@@ -1,0 +1,72 @@
+name: Temporary P3-003 safety test
+
+on:
+  push:
+    branches:
+      - P3-003_network_membership_persistence
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Add rejected-save preservation test
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("crates/blueroute-linux/src/membership_store.rs")
+          text = path.read_text()
+          marker = '''    #[test]
+    fn malformed_state_is_rejected_without_quiet_reset() {
+'''
+          test = '''    #[test]
+    fn rejected_transient_save_preserves_existing_state() {
+        let directory = TestDirectory::new();
+        let path = directory.state_path();
+        let store = NetworkMembershipStore::new(&path);
+
+        let mut stable = MembershipRegistry::default();
+        stable.remember_network(network(1, "Stable", true));
+        store.save(&stable).unwrap();
+        let before = fs::read_to_string(&path).unwrap();
+
+        let mut transient_membership = network(2, "Joining", false);
+        transient_membership.state = MembershipState::Joining;
+        let mut transient = MembershipRegistry::default();
+        transient.remember_network(transient_membership);
+
+        let error = store.save(&transient).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::PersistenceError);
+        assert_eq!(fs::read_to_string(&path).unwrap(), before);
+        assert_eq!(store.load().unwrap(), stable);
+    }
+
+'''
+          if marker not in text:
+              raise SystemExit("expected insertion marker was not found")
+          text = text.replace(marker, test + marker, 1)
+          path.write_text(text)
+          PY
+
+      - name: Format patched source
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+          rustup override set 1.95.0
+          cargo fmt --all
+
+      - name: Remove temporary workflow and commit
+        shell: bash
+        run: |
+          git rm .github/workflows/p3-003-safety-test.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/blueroute-linux/src/membership_store.rs
+          git commit -m "test: preserve membership state on rejected save"
+          git push
