@@ -1,0 +1,26 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/blueroute-core",
+    "crates/blueroute-protocol",
+    "crates/blueroute-linux",
+    "crates/blueroute-client",
+    "apps/daemon",
+    "apps/cli",
+    "apps/tui",
+    "apps/desktop",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "Apache-2.0"
+repository = "https://github.com/ekkus93/blueroute"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "deny"
