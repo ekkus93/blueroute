@@ -12,11 +12,35 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 - `[-]` in progress
 - `[x]` complete
 - `[!]` blocked
+- The **Current task status** table is authoritative for task-level state.
+- Subtask checkboxes record implementation progress. A task can remain `[-]` after all implementation subtasks are `[x]` when acceptance criteria are still outstanding.
 - A task is complete only when its acceptance criteria are satisfied.
 - Hardware-dependent tasks must record the computer/adapter, Linux distribution, kernel, BlueZ, network-backend versions, and evidence collected.
 - Do not claim physical Bluetooth behavior from CI-only tests.
 - Do not generalize one adapter's limitations into a global BlueRoute limit.
 - Keep architectural invariants in `docs/SPEC.md` intact unless the specification is deliberately revised first.
+
+## Current task status
+
+**Status date:** 2026-08-29
+
+| Task | Status | Current state |
+| --- | --- | --- |
+| P0-001 | `[-]` | Workspace/members implemented; green `cargo check --workspace` acceptance still pending. |
+| P0-002 | `[-]` | Toolchain/development policy documented; clean supported Debian validation pending. |
+| P0-003 | `[-]` | Rust formatting/lint policy configured and rustfmt corrections applied; green fmt/Clippy acceptance pending. |
+| P0-004 | `[-]` | CI workflow implemented; PR CI is proven and caught formatting failure; full green/master-trigger evidence pending. |
+| P0-005 | `[x]` | Development documentation complete. |
+| P1-001..P1-007 | `[!]` | Blocked pending physical Linux/Bluetooth test-system evidence. |
+| P1-008 | `[x]` | Capability-matrix format complete. |
+| P1-009 | `[!]` | Blocked pending a materially different second hardware class. |
+| P2-001..P2-008 | `[-]` | Domain implementation/tests present; acceptance pending a green Rust CI run. |
+| P3-001 | `[-]` | Configuration schema/validation implemented; acceptance pending a green Rust CI run. |
+| P4-001 | `[-]` | Backend-neutral adapter boundaries/fake tests implemented; acceptance pending a green Rust CI run. |
+| P5-001 | `[-]` | API version contract implemented; acceptance pending a green Rust CI run. |
+| P5-002 | `[-]` | Semantic command/response model implemented; serialization round-trip tests remain. |
+| P5-003 | `[-]` | Event model/determinism tests implemented; acceptance pending a green Rust CI run. |
+| All other tasks | `[ ]` | Not started. |
 
 ## Platform rule
 
@@ -43,8 +67,8 @@ The initial software/packaging baseline is Debian 13 with BlueZ, NetworkManager,
 
 ## P0-001 — Define Rust workspace
 
-- [ ] Create root Cargo workspace.
-- [ ] Add:
+- [x] Create root Cargo workspace.
+- [x] Add:
   - `crates/blueroute-core`
   - `crates/blueroute-protocol`
   - `crates/blueroute-linux`
@@ -53,7 +77,7 @@ The initial software/packaging baseline is Debian 13 with BlueZ, NetworkManager,
   - `apps/cli`
   - `apps/tui`
   - `apps/desktop`
-- [ ] Build placeholder crates.
+- [x] Build placeholder crates.
 
 **Acceptance**
 
@@ -62,10 +86,10 @@ The initial software/packaging baseline is Debian 13 with BlueZ, NetworkManager,
 
 ## P0-002 — Pin development toolchain policy
 
-- [ ] Add `rust-toolchain.toml` or documented minimum stable Rust.
-- [ ] Document Debian development dependencies.
-- [ ] Document Node/package-manager requirements when Tauri frontend work begins.
-- [ ] State clearly that Debian is the initial development baseline, not the only architectural target.
+- [x] Add `rust-toolchain.toml` or documented minimum stable Rust.
+- [x] Document Debian development dependencies.
+- [x] Document Node/package-manager requirements when Tauri frontend work begins.
+- [x] State clearly that Debian is the initial development baseline, not the only architectural target.
 
 **Acceptance**
 
@@ -73,9 +97,9 @@ The initial software/packaging baseline is Debian 13 with BlueZ, NetworkManager,
 
 ## P0-003 — Establish formatting and linting
 
-- [ ] Configure rustfmt.
-- [ ] Configure clippy policy.
-- [ ] Add frontend formatting/linting when frontend exists.
+- [x] Configure rustfmt.
+- [x] Configure clippy policy.
+- [ ] Add frontend formatting/linting when frontend exists. *(Deferred until frontend work begins.)*
 
 **Acceptance**
 
@@ -84,9 +108,9 @@ The initial software/packaging baseline is Debian 13 with BlueZ, NetworkManager,
 
 ## P0-004 — Establish CI baseline
 
-- [ ] Add GitHub Actions for formatting, clippy, tests, and build.
-- [ ] Add frontend checks when introduced.
-- [ ] Cache dependencies without masking lockfile errors.
+- [x] Add GitHub Actions for formatting, clippy, tests, and build.
+- [ ] Add frontend checks when introduced. *(Deferred until frontend work begins.)*
+- [x] Cache dependencies without masking lockfile errors.
 
 **Acceptance**
 
@@ -95,10 +119,10 @@ The initial software/packaging baseline is Debian 13 with BlueZ, NetworkManager,
 
 ## P0-005 — Add development documentation
 
-- [ ] Add contributor quick start.
-- [ ] Explain deterministic tests vs physical Bluetooth tests.
-- [ ] Document task-ID convention.
-- [ ] Document platform-support terminology: supported, tested, experimental, unsupported.
+- [x] Add contributor quick start.
+- [x] Explain deterministic tests vs physical Bluetooth tests.
+- [x] Document task-ID convention.
+- [x] Document platform-support terminology: supported, tested, experimental, unsupported.
 
 **Acceptance**
 
@@ -203,9 +227,9 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P1-008 — Create capability matrix format
 
-- [ ] Define fields for PANU, NAP, forwarding, practical connection limit, backend, and known quirks.
-- [ ] Distinguish discovered, measured, configured, and conservative-default capabilities.
-- [ ] Define how unknown capability is represented.
+- [x] Define fields for PANU, NAP, forwarding, practical connection limit, backend, and known quirks.
+- [x] Distinguish discovered, measured, configured, and conservative-default capabilities.
+- [x] Define how unknown capability is represented.
 
 **Acceptance**
 
@@ -227,10 +251,10 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P2-001 — Define stable identifiers
 
-- [ ] `NodeId`.
-- [ ] `NetworkId`.
-- [ ] link/segment identity if needed.
-- [ ] Separate human-readable names from authorization identity.
+- [x] `NodeId`.
+- [x] `NetworkId`.
+- [x] link/segment identity if needed.
+- [x] Separate human-readable names from authorization identity.
 
 **Acceptance**
 
@@ -240,16 +264,16 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P2-002 — Define node capability model
 
-- [ ] Bluetooth adapter usability.
-- [ ] PANU capability.
-- [ ] NAP capability.
-- [ ] routing capability.
-- [ ] network-backend capability.
-- [ ] connection policy ceiling.
-- [ ] optional link-quality/power data.
-- [ ] reserve external-connectivity/gateway fields.
-- [ ] distinguish `has_internet` from `willing_to_share_internet`.
-- [ ] track capability source where useful.
+- [x] Bluetooth adapter usability.
+- [x] PANU capability.
+- [x] NAP capability.
+- [x] routing capability.
+- [x] network-backend capability.
+- [x] connection policy ceiling.
+- [x] optional link-quality/power data.
+- [x] reserve external-connectivity/gateway fields.
+- [x] distinguish `has_internet` from `willing_to_share_internet`.
+- [x] track capability source where useful.
 
 **Acceptance**
 
@@ -257,10 +281,10 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P2-003 — Define network membership model
 
-- [ ] local membership state.
-- [ ] trusted/known peers.
-- [ ] network name vs identity.
-- [ ] join/leave transitions.
+- [x] local membership state.
+- [x] trusted/known peers.
+- [x] network name vs identity.
+- [x] join/leave transitions.
 
 **Acceptance**
 
@@ -268,9 +292,9 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P2-004 — Define link and PAN-segment model
 
-- [ ] Represent PANU/NAP relationship.
-- [ ] Represent link state/health/properties.
-- [ ] Keep a PAN segment separate from the logical BlueRoute network.
+- [x] Represent PANU/NAP relationship.
+- [x] Represent link state/health/properties.
+- [x] Keep a PAN segment separate from the logical BlueRoute network.
 
 **Acceptance**
 
@@ -278,10 +302,10 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P2-005 — Define topology graph
 
-- [ ] Graph operations for nodes/links.
-- [ ] Direct vs routed reachability.
-- [ ] Failed/unavailable links.
-- [ ] Deterministic snapshots.
+- [x] Graph operations for nodes/links.
+- [x] Direct vs routed reachability.
+- [x] Failed/unavailable links.
+- [x] Deterministic snapshots.
 
 **Acceptance**
 
@@ -289,10 +313,10 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P2-006 — Define route model
 
-- [ ] Prefix/segment destinations.
-- [ ] next hop and cost.
-- [ ] ownership metadata.
-- [ ] reserve default/Internet destination semantics.
+- [x] Prefix/segment destinations.
+- [x] next hop and cost.
+- [x] ownership metadata.
+- [x] reserve default/Internet destination semantics.
 
 **Acceptance**
 
@@ -300,9 +324,9 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P2-007 — Define health model
 
-- [ ] healthy/degraded/reconnecting/error concepts.
-- [ ] separate adapter, runtime prerequisite, membership, link, topology, and gateway health.
-- [ ] user-facing aggregation rules.
+- [x] healthy/degraded/reconnecting/error concepts.
+- [x] separate adapter, runtime prerequisite, membership, link, topology, and gateway health.
+- [x] user-facing aggregation rules.
 
 **Acceptance**
 
@@ -311,13 +335,13 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P2-008 — Define typed error taxonomy
 
-- [ ] unsupported runtime.
-- [ ] missing/disabled adapter.
-- [ ] required capability unavailable.
-- [ ] BlueZ/backend unavailable.
-- [ ] pairing/auth errors.
-- [ ] PAN/address/route/topology errors.
-- [ ] protocol/state errors.
+- [x] unsupported runtime.
+- [x] missing/disabled adapter.
+- [x] required capability unavailable.
+- [x] BlueZ/backend unavailable.
+- [x] pairing/auth errors.
+- [x] PAN/address/route/topology errors.
+- [x] protocol/state errors.
 
 **Acceptance**
 
@@ -329,12 +353,12 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P3-001 — Define configuration schema
 
-- [ ] daemon settings.
-- [ ] display name.
-- [ ] address-pool policy.
-- [ ] topology/capability policy overrides.
-- [ ] network backend selection field or internal abstraction as appropriate.
-- [ ] gateway settings reserved and disabled.
+- [x] daemon settings.
+- [x] display name.
+- [x] address-pool policy.
+- [x] topology/capability policy overrides.
+- [x] network backend selection field or internal abstraction as appropriate.
+- [x] gateway settings reserved and disabled.
 
 **Acceptance**
 
@@ -386,11 +410,11 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P4-001 — Create adapter trait boundaries
 
-- [ ] Bluetooth backend trait(s).
-- [ ] IP/network backend trait(s).
-- [ ] capability-discovery interfaces.
-- [ ] clock/event abstractions for deterministic tests.
-- [ ] keep core free of D-Bus types.
+- [x] Bluetooth backend trait(s).
+- [x] IP/network backend trait(s).
+- [x] capability-discovery interfaces.
+- [x] clock/event abstractions for deterministic tests.
+- [x] keep core free of D-Bus types.
 
 **Acceptance**
 
@@ -515,9 +539,9 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P5-001 — Define local API version
 
-- [ ] protocol version.
-- [ ] compatibility rules.
-- [ ] D-Bus service/object/interface naming.
+- [x] protocol version.
+- [x] compatibility rules.
+- [x] D-Bus service/object/interface naming.
 
 **Acceptance**
 
@@ -525,13 +549,14 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P5-002 — Define command/response types
 
-- [ ] status/capabilities.
-- [ ] network list/create/join/leave.
-- [ ] node list/get/name.
-- [ ] discovery.
-- [ ] trust/forget.
-- [ ] diagnostics.
-- [ ] reserve Internet-sharing command.
+- [x] status/capabilities.
+- [x] network list/create/join/leave.
+- [x] node list/get/name.
+- [x] discovery.
+- [x] trust/forget.
+- [x] diagnostics.
+- [x] reserve Internet-sharing command.
+- [ ] deterministic serialization/round-trip tests.
 
 **Acceptance**
 
@@ -539,13 +564,13 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P5-003 — Define event types
 
-- [ ] network discovery.
-- [ ] peer/node changes.
-- [ ] capability changes.
-- [ ] membership.
-- [ ] link/topology/route.
-- [ ] health/authorization.
-- [ ] reserve Internet/gateway events.
+- [x] network discovery.
+- [x] peer/node changes.
+- [x] capability changes.
+- [x] membership.
+- [x] link/topology/route.
+- [x] health/authorization.
+- [x] reserve Internet/gateway events.
 
 **Acceptance**
 
