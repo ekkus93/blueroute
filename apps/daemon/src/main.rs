@@ -17,6 +17,7 @@ fn main() {
     }
 
     let membership_store = NetworkMembershipStore::new(network_membership_path(&state_directory));
+    // Fail closed instead of quietly forgetting membership/trust state when durable data is invalid.
     let _membership_registry = match membership_store.load() {
         Ok(registry) => registry,
         Err(error) => {
