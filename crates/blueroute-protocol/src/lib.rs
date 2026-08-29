@@ -101,19 +101,33 @@ pub enum Command {
     GetStatus,
     GetCapabilities,
     ListNetworks,
-    CreateNetwork { name: DisplayName },
-    JoinNetwork { network: NetworkId },
+    CreateNetwork {
+        name: DisplayName,
+    },
+    JoinNetwork {
+        network: NetworkId,
+    },
     LeaveNetwork,
     ListNodes,
-    GetNode { node: NodeId },
-    SetDeviceName { name: DisplayName },
+    GetNode {
+        node: NodeId,
+    },
+    SetDeviceName {
+        name: DisplayName,
+    },
     StartDiscovery,
     StopDiscovery,
-    TrustPeer { node: NodeId },
-    ForgetPeer { node: NodeId },
+    TrustPeer {
+        node: NodeId,
+    },
+    ForgetPeer {
+        node: NodeId,
+    },
     GetDiagnostics,
     /// Reserved for the future gateway phase. Current daemons must reject it.
-    SetInternetSharing { enabled: bool },
+    SetInternetSharing {
+        enabled: bool,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -264,7 +278,10 @@ mod tests {
             cost: 10,
             owner: RouteOwner::BlueRouteNetwork(NetworkId::from_bytes([3; 16])),
         };
-        assert_eq!(Event::RouteChanged(route.clone()), Event::RouteChanged(route));
+        assert_eq!(
+            Event::RouteChanged(route.clone()),
+            Event::RouteChanged(route)
+        );
     }
 
     #[test]
