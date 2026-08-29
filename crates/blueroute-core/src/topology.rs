@@ -19,6 +19,16 @@ pub enum LinkHealth {
     Failed,
 }
 
+/// User/data-plane reachability class derived from the active PAN graph.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Reachability {
+    Local,
+    DirectLink,
+    SamePanSegment,
+    Routed,
+    Unreachable,
+}
+
 /// One BNEP/PAN relationship. The NAP and PANU roles are explicit internally.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PanLink {
@@ -139,9 +149,10 @@ impl TopologyGraph {
     pub fn remove_link(&mut self, id: &LinkId) -> Option<PanLink> {
         let removed = self.links.remove(id)?;
         if let Some(segment) = self.segments.get_mut(&removed.segment_id) {
-            let still_attached = self.links.values().any(|link| {
-                link.segment_id == removed.segment_id && link.panu == removed.panu
-            });
+            let still_attached = self
+                .links
+                .values()
+                .any(|link| link.segment_id == removed.segment_id && link.panu == removed.panu);
             if !still_attached {
                 segment.members.remove(&removed.panu);
             }
@@ -166,9 +177,11 @@ impl TopologyGraph {
             return Some(vec![start]);
         }
 
-        let mut queue = VecDeque::from([start]);
+        let mut queue = VecDeque::new();
+        queue.push_back(start);
         let mut previous = BTreeMap::<NodeId, NodeId>::new();
-        let mut visited = BTreeSet::from([start]);
+        let mut visited = BTreeSet::new();
+        visited.insert(start);
 
         while let Some(current) = queue.pop_front() {
             for neighbor in self.direct_neighbors(current) {
@@ -198,9 +211,43 @@ impl TopologyGraph {
         self.direct_neighbors(start).contains(&end)
     }
 
+    fn node_is_active_in_segment(&self, node: NodeId, segment_id: SegmentId) -> bool {
+        let Some(segment) = self.segments.get(&segment_id) else {
+            return false;
+        };
+        node == segment.nap
+            || self.links.values().any(|link| {
+                link.segment_id == segment_id
+                    && link.panu == node
+                    && link.is_forwarding_candidate()
+            })
+    }
+
+    pub fn reachability(&self, start: NodeId, end: NodeId) -> Reachability {
+        let Some(path) = self.shortest_path(start, end) else {
+            return Reachability::Unreachable;
+        };
+        if path.len() == 1 {
+            return Reachability::Local;
+        }
+        if path.len() == 2 {
+            return Reachability::DirectLink;
+        }
+
+        let same_active_segment = self.segments.values().any(|segment| {
+            self.node_is_active_in_segment(start, segment.id)
+                && self.node_is_active_in_segment(end, segment.id)
+        });
+
+        if same_active_segment {
+            Reachability::SamePanSegment
+        } else {
+            Reachability::Routed
+        }
+    }
+
     pub fn is_routed_reachable(&self, start: NodeId, end: NodeId) -> bool {
-        self.shortest_path(start, end)
-            .is_some_and(|path| path.len() > 2)
+        self.reachability(start, end) == Reachability::Routed
     }
 
     pub fn nodes(&self) -> impl Iterator<Item = (&NodeId, &NodeCapabilities)> {
@@ -269,7 +316,10 @@ mod tests {
         graph.add_link(active_link(2, 1, 1, 3)).unwrap();
 
         assert!(graph.is_directly_reachable(node(1), node(2)));
-        assert!(graph.is_routed_reachable(node(2), node(3)));
+        assert_eq!(
+            graph.reachability(node(2), node(3)),
+            Reachability::SamePanSegment
+        );
         assert_eq!(
             graph.shortest_path(node(2), node(3)).unwrap(),
             vec![node(2), node(1), node(3)]
@@ -296,6 +346,7 @@ mod tests {
             graph.shortest_path(node(2), node(4)).unwrap(),
             vec![node(2), node(1), node(3), node(4)]
         );
+        assert_eq!(graph.reachability(node(2), node(4)), Reachability::Routed);
     }
 
     #[test]
@@ -310,6 +361,10 @@ mod tests {
         failed.health = LinkHealth::Failed;
         graph.add_link(failed).unwrap();
         assert!(graph.shortest_path(node(1), node(2)).is_none());
+        assert_eq!(
+            graph.reachability(node(1), node(2)),
+            Reachability::Unreachable
+        );
     }
 
     #[test]
