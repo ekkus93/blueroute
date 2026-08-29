@@ -26,20 +26,21 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 
 | Task | Status | Current state |
 | --- | --- | --- |
-| P0-001 | `[-]` | Workspace/members implemented; green `cargo check --workspace` acceptance still pending. |
+| P0-001 | `[x]` | Workspace structure is complete and `cargo check --workspace --locked` is green on `master`. |
 | P0-002 | `[-]` | Toolchain/development policy documented; clean supported Debian validation pending. |
-| P0-003 | `[-]` | Rust formatting/lint policy configured and rustfmt corrections applied; green fmt/Clippy acceptance pending. |
-| P0-004 | `[-]` | CI workflow implemented; PR CI is proven and caught formatting failure; full green/master-trigger evidence pending. |
+| P0-003 | `[x]` | Rust formatting/lint policy is configured; `cargo fmt --all -- --check` and locked Clippy with `-D warnings` are green on `master`. |
+| P0-004 | `[-]` | CI runs on pull requests and `master`; green master execution and formatting-failure detection are proven, while an intentional test-failure probe is still pending. |
 | P0-005 | `[x]` | Development documentation complete. |
 | P1-001..P1-007 | `[!]` | Blocked pending physical Linux/Bluetooth test-system evidence. |
 | P1-008 | `[x]` | Capability-matrix format complete. |
 | P1-009 | `[!]` | Blocked pending a materially different second hardware class. |
-| P2-001..P2-008 | `[-]` | Domain implementation/tests present; acceptance pending a green Rust CI run. |
-| P3-001 | `[-]` | Configuration schema/validation implemented; acceptance pending a green Rust CI run. |
-| P4-001 | `[-]` | Backend-neutral adapter boundaries/fake tests implemented; acceptance pending a green Rust CI run. |
-| P5-001 | `[-]` | API version contract implemented; acceptance pending a green Rust CI run. |
+| P2-001..P2-008 | `[x]` | Domain implementation and tests are complete; the full locked workspace test suite is green on `master`. |
+| P3-001 | `[x]` | Versioned hardware-agnostic configuration schema and validation are implemented and green in CI. |
+| P3-002 | `[x]` | Stable node identity generation/persistence is wired into daemon startup; owner-only storage and restart recovery tests are green in CI. |
+| P4-001 | `[x]` | Backend-neutral adapter boundaries and fake-backend tests are implemented and green in CI. |
+| P5-001 | `[-]` | API version contract and compatibility rules are implemented/tested; client-side incompatibility enforcement remains pending P5-005. |
 | P5-002 | `[-]` | Semantic command/response model implemented; serialization round-trip tests remain. |
-| P5-003 | `[-]` | Event model/determinism tests implemented; acceptance pending a green Rust CI run. |
+| P5-003 | `[x]` | Event model and deterministic structural tests are implemented and green in CI. |
 | All other tasks | `[ ]` | Not started. |
 
 ## Platform rule
@@ -366,9 +367,9 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P3-002 — Implement stable node identity persistence
 
-- [ ] Generate identity first run.
-- [ ] Persist securely.
-- [ ] Recover after restart.
+- [x] Generate identity first run.
+- [x] Persist securely.
+- [x] Recover after restart.
 
 **Acceptance**
 
