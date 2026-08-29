@@ -222,8 +222,10 @@ mod tests {
 
     #[test]
     fn unknown_configuration_version_is_rejected() {
-        let mut config = DaemonConfig::default();
-        config.version = ConfigVersion::new(99);
+        let config = DaemonConfig {
+            version: ConfigVersion::new(99),
+            ..DaemonConfig::default()
+        };
         assert!(config.validate().is_err());
     }
 
