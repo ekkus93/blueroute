@@ -1,0 +1,38 @@
+name: Temporary P3-003 rustfmt
+
+on:
+  push:
+    branches:
+      - P3-003_network_membership_persistence
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+
+      - name: Select pinned Rust toolchain
+        run: rustup override set 1.95.0
+
+      - name: Apply rustfmt
+        run: cargo fmt --all
+
+      - name: Commit formatting
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "Already formatted"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- '*.rs'
+          git commit -m "style: apply rustfmt to P3-003"
+          git push
