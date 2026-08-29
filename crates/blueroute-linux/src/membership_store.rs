@@ -17,9 +17,10 @@ static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
 
 /// Durable file-backed registry of known BlueRoute networks and peer membership/trust facts.
 ///
-/// The v1 format is deterministic and intentionally simple. Transient membership
-/// states (`Joining` and `Leaving`) are rejected rather than persisted, because a
-/// restart must recover a stable fact rather than resume an in-flight operation.
+/// Files carry explicit schema versions. Supported older schemas are migrated through
+/// ordered steps, validated as the current schema, and atomically rewritten. Transient
+/// membership states (`Joining` and `Leaving`) are rejected rather than persisted,
+/// because a restart must recover a stable fact rather than resume an in-flight operation.
 pub struct NetworkMembershipStore {
     path: PathBuf,
 }
@@ -691,6 +692,18 @@ mod tests {
                 .unwrap()
                 .starts_with("BLUEROUTE_MEMBERSHIP_V2\n")
         );
+    }
+
+    #[test]
+    fn missing_legacy_migration_path_is_rejected_without_rewriting_state() {
+        let directory = TestDirectory::new();
+        let path = directory.state_path();
+        let unsupported = "BLUEROUTE_MEMBERSHIP_V0\n";
+        fs::write(&path, unsupported).unwrap();
+
+        let error = NetworkMembershipStore::new(&path).load().unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::PersistenceError);
+        assert_eq!(fs::read_to_string(path).unwrap(), unsupported);
     }
 
     #[test]
