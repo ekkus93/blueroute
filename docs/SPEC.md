@@ -3,126 +3,190 @@
 **Project:** BlueRoute  
 **Repository:** `ekkus93/blueroute`  
 **Document status:** Initial architecture specification  
-**Primary platform:** Debian Linux  
-**Initial reference hardware:** Dell Chromebook 3100 converted to Debian  
+**Product target:** Linux computers with supported Bluetooth hardware and Bluetooth PAN support  
+**Initial development environment:** Debian 13 with BlueZ, NetworkManager, and systemd  
+**Initial physical test hardware:** Dell Chromebook 3100 units are one convenient validation platform, not a product requirement  
 
 ## 1. Purpose
 
-BlueRoute is a friendly Linux application for creating ordinary TCP/IP networks over Bluetooth without requiring Wi-Fi infrastructure. It is intended to make Bluetooth PAN networking usable by non-expert users while still exposing strong diagnostic and automation interfaces for administrators and developers.
+BlueRoute is a friendly Linux application for creating ordinary TCP/IP networks over Bluetooth without requiring Wi-Fi infrastructure. It is intended to make Bluetooth PAN networking practical for non-expert users while retaining strong command-line, diagnostic, and automation interfaces for administrators and developers.
 
-BlueRoute uses standard Linux Bluetooth PAN facilities rather than Bluetooth Mesh as the IP transport. Bluetooth links are created with BlueZ/BNEP using PAN roles such as PANU and NAP. Linux IP routing is then used to connect multiple Bluetooth PAN segments when a larger or multi-hop topology is needed.
+BlueRoute is a **general Linux networking product**, not a Dell Chromebook application. Any Linux computer should be a potential BlueRoute node when its operating system, Bluetooth adapter/driver, BlueZ stack, and Bluetooth PAN/BNEP support satisfy the documented runtime requirements. Hardware-specific behavior is discovered, measured, and represented as capability data rather than encoded as model-specific assumptions.
+
+Dell Chromebook 3100 systems running Debian are useful early development machines because they are available for hands-on testing. They are test fixtures, not the definition of supported hardware.
+
+BlueRoute uses standard Linux Bluetooth PAN facilities rather than Bluetooth Mesh as the IP transport. Bluetooth links use BNEP with PAN roles such as PANU and NAP. Linux IP routing connects multiple PAN segments when a larger or multi-hop topology is needed.
 
 The project has one shared Rust networking engine and multiple front ends:
 
-- a background daemon that owns network state and keeps the network alive when no UI is open;
+- a background daemon that owns network state and keeps networking alive when no UI is open;
 - a command-line interface for scripting, administration, and diagnostics;
 - a terminal user interface for interactive use without a graphical desktop;
 - a Tauri desktop application designed for non-technical users.
 
-A later release may optionally route client traffic to the Internet through a BlueRoute node that has another usable uplink such as Ethernet or Wi-Fi. The initial implementation does not need to provide Internet sharing, but the architecture must not require redesign to add it.
+A later release may optionally route client traffic to the Internet through a BlueRoute node that has another usable uplink such as Ethernet, Wi-Fi, cellular, USB networking, or another routed interface. Internet sharing is not required for the initial LAN release, but the architecture must allow it without redesigning the core routing model.
 
-## 2. Product principles
+## 2. Product scope and platform policy
 
-1. **Normal IP networking.** Applications must see ordinary IP connectivity. SSH, HTTP, rsync, NFS, TCP, UDP, and other normal IP software should not need BlueRoute-specific support.
-2. **Use Linux networking primitives.** BlueRoute must orchestrate BlueZ, BNEP, NetworkManager, kernel routing, and related system services rather than reimplementing Bluetooth or TCP/IP.
-3. **Hide networking jargon from ordinary users.** The desktop UI should speak in terms such as “Create network,” “Join,” “Connected,” and “Internet available,” not PANU, NAP, BNEP, route metrics, NAT, or forwarding tables.
-4. **One engine, many interfaces.** CLI, TUI, and Tauri front ends must use the same daemon API and domain model.
-5. **Network survives UI exit.** Closing the desktop or TUI application must not tear down an active BlueRoute network.
-6. **Recover automatically.** Temporary Bluetooth loss, peer restarts, and topology changes should normally recover without manual reconstruction.
-7. **Least privilege.** Front ends run unprivileged. Privileged operations are delegated through established Linux services and narrowly scoped authorization.
-8. **Diagnosable.** Users should get simple health status while administrators can obtain detailed state, routes, peer information, logs, and machine-readable output.
-9. **Incremental topology complexity.** A reliable single-star PAN is built first. Routed interconnected stars and automatic topology management are layered on top without changing the application-facing model.
-10. **Future gateway support.** Internet sharing remains opt-in and is modeled separately from Bluetooth link management.
+### 2.1 Product scope
 
-## 3. Goals
+BlueRoute targets Linux computers, including but not limited to:
 
-### 3.1 Functional goals
+- laptops;
+- desktops;
+- Chromebooks converted to Linux;
+- single-board computers;
+- mini PCs;
+- embedded Linux systems capable of running the daemon and required system services.
+
+A device is not supported merely because it has a Bluetooth logo. Support depends on the complete Linux Bluetooth/PAN path actually working: controller, firmware, kernel driver, BlueZ, PAN/BNEP capabilities, and the network configuration backend.
+
+### 2.2 Initial software baseline
+
+The first implementation and packaging effort targets Debian 13 because it provides a stable development baseline. The initial production backend may require:
+
+- Linux;
+- BlueZ;
+- Bluetooth PAN/BNEP support;
+- NetworkManager;
+- systemd and system D-Bus;
+- a Bluetooth adapter whose Linux stack can perform the required PAN roles.
+
+These are **software/runtime requirements**, not hardware-model requirements.
+
+### 2.3 Portability requirement
+
+Core logic must not depend on:
+
+- Dell-specific hardware IDs;
+- Chromebook-specific paths or firmware names;
+- one Bluetooth controller family;
+- one adapter's maximum peer count;
+- one fixed interface name;
+- one fixed radio range, MTU, throughput, or latency;
+- one computer's power/battery behavior.
+
+Those properties belong in runtime capability discovery, configuration, policy, diagnostics, or hardware test evidence.
+
+### 2.4 Backend portability
+
+The first Linux network backend may use NetworkManager. The architecture must isolate NetworkManager behind a typed adapter so a future backend for systemd-networkd, direct netlink, or another Linux network manager can be added without rewriting topology, identity, routing policy, or UI code.
+
+## 3. Product principles
+
+1. **Normal IP networking.** Applications see ordinary IP connectivity. SSH, HTTP, rsync, NFS, TCP, UDP, and normal IP software require no BlueRoute library.
+2. **Standard Bluetooth PAN.** Use Linux Bluetooth PAN/BNEP rather than inventing an IP-over-Bluetooth-Mesh transport.
+3. **Linux routing for multi-hop.** Multi-segment behavior is implemented with layer-3 routing between PAN links.
+4. **Hardware agnostic by design.** Hardware limits are capabilities and measurements, never assumptions tied to one model.
+5. **Use system networking primitives.** Orchestrate BlueZ, NetworkManager, the kernel routing stack, and established Linux services instead of reimplementing Bluetooth or TCP/IP.
+6. **One engine, many interfaces.** CLI, TUI, and Tauri front ends use the same daemon API and domain model.
+7. **Network survives UI exit.** Closing a UI must not tear down an active BlueRoute network.
+8. **Friendly defaults.** Ordinary users should not need to understand PANU, NAP, BNEP, route metrics, NAT, or forwarding tables.
+9. **Automatic recovery.** Temporary Bluetooth loss, service restarts, peer restarts, and topology changes should normally reconcile automatically.
+10. **Least privilege.** Front ends are unprivileged; privileged operations go through narrow system-service and authorization boundaries.
+11. **Diagnosable.** Simple user health status and detailed administrator diagnostics are both first-class requirements.
+12. **Future gateway support.** Internet sharing is separate, opt-in, and modeled independently from Bluetooth link establishment.
+
+## 4. Functional goals
 
 BlueRoute shall eventually support:
 
 - discovering nearby BlueRoute-capable Linux devices;
 - pairing/trusting devices through a friendly workflow;
 - creating a named BlueRoute network;
-- joining an existing BlueRoute network;
-- forming Bluetooth PAN links using standard Linux Bluetooth support;
+- joining and leaving an existing BlueRoute network;
+- forming Bluetooth PAN links using standard Linux facilities;
 - assigning and managing IP addresses automatically;
 - providing normal IPv4 connectivity between directly connected members;
 - routing traffic across multiple PAN segments;
-- selecting and changing topology without requiring the user to understand node roles;
+- automatically selecting suitable PAN roles and topology;
+- adapting policy to controller and system capabilities;
 - reconnecting after transient failures;
-- displaying network, node, link, route, and health state;
-- CLI automation with stable machine-readable output;
-- a Ratatui-based TUI;
-- a polished Tauri desktop UI;
-- systemd service integration;
-- diagnostics suitable for troubleshooting real hardware;
-- optional future Internet gateway advertisement, selection, forwarding, DNS, and NAT.
+- displaying node, link, route, topology, and health state;
+- stable machine-readable CLI output;
+- a Ratatui TUI;
+- a polished Tauri desktop application;
+- system-service integration and packaging;
+- diagnostics suitable for heterogeneous Linux hardware;
+- optional future Internet gateway advertisement, selection, forwarding, DNS, and NAT;
+- future alternative Linux network backends without changing the core domain model.
 
-### 3.2 User-experience goals
+## 5. User-experience goals
 
-A non-technical user should be able to perform the primary workflow as follows:
+A non-technical user should be able to:
 
 1. Open BlueRoute.
 2. Choose **Create a Network** or select a nearby network and choose **Join**.
 3. Complete a simple trust/pairing step if required.
-4. See a clear “Connected” state.
-5. Use ordinary applications over the resulting IP network without additional BlueRoute configuration.
+4. See a clear connected/healthy state.
+5. Use ordinary applications over the resulting IP network.
 
-The UI may expose an advanced diagnostics screen, but advanced networking terminology must not be required for normal operation.
+The UI may expose advanced diagnostics, but normal workflows must not require Bluetooth PAN or Linux routing terminology.
 
-## 4. Non-goals
+The product should report unsupported or partially supported hardware in user-centered language, for example:
 
-The following are explicitly outside the initial scope:
+- “Bluetooth is unavailable.”
+- “This Bluetooth adapter does not support the required network mode.”
+- “Your Linux Bluetooth service is not running.”
+- “This system can join a network but cannot currently act as a hub.”
 
-- implementing the Bluetooth controller, HCI stack, L2CAP, BNEP, TCP, UDP, IPv4, or IPv6 stacks;
-- transporting arbitrary IP packets through the Bluetooth Mesh protocol;
-- replacing BlueZ or NetworkManager;
-- creating a general-purpose Wi-Fi mesh manager;
-- promising broadband-like throughput over Bluetooth;
-- supporting every Linux distribution in the first release;
-- providing Internet sharing in the first proof-of-concept milestone;
-- acting as an Internet router without explicit user opt-in;
-- exposing raw low-level topology controls as the default desktop experience.
+## 6. Non-goals
 
-## 5. Terminology
+The initial project does not aim to:
+
+- implement HCI, L2CAP, BNEP, TCP, UDP, IPv4, or IPv6 stacks;
+- tunnel arbitrary IP packets through the Bluetooth Mesh protocol;
+- replace BlueZ;
+- become a Wi-Fi mesh manager;
+- promise Wi-Fi-equivalent throughput;
+- claim that every Linux/Bluetooth combination works without validation;
+- provide Internet sharing in the first proof-of-concept milestone;
+- expose an Internet uplink without explicit user opt-in;
+- make hardware-model-specific code the normal solution to controller differences;
+- expose raw topology controls as the default desktop experience.
+
+## 7. Terminology
 
 ### Node
-A computer running the BlueRoute daemon.
+A Linux computer running the BlueRoute daemon.
 
 ### BlueRoute network
-A logical trusted group of nodes that may form one or more Bluetooth PAN segments and route IP traffic between members.
+A logical trusted group of nodes that may form one or more PAN segments and route IP traffic between members.
 
 ### PAN
 Bluetooth Personal Area Networking using BNEP.
 
 ### PANU
-Bluetooth PAN User role. A node in this role attaches to a PAN provider.
+Bluetooth PAN User role. A node attaches to a PAN provider.
 
 ### NAP
-Bluetooth Network Access Point role. A node in this role accepts PAN clients and anchors a PAN segment.
+Bluetooth Network Access Point role. A node accepts PAN clients and anchors a PAN segment.
 
 ### PAN segment
 One local BNEP/IP segment consisting of a NAP and one or more PANU peers.
 
 ### Routed topology
-A BlueRoute network containing more than one PAN segment, with one or more nodes forwarding IP traffic between segments.
+A BlueRoute network with multiple PAN segments and one or more Linux nodes forwarding IP traffic between them.
 
 ### Direct peer
-A node reachable over a direct Bluetooth PAN link.
+A node reachable over a direct Bluetooth PAN relationship.
 
 ### Routed peer
 A node reachable through one or more BlueRoute routing nodes.
 
 ### Gateway
-A BlueRoute node that offers an optional route from the private BlueRoute network to an external network or the Internet.
+A BlueRoute node that optionally offers a route from the private BlueRoute network to an external network or the Internet.
+
+### Capability
+A discovered, measured, configured, or negotiated property of a node or adapter, such as whether it can act as NAP, whether routing is allowed, or how many simultaneous links should be attempted.
 
 ### Control plane
-BlueRoute protocol traffic used for membership, capability, topology, route, and health coordination.
+BlueRoute messages used for identity, membership, capability, topology, route, and health coordination.
 
 ### Data plane
 Normal user IP traffic carried across PAN links and routed by Linux.
 
-## 6. High-level architecture
+## 8. High-level architecture
 
 ```text
                          Linux system
@@ -131,7 +195,8 @@ Normal user IP traffic carried across PAN links and routed by Linux.
                  |   blueroute-daemon      |
                  |       Rust              |
                  |-------------------------|
-                 | membership              |
+                 | identity/membership     |
+                 | capabilities            |
                  | topology                |
                  | addressing              |
                  | route decisions         |
@@ -147,7 +212,7 @@ Normal user IP traffic carried across PAN links and routed by Linux.
           | BlueZ |                    | NetworkManager |
           +---+---+                    +-------+--------+
               |                                |
-        Bluetooth/BNEP                  IP interfaces,
+        Bluetooth/BNEP                  interfaces,
                                          addresses,
                                          routes, DNS,
                                          forwarding
@@ -165,11 +230,9 @@ Normal user IP traffic carried across PAN links and routed by Linux.
        +------------+   +------------+   +---------------+
 ```
 
-The daemon is authoritative for active BlueRoute state. Front ends are clients of the daemon and must not independently manipulate BlueZ, NetworkManager, or routes.
+The daemon is authoritative for active network state. Front ends must not independently manipulate BlueZ, the network manager, interfaces, or routes.
 
-## 7. Proposed Rust workspace
-
-The exact paths may evolve, but architectural boundaries should remain similar to the following:
+## 9. Proposed Rust workspace
 
 ```text
 blueroute/
@@ -192,107 +255,103 @@ blueroute/
 └── tests/
 ```
 
-### 7.1 `blueroute-core`
+### `blueroute-core`
 
-Pure or mostly pure domain logic:
+Hardware-independent domain logic:
 
-- node and network identities;
+- identities;
 - capability model;
 - topology graph;
-- link scoring;
+- link/path scoring;
 - route planning;
 - state machines;
 - addressing policy;
 - health model;
-- configuration schema;
+- configuration model;
 - events and domain errors.
 
-It must not contain shell commands or direct BlueZ/NetworkManager implementation details.
+It must contain no Dell/Chromebook assumptions, shell commands, BlueZ object paths, NetworkManager object paths, or UI types.
 
-### 7.2 `blueroute-protocol`
+### `blueroute-protocol`
 
-Shared serialized types for daemon clients and, where appropriate, inter-node control messages:
+Shared versioned protocol types:
 
-- API version;
-- commands;
-- responses;
+- local API version;
+- commands and responses;
 - events;
 - status snapshots;
-- diagnostics types;
+- diagnostics;
+- inter-node control envelopes where appropriate;
 - compatibility rules.
 
-Serialization should use a well-supported Rust format with explicit versioning. The exact encoding is an implementation decision; domain compatibility is more important than wire-format novelty.
-
-### 7.3 `blueroute-linux`
+### `blueroute-linux`
 
 Linux-specific adapters:
 
 - BlueZ D-Bus client;
-- NetworkManager D-Bus client;
-- Bluetooth discovery and pairing integration;
+- Bluetooth discovery and pairing;
 - PANU/NAP lifecycle;
+- NetworkManager backend;
 - interface inspection;
 - address and route application;
 - forwarding/firewall adapters;
-- system capability detection;
-- Polkit-related integration where needed.
+- system capability discovery;
+- Polkit integration where necessary.
 
-This crate should expose typed Rust traits/interfaces to the core rather than leak D-Bus object paths throughout the codebase.
+The crate must expose typed interfaces to the core rather than leak D-Bus types across the architecture.
 
-### 7.4 `blueroute-client`
+### `blueroute-client`
 
-Reusable local daemon client library used by CLI, TUI, and Tauri backend. It handles:
+Reusable daemon client for CLI, TUI, and Tauri backend:
 
-- connection to daemon API;
-- API-version negotiation;
-- command/response helpers;
+- daemon connection;
+- API version negotiation;
+- typed request helpers;
 - event subscriptions;
-- reconnection to a restarted daemon;
-- conversion of daemon state into UI-friendly view models where appropriate.
+- daemon-restart reconnection;
+- shared presentation/view models where useful.
 
-### 7.5 Applications
+### Applications
 
-- `blueroute-daemon`: long-running system networking service.
-- `blueroute`: CLI.
-- `blueroute-tui`: Ratatui application.
-- `blueroute-desktop`: Tauri desktop application with a Rust Tauri backend and web frontend.
+- `blueroute-daemon`: long-running network service;
+- `blueroute`: CLI;
+- `blueroute-tui`: Ratatui UI;
+- `blueroute-desktop`: Tauri desktop UI.
 
-## 8. Daemon model
+## 10. Daemon model
 
-The daemon shall be a long-running service managed by systemd on the initial platform.
+The daemon is a long-running system service on the initial Debian/systemd backend.
 
-Responsibilities:
+Responsibilities include:
 
-- own active BlueRoute configuration and runtime state;
-- observe BlueZ and NetworkManager state;
+- own BlueRoute configuration and runtime state;
+- discover platform and Bluetooth capabilities;
+- observe BlueZ and network-manager state;
 - create and tear down PAN links;
-- run topology logic;
-- apply local addresses and routes;
-- maintain control-plane sessions to peers;
-- reconnect links when policy allows;
+- perform membership and topology logic;
+- apply addresses and routes;
+- maintain peer control sessions;
+- reconnect/reconcile when policy allows;
 - expose a stable local API;
 - emit state-change events;
-- persist durable settings and trust information;
+- persist durable settings and trust state;
 - produce structured diagnostics.
 
-The daemon must not require a graphical session. Active networking must continue after all front ends exit.
+The daemon must not require a graphical session. Active networking continues after all front ends exit.
 
-## 9. Local daemon API
+## 11. Local daemon API
 
-The preferred local IPC mechanism is D-Bus because BlueRoute is a Linux system networking service and D-Bus provides service discovery, typed method boundaries, signals, permissions, and integration with the rest of the platform.
-
-A service/interface naming scheme should be reserved early, for example:
+The initial local IPC mechanism is system D-Bus. A versioned service/interface namespace should be reserved early, for example:
 
 ```text
 org.blueroute.Service1
 /org/blueroute/Service1
 ```
 
-The exact names are subject to implementation review.
-
-The local API should include semantic operations rather than low-level network commands. Representative operations include:
+Representative semantic operations:
 
 - `GetStatus`
+- `GetCapabilities`
 - `ListNetworks`
 - `CreateNetwork`
 - `JoinNetwork`
@@ -307,40 +366,42 @@ The local API should include semantic operations rather than low-level network c
 - `GetDiagnostics`
 - future `SetInternetSharing`
 
-Representative events include:
+Representative events:
 
 - network discovered/lost;
 - node discovered/changed;
 - node connected/disconnected;
+- capabilities changed;
 - network joined/left;
 - topology changed;
 - route changed;
-- daemon health changed;
+- health changed;
 - Internet availability changed;
-- authorization required or failed.
+- authorization required/failed.
 
-All public IPC interfaces must be versioned. Front ends should detect incompatible daemon versions and present a useful error instead of failing unpredictably.
+All public IPC interfaces are versioned. Clients must fail clearly on incompatible daemon versions.
 
-## 10. Bluetooth integration
+## 12. Bluetooth and Linux networking integration
 
-### 10.1 BlueZ
+### 12.1 BlueZ
 
-BlueRoute will use the system BlueZ service through D-Bus for Bluetooth operations. It should not invoke `bluetoothctl` as the production backend. Shell tools may be used during early hardware experiments only.
+Production Bluetooth operations should use BlueZ D-Bus APIs rather than parsing `bluetoothctl` output. Development shell tools may be used during characterization only.
 
-Required integration areas include:
+Required areas:
 
-- adapter enumeration and power state;
-- nearby-device discovery;
+- adapter enumeration and state;
+- device discovery;
 - device properties;
 - pairing and trust;
 - connection state;
-- PAN network profile access;
-- NAP registration or equivalent BlueZ/NetworkManager integration;
-- error mapping into BlueRoute domain errors.
+- PAN profile access;
+- NAP registration and PANU connection through the selected production boundary;
+- error mapping;
+- capability and failure reporting.
 
-### 10.2 BNEP/PAN
+### 12.2 BNEP/PAN data plane
 
-The data plane is Bluetooth PAN using BNEP.
+The data plane is standard Bluetooth PAN using BNEP.
 
 Initial proof-of-concept topology:
 
@@ -350,253 +411,234 @@ Initial proof-of-concept topology:
        PANU    PANU   PANU
 ```
 
-This topology is deliberately simple. Once reliable, BlueRoute can build a routed graph from multiple PAN segments.
+The exact number of PANU clients is adapter/system dependent. BlueRoute must not assume a universal limit.
 
-### 10.3 No Bluetooth Mesh IP tunneling
+### 12.3 NetworkManager
 
-BlueRoute explicitly does not encapsulate arbitrary TCP/IP packets into Bluetooth Mesh messages. Multi-hop behavior is provided by Linux IP routing between standard PAN links.
+The initial Debian backend should use NetworkManager D-Bus for IP/network state where practical. Production code must not depend on parsing `nmcli`.
 
-## 11. Network topology
+NetworkManager-specific implementation belongs behind the Linux network-backend abstraction.
 
-### 11.1 Single-star baseline
+### 12.4 No Bluetooth Mesh IP tunneling
 
-The first operational milestone is one NAP with one or more PANU clients. All members must be able to use normal IP traffic on the PAN.
+BlueRoute does not encapsulate arbitrary TCP/IP packets into Bluetooth Mesh messages. Multi-hop connectivity is provided by Linux IP routing between standard PAN links.
 
-### 11.2 Interconnected stars
+## 13. Capability model
 
-A larger BlueRoute network may contain multiple PAN segments:
+Hardware and software differences are expected and must be explicit.
+
+A node capability snapshot may include:
+
+- Bluetooth adapter present/usable;
+- controller/driver identity for diagnostics;
+- PANU support;
+- NAP support;
+- practical simultaneous-link limit or policy ceiling;
+- routing/forwarding capability;
+- available network backend;
+- power/battery information where available;
+- observed link-quality information;
+- external connectivity present;
+- future willingness to share Internet.
+
+Capabilities may be **discovered**, **measured**, **configured**, or **conservatively defaulted**. Diagnostics should distinguish these sources where useful.
+
+A capability failure on one node should not unnecessarily make the entire network unsupported. For example, a node that can act only as a client may still participate as PANU.
+
+## 14. Network topology
+
+### 14.1 Single-star baseline
+
+The first operational milestone is one NAP with one or more PANU clients and ordinary IP traffic between members.
+
+### 14.2 Interconnected stars
+
+Larger networks may use multiple PAN segments:
 
 ```text
         client A       client B
             \             /
-             \           /
                 hub 1
                   |
-                  | routed PAN link
+                  | routed PAN relationship
                   |
                 hub 2
               /       \
         client C     client D
 ```
 
-Traffic from client A to client D is ordinary routed IP traffic:
+Traffic from client A to client D is routed IP traffic:
 
 ```text
 client A -> hub 1 -> hub 2 -> client D
 ```
 
-### 11.3 Routing, not giant bridging
+### 14.3 Routing, not giant bridging
 
-The preferred multi-segment design is layer-3 routing rather than attempting to bridge all PAN segments into one large layer-2 broadcast domain. This reduces loop risk, limits broadcast propagation, and gives BlueRoute explicit topology and route control.
+The preferred multi-segment architecture is layer-3 routing rather than one large bridged layer-2 domain. This reduces loop/broadcast problems and makes path ownership explicit.
 
-### 11.4 Automatic role selection
+### 14.4 Automatic role selection
 
-Ordinary users should not choose PANU/NAP roles. The topology engine eventually selects roles based on:
+Ordinary users do not select PANU/NAP roles. The topology engine considers:
 
-- which nodes can directly hear/connect to each other;
-- measured link quality and stability where available;
-- controller connection limits;
+- candidate direct neighbors;
+- node/adapter capabilities;
+- practical connection ceilings;
 - current node degree/load;
-- path cost;
-- whether a node is battery constrained;
-- gateway capability, when Internet sharing is implemented;
-- topology stability and avoidance of needless churn.
+- link stability/quality where measurable;
+- path cost/hops;
+- power status where relevant;
+- gateway capability in later releases;
+- topology stability and anti-flap policy.
 
-Manual role forcing may exist only as an advanced diagnostic/development feature.
+A device model name is never a topology-policy input by itself.
 
-### 11.5 Topology convergence
+### 14.5 Topology convergence
 
-Topology changes should be incremental. BlueRoute should prefer keeping a healthy existing topology over continuously rebuilding it for tiny metric improvements.
+BlueRoute should favor a healthy existing topology over constant optimization. Hub loss or range loss should trigger bounded reformation where alternate physical links exist.
 
-When a hub disappears, surviving nodes should attempt to establish replacement links and update routes automatically where the physical Bluetooth graph permits it.
+## 15. Addressing
 
-## 12. Addressing
+### 15.1 IPv4 first
 
-### 12.1 IPv4 first
+Initial production networking uses IPv4. Each routed PAN segment should have a distinct private subnet selected from a BlueRoute-managed pool.
 
-The first production data plane should support IPv4. Each routed PAN segment should use a distinct private subnet selected from a BlueRoute-managed address pool.
+BlueRoute must detect conflicts with active local networks and avoid installing overlapping routes.
 
-The exact default pool must be selected after collision analysis. BlueRoute must detect conflicts with locally connected networks and avoid installing routes that overlap active non-BlueRoute networks.
+### 15.2 Identity is not address
 
-### 12.2 Stable logical identity vs address
+Logical node identity is independent of Bluetooth MAC address, IP address, interface name, hostname, and display name.
 
-Node identity must not be defined by an IP address. A node keeps a stable BlueRoute identity even if its current PAN segment or address changes.
+### 15.3 DHCP vs explicit assignment
 
-### 12.3 DHCP vs explicit assignment
+NetworkManager shared-mode DHCP may be used for early single-star prototypes, but final multi-segment addressing must support deterministic orchestration. The addressing abstraction must prevent an early DHCP choice from becoming a protocol assumption.
 
-The implementation may use NetworkManager shared-mode DHCP for the earliest single-star prototype, but the final addressing design must support deterministic orchestration across multiple routed segments. Address allocation logic belongs behind an abstraction so early DHCP choices do not become protocol assumptions.
+### 15.4 IPv6
 
-### 12.4 IPv6
+IPv6/ULA support is planned. Core destination and identity models must not require redesign when IPv6 is added.
 
-IPv6 is a planned capability, not an initial blocker. The design should reserve support for a per-network ULA prefix and routing model without requiring the core domain model to be rewritten.
+## 16. Routing
 
-## 13. Routing
+The Linux kernel forwards packets. BlueRoute computes desired route state and applies it through a network backend.
 
-The kernel remains responsible for packet forwarding. BlueRoute computes desired route state and applies it through Linux networking adapters.
+The route model must support:
 
-The core route model must support destinations that include:
+- BlueRoute segment/prefix destinations;
+- logical-node destinations where needed;
+- reachability and next hop;
+- metric/path cost;
+- ownership so BlueRoute removes only its own state;
+- future default/Internet routes.
 
-- an individual logical node where needed;
-- a BlueRoute segment/prefix;
-- the entire BlueRoute network where appropriate;
-- a future default/Internet route.
+Route decisions should account for reachability, link state, path cost, freshness, topology stability, and optional gateway preference.
 
-Route decisions should account for:
+The first routed version may centrally compute routes if that simplifies correctness. Babel or another mature dynamic-routing protocol may be evaluated later after PAN behavior is characterized.
 
-- reachability;
-- hop count/path cost;
-- link state;
-- topology stability;
-- route freshness;
-- optional gateway preference.
+## 17. Inter-node control plane
 
-The initial routed implementation may use centrally computed routes if that simplifies correctness. A dynamic routing protocol such as Babel may be evaluated later, but BlueRoute must not depend on choosing a third-party dynamic routing protocol before the underlying PAN behavior is characterized.
+BlueRoute needs authenticated, versioned control communication separate from user traffic.
 
-## 14. Control plane
+Control information may include:
 
-BlueRoute requires a control plane separate from user data traffic.
-
-Once nodes have sufficient connectivity, control messages coordinate:
-
-- node identity;
+- stable node identity;
 - network identity;
 - software/protocol version;
 - capabilities;
 - neighbor/link observations;
-- topology membership;
-- route advertisements or assignments;
+- membership state;
+- topology state;
+- route information;
 - health;
-- gateway availability in a later release.
+- future gateway advertisements.
 
-Control messages must be bounded, versioned, and validated before use. Malformed or unauthenticated control data must never cause arbitrary system commands to execute.
+Messages must be bounded and validated. Source IP or Bluetooth display name alone is not proof of BlueRoute identity.
 
-The transport and authentication mechanism for inter-node control messages should be selected during implementation after the PAN proof of concept. The core protocol must not depend on source IP alone as proof of identity.
+The exact transport and authentication mechanism is selected after the PAN proof of concept and recorded in an ADR.
 
-## 15. Identity, pairing, and trust
+## 18. Identity, pairing, and trust
 
-BlueRoute needs two related but distinct notions:
+BlueRoute distinguishes:
 
 1. Bluetooth device pairing/trust managed through BlueZ.
 2. BlueRoute network membership managed by BlueRoute.
 
-A Bluetooth-paired device is not automatically entitled to become a member of every BlueRoute network.
+Bluetooth pairing does not automatically grant membership.
 
-Each installation should have a stable generated node identifier and a user-editable display name.
+Each installation has a stable generated node identity and a user-editable display name. Each BlueRoute network has a stable network identity and a human-friendly name.
 
-A BlueRoute network should have a stable network identifier plus a human-friendly name.
+The initial enrollment flow may use explicit approval. Future invitation codes/QR enrollment may be added.
 
-The initial membership flow may use an explicit approval step on the creating node. Later versions may add invitation codes or QR-based enrollment. Security-sensitive material must not be displayed in logs by default.
+## 19. Security and privilege requirements
 
-## 16. Security requirements
-
-- Front ends run without root privileges.
-- The daemon must use the minimum permissions required for networking operations.
-- Prefer BlueZ and NetworkManager D-Bus APIs over spawning privileged shell commands.
-- Use Polkit/system D-Bus policy for privileged actions where appropriate.
-- Never construct shell commands from peer-provided strings.
-- Validate all IPC and network protocol inputs.
-- Persist secrets with restrictive filesystem permissions.
+- Front ends run unprivileged.
+- Privileged networking uses the narrowest practical daemon/system-service boundary.
+- Prefer BlueZ/NetworkManager D-Bus APIs over privileged shell commands.
+- Use D-Bus/Polkit policy where appropriate.
+- Never construct shell commands from peer-controlled data.
+- Validate all local IPC and peer protocol input.
+- Persist secrets with restrictive permissions.
+- Treat display names and Bluetooth metadata as untrusted presentation data.
 - Do not automatically expose an Internet uplink.
-- Internet sharing must be explicit, visible, and reversible.
-- Peer display names are untrusted presentation data and must not be used as authorization identities.
-- Logging must redact secrets and sensitive tokens.
-- Destructive operations such as forgetting a network should require clear user intent.
+- Internet sharing is explicit, visible, and reversible.
+- Logs redact secrets and credentials.
+- Forget/revoke operations require clear user intent.
 
-A formal threat model should be created before automatic multi-node trust and Internet gateway features are declared production-ready.
+A formal threat model is required before production-ready automatic multi-node trust or Internet gateway support.
 
-## 17. Privilege model
+## 20. Persistence
 
-The desired model is:
+Durable state may include:
 
-```text
-unprivileged front ends
-        |
-        v
-BlueRoute system daemon
-        |
-        +--> BlueZ system D-Bus
-        +--> NetworkManager system D-Bus
-        +--> narrowly scoped system networking operations
-```
-
-The daemon should not run as unrestricted root merely because it is convenient. Implementation work must identify which operations can be delegated through BlueZ/NetworkManager and which, if any, require additional capabilities or helper components.
-
-Authorization failures must be surfaced as user-actionable errors.
-
-## 18. Persistence
-
-Persistent state may include:
-
-- local node identity;
-- device display name;
+- node identity;
+- display name;
 - known BlueRoute networks;
-- network membership/trust data;
+- membership/trust data;
 - remembered peers;
 - user preferences;
-- advanced policy overrides;
+- topology policy overrides;
 - future gateway preferences.
 
-Transient state such as current RSSI, temporary routes, and live interface names should not be treated as durable identity.
+Transient state such as interface names, RSSI, live routes, and temporary IP addresses is not durable identity.
 
-Configuration schemas must be versioned and migrations tested.
+Persistent schemas must be versioned and migrations tested.
 
-## 19. State and lifecycle
-
-Representative daemon/network states include:
-
-- stopped;
-- idle;
-- discovering;
-- joining;
-- connected;
-- degraded;
-- reconnecting;
-- leaving;
-- error.
-
-The actual implementation may model several orthogonal state machines instead of one giant enum. For example, adapter availability, membership, link state, topology state, and gateway state should not be forced into an invalid combinatorial state model.
-
-Transitions must be idempotent where practical. Repeated “join” or recovery operations must not accumulate duplicate routes or stale interfaces.
-
-## 20. Reliability and recovery
+## 21. Reliability and reconciliation
 
 BlueRoute must expect:
 
 - Bluetooth adapters disappearing/reappearing;
+- adapters with different feature sets;
 - peers moving out of range;
 - suspend/resume;
-- daemon restarts;
-- NetworkManager restarts;
+- daemon restart;
+- BlueZ restart;
+- NetworkManager restart;
 - stale BNEP interfaces;
-- failed pairing attempts;
-- IP conflicts;
-- partial topology partitions;
-- hubs losing power;
-- multiple peers attempting topology changes at nearly the same time.
+- pairing failures;
+- address conflicts;
+- partial network partitions;
+- hub loss;
+- simultaneous topology events.
 
-Recovery behavior should prefer reconciliation from observed system state rather than assuming every prior command succeeded.
+Recovery should reconcile desired state against observed BlueZ, network-manager, interface, address, and route state rather than assume prior commands succeeded.
 
-The daemon should periodically or event-driven reconcile desired state against BlueZ, NetworkManager, interfaces, and routes.
+Retries must be bounded with backoff and retryability classification.
 
-## 21. Internet gateway extension
+## 22. Future Internet gateway extension
 
-Internet sharing is a planned post-MVP capability.
+Internet sharing is post-core-product and disabled by default.
 
-The architecture must model it now but keep it disabled unless explicitly implemented and enabled.
-
-### 21.1 Gateway model
-
-A node may report capabilities such as:
+A node may eventually report:
 
 - external connectivity present;
 - connectivity type;
 - Internet reachability verified;
-- willing to share Internet;
-- gateway cost/preference.
+- willingness to share;
+- gateway preference/cost.
 
-“Has Internet” and “is willing to share Internet” are separate states.
+“Has Internet” and “willing to share Internet” are distinct.
 
-### 21.2 Future traffic path
+Potential path:
 
 ```text
 BlueRoute client
@@ -608,40 +650,23 @@ one or more routed PAN segments
 BlueRoute gateway
       |
       v
-Ethernet / Wi-Fi / other uplink
+Ethernet / Wi-Fi / cellular / other uplink
       |
       v
 Internet
 ```
 
-### 21.3 Linux implementation
+Gateway implementation must cover forwarding, NAT/masquerading where required, DNS, default-route advertisement/selection, firewall policy, cleanup, loop prevention, and optional failover.
 
-The gateway adapter may use NetworkManager shared networking where it fits the topology or explicit forwarding/NAT/firewall configuration where required. This decision should be based on actual routed topology requirements rather than hard-coded into the core.
+The gateway backend may use NetworkManager shared networking or explicit nftables/forwarding, depending on proven topology needs.
 
-Future gateway support must include:
-
-- IP forwarding;
-- NAT/masquerading where required;
-- DNS handling;
-- default-route advertisement/selection;
-- cleanup on disable or failure;
-- prevention of forwarding loops;
-- firewall policy;
-- clear UI indication;
-- optional automatic failover to another approved gateway.
-
-### 21.4 Gateway safety
-
-Internet sharing must be off by default in the first release containing the feature. The UI must clearly identify which connection is being shared and which BlueRoute network can use it.
-
-## 22. CLI requirements
-
-The CLI is both an administrator interface and an acceptance-test surface.
+## 23. CLI requirements
 
 Representative commands:
 
 ```text
 blueroute status
+blueroute capability show
 blueroute network list
 blueroute network create <name>
 blueroute network join <id-or-name>
@@ -654,34 +679,29 @@ blueroute discover
 blueroute diagnose
 ```
 
-The CLI should support structured output, preferably JSON, for read-only status and diagnostic commands.
+Read-only commands should support stable JSON output. Exit codes should distinguish usage/configuration, daemon unavailable, authorization failure, unsupported capability, and operational failure.
 
-Exit codes must distinguish success, user/configuration errors, authorization errors, unavailable daemon/system services, and operational failures where practical.
+The CLI is a daemon client, not a second network implementation.
 
-The CLI must call the daemon API rather than implement a second networking stack.
+## 24. TUI requirements
 
-## 23. TUI requirements
-
-The TUI should use Ratatui and the shared client library.
-
-Primary screens:
+The Ratatui TUI should provide:
 
 - overall status;
 - nearby/known networks;
 - connected nodes;
 - node details;
-- diagnostics/log view;
+- capabilities;
+- diagnostics;
 - settings.
 
-Keyboard interactions must be discoverable on screen. The TUI must remain useful over a local terminal without a graphical desktop.
+Keyboard interactions should be discoverable on screen and usable without a graphical session.
 
-## 24. Tauri desktop requirements
+## 25. Tauri desktop requirements
 
-The desktop application is the primary non-technical user experience.
+The desktop application is the primary non-technical experience.
 
-### 24.1 Main workflow
-
-The default interface should make these actions prominent:
+Prominent actions:
 
 - Create a Network
 - Join
@@ -690,70 +710,49 @@ The default interface should make these actions prominent:
 - Settings
 - Diagnose a Problem
 
-### 24.2 Language
+Default terminology should say:
 
-Default UI terminology should prefer:
+- “network” rather than “PAN segment”;
+- “device/computer” rather than “PANU”;
+- “connected through another device” rather than “multi-hop routed peer”;
+- “Internet sharing” rather than “NAT/default-route advertisement.”
 
-- “network” instead of “PAN segment”;
-- “computer/device” instead of “PANU node”;
-- “connected through another device” instead of “multi-hop routed peer”;
-- “Internet sharing” instead of “NAT/default-route advertisement.”
+The desktop UI should adapt to capabilities. It must not offer a role/action that the local system cannot perform, and it should explain why when useful.
 
-Technical terms may appear in an advanced diagnostic view.
+The Tauri Rust backend uses `blueroute-client`; browser-side code never receives unrestricted system D-Bus or shell access.
 
-### 24.3 Status presentation
+## 26. Diagnostics and observability
 
-The application should summarize state in user-centered terms such as:
+Diagnostics should include:
 
-- Everything looks good
-- Connecting…
-- Reconnecting…
-- Some devices are unreachable
-- Bluetooth is turned off
-- Permission required
-- Internet available
-- Internet unavailable
-
-### 24.4 Tauri boundary
-
-The Tauri Rust backend should use `blueroute-client` to talk to the daemon. Browser-side code must not receive unrestricted access to system D-Bus or execute arbitrary system commands.
-
-## 25. Diagnostics and observability
-
-BlueRoute must provide both friendly and detailed diagnostics.
-
-Useful diagnostic data includes:
-
-- BlueRoute version;
-- daemon version/API version;
-- Linux/kernel version;
-- BlueZ availability/version;
-- NetworkManager availability/version;
-- Bluetooth adapter identity and state;
-- current logical network;
-- direct peers;
-- routed peers;
+- BlueRoute and daemon/API versions;
+- Linux distribution/kernel;
+- BlueZ version/state;
+- network-backend version/state;
+- Bluetooth adapter/controller/driver identity;
+- discovered capabilities and their source;
+- current BlueRoute network;
+- direct and routed peers;
 - BNEP/PAN interfaces;
-- assigned addresses;
-- routing table entries owned by BlueRoute;
+- addresses;
+- BlueRoute-owned routes;
 - topology graph;
-- recent state transitions;
+- recent state transitions/errors;
 - authorization failures;
-- gateway state when implemented.
+- future gateway state.
 
-Logs should be structured where practical and integrated with journald for the daemon.
+The daemon logs to journald on systemd systems. Support bundles, when added, must redact secrets.
 
-A support bundle feature may be added later, but it must redact secrets and private membership credentials.
+## 27. Error model
 
-## 26. Error model
+At minimum distinguish:
 
-Errors should be typed and categorized. At minimum the domain should distinguish:
-
-- unsupported platform/system configuration;
+- unsupported platform/runtime;
 - missing Bluetooth adapter;
 - adapter disabled;
+- required PAN capability unavailable;
 - BlueZ unavailable;
-- NetworkManager unavailable;
+- network backend unavailable;
 - peer unavailable;
 - pairing rejected/failed;
 - authorization denied;
@@ -762,242 +761,233 @@ Errors should be typed and categorized. At minimum the domain should distinguish
 - route application failure;
 - topology failure;
 - protocol incompatibility;
-- invalid/corrupt persisted state;
+- corrupt persisted state;
 - internal error.
 
-Front ends convert these into audience-appropriate messages. Raw D-Bus errors should remain available in advanced diagnostics but should not be the only user-facing explanation.
+Front ends convert these into audience-appropriate messages while preserving low-level context for advanced diagnostics.
 
-## 27. Hardware characterization
+## 28. Hardware and platform characterization
 
-Dell Chromebook 3100 is the initial reference platform, but Bluetooth controller behavior must be measured rather than assumed.
+BlueRoute must characterize **capability classes**, not one computer model.
 
-Required measurements include:
+For every hardware/software combination used for acceptance, record:
 
-- controller and driver identification;
-- supported Bluetooth features;
-- reliable simultaneous PAN connection count;
-- connection-establishment behavior;
-- stability under sustained TCP traffic;
-- throughput and latency for one link;
-- throughput and latency under multiple clients;
-- routed two-hop behavior;
-- CPU use;
-- memory use;
-- power impact where practical;
-- suspend/resume behavior;
-- recovery after range loss.
+- system/vendor/model for reproducibility only;
+- Linux distribution and kernel;
+- BlueZ and network-backend versions;
+- controller/chipset and kernel driver;
+- PANU/NAP behavior;
+- reliable simultaneous link count;
+- connection establishment/reconnection behavior;
+- sustained TCP/UDP stability;
+- latency/throughput;
+- CPU/memory use;
+- suspend/resume behavior where applicable;
+- range-loss recovery;
+- routed two-hop behavior where applicable.
 
-BlueRoute must not encode an assumed maximum number of peers until hardware testing establishes practical limits. Limits should be capability/policy data, not magic constants scattered through the code.
+Dell Chromebook 3100 machines may provide the first such report. At least one materially different Linux/Bluetooth hardware platform should be included before making broad v1 portability claims.
 
-## 28. Testing strategy
+No controller limit should become a global constant. Policy uses per-node capabilities, conservative defaults, or measured/configured ceilings.
 
-### 28.1 Unit tests
+## 29. Testing strategy
 
-Pure core logic should have deterministic unit tests for:
+### Unit tests
 
-- identifiers and serialization;
-- state machines;
-- topology graph operations;
-- route selection;
-- address allocation/conflict avoidance;
-- policy decisions;
-- health aggregation;
-- configuration migrations.
+Deterministic core tests cover identifiers, serialization, state machines, capability handling, topology, routes, addressing, policy, health aggregation, and migrations.
 
-### 28.2 Adapter tests
+### Adapter tests
 
-Linux adapters should use trait boundaries and fakes/mocks for most tests. Tests should verify D-Bus translation, error mapping, idempotency, and reconciliation behavior.
+Linux adapters use trait boundaries and fakes/mocks to test D-Bus translation, errors, idempotency, and reconciliation.
 
-### 28.3 Integration tests
+### Network integration tests
 
-Where feasible, Linux network namespaces and virtual interfaces should test route computation/application independently of Bluetooth hardware.
+Linux network namespaces/virtual interfaces should test route/address logic independently of physical Bluetooth where possible.
 
-BlueZ/NetworkManager integration tests should be separated from deterministic core tests so CI does not require physical Bluetooth hardware for every run.
+### Hardware acceptance
 
-### 28.4 Hardware acceptance tests
+Physical tests prove Bluetooth claims. CI must never be presented as proof that a Bluetooth controller behaves correctly.
 
-A documented hardware test suite must run on at least two Dell Chromebook 3100 units before the first useful release. Routed topology acceptance requires additional nodes.
+The acceptance matrix should include multiple adapters/hardware classes over time, not only the initial Chromebook fixtures.
 
-Hardware tests should record exact software versions and produce reproducible evidence rather than rely on anecdotal success.
+### UI tests
 
-### 28.5 UI tests
+- CLI contract/JSON tests;
+- TUI state/view tests;
+- Tauri component tests;
+- desktop end-to-end tests against a fake/test daemon;
+- selected full-stack hardware workflows.
 
-- CLI command and JSON contract tests;
-- TUI state/view tests where practical;
-- Tauri unit/component tests;
-- end-to-end desktop tests for create/join/leave/error flows once the backend is stable.
+## 30. CI and quality gates
 
-## 29. CI and quality gates
+The repository should enforce, as introduced:
 
-The repository should eventually enforce:
-
-- `cargo fmt --check`;
-- `cargo clippy` with agreed lint policy;
+- `cargo fmt --all -- --check`;
+- clippy under an agreed warning policy;
 - Rust unit/integration tests;
-- frontend formatting/linting/type checks;
+- frontend formatting/lint/type checks;
 - Tauri/frontend tests;
 - documentation checks where practical;
-- dependency/security review tooling as appropriate;
-- reproducible packaging checks for supported Debian targets.
+- dependency/security checks as appropriate;
+- reproducible packaging checks.
 
-Hardware acceptance is a separate gate and must not be falsely represented as covered by ordinary CI.
+Hardware acceptance remains a separate gate.
 
-## 30. Packaging and installation
+## 31. Packaging and installation
 
-Initial packaging target is Debian.
+Initial packaging target is Debian. The installed package set may include:
 
-The installed system may include:
-
-- `blueroute-daemon` binary;
-- CLI binary;
-- TUI binary;
+- `blueroute-daemon`;
+- CLI;
+- TUI;
 - desktop application;
 - systemd unit;
 - D-Bus service/policy files;
-- Polkit rules/actions if required;
-- desktop launcher/icon metadata;
+- Polkit files if required;
+- desktop metadata/icons;
 - configuration directories;
-- man pages or generated CLI documentation.
+- man pages/documentation.
 
-Uninstall must not leave stale BlueRoute routes, firewall rules, or automatically created network profiles active.
+Uninstall must not leave active BlueRoute routes, forwarding, NAT/firewall rules, or unintended network profiles.
 
-## 31. Compatibility and dependencies
+Future distribution packaging may be added without changing the daemon/core architecture.
 
-The initial supported environment should explicitly document minimum tested versions for:
+## 32. Support matrix
 
-- Debian;
-- Linux kernel;
-- BlueZ;
-- NetworkManager;
-- systemd;
-- Rust toolchain for source builds;
-- WebKit/other Tauri runtime dependencies.
+Every release should publish a support/test matrix using software and capability criteria rather than a single device model.
 
-The first development target is Debian 13 on Dell Chromebook 3100. Portability to other modern Linux distributions is desirable but secondary to getting the reference platform correct.
+It should list:
 
-## 32. Performance expectations
+- tested distributions;
+- minimum/tested kernel versions;
+- BlueZ versions;
+- network backend and versions;
+- tested Bluetooth controllers/hardware examples;
+- observed role/connection limitations;
+- known driver/firmware issues;
+- packaging status by distribution.
 
-BlueRoute is intended for management, file transfer, SSH, application control, local services, and similar IP workloads where Bluetooth performance is acceptable. It is not intended to claim Wi-Fi-equivalent bandwidth.
+A listed computer model is evidence of testing, not an architectural requirement.
 
-No hard throughput target should be published until measurements are collected on the reference hardware. The project should instead establish baseline metrics and regression thresholds from hardware characterization.
+## 33. Performance and resource expectations
 
-Topology algorithms must account for the fact that every additional wireless hop consumes capacity and increases latency.
+Bluetooth performance varies substantially by controller, radio environment, BlueZ/kernel behavior, topology, and hop count. BlueRoute must not publish a universal throughput or peer-count promise without evidence.
 
-## 33. Resource use
+BlueRoute is intended for workloads such as management, SSH, local services, application control, and file transfer where Bluetooth performance is acceptable.
 
-The daemon should be lightweight enough for Chromebook-class hardware. Idle CPU use should be near-zero except for necessary system events/timers, and discovery scans should not run continuously without policy justification.
+The daemon should be lightweight on modest Linux hardware. Idle CPU should be near-zero apart from necessary timers/events, and discovery scanning should not run continuously without policy justification.
 
-Memory, wakeup frequency, and scan behavior should be measured during hardware acceptance.
+## 34. Initial release layering
 
-## 34. Privacy
+### Layer A — PAN proof of concept
 
-BlueRoute should minimize broadcast metadata. Device/network names shown to other peers should be user-controlled. Diagnostic exports must avoid secrets and should warn before including identifiers that may be sensitive.
-
-Internet connectivity checks, when later implemented, should be documented and configurable if they contact external endpoints.
-
-## 35. Initial release layering
-
-### Layer A: PAN proof of concept
-
-- two Debian nodes;
-- one NAP, one PANU;
-- automatic or scripted setup through production adapters;
+- two compatible Linux nodes;
+- one NAP and one PANU;
 - IPv4 connectivity;
-- TCP traffic succeeds.
+- TCP and UDP traffic;
+- exact capabilities/versions recorded.
 
-### Layer B: Managed single-star network
+### Layer B — Managed single-star network
 
 - daemon;
-- persistent node/network identity;
-- multiple clients where hardware permits;
-- automatic address configuration;
+- persistent identities;
+- multiple clients where capabilities permit;
+- automatic addressing;
 - create/join/leave;
 - CLI diagnostics;
 - reconnection.
 
-### Layer C: Routed interconnected stars
+### Layer C — Routed interconnected stars
 
 - multiple PAN segments;
 - forwarding;
 - topology graph;
-- routes computed/applied automatically;
+- automatically applied routes;
 - multi-hop TCP/IP;
 - failure recovery.
 
-### Layer D: Friendly applications
+### Layer D — Friendly applications
 
 - TUI;
-- polished Tauri desktop workflow;
+- Tauri desktop workflow;
 - packaging and installation.
 
-### Layer E: Internet gateway
+### Layer E — Internet gateway
 
-- explicit gateway enablement;
+- explicit opt-in;
 - forwarding/NAT/DNS;
 - gateway advertisements;
 - default-route selection;
 - optional failover.
 
-## 36. Acceptance definition for core product
+## 35. Core-product acceptance
 
-BlueRoute reaches its initial core-product objective when, on supported Debian hardware:
+BlueRoute reaches its initial local-network objective when, on the documented supported Linux baseline:
 
-1. A non-technical user can create a BlueRoute network from the desktop application.
-2. Another device can discover and join it through the desktop application.
-3. The devices obtain working IP connectivity without manual `ip`, `nmcli`, `bluetoothctl`, or route commands.
-4. Ordinary TCP and UDP applications work across the network.
+1. A non-technical user can create a network from the desktop app.
+2. Another compatible Linux device can discover and join it from the desktop app.
+3. IP networking works without manual `ip`, `nmcli`, or `bluetoothctl` commands.
+4. Ordinary TCP/UDP applications work.
 5. Closing the UI does not stop networking.
-6. Restarting a peer or temporarily losing Bluetooth connectivity results in understandable state and automatic recovery when possible.
-7. CLI and TUI show the same underlying daemon state as the desktop application.
-8. Diagnostics can explain the active interfaces, addresses, peers, and routes.
-9. Multi-segment routing works before BlueRoute claims automatic routed topology support.
-10. Internet sharing, if not yet implemented, remains cleanly absent rather than partially enabled.
+6. Temporary connectivity loss results in understandable state and automatic recovery when possible.
+7. CLI, TUI, and desktop show the same daemon state.
+8. Diagnostics explain platform capabilities, interfaces, addresses, peers, topology, and routes.
+9. Multi-segment routing is physically proven before the product claims routed-topology support.
+10. Behavior is not dependent on Dell Chromebook-specific code or assumptions.
+11. Internet sharing remains absent/off until its separate acceptance criteria are complete.
 
-## 37. Open engineering questions
+## 36. Open engineering questions
 
-These questions should be answered by prototypes and recorded decisions rather than guessed up front:
+These should be answered with prototypes/ADRs rather than assumptions:
 
-- What Bluetooth chipset/driver variants exist across Dell Chromebook 3100 units?
-- How many simultaneous BNEP/PAN links are reliable on the reference hardware?
-- Should NetworkManager own all PAN profiles, or should some NAP/PAN operations use BlueZ directly with NetworkManager managing only IP state?
-- What is the best pre-PAN mechanism for positively identifying a discovered device as BlueRoute-capable?
+- Which BlueZ/NetworkManager API boundary is most reliable for PANU/NAP lifecycle?
+- How consistently do common Linux Bluetooth controllers expose PAN roles?
+- What capability probes can reliably distinguish supported/unsupported role combinations?
+- How should BlueRoute choose a conservative connection ceiling before hardware-specific measurements exist?
+- What pre-PAN mechanism best identifies a device as BlueRoute-capable?
 - What enrollment method best balances friendliness and trust security?
-- What private IPv4 pool minimizes collisions while remaining easy to diagnose?
-- What inter-node control transport best fits connected PAN segments?
-- Should initial routed topology be centrally coordinated, distributed, or hybrid?
-- Is an existing routing protocol such as Babel advantageous after hardware constraints are understood?
-- Which D-Bus/Polkit permissions are actually required on Debian 13?
-- How should suspend/resume affect NAP responsibilities?
-- What topology metrics are reliable from BlueZ/controller data on this hardware?
-- What gateway/NAT approach works best once routed multi-segment networks exist?
+- What IPv4 pool minimizes collisions?
+- What inter-node control transport/authentication best fits PAN links?
+- Should routed topology be centrally coordinated, distributed, or hybrid?
+- Is Babel or another routing protocol advantageous after PAN constraints are understood?
+- Which D-Bus/Polkit permissions are required on the initial Debian backend?
+- How should suspend/resume affect hub responsibility?
+- Which link-quality metrics are portable enough for topology policy?
+- When should a node decline a hub role because of controller limits or power state?
+- What gateway/NAT approach best fits routed multi-segment networks?
+- What abstraction is needed to add a non-NetworkManager Linux backend later?
 
-## 38. Architectural invariants
+## 37. Architectural invariants
 
-The following are considered project-level invariants unless this specification is deliberately revised:
+Unless deliberately revised:
 
-1. BlueRoute carries normal IP over standard Bluetooth PAN/BNEP links.
-2. Bluetooth Mesh is not the IP transport.
-3. Multi-hop connectivity is solved at the IP routing/topology layer.
-4. The daemon is authoritative for network state.
-5. CLI, TUI, and desktop front ends share the daemon API rather than duplicate networking logic.
-6. Front ends do not require root privileges.
-7. The core domain model is separated from Linux/BlueZ/NetworkManager adapters.
-8. Internet sharing is a distinct, opt-in gateway feature.
-9. The UI hides low-level networking concepts from ordinary users.
-10. Hardware-dependent connection limits are measured and represented as capabilities/policy, not assumed.
+1. BlueRoute targets compatible Linux computers, not a specific computer model.
+2. Hardware-dependent behavior is modeled as capability/policy data.
+3. BlueRoute carries normal IP over standard Bluetooth PAN/BNEP links.
+4. Bluetooth Mesh is not the IP transport.
+5. Multi-hop connectivity is solved at the IP routing/topology layer.
+6. The daemon is authoritative for network state.
+7. CLI, TUI, and desktop share the daemon API.
+8. Front ends do not require root privileges.
+9. The core is separated from Linux/BlueZ/network-backend adapters.
+10. NetworkManager is an initial backend, not a core-domain dependency.
+11. Internet sharing is a distinct, opt-in gateway feature.
+12. The default UI hides low-level networking concepts.
+13. Hardware connection limits are measured/discovered/configured rather than globally assumed.
 
-## 39. Documentation requirements
+## 38. Documentation requirements
 
-As implementation progresses, the project should add and maintain:
+As implementation progresses, maintain:
 
-- architecture decision records for material design choices;
+- architecture decision records;
 - developer setup instructions;
 - protocol/API documentation;
-- daemon D-Bus API documentation;
-- hardware test procedures and results;
+- daemon D-Bus documentation;
+- platform support matrix;
+- hardware capability/test reports;
 - troubleshooting guide;
-- packaging/install guide;
-- user guide for desktop/TUI/CLI;
-- security/threat-model documentation before production trust/gateway features.
+- packaging/install guides;
+- user guides for desktop/TUI/CLI;
+- security/threat-model documentation.
 
 This document defines the intended architecture and product direction. `docs/TODO.md` decomposes it into implementation tasks and acceptance gates.

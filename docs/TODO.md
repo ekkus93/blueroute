@@ -12,24 +12,30 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 - `[-]` in progress
 - `[x]` complete
 - `[!]` blocked
-- Tasks should be completed on the smallest sensible branch/commit scope.
-- A task is not complete merely because code exists; its acceptance criteria must be satisfied.
-- Hardware-dependent tasks must record the hardware, Debian/kernel/BlueZ/NetworkManager versions, and the evidence collected.
-- Do not claim Bluetooth hardware behavior from CI-only tests.
-- Keep the architectural invariants in `docs/SPEC.md` intact unless the spec is deliberately updated first.
+- A task is complete only when its acceptance criteria are satisfied.
+- Hardware-dependent tasks must record the computer/adapter, Linux distribution, kernel, BlueZ, network-backend versions, and evidence collected.
+- Do not claim physical Bluetooth behavior from CI-only tests.
+- Do not generalize one adapter's limitations into a global BlueRoute limit.
+- Keep architectural invariants in `docs/SPEC.md` intact unless the specification is deliberately revised first.
+
+## Platform rule
+
+BlueRoute targets **compatible Linux computers with Bluetooth PAN support**, not Dell Chromebook 3100 specifically. Dell Chromebook 3100 machines running Debian are available early test fixtures and should be used for useful evidence, but implementation code and product policy must remain hardware-agnostic.
+
+The initial software/packaging baseline is Debian 13 with BlueZ, NetworkManager, systemd, and system D-Bus. NetworkManager is an initial backend, not a permanent core dependency.
 
 ## Release strategy
 
-The work is deliberately layered:
-
-1. Prove standard Bluetooth PAN/BNEP on the reference hardware.
-2. Build the Rust domain model and Linux adapters.
-3. Make a daemon own the network lifecycle.
-4. Deliver a reliable single-star BlueRoute LAN.
-5. Add routed interconnected-star topology.
-6. Add the CLI, TUI, and polished Tauri experience around the same daemon API.
-7. Harden, package, and validate on Dell Chromebook 3100 hardware.
-8. Add optional Internet gateway support only after the local routed network is solid.
+1. Establish the Rust/project baseline.
+2. Prove Bluetooth PAN/BNEP on available Linux hardware and characterize capability differences.
+3. Build hardware-independent Rust domain models and Linux adapter boundaries.
+4. Make a daemon own the networking lifecycle.
+5. Deliver a reliable single-star BlueRoute LAN.
+6. Add authenticated control and routed interconnected-star topology.
+7. Add automatic topology management driven by capabilities rather than device models.
+8. Deliver CLI, TUI, and polished Tauri front ends around the same daemon API.
+9. Harden, package, and validate across representative Linux/Bluetooth hardware.
+10. Add optional Internet gateway support after local routed networking is solid.
 
 ---
 
@@ -38,7 +44,7 @@ The work is deliberately layered:
 ## P0-001 — Define Rust workspace
 
 - [ ] Create root Cargo workspace.
-- [ ] Add initial crate/app directories:
+- [ ] Add:
   - `crates/blueroute-core`
   - `crates/blueroute-protocol`
   - `crates/blueroute-linux`
@@ -47,147 +53,173 @@ The work is deliberately layered:
   - `apps/cli`
   - `apps/tui`
   - `apps/desktop`
-- [ ] Ensure workspace builds with placeholder crates.
+- [ ] Build placeholder crates.
 
 **Acceptance**
 
 - `cargo check --workspace` succeeds.
-- No application contains duplicated domain types that should live in shared crates.
+- Shared domain types are not duplicated in applications.
 
 ## P0-002 — Pin development toolchain policy
 
-- [ ] Add `rust-toolchain.toml` or documented minimum stable Rust version.
-- [ ] Document required Debian development packages.
-- [ ] Document Node/package-manager requirements for Tauri frontend work when introduced.
+- [ ] Add `rust-toolchain.toml` or documented minimum stable Rust.
+- [ ] Document Debian development dependencies.
+- [ ] Document Node/package-manager requirements when Tauri frontend work begins.
+- [ ] State clearly that Debian is the initial development baseline, not the only architectural target.
 
 **Acceptance**
 
-- A clean Debian 13 machine can follow documented setup steps to run the Rust checks.
+- A clean supported Debian machine can run documented checks.
 
 ## P0-003 — Establish formatting and linting
 
-- [ ] Configure rustfmt policy.
+- [ ] Configure rustfmt.
 - [ ] Configure clippy policy.
-- [ ] Add frontend formatting/linting policy when frontend is created.
+- [ ] Add frontend formatting/linting when frontend exists.
 
 **Acceptance**
 
 - `cargo fmt --all -- --check` passes.
-- `cargo clippy --workspace --all-targets` passes under the agreed warning policy.
+- `cargo clippy --workspace --all-targets` passes under agreed policy.
 
 ## P0-004 — Establish CI baseline
 
-- [ ] Add GitHub Actions workflow for Rust formatting, clippy, tests, and build.
-- [ ] Add frontend checks when Tauri code exists.
-- [ ] Cache dependencies without hiding lockfile problems.
+- [ ] Add GitHub Actions for formatting, clippy, tests, and build.
+- [ ] Add frontend checks when introduced.
+- [ ] Cache dependencies without masking lockfile errors.
 
 **Acceptance**
 
 - CI runs on pull requests and `master`.
-- A deliberately broken format/test change is caught by CI.
+- Deliberate formatting/test failures are detected.
 
-## P0-005 — Add contribution/development documentation
+## P0-005 — Add development documentation
 
-- [ ] Add developer quick-start instructions.
-- [ ] Explain which tests require physical Bluetooth hardware.
-- [ ] Document project task-ID convention.
+- [ ] Add contributor quick start.
+- [ ] Explain deterministic tests vs physical Bluetooth tests.
+- [ ] Document task-ID convention.
+- [ ] Document platform-support terminology: supported, tested, experimental, unsupported.
 
 **Acceptance**
 
-- A contributor can distinguish deterministic CI tests from hardware acceptance tests.
+- Contributors understand that one successful computer model does not establish a universal hardware claim.
 
 ---
 
-# P1 — Reference hardware characterization
+# P1 — Linux Bluetooth/PAN capability characterization
 
-Do this early. The architecture must be informed by what the Dell Chromebook 3100 Bluetooth hardware actually supports.
+Do this early. Architecture must be informed by real Bluetooth PAN behavior, but it must characterize capabilities across systems rather than become specialized to one model.
 
-## P1-001 — Inventory reference Chromebook hardware
+## P1-001 — Inventory initial test systems
 
-- [ ] Record exact Dell Chromebook 3100 model variants available.
+- [ ] Record every available Linux test machine used for early work.
+- [ ] Record vendor/model only for reproducibility.
 - [ ] Record Bluetooth controller/chipset identifiers.
-- [ ] Record kernel driver/module.
-- [ ] Record Debian, kernel, BlueZ, and NetworkManager versions.
-- [ ] Capture relevant `bluetoothctl show`, `btmgmt info`, `lsusb`/`lspci`, and system information.
+- [ ] Record kernel driver/module and firmware information where useful.
+- [ ] Record distribution, kernel, BlueZ, NetworkManager, and systemd versions.
+- [ ] Capture relevant `bluetoothctl show`, `btmgmt info`, `lsusb`/`lspci`, and network information.
+- [ ] Include Dell Chromebook 3100 units as initial fixtures if available.
 
 **Acceptance**
 
-- A versioned hardware report exists under `docs/hardware/`.
+- Versioned reports exist under `docs/hardware/` or `docs/platforms/`.
+- Reports describe capability evidence, not product requirements.
 
-## P1-002 — Verify basic Bluetooth stability on Debian 13
+## P1-002 — Verify basic Bluetooth stability
 
-- [ ] Confirm adapter powers on/off reliably.
-- [ ] Confirm discovery works.
-- [ ] Pair two Chromebook 3100 units.
+- [ ] Confirm adapter power state changes reliably.
+- [ ] Confirm discovery.
+- [ ] Pair two compatible Linux nodes.
 - [ ] Disconnect/reconnect repeatedly.
 - [ ] Test after reboot.
+- [ ] Record driver/firmware quirks.
 
 **Acceptance**
 
-- Reproducible pairing and reconnection procedure is documented.
-- Any driver/firmware quirks are recorded.
+- Reproducible pairing/reconnection procedures and results exist for the tested combination.
 
 ## P1-003 — Prove manual PANU/NAP connectivity
 
-- [ ] Create one NAP and one PANU using existing Linux tooling/APIs.
+- [ ] Create one NAP and one PANU with existing Linux tooling/APIs.
 - [ ] Confirm BNEP interface creation.
 - [ ] Assign working IPv4 configuration.
 - [ ] Ping both directions.
-- [ ] Run TCP traffic (SSH, iperf3, or equivalent).
+- [ ] Run TCP traffic.
 - [ ] Run UDP traffic.
+- [ ] Disable Wi-Fi during acceptance to prove the data path.
 
 **Acceptance**
 
-- Two Chromebook 3100 units exchange ordinary TCP/IP over Bluetooth PAN with Wi-Fi disabled.
-- Exact commands/system state are documented.
+- Two compatible Linux nodes exchange ordinary TCP/IP over Bluetooth PAN.
+- Exact hardware/software combination and commands are documented.
 
 ## P1-004 — Determine NetworkManager vs direct BlueZ responsibility
 
 - [ ] Prototype PAN setup through NetworkManager.
-- [ ] Prototype/inspect direct BlueZ network APIs where relevant.
-- [ ] Record which component should own PAN profile creation and which should own IP configuration.
-- [ ] Create an ADR for the selected production boundary.
+- [ ] Prototype/inspect BlueZ network APIs where relevant.
+- [ ] Record ownership of NAP registration, PANU connection, IP configuration, and teardown.
+- [ ] Write an ADR.
 
 **Acceptance**
 
-- Production path is chosen for NAP registration, PANU connection, address configuration, and teardown.
-- Choice is justified by reproducible testing on Debian 13.
+- Production boundary is chosen based on reproducible Linux testing, not Chromebook-specific behavior.
 
 ## P1-005 — Measure single-link baseline
 
-- [ ] Measure TCP throughput.
-- [ ] Measure UDP behavior.
-- [ ] Measure latency and packet loss.
-- [ ] Measure CPU and memory impact.
-- [ ] Test sustained transfer.
-- [ ] Repeat at several practical distances.
+- [ ] TCP throughput.
+- [ ] UDP behavior.
+- [ ] latency/loss.
+- [ ] CPU/memory.
+- [ ] sustained transfer.
+- [ ] practical distances/radio conditions.
 
 **Acceptance**
 
-- Baseline results are stored in `docs/hardware/` with test method and versions.
+- Results include complete platform/adapter/version metadata.
 
-## P1-006 — Measure simultaneous PAN connection limit
+## P1-006 — Measure simultaneous PAN connection limits
 
-- [ ] Add PANU clients one at a time to a NAP.
-- [ ] Record successful connection count.
-- [ ] Run simultaneous traffic rather than testing idle links only.
-- [ ] Record instability/failure modes at and beyond practical limits.
+- [ ] Add PANU clients one at a time.
+- [ ] Exercise simultaneous traffic.
+- [ ] Record stable and unstable counts.
+- [ ] Record failure modes.
+- [ ] Repeat on more than one adapter/controller class as hardware becomes available.
 
 **Acceptance**
 
-- BlueRoute has an evidence-based initial maximum/recommended peer count for the reference hardware.
-- No hard-coded limit is introduced without a configuration/capability abstraction.
+- BlueRoute has per-platform evidence and a conservative capability-policy approach.
+- No global peer-count constant is inferred from one controller.
 
 ## P1-007 — Test suspend/resume and range loss
 
-- [ ] Suspend NAP and PANU separately.
-- [ ] Resume and observe BlueZ/NetworkManager state.
+- [ ] Suspend NAP and PANU where platform supports suspend.
+- [ ] Resume and inspect BlueZ/network state.
 - [ ] Move a node out of range and back.
-- [ ] Record stale interfaces/profiles/routes if any.
+- [ ] Record stale interfaces/profiles/routes.
 
 **Acceptance**
 
-- Recovery requirements are documented for the daemon reconciliation design.
+- Recovery requirements are documented without assuming every Linux node has identical suspend semantics.
+
+## P1-008 — Create capability matrix format
+
+- [ ] Define fields for PANU, NAP, forwarding, practical connection limit, backend, and known quirks.
+- [ ] Distinguish discovered, measured, configured, and conservative-default capabilities.
+- [ ] Define how unknown capability is represented.
+
+**Acceptance**
+
+- Two different hardware profiles can be represented without code changes.
+
+## P1-009 — Add second hardware-class validation
+
+- [ ] Test at least one materially different Linux/Bluetooth system from the initial Chromebook fixtures before broad v1 portability claims.
+- [ ] Repeat basic discovery, pairing, PANU/NAP, and traffic tests.
+- [ ] Compare behavioral differences.
+
+**Acceptance**
+
+- Architecture assumptions that accidentally depend on one controller are identified before v1 support claims.
 
 ---
 
@@ -195,91 +227,101 @@ Do this early. The architecture must be informed by what the Dell Chromebook 310
 
 ## P2-001 — Define stable identifiers
 
-- [ ] Define `NodeId`.
-- [ ] Define `NetworkId`.
-- [ ] Define `LinkId`/segment identity if required.
-- [ ] Keep human-readable names separate from authorization identity.
+- [ ] `NodeId`.
+- [ ] `NetworkId`.
+- [ ] link/segment identity if needed.
+- [ ] Separate human-readable names from authorization identity.
 
 **Acceptance**
 
 - IDs serialize deterministically.
-- Display names can change without changing identity.
-- Unit tests cover parsing/serialization/invalid values.
+- Display-name changes do not change identity.
+- Parsing/serialization tests exist.
 
 ## P2-002 — Define node capability model
 
-- [ ] Model Bluetooth/PAN capability.
-- [ ] Model routing capability.
-- [ ] Model controller connection limits.
-- [ ] Reserve external-connectivity and gateway-sharing capabilities.
-- [ ] Keep “has Internet” distinct from “willing to share Internet.”
+- [ ] Bluetooth adapter usability.
+- [ ] PANU capability.
+- [ ] NAP capability.
+- [ ] routing capability.
+- [ ] network-backend capability.
+- [ ] connection policy ceiling.
+- [ ] optional link-quality/power data.
+- [ ] reserve external-connectivity/gateway fields.
+- [ ] distinguish `has_internet` from `willing_to_share_internet`.
+- [ ] track capability source where useful.
 
 **Acceptance**
 
-- Capabilities can represent the known Chromebook constraints without UI-specific types.
+- Core can represent heterogeneous Linux nodes without model-specific types.
 
 ## P2-003 — Define network membership model
 
-- [ ] Model local membership state.
-- [ ] Model trusted/known peers.
-- [ ] Model network name vs network identity.
-- [ ] Model joining/leaving transitions.
+- [ ] local membership state.
+- [ ] trusted/known peers.
+- [ ] network name vs identity.
+- [ ] join/leave transitions.
 
 **Acceptance**
 
-- Unit tests cover legal and illegal transitions.
+- Tests cover legal/illegal transitions.
 
 ## P2-004 — Define link and PAN-segment model
 
-- [ ] Represent PANU/NAP relationship without exposing it as the default UI vocabulary.
-- [ ] Represent link state, health, and observed properties.
-- [ ] Represent a PAN segment separately from the overall BlueRoute network.
+- [ ] Represent PANU/NAP relationship.
+- [ ] Represent link state/health/properties.
+- [ ] Keep a PAN segment separate from the logical BlueRoute network.
 
 **Acceptance**
 
-- One-star and multi-star graphs can both be represented.
+- Single-star and routed multi-star graphs are representable.
 
 ## P2-005 — Define topology graph
 
-- [ ] Add graph operations for nodes and links.
-- [ ] Track direct vs routed reachability.
-- [ ] Represent unavailable/failed links.
-- [ ] Add deterministic graph snapshots for diagnostics/tests.
+- [ ] Graph operations for nodes/links.
+- [ ] Direct vs routed reachability.
+- [ ] Failed/unavailable links.
+- [ ] Deterministic snapshots.
 
 **Acceptance**
 
-- Unit tests cover connect/disconnect, partitions, and multiple paths.
+- Tests cover connect/disconnect, partitions, redundant paths, and heterogeneous capabilities.
 
 ## P2-006 — Define route model
 
-- [ ] Represent prefix/segment destinations.
-- [ ] Represent next hop and metric/cost.
-- [ ] Reserve default/Internet destination semantics.
-- [ ] Track ownership so BlueRoute can remove only its own routes.
+- [ ] Prefix/segment destinations.
+- [ ] next hop and cost.
+- [ ] ownership metadata.
+- [ ] reserve default/Internet destination semantics.
 
 **Acceptance**
 
-- Route model supports local-only release and future gateway release without breaking changes.
+- Model supports local-only v1 and future gateway routing without breaking redesign.
 
 ## P2-007 — Define health model
 
-- [ ] Define healthy/degraded/reconnecting/error concepts.
-- [ ] Separate adapter, membership, link, topology, and gateway health.
-- [ ] Add aggregation rules for user-facing status.
+- [ ] healthy/degraded/reconnecting/error concepts.
+- [ ] separate adapter, runtime prerequisite, membership, link, topology, and gateway health.
+- [ ] user-facing aggregation rules.
 
 **Acceptance**
 
-- A disconnected optional peer does not necessarily mark the entire network fatal.
+- A client-only node is not considered unhealthy merely because it lacks NAP capability.
 - Tests cover representative combinations.
 
 ## P2-008 — Define typed error taxonomy
 
-- [ ] Add domain errors listed in `SPEC.md`.
-- [ ] Preserve low-level diagnostic context without forcing UI to show raw D-Bus errors.
+- [ ] unsupported runtime.
+- [ ] missing/disabled adapter.
+- [ ] required capability unavailable.
+- [ ] BlueZ/backend unavailable.
+- [ ] pairing/auth errors.
+- [ ] PAN/address/route/topology errors.
+- [ ] protocol/state errors.
 
 **Acceptance**
 
-- Front ends can map errors to friendly messages while diagnostics retain actionable detail.
+- UIs can show friendly messages while diagnostics retain low-level context.
 
 ---
 
@@ -287,56 +329,56 @@ Do this early. The architecture must be informed by what the Dell Chromebook 310
 
 ## P3-001 — Define configuration schema
 
-- [ ] Define daemon settings.
-- [ ] Define node display name.
-- [ ] Define address pool policy.
-- [ ] Define topology policy placeholders.
-- [ ] Reserve gateway settings disabled by default.
+- [ ] daemon settings.
+- [ ] display name.
+- [ ] address-pool policy.
+- [ ] topology/capability policy overrides.
+- [ ] network backend selection field or internal abstraction as appropriate.
+- [ ] gateway settings reserved and disabled.
 
 **Acceptance**
 
-- Configuration is versioned and validated.
-- Unknown/invalid fields have defined behavior.
+- Configuration is versioned/validated and contains no hard-coded computer-model policy.
 
 ## P3-002 — Implement stable node identity persistence
 
-- [ ] Generate identity at first run.
+- [ ] Generate identity first run.
 - [ ] Persist securely.
-- [ ] Recover after daemon restart.
+- [ ] Recover after restart.
 
 **Acceptance**
 
-- Rebooting does not create a new logical node.
+- Reboot does not create a new logical node.
 
 ## P3-003 — Implement network membership persistence
 
-- [ ] Persist known networks.
-- [ ] Persist trusted peer membership data.
-- [ ] Define cleanup/forget semantics.
+- [ ] known networks.
+- [ ] peer membership/trust data.
+- [ ] cleanup/forget semantics.
 
 **Acceptance**
 
-- Joining then rebooting preserves the intended remembered-network state.
+- Remembered network state survives intended restarts.
 
 ## P3-004 — Add schema migration framework
 
-- [ ] Version persistent format.
-- [ ] Add migration entry points.
-- [ ] Test at least one synthetic old-to-new migration.
+- [ ] version persistent format.
+- [ ] migration entry points.
+- [ ] synthetic migration test.
 
 **Acceptance**
 
-- Future schema evolution does not require deleting all user state.
+- Schema evolution does not require deleting user identity/state.
 
 ## P3-005 — Secure persistent secrets
 
-- [ ] Identify which fields are secret.
-- [ ] Enforce restrictive permissions.
-- [ ] Ensure logs/debug serialization redact them.
+- [ ] identify secrets.
+- [ ] restrictive permissions.
+- [ ] log/debug redaction.
 
 **Acceptance**
 
-- Automated tests verify redaction and file-permission expectations where feasible.
+- Tests cover redaction and permissions where feasible.
 
 ---
 
@@ -344,113 +386,128 @@ Do this early. The architecture must be informed by what the Dell Chromebook 310
 
 ## P4-001 — Create adapter trait boundaries
 
-- [ ] Define Bluetooth backend trait(s).
-- [ ] Define network/IP backend trait(s).
-- [ ] Define clock/event abstractions needed for deterministic tests.
-- [ ] Keep core free of direct D-Bus types.
+- [ ] Bluetooth backend trait(s).
+- [ ] IP/network backend trait(s).
+- [ ] capability-discovery interfaces.
+- [ ] clock/event abstractions for deterministic tests.
+- [ ] keep core free of D-Bus types.
 
 **Acceptance**
 
-- Core topology/state tests run entirely with fake adapters.
+- Core tests run with fake adapters.
+- Future non-NetworkManager backend can fit the interface without changing topology types.
 
 ## P4-002 — Implement BlueZ service/adapter discovery
 
-- [ ] Connect via Rust D-Bus library (expected: zbus or equivalent).
-- [ ] Enumerate adapters.
-- [ ] Observe power state.
-- [ ] Subscribe to adapter changes.
+- [ ] Rust system-D-Bus connection.
+- [ ] enumerate adapters.
+- [ ] observe power state.
+- [ ] subscribe to changes.
 
 **Acceptance**
 
-- Daemon-side probe reports adapter state without shelling out to `bluetoothctl`.
+- Probe reports adapter state without `bluetoothctl` parsing.
 
 ## P4-003 — Implement Bluetooth device discovery adapter
 
-- [ ] Start/stop discovery.
-- [ ] Observe device add/change/remove events.
-- [ ] Map BlueZ device properties into domain types.
-- [ ] Bound/clean discovery state.
+- [ ] start/stop discovery.
+- [ ] device add/change/remove.
+- [ ] map properties into domain types.
+- [ ] bound discovery state.
 
 **Acceptance**
 
-- Nearby test Chromebook appears through the Rust adapter.
+- Nearby compatible Linux test nodes appear through Rust adapter.
 
 ## P4-004 — Implement pairing/trust adapter
 
-- [ ] Initiate pairing.
-- [ ] Handle pairing callbacks/agent requirements.
-- [ ] Mark/unmark BlueZ trust as policy requires.
-- [ ] Map rejection/timeouts into typed errors.
+- [ ] initiate pairing.
+- [ ] handle agent/callback needs.
+- [ ] trust/untrust according to policy.
+- [ ] typed rejection/timeouts.
 
 **Acceptance**
 
-- Two test Chromebooks can complete pairing through Rust-controlled flow.
+- Two test nodes complete pairing through Rust-controlled flow.
 
 ## P4-005 — Implement PANU connection adapter
 
-- [ ] Establish PANU connection through selected production API.
-- [ ] Identify resulting network interface.
-- [ ] Observe connection loss.
-- [ ] Disconnect idempotently.
+- [ ] establish PANU connection through selected API.
+- [ ] identify resulting interface.
+- [ ] observe loss.
+- [ ] idempotent disconnect.
 
 **Acceptance**
 
-- Rust integration test/manual harness creates working PANU data plane on hardware.
+- Hardware integration path creates a working PANU data plane on supported test hardware.
 
 ## P4-006 — Implement NAP lifecycle adapter
 
-- [ ] Register/start NAP.
-- [ ] Accept PAN clients.
-- [ ] Observe client attach/detach.
-- [ ] Stop/cleanup idempotently.
+- [ ] register/start NAP.
+- [ ] accept PAN clients.
+- [ ] observe attach/detach.
+- [ ] idempotent stop/cleanup.
+- [ ] return capability error cleanly if local stack cannot provide NAP.
 
 **Acceptance**
 
-- Rust integration path replaces the manual P1 setup for one NAP and one PANU.
+- Rust path replaces manual P1 setup for a supported NAP/PANU pair.
 
-## P4-007 — Implement NetworkManager state adapter
+## P4-007 — Implement NetworkManager backend
 
-- [ ] Enumerate relevant connections/devices.
-- [ ] Observe state changes.
-- [ ] Apply BlueRoute-owned address configuration.
-- [ ] Remove only BlueRoute-owned configuration.
+- [ ] enumerate relevant connections/devices.
+- [ ] observe changes.
+- [ ] apply BlueRoute-owned addressing.
+- [ ] remove only BlueRoute-owned state.
 
 **Acceptance**
 
-- No production operation depends on parsing `nmcli` output.
+- No production operation parses `nmcli` output.
 
 ## P4-008 — Implement route adapter
 
-- [ ] Inspect effective routes.
-- [ ] Add/update/remove BlueRoute routes.
-- [ ] Tag/identify ownership where supported.
-- [ ] Reconcile after NetworkManager restart.
+- [ ] inspect routes.
+- [ ] add/update/remove BlueRoute routes.
+- [ ] ownership identification.
+- [ ] reconcile after backend restart.
 
 **Acceptance**
 
-- Repeated application is idempotent.
-- Non-BlueRoute routes are preserved.
+- Repeated application is idempotent and foreign routes are preserved.
 
 ## P4-009 — Implement forwarding adapter
 
-- [ ] Add abstraction for per-node IP forwarding.
-- [ ] Keep it disabled unless routed topology requires it.
-- [ ] Reserve NAT/firewall methods separately for gateway phase.
+- [ ] per-node forwarding abstraction.
+- [ ] enable only when routed topology requires it.
+- [ ] keep NAT/firewall separate for gateway phase.
 
 **Acceptance**
 
-- Multi-hop implementation can enable forwarding without baking NAT into the same operation.
+- Routed implementation can enable forwarding without coupling to Internet NAT.
 
 ## P4-010 — Implement system capability report
 
-- [ ] Detect BlueZ availability/version.
-- [ ] Detect NetworkManager availability/version.
-- [ ] Detect Bluetooth adapter availability.
-- [ ] Detect required kernel/network capabilities where practical.
+- [ ] BlueZ availability/version.
+- [ ] network backend/version.
+- [ ] Bluetooth adapters/controllers/drivers.
+- [ ] PANU/NAP capability observations where determinable.
+- [ ] forwarding capability.
+- [ ] practical/configured peer ceiling.
+- [ ] kernel/runtime prerequisites.
 
 **Acceptance**
 
-- Diagnostics can explain unsupported/missing system prerequisites.
+- Diagnostics explain why a system is fully supported, client-only, degraded, or unsupported.
+
+## P4-011 — Define network-backend abstraction tests
+
+- [ ] Fake backend contract tests.
+- [ ] NetworkManager implementation conformance tests.
+- [ ] Ensure topology/core never imports NetworkManager-specific types.
+
+**Acceptance**
+
+- A future backend can be tested against the same contract.
 
 ---
 
@@ -458,28 +515,23 @@ Do this early. The architecture must be informed by what the Dell Chromebook 310
 
 ## P5-001 — Define local API version
 
-- [ ] Define protocol version type.
-- [ ] Define compatibility rules.
-- [ ] Define service/object/interface naming.
+- [ ] protocol version.
+- [ ] compatibility rules.
+- [ ] D-Bus service/object/interface naming.
 
 **Acceptance**
 
-- A client can detect incompatible daemon API before issuing normal commands.
+- Client detects incompatibility before normal commands.
 
 ## P5-002 — Define command/response types
 
-- [ ] `GetStatus`
-- [ ] `ListNetworks`
-- [ ] `CreateNetwork`
-- [ ] `JoinNetwork`
-- [ ] `LeaveNetwork`
-- [ ] `ListNodes`
-- [ ] `GetNode`
-- [ ] `SetDeviceName`
-- [ ] discovery controls
-- [ ] trust/forget operations
-- [ ] diagnostics
-- [ ] reserve future Internet-sharing operation
+- [ ] status/capabilities.
+- [ ] network list/create/join/leave.
+- [ ] node list/get/name.
+- [ ] discovery.
+- [ ] trust/forget.
+- [ ] diagnostics.
+- [ ] reserve Internet-sharing command.
 
 **Acceptance**
 
@@ -487,13 +539,13 @@ Do this early. The architecture must be informed by what the Dell Chromebook 310
 
 ## P5-003 — Define event types
 
-- [ ] Network discovery events.
-- [ ] Peer/node changes.
-- [ ] Membership changes.
-- [ ] Link/topology changes.
-- [ ] Health changes.
-- [ ] Authorization errors.
-- [ ] Reserve gateway/Internet events.
+- [ ] network discovery.
+- [ ] peer/node changes.
+- [ ] capability changes.
+- [ ] membership.
+- [ ] link/topology/route.
+- [ ] health/authorization.
+- [ ] reserve Internet/gateway events.
 
 **Acceptance**
 
@@ -501,49 +553,47 @@ Do this early. The architecture must be informed by what the Dell Chromebook 310
 
 ## P5-004 — Implement daemon D-Bus service skeleton
 
-- [ ] Own service name.
-- [ ] Expose version/status method.
-- [ ] Emit test signal/event.
-- [ ] Gracefully reject malformed requests.
+- [ ] own service name.
+- [ ] expose version/status/capabilities.
+- [ ] emit test event.
+- [ ] reject malformed requests safely.
 
 **Acceptance**
 
-- A standalone test client can query daemon version and receive an event.
+- Test client queries daemon and receives events.
 
 ## P5-005 — Implement `blueroute-client`
 
-- [ ] Connect to local daemon.
-- [ ] Negotiate/check API version.
-- [ ] Provide typed request helpers.
-- [ ] Subscribe to events.
-- [ ] Reconnect after daemon restart where sensible.
+- [ ] connect.
+- [ ] version negotiation.
+- [ ] typed requests.
+- [ ] events.
+- [ ] reconnect after daemon restart.
 
 **Acceptance**
 
-- CLI/TUI/Tauri can share this crate with no direct D-Bus duplication.
+- CLI/TUI/Tauri share the crate with no duplicate system-D-Bus networking logic.
 
 ## P5-006 — Add systemd service
 
-- [ ] Create unit file.
-- [ ] Define restart policy.
-- [ ] Define startup ordering around BlueZ/NetworkManager.
-- [ ] Log to journald.
+- [ ] unit file.
+- [ ] restart policy.
+- [ ] startup ordering.
+- [ ] journald logging.
 
 **Acceptance**
 
-- Daemon starts at boot on Debian test system and survives GUI logout.
+- Daemon starts at boot on supported Debian baseline and survives GUI logout.
 
 ## P5-007 — Define D-Bus/Polkit authorization policy
 
-- [ ] Identify read-only operations.
-- [ ] Identify mutating operations.
-- [ ] Define authorization behavior.
-- [ ] Avoid granting front ends blanket root access.
+- [ ] read-only vs mutating operations.
+- [ ] authorization behavior.
+- [ ] no blanket front-end root access.
 
 **Acceptance**
 
-- Read status works for intended local users.
-- Sensitive changes fail safely without authorization.
+- Intended users can inspect status; unauthorized sensitive changes fail safely.
 
 ---
 
@@ -553,110 +603,112 @@ This is the first complete product slice.
 
 ## P6-001 — Implement create-network operation
 
-- [ ] Create logical `NetworkId` and name.
-- [ ] Persist membership.
-- [ ] Start local NAP role as policy selects.
-- [ ] Establish local subnet configuration.
+- [ ] create logical network ID/name.
+- [ ] persist membership.
+- [ ] select local NAP only if capability permits.
+- [ ] establish local subnet.
 
 **Acceptance**
 
-- `CreateNetwork` results in a stable, inspectable daemon state on one Chromebook.
+- `CreateNetwork` yields stable daemon state on a NAP-capable Linux node.
+- Unsupported NAP capability produces a clear error rather than a model-name special case.
 
 ## P6-002 — Implement discoverable BlueRoute network identity
 
-- [ ] Select initial mechanism for identifying nearby BlueRoute-capable peers/networks.
-- [ ] Do not rely on user-visible Bluetooth name alone for security.
-- [ ] Document limitations of initial discovery method.
+- [ ] identify nearby BlueRoute-capable peers/networks.
+- [ ] do not rely on display/Bluetooth name for security.
+- [ ] document limitations.
 
 **Acceptance**
 
-- A second Chromebook can identify a nearby candidate BlueRoute network without manual MAC-address entry.
+- Second compatible Linux node discovers a candidate network without manual MAC entry.
 
 ## P6-003 — Implement join approval/trust workflow
 
-- [ ] Pair if required.
-- [ ] Perform BlueRoute-level membership approval.
-- [ ] Persist accepted membership.
-- [ ] Reject unauthorized nodes cleanly.
+- [ ] pair if needed.
+- [ ] BlueRoute membership approval.
+- [ ] persist accepted membership.
+- [ ] reject unauthorized nodes.
 
 **Acceptance**
 
-- Joining requires explicit intended trust in the initial security model.
+- Joining requires intended trust under initial security model.
 
 ## P6-004 — Implement join-network operation
 
-- [ ] Establish PANU link.
-- [ ] Obtain/assign IP configuration.
-- [ ] Start control-plane session.
-- [ ] Mark joined only after required networking succeeds.
+- [ ] establish PANU link.
+- [ ] obtain/assign IP.
+- [ ] start control session.
+- [ ] mark joined only after required networking succeeds.
 
 **Acceptance**
 
-- A second Chromebook joins without manual Bluetooth/network shell commands.
+- Compatible node joins without manual Bluetooth/network shell commands.
 
-## P6-005 — Implement IPv4 address allocation for one star
+## P6-005 — Implement IPv4 allocation for one star
 
-- [ ] Select initial private subnet policy.
-- [ ] Detect collision with active local routes.
-- [ ] Assign NAP/PANU addresses.
-- [ ] Persist only what needs to be durable.
+- [ ] select private subnet policy.
+- [ ] detect route conflicts.
+- [ ] assign addresses.
+- [ ] avoid unnecessary durable transient state.
 
 **Acceptance**
 
-- Repeated create/join cycles do not accumulate conflicting addresses.
+- Repeated create/join cycles do not accumulate conflicts.
 
 ## P6-006 — Prove ordinary application traffic
 
-- [ ] Ping.
+- [ ] ping.
 - [ ] SSH.
 - [ ] TCP bulk transfer.
 - [ ] UDP test.
-- [ ] Verify DNS/name behavior separately from raw IP connectivity.
+- [ ] separate raw IP success from name-resolution behavior.
 
 **Acceptance**
 
-- Applications require no BlueRoute-specific networking library.
+- Applications require no BlueRoute-specific library.
 
 ## P6-007 — Add third and subsequent clients
 
-- [ ] Connect multiple PANU nodes up to conservative tested limit.
-- [ ] Exercise concurrent traffic.
-- [ ] Surface NAP capacity in diagnostics.
+- [ ] connect multiple PANU nodes up to conservative local capability/policy ceiling.
+- [ ] concurrent traffic.
+- [ ] expose capacity/capability diagnostics.
 
 **Acceptance**
 
-- Stable multi-client star works on reference hardware at the documented supported count.
+- Stable multi-client star works at documented count for tested adapter.
+- Count is not treated as universal.
 
 ## P6-008 — Implement leave-network operation
 
-- [ ] Tear down membership runtime state.
-- [ ] Remove BlueRoute-owned addresses/routes/profiles as policy dictates.
-- [ ] Preserve remembered trust only when intended.
+- [ ] tear down runtime membership.
+- [ ] remove BlueRoute-owned addresses/routes/profiles.
+- [ ] retain trust only according to policy.
 
 **Acceptance**
 
-- Leave is idempotent and leaves no stale BlueRoute data-plane state.
+- Leave is idempotent and leaves no stale data-plane state.
 
 ## P6-009 — Implement daemon restart reconciliation
 
-- [ ] Restart daemon while PAN links exist.
-- [ ] Re-observe system state.
-- [ ] Reconcile instead of blindly duplicating connections/routes.
+- [ ] restart with PAN links present.
+- [ ] re-observe system state.
+- [ ] reconcile instead of duplicating.
 
 **Acceptance**
 
-- Daemon restart does not require reboot or manual network cleanup.
+- Daemon restart requires no reboot/manual cleanup.
 
 ## P6-010 — Implement link-loss reconnect
 
-- [ ] Detect lost PAN peer.
-- [ ] Transition state to degraded/reconnecting.
-- [ ] Retry with bounded backoff.
-- [ ] Restore healthy state when peer returns.
+- [ ] detect lost peer.
+- [ ] degraded/reconnecting state.
+- [ ] bounded backoff.
+- [ ] restore health when peer returns.
 
 **Acceptance**
 
-- Range-loss/recovery test succeeds without manual commands.
+- Range-loss/recovery works on physical test hardware without manual commands.
 
 ---
 
@@ -664,59 +716,58 @@ This is the first complete product slice.
 
 ## P7-001 — Choose control-plane transport
 
-- [ ] Evaluate transport over established IP PAN.
-- [ ] Define port/address discovery policy.
-- [ ] Define authentication binding to BlueRoute identity.
-- [ ] Write ADR.
+- [ ] evaluate transport over established IP PAN.
+- [ ] port/address discovery.
+- [ ] authentication binding to BlueRoute identity.
+- [ ] ADR.
 
 **Acceptance**
 
-- Choice does not treat source IP as sole identity proof.
+- Source IP is not sole identity proof.
 
 ## P7-002 — Define control protocol envelope
 
-- [ ] Version.
-- [ ] Sender identity.
-- [ ] Network identity.
-- [ ] Message type.
-- [ ] Bounded payload.
-- [ ] Replay/freshness strategy as required.
+- [ ] version.
+- [ ] sender/network identity.
+- [ ] message type.
+- [ ] bounded payload.
+- [ ] freshness/replay approach.
 
 **Acceptance**
 
-- Parser rejects oversized, malformed, and unknown-critical data safely.
+- Malformed/oversized/unknown-critical data is safely rejected.
 
 ## P7-003 — Implement peer hello/capability exchange
 
-- [ ] Exchange software/protocol version.
-- [ ] Exchange stable node identity.
-- [ ] Exchange capabilities.
-- [ ] Exchange current segment/topology facts needed by next phase.
+- [ ] software/protocol version.
+- [ ] stable identity.
+- [ ] node capabilities.
+- [ ] current segment/topology facts.
 
 **Acceptance**
 
-- Daemon status shows authenticated peer identity independently of IP/MAC display name.
+- Peers negotiate capability without knowing each other's computer model.
 
 ## P7-004 — Implement control-session lifecycle
 
-- [ ] Establish session after data-plane availability.
-- [ ] Detect session loss.
-- [ ] Reconnect.
-- [ ] Avoid duplicate active sessions for the same logical peer.
+- [ ] establish after data-plane availability.
+- [ ] detect loss.
+- [ ] reconnect.
+- [ ] avoid duplicate logical-peer sessions.
 
 **Acceptance**
 
 - Repeated PAN reconnects do not leak sessions/tasks.
 
-## P7-005 — Fuzz/property-test protocol parser
+## P7-005 — Fuzz/property-test parser
 
-- [ ] Add bounded malformed-input tests.
-- [ ] Add serialization round-trip tests.
-- [ ] Add version-compatibility tests.
+- [ ] malformed-input tests.
+- [ ] round-trip tests.
+- [ ] compatibility tests.
 
 **Acceptance**
 
-- Invalid peer data cannot panic the daemon in tested cases.
+- Tested invalid peer data cannot panic daemon.
 
 ---
 
@@ -724,84 +775,82 @@ This is the first complete product slice.
 
 ## P8-001 — Build neighbor observation model
 
-- [ ] Record which peers have direct PAN links.
-- [ ] Record candidate reachability observations separately from active links.
-- [ ] Timestamp/expire stale observations.
+- [ ] direct PAN links.
+- [ ] candidate reachability separate from active links.
+- [ ] timestamps/expiry.
+- [ ] capability annotations.
 
 **Acceptance**
 
-- Core can represent physical/candidate graph separately from active routed graph.
+- Physical/candidate graph is distinct from active routed graph.
 
 ## P8-002 — Implement distinct subnet allocation per PAN segment
 
-- [ ] Allocate non-overlapping segment prefixes.
-- [ ] Detect host route conflicts.
-- [ ] Reclaim retired segment prefixes safely.
+- [ ] non-overlapping prefixes.
+- [ ] host-route conflict detection.
+- [ ] safe prefix reclamation.
 
 **Acceptance**
 
-- Two simultaneous PAN stars can exist without overlapping local addresses.
+- Multiple PAN stars coexist without address overlap.
 
 ## P8-003 — Implement forwarding on routing nodes
 
-- [ ] Enable IPv4 forwarding only when required.
-- [ ] Preserve host security policy.
-- [ ] Disable/cleanup when no longer needed.
+- [ ] enable IPv4 forwarding only when required.
+- [ ] preserve host security policy.
+- [ ] cleanup when unnecessary.
 
 **Acceptance**
 
-- Router node forwards BlueRoute traffic between two test PAN segments.
+- Routing node forwards BlueRoute traffic between test PAN segments.
 
 ## P8-004 — Implement route computation v1
 
-- [ ] Compute paths across active topology.
-- [ ] Produce deterministic desired route set per node.
-- [ ] Prefer stable paths over unnecessary churn.
-- [ ] Detect unreachable destinations.
+- [ ] compute paths.
+- [ ] deterministic desired route set.
+- [ ] stable-path preference.
+- [ ] unreachable detection.
+- [ ] respect node capability restrictions.
 
 **Acceptance**
 
-- Unit tests cover line, tree, redundant, and partitioned graphs.
+- Unit tests cover line/tree/redundant/partitioned and heterogeneous-capability graphs.
 
 ## P8-005 — Implement route distribution/application
 
-- [ ] Deliver desired routing information through control plane.
-- [ ] Apply routes through Linux adapter.
-- [ ] Remove stale routes.
-- [ ] Reject routes for foreign/non-member networks.
+- [ ] distribute desired routes.
+- [ ] apply through Linux backend.
+- [ ] remove stale routes.
+- [ ] reject foreign/non-member routes.
 
 **Acceptance**
 
-- Route table matches expected topology after connect and disconnect events.
+- Route table matches expected topology after changes.
 
 ## P8-006 — Prove two-hop TCP/IP
 
-Test topology:
-
 ```text
-client A -> hub/router B -> client C
+client A -> router B -> client C
 ```
 
-- [ ] Ping end to end.
-- [ ] TCP transfer end to end.
-- [ ] UDP traffic end to end.
-- [ ] Record throughput/latency versus direct link.
+- [ ] ping.
+- [ ] TCP.
+- [ ] UDP.
+- [ ] record performance vs direct link.
 
 **Acceptance**
 
-- A and C exchange ordinary IP traffic despite lacking a direct PAN link.
+- A and C exchange normal IP traffic without a direct PAN link.
 
 ## P8-007 — Prove interconnected stars
-
-Test topology:
 
 ```text
 A/B clients -> hub 1 -> hub 2 -> C/D clients
 ```
 
-- [ ] Establish two PAN segments.
-- [ ] Route across hubs.
-- [ ] Exercise traffic in both directions.
+- [ ] two PAN segments.
+- [ ] route across hubs.
+- [ ] bidirectional traffic.
 
 **Acceptance**
 
@@ -809,24 +858,24 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P8-008 — Implement route recovery after node loss
 
-- [ ] Remove failed next-hop routes.
-- [ ] Select alternate path when available.
-- [ ] Mark unreachable when no path exists.
-- [ ] Restore path when peer returns.
+- [ ] remove failed next hop.
+- [ ] alternate route when available.
+- [ ] unreachable state otherwise.
+- [ ] restore on return.
 
 **Acceptance**
 
-- Redundant hardware topology survives removal of one routing node when an alternate physical path exists.
+- Redundant physical topology survives router removal where alternate links exist.
 
 ## P8-009 — Evaluate dynamic routing protocol option
 
-- [ ] Compare current BlueRoute route orchestration with Babel or another mature protocol.
-- [ ] Evaluate complexity, convergence, observability, security, and hardware fit.
-- [ ] Record ADR to adopt or reject for v1.
+- [ ] compare BlueRoute orchestration with Babel or other mature option.
+- [ ] evaluate convergence, security, observability, complexity, portability.
+- [ ] ADR adopt/reject.
 
 **Acceptance**
 
-- Decision is evidence-based; no routing daemon is added merely because mesh terminology suggests one.
+- Decision is evidence-based.
 
 ---
 
@@ -834,69 +883,70 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P9-001 — Define topology policy inputs
 
-- [ ] Connection capacity.
-- [ ] Direct-neighbor availability.
-- [ ] Link quality/stability when measurable.
-- [ ] Hop count/path cost.
-- [ ] Current topology stability.
-- [ ] Battery/power policy placeholder.
-- [ ] Future gateway preference placeholder.
+- [ ] connection capacity/capabilities.
+- [ ] direct-neighbor availability.
+- [ ] link quality/stability where portable.
+- [ ] hop/path cost.
+- [ ] topology stability.
+- [ ] battery/power placeholder.
+- [ ] future gateway preference.
 
 **Acceptance**
 
-- Inputs are explicit and testable rather than hidden in ad hoc heuristics.
+- Inputs are explicit/testable and do not include hard-coded product models.
 
 ## P9-002 — Implement NAP role selection v1
 
-- [ ] Choose hub nodes automatically in a small topology.
-- [ ] Respect hardware connection capacity.
-- [ ] Avoid assigning every node as a hub unnecessarily.
+- [ ] choose capable hub nodes automatically.
+- [ ] respect per-node capacity.
+- [ ] avoid unnecessary hubs.
+- [ ] permit client-only nodes.
 
 **Acceptance**
 
-- Deterministic tests produce expected role assignments for representative graphs.
+- Deterministic tests produce expected assignments across heterogeneous capabilities.
 
 ## P9-003 — Implement topology plan diff
 
-- [ ] Compare desired vs active topology.
-- [ ] Generate minimal ordered changes.
-- [ ] Avoid tearing down a working path before replacement exists where possible.
+- [ ] desired vs active topology.
+- [ ] minimal ordered changes.
+- [ ] keep working path until replacement exists where possible.
 
 **Acceptance**
 
-- Small metric changes do not cause full-network churn.
+- Small metric changes do not rebuild whole network.
 
 ## P9-004 — Implement topology executor
 
-- [ ] Create required links.
-- [ ] Remove obsolete links.
-- [ ] Coordinate routing changes.
-- [ ] Roll back or reconcile after partial failure.
+- [ ] create links.
+- [ ] remove obsolete links.
+- [ ] coordinate routing.
+- [ ] reconcile partial failures.
 
 **Acceptance**
 
-- Injected operation failure leaves daemon able to reconcile to a valid state.
+- Injected failure leaves daemon able to recover to valid state.
 
 ## P9-005 — Implement hub-loss reformation
 
-- [ ] Detect hub loss.
-- [ ] Select replacement hub/path.
-- [ ] Reconnect members.
-- [ ] Recompute routes.
+- [ ] detect loss.
+- [ ] select capable replacement/path.
+- [ ] reconnect.
+- [ ] recompute routes.
 
 **Acceptance**
 
-- Hardware test demonstrates automatic recovery where radio reachability permits.
+- Physical test recovers where radio/capability graph permits.
 
 ## P9-006 — Add topology anti-flap policy
 
-- [ ] Hysteresis/minimum stability thresholds.
-- [ ] Backoff after repeated failures.
-- [ ] Prefer known-good existing links.
+- [ ] hysteresis/stability thresholds.
+- [ ] failure backoff.
+- [ ] prefer known-good links.
 
 **Acceptance**
 
-- Synthetic noisy metrics do not trigger continuous topology rebuild.
+- Noisy metrics do not trigger continuous rebuild.
 
 ---
 
@@ -904,10 +954,10 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P10-001 — Create CLI skeleton with clap
 
-- [ ] Global options.
-- [ ] Daemon connection handling.
-- [ ] Version output.
-- [ ] Consistent error/exit handling.
+- [ ] global options.
+- [ ] daemon handling.
+- [ ] version.
+- [ ] consistent errors/exits.
 
 **Acceptance**
 
@@ -915,59 +965,59 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P10-002 — Implement status commands
 
-- [ ] `blueroute status`
-- [ ] `blueroute node list`
-- [ ] `blueroute node show`
-- [ ] `blueroute network list`
+- [ ] `blueroute status`.
+- [ ] `blueroute capability show`.
+- [ ] `blueroute node list/show`.
+- [ ] `blueroute network list`.
 
 **Acceptance**
 
-- Human-readable output is useful.
-- JSON output is stable and tested for automation.
+- Human output is useful and JSON is stable/tested.
 
 ## P10-003 — Implement network lifecycle commands
 
-- [ ] create
-- [ ] join
-- [ ] leave
-- [ ] discover
+- [ ] create.
+- [ ] join.
+- [ ] leave.
+- [ ] discover.
 
 **Acceptance**
 
-- A single-star network can be operated end-to-end from CLI via daemon.
+- Single-star network can be managed end-to-end through daemon.
 
 ## P10-004 — Implement trust commands
 
-- [ ] list pending trust requests where applicable.
+- [ ] pending requests where applicable.
 - [ ] approve/trust.
 - [ ] forget/revoke.
 
 **Acceptance**
 
-- Unauthorized joining cannot be silently approved by CLI defaults.
+- Unauthorized join is never silently approved by defaults.
 
 ## P10-005 — Implement diagnostics command
 
-- [ ] concise summary.
-- [ ] detailed view.
-- [ ] JSON form.
+- [ ] concise and detailed output.
+- [ ] JSON.
 - [ ] redact secrets.
+- [ ] show platform/capabilities/backend.
 
 **Acceptance**
 
-- Diagnostics expose adapters, PAN interfaces, addresses, peers, topology, and BlueRoute routes.
+- Diagnostics expose enough system/PAN/route/capability state to troubleshoot heterogeneous hardware.
 
 ## P10-006 — Define exit-code contract
 
 - [ ] success.
-- [ ] usage/config error.
+- [ ] usage/config.
 - [ ] daemon unavailable.
-- [ ] authorization failure.
+- [ ] unsupported capability.
+- [ ] authorization.
 - [ ] operational failure.
 
 **Acceptance**
 
-- Script tests verify representative exit codes.
+- Script tests verify representative exits.
 
 ---
 
@@ -975,68 +1025,66 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P11-001 — Create Ratatui application shell
 
-- [ ] Event loop.
-- [ ] daemon event subscription.
-- [ ] resize handling.
-- [ ] graceful daemon disconnect/reconnect.
+- [ ] event loop.
+- [ ] daemon subscription.
+- [ ] resize.
+- [ ] daemon disconnect/reconnect.
 
 **Acceptance**
 
-- TUI starts on a text-only Debian session and renders daemon status.
+- TUI starts in text-only supported Linux session and renders status.
 
 ## P11-002 — Implement overview/status screen
 
-- [ ] local node name.
-- [ ] joined network.
+- [ ] node/network.
 - [ ] overall health.
-- [ ] connected device count.
-- [ ] Internet state placeholder hidden until implemented.
+- [ ] device count.
+- [ ] concise capability warnings.
+- [ ] Internet placeholder hidden until implemented.
 
 **Acceptance**
 
-- Screen uses friendly default wording.
+- Friendly default wording.
 
 ## P11-003 — Implement networks screen
 
 - [ ] nearby/known networks.
-- [ ] create.
-- [ ] join.
-- [ ] leave.
+- [ ] create/join/leave.
 
 **Acceptance**
 
-- User can complete normal single-star workflow without CLI.
+- Normal single-star workflow works without CLI.
 
 ## P11-004 — Implement devices screen
 
 - [ ] direct/routed indication.
 - [ ] connection state.
-- [ ] details.
-- [ ] trust actions where appropriate.
+- [ ] details/trust actions.
 
 **Acceptance**
 
-- Low-level PAN role is not required to understand normal status.
+- PAN role terminology is not required for normal understanding.
 
 ## P11-005 — Implement diagnostics screen
 
 - [ ] topology.
+- [ ] capabilities.
 - [ ] interfaces/routes.
-- [ ] recent errors/state transitions.
+- [ ] errors/transitions.
 
 **Acceptance**
 
-- Advanced details are available without cluttering primary screens.
+- Advanced detail is available without cluttering primary UI.
 
-## P11-006 — TUI usability/keyboard review
+## P11-006 — TUI usability review
 
-- [ ] On-screen key hints.
-- [ ] predictable back/quit behavior.
+- [ ] on-screen key hints.
+- [ ] predictable back/quit.
 - [ ] no mouse requirement.
 
 **Acceptance**
 
-- A user unfamiliar with Ratatui can discover primary actions from the screen itself.
+- Primary actions are discoverable.
 
 ---
 
@@ -1044,123 +1092,122 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P12-001 — Bootstrap Tauri desktop app
 
-- [ ] Tauri 2 project.
+- [ ] Tauri 2.
 - [ ] TypeScript frontend.
-- [ ] Choose/document frontend framework (React is preferred unless changed by ADR).
-- [ ] Establish formatting/type-check/test tooling.
+- [ ] React preferred unless ADR changes it.
+- [ ] formatting/type-check/tests.
 
 **Acceptance**
 
-- Desktop app builds on Debian 13.
+- App builds on initial supported Debian baseline.
 
 ## P12-002 — Implement Tauri-to-daemon bridge
 
 - [ ] Rust backend uses `blueroute-client`.
-- [ ] Define narrow Tauri commands.
-- [ ] Forward daemon events to frontend safely.
-- [ ] Do not expose arbitrary system command execution.
+- [ ] narrow Tauri commands.
+- [ ] safe event forwarding.
+- [ ] no arbitrary command execution.
 
 **Acceptance**
 
-- Frontend can render live daemon status without direct system D-Bus access.
+- Frontend renders live daemon state without direct system D-Bus access.
 
-## P12-003 — Design visual language and component system
+## P12-003 — Design visual/component system
 
-- [ ] Typography.
-- [ ] spacing/layout.
+- [ ] typography/layout.
 - [ ] status indicators.
-- [ ] buttons/forms/dialogs.
+- [ ] controls/dialogs.
 - [ ] error/empty/loading states.
 - [ ] accessibility basics.
 
 **Acceptance**
 
-- Main workflows use consistent components rather than one-off styling.
+- Main workflows use consistent components.
 
-## P12-004 — Implement first-run screen
+## P12-004 — Implement first-run/platform-check screen
 
-- [ ] Explain BlueRoute in plain language.
-- [ ] Detect missing/disabled Bluetooth.
-- [ ] Offer create/join actions.
+- [ ] explain BlueRoute plainly.
+- [ ] detect missing/disabled Bluetooth.
+- [ ] detect unsupported required capabilities/runtime.
+- [ ] offer appropriate create/join actions only when available.
 
 **Acceptance**
 
-- User is not shown PANU/NAP/BNEP terminology.
+- User sees actionable capability explanation, never “unsupported Chromebook” logic.
 
 ## P12-005 — Implement create-network workflow
 
-- [ ] Name network.
-- [ ] Create.
-- [ ] Show progress.
-- [ ] Show success/error recovery.
+- [ ] name/create/progress/success/error.
 
 **Acceptance**
 
-- Non-technical user can create a working network without terminal commands.
+- Non-technical user creates working network on a capable Linux node without terminal commands.
 
 ## P12-006 — Implement nearby-network join workflow
 
-- [ ] Discovery list.
-- [ ] Network/device identity presentation.
+- [ ] discovery list.
+- [ ] identity presentation.
 - [ ] pairing/trust prompt.
-- [ ] join progress.
-- [ ] actionable errors.
+- [ ] progress/actionable errors.
 
 **Acceptance**
 
-- Another Chromebook can join entirely through GUI.
+- Compatible Linux node joins entirely through GUI.
 
 ## P12-007 — Implement connected-network dashboard
 
-- [ ] friendly health summary.
-- [ ] device count/list.
-- [ ] direct vs “connected through another device” wording.
-- [ ] leave action.
+- [ ] friendly health.
+- [ ] device list/count.
+- [ ] “connected through another device” wording.
+- [ ] leave.
 
 **Acceptance**
 
-- Dashboard accurately reflects daemon state after topology changes.
+- Dashboard tracks topology changes accurately.
 
-## P12-008 — Implement devices/details UI
+## P12-008 — Implement device/details UI
 
-- [ ] node display name.
-- [ ] online/offline.
-- [ ] path/reachability.
-- [ ] advanced technical detail expansion.
+- [ ] display name.
+- [ ] online/offline/path.
+- [ ] advanced capability/technical details.
 
 **Acceptance**
 
-- Friendly and diagnostic information are visually separated.
+- Friendly and diagnostic data are visually separated.
 
 ## P12-009 — Implement settings UI
 
-- [ ] local device name.
+- [ ] device name.
 - [ ] remembered networks.
-- [ ] discovery preferences where applicable.
-- [ ] advanced settings area.
-- [ ] reserve Internet Sharing section hidden/disabled until implemented.
+- [ ] discovery/preferences.
+- [ ] advanced policy area.
+- [ ] future Internet Sharing section hidden/disabled.
 
 **Acceptance**
 
-- Changing display name does not change node identity.
+- Display-name change does not alter identity.
 
 ## P12-010 — Implement friendly diagnostics UI
 
-- [ ] “Diagnose a Problem” entry point.
-- [ ] common problems: Bluetooth off, daemon unavailable, permission denied, peer unreachable.
-- [ ] optional advanced details/copy report.
+- [ ] “Diagnose a Problem”.
+- [ ] Bluetooth off/missing.
+- [ ] required PAN capability unavailable.
+- [ ] daemon/backend unavailable.
+- [ ] permission denied.
+- [ ] peer unreachable.
+- [ ] advanced/copy report.
 
 **Acceptance**
 
-- Common failure states provide a next action rather than raw exception text only.
+- Common failures provide next actions, not raw exceptions only.
 
 ## P12-011 — Desktop accessibility pass
 
 - [ ] keyboard navigation.
 - [ ] focus states.
 - [ ] semantic labels.
-- [ ] contrast review.
-- [ ] reduced-motion consideration where animations are used.
+- [ ] contrast.
+- [ ] reduced motion where relevant.
 
 **Acceptance**
 
@@ -1168,117 +1215,113 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P12-012 — Desktop end-to-end tests
 
-- [ ] daemon fake/test fixture.
-- [ ] create flow.
-- [ ] join flow.
-- [ ] reconnect state.
-- [ ] error state.
+- [ ] fake/test daemon.
+- [ ] create/join.
+- [ ] capability-limited states.
+- [ ] reconnect/error states.
 
 **Acceptance**
 
-- UI regressions can be caught without physical Bluetooth hardware for every frontend test.
+- UI regressions are testable without physical Bluetooth for every run.
 
 ---
 
-# P13 — Reliability, reconciliation, and diagnostics hardening
+# P13 — Reliability, reconciliation, diagnostics hardening
 
 ## P13-001 — Central desired-vs-observed reconciliation loop
 
-- [ ] Observe BlueZ state.
-- [ ] Observe NetworkManager state.
-- [ ] Observe interfaces/routes.
-- [ ] Compare against desired BlueRoute state.
-- [ ] Apply bounded corrective actions.
+- [ ] observe BlueZ.
+- [ ] observe network backend.
+- [ ] observe interfaces/routes.
+- [ ] compare desired state.
+- [ ] bounded corrective actions.
 
 **Acceptance**
 
-- Recovery does not depend solely on remembering that a prior operation succeeded.
+- Recovery does not depend on remembered success of prior calls.
 
 ## P13-002 — Handle BlueZ restart
 
-- [ ] Detect service disappearance.
-- [ ] Mark health appropriately.
-- [ ] Re-enumerate/reconcile after return.
+- [ ] detect disappearance.
+- [ ] health transition.
+- [ ] re-enumerate/reconcile.
 
 **Acceptance**
 
-- BlueZ restart does not require BlueRoute daemon restart.
+- BlueZ restart does not require BlueRoute restart.
 
 ## P13-003 — Handle NetworkManager restart
 
-- [ ] Detect service disappearance.
-- [ ] Preserve desired state.
-- [ ] Reconcile addresses/routes after return.
+- [ ] detect disappearance.
+- [ ] preserve desired state.
+- [ ] reconcile after return.
 
 **Acceptance**
 
-- No duplicate/stale BlueRoute route accumulation after test restart.
+- No duplicate/stale route accumulation.
 
-## P13-004 — Handle Bluetooth adapter reset
+## P13-004 — Handle Bluetooth adapter reset/change
 
-- [ ] adapter power off/on.
-- [ ] USB/device disappearance if relevant.
-- [ ] re-establish discovery and links.
-
-**Acceptance**
-
-- UI reports degradation and recovery correctly.
-
-## P13-005 — Handle system suspend/resume
-
-- [ ] detect sleep/resume events if necessary.
-- [ ] stop unsafe retry storms during sleep.
-- [ ] reconcile after resume.
+- [ ] power off/on.
+- [ ] adapter disappearance/reappearance.
+- [ ] multiple adapters if present.
+- [ ] capability refresh if active adapter changes.
 
 **Acceptance**
 
-- Reference Chromebook resumes into a recoverable BlueRoute state.
+- UI reports degradation/recovery correctly.
 
-## P13-006 — Add bounded retry/backoff framework
+## P13-005 — Handle suspend/resume
 
-- [ ] classify retryable vs permanent errors.
-- [ ] exponential/bounded backoff.
-- [ ] reset backoff after success.
+- [ ] detect sleep/resume if needed.
+- [ ] avoid retry storms.
+- [ ] reconcile on resume.
 
 **Acceptance**
 
-- Unreachable peer does not cause busy-loop CPU/log spam.
+- Tested suspend-capable platforms return to recoverable state.
+
+## P13-006 — Add bounded retry/backoff
+
+- [ ] retryable vs permanent errors.
+- [ ] bounded exponential backoff.
+- [ ] reset after success.
+
+**Acceptance**
+
+- Unreachable/unsupported peers do not busy-loop CPU/logs.
 
 ## P13-007 — Add structured journald logging
 
-- [ ] consistent event fields.
-- [ ] node/network IDs in safe form.
-- [ ] operation correlation where useful.
+- [ ] consistent fields.
+- [ ] safe IDs.
+- [ ] operation correlation.
 - [ ] secret redaction.
 
 **Acceptance**
 
-- A failed join can be reconstructed from logs without exposing membership secrets.
+- Failed join can be diagnosed without leaking secrets.
 
 ## P13-008 — Add diagnostic snapshot model
 
-- [ ] versions.
-- [ ] adapters.
-- [ ] peers.
-- [ ] interfaces.
-- [ ] addresses.
-- [ ] routes.
-- [ ] topology.
+- [ ] versions/platform.
+- [ ] adapters/capabilities.
+- [ ] peers/interfaces/addresses/routes/topology.
 - [ ] recent errors.
 
 **Acceptance**
 
-- CLI, TUI, and GUI consume one shared diagnostic representation.
+- CLI/TUI/GUI consume one representation.
 
 ## P13-009 — Add support bundle export
 
-- [ ] optional post-v1 if scope requires.
+- [ ] optional post-v1 if needed.
 - [ ] redact secrets.
-- [ ] include explicit user review/warning.
+- [ ] user review/warning.
 
 **Acceptance**
 
-- Automated redaction tests cover all known secret fields.
+- Redaction tests cover all known secret fields.
 
 ---
 
@@ -1286,76 +1329,70 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P14-001 — Write formal threat model
 
-Cover at least:
+Cover:
 
 - untrusted nearby Bluetooth devices;
 - paired-but-not-member devices;
-- malicious BlueRoute member;
-- spoofed control messages;
-- replay;
-- malformed protocol data;
+- malicious member;
+- spoofed/replayed/malformed control messages;
 - privilege escalation through daemon APIs;
-- hostile display names/metadata;
+- hostile metadata/display names;
 - route injection;
 - future malicious gateway.
 
 **Acceptance**
 
-- Threats, assumptions, mitigations, and residual risks are documented.
+- Threats, assumptions, mitigations, residual risk documented.
 
-## P14-002 — Harden local D-Bus API authorization
+## P14-002 — Harden local D-Bus authorization
 
-- [ ] Define allowed callers.
-- [ ] Define read/write authorization.
-- [ ] Test denied access.
-- [ ] Test frontend operation under normal user account.
-
-**Acceptance**
-
-- A random local process cannot perform privileged BlueRoute changes merely by calling an unprotected method.
-
-## P14-003 — Harden inter-node control authentication
-
-- [ ] Bind peer session to BlueRoute identity.
-- [ ] Verify network membership.
-- [ ] Prevent unauthenticated route/topology control.
+- [ ] allowed callers.
+- [ ] read/write policy.
+- [ ] denied-access tests.
+- [ ] normal-user frontend tests.
 
 **Acceptance**
 
-- Non-member peer cannot inject accepted route/topology updates.
+- Arbitrary local process cannot perform unprotected privileged changes.
 
-## P14-004 — Validate all peer-controlled fields
+## P14-003 — Harden inter-node authentication
 
-- [ ] lengths.
-- [ ] character/display handling.
-- [ ] numeric ranges.
-- [ ] collection bounds.
-- [ ] unsupported message behavior.
+- [ ] bind session to identity.
+- [ ] verify membership.
+- [ ] prevent unauthenticated topology/route control.
 
 **Acceptance**
 
-- Fuzz/property tests cover parser and representative domain conversion.
+- Non-member cannot inject accepted routing/topology updates.
+
+## P14-004 — Validate peer-controlled fields
+
+- [ ] lengths/characters/ranges/bounds.
+- [ ] unsupported-message behavior.
+
+**Acceptance**
+
+- Fuzz/property tests cover parser/domain conversion.
 
 ## P14-005 — Verify shell-free privileged path
 
-- [ ] Audit production code for shelling out.
-- [ ] Remove or strictly isolate development-only command wrappers.
+- [ ] audit production code.
+- [ ] isolate/remove development shell wrappers.
 
 **Acceptance**
 
-- Peer/user strings cannot become shell fragments in privileged production paths.
+- Peer/user strings cannot become shell fragments.
 
-## P14-006 — Security review of persistence
+## P14-006 — Security review persistence
 
-- [ ] permissions.
-- [ ] ownership.
+- [ ] permissions/ownership.
 - [ ] symlink/path handling.
 - [ ] atomic writes.
 - [ ] corruption recovery.
 
 **Acceptance**
 
-- Security-sensitive state cannot be trivially read or replaced by unintended local users under the documented threat model.
+- Sensitive state is protected under documented local threat model.
 
 ---
 
@@ -1363,101 +1400,110 @@ Cover at least:
 
 ## P15-001 — Define Debian package contents
 
-- [ ] daemon.
-- [ ] CLI.
-- [ ] TUI.
-- [ ] desktop app.
+- [ ] daemon/CLI/TUI/desktop.
 - [ ] systemd unit.
-- [ ] D-Bus policy/service files.
-- [ ] Polkit files if required.
+- [ ] D-Bus policy/service.
+- [ ] Polkit if required.
 - [ ] desktop metadata/icons.
 
 **Acceptance**
 
-- Package manifest is documented and reproducible.
+- Manifest documented and reproducible.
 
 ## P15-002 — Build Debian package
 
-- [ ] Automate build.
-- [ ] Declare runtime dependencies.
-- [ ] Install files to standard locations.
+- [ ] automated build.
+- [ ] runtime dependencies.
+- [ ] standard install locations.
 
 **Acceptance**
 
-- Package installs cleanly on a fresh Debian 13 reference system.
+- Package installs on clean supported Debian baseline on more than one compatible computer model when available.
 
 ## P15-003 — First-install service behavior
 
-- [ ] Enable/start daemon according to documented policy.
-- [ ] Do not unexpectedly create/share a network.
-- [ ] GUI detects daemon availability.
+- [ ] enable/start according to policy.
+- [ ] do not automatically create/share network.
+- [ ] GUI detects daemon and capability state.
 
 **Acceptance**
 
-- Installation alone does not expose a Bluetooth network or Internet uplink.
+- Installation alone exposes no Bluetooth network or Internet uplink.
 
 ## P15-004 — Upgrade test
 
-- [ ] Install older package fixture.
-- [ ] Create configuration/state.
-- [ ] Upgrade.
-- [ ] Verify migration and service health.
+- [ ] older fixture.
+- [ ] create state.
+- [ ] upgrade.
+- [ ] verify migration/service.
 
 **Acceptance**
 
-- Supported upgrade path preserves identity/membership state.
+- Supported upgrade preserves identity/membership.
 
 ## P15-005 — Uninstall cleanup test
 
-- [ ] Stop service.
-- [ ] Remove package-created system policy files.
-- [ ] Verify no active BlueRoute routes/NAT/firewall state remains.
-- [ ] Define whether user data is retained or purged.
+- [ ] stop service.
+- [ ] remove package-created system policy.
+- [ ] verify no active routes/NAT/firewall state.
+- [ ] define retained/purged user data.
 
 **Acceptance**
 
-- Uninstall does not leave an active networking configuration behind.
+- Uninstall leaves no active BlueRoute networking configuration.
+
+## P15-006 — Define future distribution packaging boundary
+
+- [ ] identify Debian-specific packaging vs core runtime assumptions.
+- [ ] ensure package scripts do not leak into core logic.
+- [ ] document what another distribution would need to provide.
+
+**Acceptance**
+
+- Adding another distribution does not require redesigning BlueRoute domain crates.
 
 ---
 
-# P16 — Reference hardware acceptance
+# P16 — Platform and hardware acceptance
+
+This phase validates product claims across compatible Linux systems. Dell Chromebook 3100 is one test family, not the support definition.
 
 ## P16-001 — Two-node clean-install acceptance
 
-Starting from clean supported Debian installs:
+From clean supported Linux/Debian installs:
 
-- [ ] Install BlueRoute packages.
-- [ ] Create network on node A via GUI.
-- [ ] Discover/join on node B via GUI.
-- [ ] Verify TCP/UDP/IP.
-- [ ] Close both GUIs.
-- [ ] Verify network remains active.
+- [ ] install packages.
+- [ ] create network on node A via GUI.
+- [ ] discover/join on node B via GUI.
+- [ ] verify TCP/UDP/IP.
+- [ ] close GUIs.
+- [ ] verify network persists.
 
 **Acceptance**
 
-- No terminal networking commands are needed for normal workflow.
+- No terminal networking commands are needed in normal workflow.
 
 ## P16-002 — Multi-client single-star acceptance
 
-- [ ] Add supported number of clients.
-- [ ] Run concurrent traffic.
-- [ ] Exercise leave/rejoin.
-- [ ] Verify UI state on each node.
+- [ ] add clients up to documented capability ceiling.
+- [ ] concurrent traffic.
+- [ ] leave/rejoin.
+- [ ] verify UI state.
 
 **Acceptance**
 
-- Stable at documented peer-count limit for test duration.
+- Stable at documented **test-platform-specific** count.
 
 ## P16-003 — Routed topology acceptance
 
-- [ ] Build at least two PAN segments.
-- [ ] Verify cross-segment traffic.
-- [ ] Verify route diagnostics.
-- [ ] Record hop performance.
+- [ ] at least two PAN segments.
+- [ ] cross-segment traffic.
+- [ ] route diagnostics.
+- [ ] hop performance.
 
 **Acceptance**
 
-- Multi-hop claim is backed by physical-hardware evidence.
+- Multi-hop claim has physical hardware evidence.
 
 ## P16-004 — Failure/recovery acceptance
 
@@ -1466,24 +1512,44 @@ Starting from clean supported Debian installs:
 - [ ] daemon restart.
 - [ ] BlueZ restart.
 - [ ] NetworkManager restart.
-- [ ] suspend/resume.
+- [ ] adapter reset.
+- [ ] suspend/resume where applicable.
 
 **Acceptance**
 
-- Each scenario has expected behavior and recorded result.
-- Recoverable scenarios recover without manual route/interface cleanup.
+- Expected behavior/results recorded; recoverable cases require no manual route/interface cleanup.
 
 ## P16-005 — Resource-use acceptance
 
-- [ ] idle CPU.
-- [ ] active CPU.
+- [ ] idle/active CPU.
 - [ ] memory.
-- [ ] discovery scan impact.
+- [ ] scanning impact.
 - [ ] sustained transfer impact.
 
 **Acceptance**
 
-- Results are documented and any unacceptable hotspot has a tracked task.
+- Results are documented per test platform and hotspots tracked.
+
+## P16-006 — Heterogeneous-node acceptance
+
+- [ ] Build a BlueRoute network using at least two different Linux computer/Bluetooth-controller classes.
+- [ ] Verify capability exchange.
+- [ ] Verify client/hub role selection respects differences.
+- [ ] Verify normal traffic.
+
+**Acceptance**
+
+- No Dell/Chromebook-specific assumption is required for interoperability.
+
+## P16-007 — Client-only capability acceptance
+
+- [ ] Simulate or use a node unable/unwilling to act as NAP.
+- [ ] Verify it can still join as PANU when supported.
+- [ ] Verify topology never assigns prohibited role.
+
+**Acceptance**
+
+- Partial capability is handled as policy, not whole-device rejection when participation is possible.
 
 ---
 
@@ -1492,315 +1558,332 @@ Starting from clean supported Debian installs:
 ## P17-001 — User guide
 
 - [ ] install.
-- [ ] create network.
-- [ ] join.
-- [ ] leave.
+- [ ] create/join/leave.
 - [ ] device status.
-- [ ] common recovery steps.
+- [ ] common recovery.
+- [ ] explain compatibility requirements without requiring PAN knowledge.
 
 **Acceptance**
 
-- Guide assumes no prior Bluetooth PAN knowledge.
+- Guide does not imply Chromebook-specific product scope.
 
 ## P17-002 — Administrator/CLI guide
 
-- [ ] commands.
-- [ ] JSON output.
-- [ ] logs.
-- [ ] diagnostics.
-- [ ] advanced topology information.
+- [ ] commands/JSON.
+- [ ] logs/diagnostics.
+- [ ] topology/capabilities.
 
 **Acceptance**
 
-- Admin can diagnose a failed link without reading source code.
+- Admin can diagnose failed/unsupported link without source code.
 
 ## P17-003 — Architecture documentation pass
 
-- [ ] Update `SPEC.md` to match implemented reality.
-- [ ] Add diagrams.
-- [ ] Index ADRs.
-- [ ] Document daemon/API boundaries.
+- [ ] update `SPEC.md` to implemented reality.
+- [ ] diagrams.
+- [ ] ADR index.
+- [ ] daemon/API/backend boundaries.
 
 **Acceptance**
 
-- No known material architecture drift remains undocumented.
+- No known material architecture drift.
 
 ## P17-004 — Troubleshooting guide
 
-Cover at least:
+Cover:
 
-- Bluetooth disabled/missing.
-- pairing fails.
-- BlueZ unavailable.
-- NetworkManager unavailable.
-- permission denied.
-- peer unreachable.
-- address conflict.
-- stale/reconnecting state.
-- routed peer unavailable.
+- Bluetooth disabled/missing;
+- adapter lacks required role/capability;
+- pairing failure;
+- BlueZ unavailable;
+- NetworkManager unavailable;
+- permission denied;
+- peer unreachable;
+- address conflict;
+- stale/reconnecting state;
+- routed peer unavailable;
+- driver/firmware quirks.
 
 **Acceptance**
 
-- Common UI error messages point to relevant troubleshooting guidance.
+- Common UI errors point to useful guidance.
 
 ## P17-005 — Define v1 support matrix
 
-- [ ] Debian version.
-- [ ] kernel baseline.
-- [ ] BlueZ baseline.
-- [ ] NetworkManager baseline.
-- [ ] tested Chromebook variants.
-- [ ] known limitations.
+- [ ] tested Linux distributions.
+- [ ] kernel baselines.
+- [ ] BlueZ baselines.
+- [ ] network backend/version.
+- [ ] tested Bluetooth controllers and representative computer models.
+- [ ] observed role/peer limitations.
+- [ ] known quirks.
+- [ ] distinguish tested from expected-compatible configurations.
 
 **Acceptance**
 
-- Release does not imply unsupported platforms were tested.
+- Support is described by Linux/runtime/capability requirements, with model names used only as test evidence.
 
 ## P17-006 — v1 release gate
 
 - [ ] CI green.
-- [ ] hardware acceptance green.
+- [ ] physical acceptance green.
+- [ ] heterogeneous-node acceptance green for broad portability claim.
 - [ ] security review complete for enabled features.
-- [ ] docs current.
-- [ ] package clean-install/upgrade/uninstall tests green.
-- [ ] no Internet sharing enabled unless P18 is complete.
+- [ ] docs/support matrix current.
+- [ ] package clean-install/upgrade/uninstall green.
+- [ ] no Internet sharing unless P18 complete.
 
 **Acceptance**
 
-- Release checklist is signed off with exact commit/build identifiers.
+- Release checklist records exact commit/build and tested platform identifiers.
 
 ---
 
 # P18 — Future Internet gateway support
 
-**This phase is intentionally post-core-product. Do not let it block initial BlueRoute LAN development.**
+**Post-core-product. Do not let this block the initial BlueRoute LAN.**
 
 ## P18-001 — Implement external connectivity detector
 
-- [ ] Distinguish link presence from verified Internet reachability.
-- [ ] Observe uplink changes.
-- [ ] Avoid hard-coding Wi-Fi as the only uplink type.
+- [ ] distinguish link from verified Internet reachability.
+- [ ] observe uplink changes.
+- [ ] do not hard-code Wi-Fi as only uplink type.
 
 **Acceptance**
 
-- Daemon can report local external connectivity without offering it to peers.
+- Daemon can report external connectivity without offering it to peers.
 
 ## P18-002 — Implement gateway opt-in policy
 
-- [ ] User setting: do not share/share.
-- [ ] Default off.
-- [ ] Persist explicit preference.
-- [ ] Surface current state clearly.
+- [ ] share/do-not-share setting.
+- [ ] default off.
+- [ ] persist explicit preference.
+- [ ] clear current state.
 
 **Acceptance**
 
-- Merely having Internet never automatically makes the node a sharing gateway.
+- Having Internet never automatically enables sharing.
 
 ## P18-003 — Extend control plane with gateway advertisement
 
-- [ ] gateway availability.
-- [ ] willingness to share.
-- [ ] preference/metric.
+- [ ] availability.
+- [ ] willingness.
+- [ ] metric/preference.
 - [ ] freshness/withdrawal.
 
 **Acceptance**
 
-- Gateway advertisements are authenticated as member control messages.
+- Advertisements are authenticated member messages.
 
 ## P18-004 — Implement gateway route selection
 
-- [ ] Default-route candidate model.
-- [ ] Path cost to gateway.
-- [ ] Preference policy.
-- [ ] withdrawal/failure behavior.
+- [ ] default-route candidates.
+- [ ] path cost/preference.
+- [ ] withdrawal/failure.
 
 **Acceptance**
 
-- Core route tests cover zero, one, and multiple gateways.
+- Core tests cover zero/one/multiple gateways.
 
 ## P18-005 — Implement IPv4 forwarding/NAT backend
 
-- [ ] Select NetworkManager shared mode or explicit nftables/forwarding strategy based on topology needs.
-- [ ] Configure forwarding.
-- [ ] Configure NAT/masquerading.
-- [ ] Scope firewall rules to BlueRoute network.
-- [ ] Ensure cleanup.
+- [ ] choose NetworkManager shared mode or explicit nftables based on topology evidence.
+- [ ] forwarding.
+- [ ] NAT/masquerade.
+- [ ] scoped firewall rules.
+- [ ] cleanup.
 
 **Acceptance**
 
-- Direct BlueRoute client reaches Internet through gateway.
-- Disabling sharing removes gateway-owned NAT/firewall state.
+- Direct client reaches Internet through opted-in gateway.
+- Disable removes gateway-owned state.
 
 ## P18-006 — Implement DNS behavior
 
-- [ ] Define DNS source/forwarding approach.
-- [ ] Handle gateway change.
-- [ ] Avoid stale DNS configuration on clients.
+- [ ] DNS source/forwarding.
+- [ ] gateway change.
+- [ ] stale DNS cleanup.
 
 **Acceptance**
 
-- Client can resolve DNS and access Internet through enabled gateway.
+- Client resolves names and uses gateway Internet.
 
 ## P18-007 — Prove routed-client Internet access
-
-Test:
 
 ```text
 client -> routing node -> gateway -> Internet
 ```
 
-- [ ] Verify multi-hop default route.
-- [ ] Verify TCP/UDP/DNS.
-- [ ] Measure impact.
+- [ ] multi-hop default route.
+- [ ] TCP/UDP/DNS.
+- [ ] performance measurement.
 
 **Acceptance**
 
-- Internet access works for a client that is not directly attached to gateway's PAN segment.
+- Client not directly attached to gateway reaches Internet.
 
 ## P18-008 — Implement gateway failover
 
-- [ ] Two approved gateways.
-- [ ] Select preferred gateway.
-- [ ] Detect failure.
-- [ ] Withdraw/re-route.
-- [ ] Avoid loops.
+- [ ] two approved gateways.
+- [ ] preference.
+- [ ] failure detection.
+- [ ] withdrawal/re-route.
+- [ ] loop prevention.
 
 **Acceptance**
 
-- Hardware test demonstrates bounded failover without manual route changes.
+- Physical test demonstrates bounded failover.
 
 ## P18-009 — Add desktop Internet Sharing UI
 
-- [ ] Simple opt-in control.
-- [ ] Explain which connection is shared.
-- [ ] Show gateway provider on clients.
-- [ ] Show unavailable/failover states.
-- [ ] Keep NAT/routing jargon in advanced view only.
+- [ ] simple opt-in.
+- [ ] explain shared connection.
+- [ ] show provider on clients.
+- [ ] unavailable/failover states.
+- [ ] low-level details only in advanced view.
 
 **Acceptance**
 
-- Non-technical user can enable/disable sharing and understand current state.
+- Non-technical user can enable/disable and understand state.
 
 ## P18-010 — Internet gateway security review
 
-- [ ] Firewall exposure.
-- [ ] malicious client behavior.
-- [ ] malicious gateway behavior.
+- [ ] firewall exposure.
+- [ ] malicious clients/gateways.
 - [ ] DNS trust.
 - [ ] route injection.
 - [ ] accidental uplink exposure.
 
 **Acceptance**
 
-- Threat model is updated before gateway feature is considered production-ready.
+- Threat model updated before production gateway release.
 
 ---
 
 # P19 — Optional advanced work
 
-These tasks are intentionally not prerequisites for the first useful release.
-
 ## P19-001 — IPv6/ULA support
 
-- [ ] Derive/allocate per-network ULA prefix.
-- [ ] Configure per-segment prefixes.
-- [ ] Route across segments.
-- [ ] Evaluate IPv6 Internet gateway behavior separately.
+- [ ] per-network ULA prefix.
+- [ ] per-segment prefixes.
+- [ ] routed IPv6.
+- [ ] evaluate IPv6 Internet gateway separately.
 
 ## P19-002 — Invitation code / QR enrollment
 
-- [ ] Design secure invitation representation.
-- [ ] Desktop QR display/scan workflow where hardware permits.
-- [ ] Expiry/revocation.
+- [ ] secure invitation representation.
+- [ ] desktop QR workflow where possible.
+- [ ] expiry/revocation.
 
 ## P19-003 — Topology visualization
 
-- [ ] Advanced GUI graph.
-- [ ] Direct vs routed links.
+- [ ] advanced GUI graph.
+- [ ] direct/routed links.
 - [ ] health/path visualization.
-- [ ] Keep optional for normal users.
 
 ## P19-004 — Battery-aware topology policy
 
-- [ ] Detect AC/battery where available.
-- [ ] Prefer powered nodes for hub roles if useful.
-- [ ] Avoid destabilizing topology for minor battery changes.
+- [ ] AC/battery detection where available.
+- [ ] prefer powered nodes when useful.
+- [ ] anti-flap behavior.
 
-## P19-005 — Evaluate non-NetworkManager Linux backend
+## P19-005 — Implement/evaluate non-NetworkManager Linux backend
 
-- [ ] Consider systems using systemd-networkd or direct netlink.
-- [ ] Keep behind adapter boundary.
+- [ ] systemd-networkd or direct netlink option.
+- [ ] implement behind P4 backend boundary.
+- [ ] run common backend contract tests.
+
+**Acceptance**
+
+- Core/topology/front ends require no changes for alternate backend.
 
 ## P19-006 — Additional Linux distribution support
 
-- [ ] Define support criteria.
-- [ ] Test package/service integration.
+- [ ] define support criteria.
+- [ ] packaging/service integration.
+- [ ] run capability and network acceptance matrix.
 
 ## P19-007 — Remote management API
 
-- [ ] Only if a concrete use case exists.
-- [ ] Must receive independent authentication/security design.
-- [ ] Do not expose local privileged D-Bus API directly over network.
+- [ ] only with concrete use case.
+- [ ] independent authentication/security design.
+- [ ] never expose local privileged D-Bus directly over network.
+
+## P19-008 — Multiple Bluetooth adapter policy
+
+- [ ] enumerate multiple local adapters.
+- [ ] choose/prefer adapter by capability/policy.
+- [ ] evaluate whether multiple radios may be used concurrently.
+
+## P19-009 — Hardware capability database/cache
+
+- [ ] Evaluate whether measured local capabilities should be cached.
+- [ ] Never substitute model-name lookup for runtime validation where validation is possible.
+- [ ] Version/invalidate cached evidence when kernel/firmware/BlueZ changes.
 
 ---
 
 # Cross-cutting acceptance checklist
 
-For every feature that manipulates networking:
+For every networking feature:
 
 - [ ] Is the operation idempotent?
 - [ ] Does failure preserve enough state for reconciliation?
 - [ ] Does cleanup remove only BlueRoute-owned state?
-- [ ] Is the behavior testable without hardware where possible?
-- [ ] Is hardware evidence recorded where hardware behavior matters?
-- [ ] Are errors typed and surfaced in diagnostics?
-- [ ] Are secrets absent from normal logs?
-- [ ] Can CLI/TUI/desktop consume the same daemon state?
+- [ ] Is behavior testable without hardware where possible?
+- [ ] Is physical evidence recorded where hardware behavior matters?
+- [ ] Are hardware differences represented as capabilities rather than model-specific branches?
+- [ ] Are errors typed and useful in diagnostics?
+- [ ] Are secrets absent from logs?
+- [ ] Do CLI/TUI/desktop consume the same daemon state?
+- [ ] Does the change preserve network-backend abstraction?
 - [ ] Does the change preserve future Internet-gateway separation?
 - [ ] Does the default GUI avoid unnecessary networking jargon?
 
 # Initial recommended execution order
 
-The recommended first implementation sequence is:
+1. `P0-*` — project baseline.
+2. `P1-001` through `P1-004` — prove PAN and Linux ownership boundaries on available hardware.
+3. `P2-*` and `P3-*` — hardware-independent domain/persistence model.
+4. `P4-*` — production BlueZ/NetworkManager adapters and capability reporting.
+5. `P5-*` — daemon/API.
+6. `P6-*` — managed single-star LAN.
+7. `P7-*` and `P8-*` — authenticated control and routed stars.
+8. `P9-*` — automatic capability-aware topology.
+9. `P10-*`, `P11-*`, `P12-*` — CLI/TUI/Tauri.
+10. `P13-*` through `P17-*` — hardening, security, packaging, heterogeneous platform acceptance, v1.
+11. `P18-*` — Internet gateway.
+12. `P19-*` — optional extensions/backends/distributions.
 
-1. `P0-001` through `P0-005` — establish the project baseline.
-2. `P1-001` through `P1-004` — prove PAN and choose Linux ownership boundaries before building abstractions around assumptions.
-3. `P2-*` and `P3-*` — build the domain/persistence model.
-4. `P4-*` — implement production BlueZ/NetworkManager adapters.
-5. `P5-*` — make the daemon/API operational.
-6. `P6-*` — deliver a complete managed single-star LAN.
-7. `P7-*` and `P8-*` — add authenticated control and routed interconnected stars.
-8. `P9-*` — automate topology once routed behavior is proven.
-9. `P10-*`, `P11-*`, and `P12-*` — finish CLI/TUI/Tauri experiences on the stable daemon.
-10. `P13-*` through `P17-*` — hardening, security, packaging, hardware acceptance, and v1 release.
-11. `P18-*` — add Internet gateway capability after the local network is dependable.
-12. `P19-*` — optional extensions.
+# Definition of first useful milestone
 
-# Definition of “first useful milestone”
+The first useful milestone is a reliable daemon-managed two-node PAN in which:
 
-The first useful milestone is not the desktop GUI. It is a reliable daemon-managed two-node PAN in which:
-
-- both nodes run Debian on reference hardware;
+- both nodes are compatible Linux systems;
+- one can provide NAP and the other PANU according to discovered/tested capability;
 - one creates a BlueRoute network;
 - the other joins through the daemon API;
-- IPv4 is configured automatically;
-- ordinary TCP and UDP traffic works;
-- no manual `bluetoothctl`, `nmcli`, `ip addr`, or `ip route` command is required after installation;
-- daemon restart can reconcile the connection;
-- CLI diagnostics explain the resulting state.
+- IPv4 is automatic;
+- ordinary TCP/UDP works;
+- Wi-Fi is not carrying the acceptance traffic;
+- no manual `bluetoothctl`, `nmcli`, `ip addr`, or `ip route` command is needed after installation;
+- daemon restart reconciles the connection;
+- CLI diagnostics explain platform capabilities and resulting state.
 
-That milestone validates the foundation before substantial UI work.
+Dell Chromebook 3100 systems can satisfy this milestone as the first physical test pair, but the milestone must not introduce Chromebook-specific domain logic.
 
-# Definition of “v1 local-network complete”
+# Definition of v1 local-network complete
 
-The local-network v1 is complete when:
+Local-network v1 is complete when:
 
-- the single-star workflow is reliable;
-- routed interconnected-star networking has physical hardware acceptance evidence;
-- topology recovery behavior is documented and tested;
-- daemon, CLI, TUI, and Tauri all use the same API;
-- non-technical users can create/join/leave from the desktop app;
-- installation and system service behavior are packaged for Debian 13;
-- threat model and privilege boundaries have been reviewed;
-- reference Chromebook hardware limits are documented;
-- Internet sharing remains off/absent unless the separate P18 acceptance criteria are completed.
+- single-star workflow is reliable;
+- routed interconnected-star networking has physical evidence;
+- topology recovery is documented/tested;
+- capability-aware role selection works;
+- daemon, CLI, TUI, and Tauri use the same API;
+- non-technical users can create/join/leave from desktop;
+- Debian packaging/service behavior is validated;
+- threat model and privilege boundaries are reviewed;
+- support matrix describes Linux/runtime/capability requirements rather than one computer model;
+- at least one heterogeneous hardware combination has been tested before broad portability claims;
+- Internet sharing remains off/absent unless P18 is complete.
