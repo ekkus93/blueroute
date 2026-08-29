@@ -89,20 +89,14 @@ impl NetworkMembership {
     }
 
     pub fn set_peer_member(&mut self, peer: NodeId, member: bool) -> bool {
-        let peer = self
-            .peers
-            .entry(peer)
-            .or_insert(PeerMembership::new(peer));
+        let peer = self.peers.entry(peer).or_insert(PeerMembership::new(peer));
         let changed = peer.member != member;
         peer.member = member;
         changed
     }
 
     pub fn trust_peer(&mut self, peer: NodeId) -> bool {
-        let peer = self
-            .peers
-            .entry(peer)
-            .or_insert(PeerMembership::new(peer));
+        let peer = self.peers.entry(peer).or_insert(PeerMembership::new(peer));
         let changed = !peer.trusted;
         peer.trusted = true;
         changed
@@ -130,9 +124,7 @@ impl NetworkMembership {
     }
 
     pub fn is_peer_trusted(&self, peer: &NodeId) -> bool {
-        self.peers
-            .get(peer)
-            .is_some_and(PeerMembership::is_trusted)
+        self.peers.get(peer).is_some_and(PeerMembership::is_trusted)
     }
 
     pub fn peers(&self) -> impl Iterator<Item = &PeerMembership> {
@@ -153,10 +145,7 @@ pub struct MembershipRegistry {
 }
 
 impl MembershipRegistry {
-    pub fn remember_network(
-        &mut self,
-        membership: NetworkMembership,
-    ) -> Option<NetworkMembership> {
+    pub fn remember_network(&mut self, membership: NetworkMembership) -> Option<NetworkMembership> {
         self.networks.insert(membership.network_id, membership)
     }
 
