@@ -18,7 +18,9 @@ pub use config::{
 pub use error::{CoreError, ErrorKind};
 pub use health::{HealthComponent, HealthLevel, NodeHealth};
 pub use id::{DisplayName, LinkId, NetworkId, NodeId, SegmentId};
-pub use membership::{MembershipState, NetworkMembership};
+pub use membership::{
+    MembershipRegistry, MembershipState, NetworkMembership, PeerMembership,
+};
 pub use route::{IpPrefix, Route, RouteDestination, RouteOwner};
 pub use topology::{LinkHealth, LinkState, PanLink, PanSegment, Reachability, TopologyGraph};
 
