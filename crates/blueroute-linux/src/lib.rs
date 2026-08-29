@@ -1,8 +1,10 @@
 #![doc = "Linux system adapter boundaries for BlueRoute."]
 
 mod identity;
+mod membership_store;
 
 pub use identity::{NodeIdentityGenerator, NodeIdentityStore, SystemNodeIdentityGenerator};
+pub use membership_store::NetworkMembershipStore;
 
 use std::future::Future;
 use std::net::IpAddr;
@@ -263,35 +265,94 @@ mod tests {
         }
     }
 
-    #[test]
-    fn fake_bluetooth_backend_exercises_boundary_without_dbus() {
-        let backend = FakeBluetooth::default();
-        let adapters = resolve(backend.adapters()).unwrap();
-        assert_eq!(adapters.len(), 1);
-        resolve(backend.start_discovery(adapters[0].handle.clone())).unwrap();
-        assert!(*backend.discovery_started.lock().unwrap());
+    #[derive(Default)]
+    struct FakePan;
+
+    impl PanBackend for FakePan {
+        fn connect_panu(&self, _peer: PeerHandle) -> BackendFuture<'_, PanAttachment> {
+            Box::pin(async {
+                Ok(PanAttachment {
+                    role: PanRole::Panu,
+                    interface: NetworkInterfaceHandle::new("bnep0")?,
+                    peer: Some(PeerHandle::new("peer0")?),
+                })
+            })
+        }
+
+        fn disconnect_panu(&self, _peer: PeerHandle) -> BackendFuture<'_, ()> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn start_nap(&self, _adapter: AdapterHandle) -> BackendFuture<'_, PanAttachment> {
+            Box::pin(async {
+                Ok(PanAttachment {
+                    role: PanRole::Nap,
+                    interface: NetworkInterfaceHandle::new("btnap0")?,
+                    peer: None,
+                })
+            })
+        }
+
+        fn stop_nap(&self, _adapter: AdapterHandle) -> BackendFuture<'_, ()> {
+            Box::pin(async { Ok(()) })
+        }
     }
 
     #[test]
-    fn fake_ip_backend_is_not_networkmanager_specific() {
+    fn fake_bluetooth_backend_obeys_discovery_boundary() {
+        let backend = FakeBluetooth::default();
+        let adapter = resolve(backend.adapters()).unwrap().remove(0).handle;
+        resolve(backend.start_discovery(adapter.clone())).unwrap();
+        assert!(*backend.discovery_started.lock().unwrap());
+        resolve(backend.stop_discovery(adapter)).unwrap();
+        assert!(!*backend.discovery_started.lock().unwrap());
+    }
+
+    #[test]
+    fn fake_pan_backend_returns_opaque_interfaces() {
+        let backend = FakePan;
+        let attachment = resolve(backend.connect_panu(PeerHandle::new("peer0").unwrap())).unwrap();
+        assert_eq!(attachment.role, PanRole::Panu);
+        assert_eq!(attachment.interface.as_str(), "bnep0");
+    }
+
+    #[test]
+    fn fake_ip_backend_can_toggle_forwarding() {
         let backend = FakeIpBackend::default();
         resolve(backend.set_ipv4_forwarding(true)).unwrap();
         assert!(*backend.forwarding.lock().unwrap());
     }
 
     #[test]
-    fn runtime_capabilities_can_describe_non_networkmanager_backend() {
+    fn handles_reject_empty_values() {
+        assert!(AdapterHandle::new(" ").is_err());
+        assert!(PeerHandle::new("").is_err());
+    }
+
+    #[test]
+    fn capability_boundary_stays_in_domain_types() {
         let capabilities = RuntimeCapabilities {
             bluez_available: true,
-            network_backend: Some(NetworkBackend::SystemdNetworkd),
+            network_backend: Some(NetworkBackend::NetworkManager),
             node: NodeCapabilities {
-                panu: Some(Sourced::new(true, CapabilitySource::Measured)),
-                ..NodeCapabilities::default()
+                bluetooth_usable: Sourced::new(true, CapabilitySource::Discovered),
+                panu: Sourced::new(true, CapabilitySource::Discovered),
+                nap: Sourced::new(false, CapabilitySource::Measured),
+                routing: Sourced::new(true, CapabilitySource::Configured),
+                network_backend: Sourced::new(
+                    Some(NetworkBackend::NetworkManager),
+                    CapabilitySource::Discovered,
+                ),
+                connection_policy_ceiling: Sourced::new(None, CapabilitySource::Unknown),
+                link_quality: Sourced::new(None, CapabilitySource::Unknown),
+                power_state: Sourced::new(None, CapabilitySource::Unknown),
+                has_internet: Sourced::new(false, CapabilitySource::Unknown),
+                willing_to_share_internet: Sourced::new(false, CapabilitySource::Configured),
             },
         };
         assert_eq!(
-            capabilities.network_backend,
-            Some(NetworkBackend::SystemdNetworkd)
+            capabilities.node.network_backend.value,
+            Some(NetworkBackend::NetworkManager)
         );
     }
 }
