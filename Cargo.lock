@@ -32,6 +32,9 @@ dependencies = [
 [[package]]
 name = "blueroute-protocol"
 version = "0.1.0"
+dependencies = [
+ "blueroute-core",
+]
 
 [[package]]
 name = "blueroute-tui"

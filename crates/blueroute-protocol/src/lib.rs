@@ -2,6 +2,11 @@
 
 use std::fmt;
 
+use blueroute_core::{
+    DisplayName, HealthLevel, LinkHealth, LinkId, LinkState, MembershipState, NetworkId, NodeId,
+    Reachability,
+};
+
 /// Version of the local daemon API contract.
 ///
 /// Major versions are incompatible. Minor versions are additive: a server can
@@ -57,6 +62,99 @@ pub const DBUS_SERVICE_NAME: &str = "org.blueroute.Service1";
 pub const DBUS_OBJECT_PATH: &str = "/org/blueroute/Service1";
 /// Well-known D-Bus interface for the v1 daemon API.
 pub const DBUS_INTERFACE_NAME: &str = "org.blueroute.Service1";
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NetworkSummary {
+    pub id: NetworkId,
+    pub name: DisplayName,
+    pub member_count: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NodeSummary {
+    pub id: NodeId,
+    pub name: DisplayName,
+    pub reachability: Reachability,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DaemonStatus {
+    pub api_version: ApiVersion,
+    pub local_node: Option<NodeId>,
+    pub current_network: Option<NetworkId>,
+    pub health: HealthLevel,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiagnosticSnapshot {
+    pub api_version: ApiVersion,
+    pub health: HealthLevel,
+    pub current_network: Option<NetworkId>,
+    pub visible_nodes: usize,
+}
+
+/// Semantic local-daemon operations shared by all front ends.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Command {
+    GetStatus,
+    ListNetworks,
+    CreateNetwork { name: DisplayName },
+    JoinNetwork { network: NetworkId },
+    LeaveNetwork,
+    ListNodes,
+    GetNode { node: NodeId },
+    SetDeviceName { name: DisplayName },
+    StartDiscovery,
+    StopDiscovery,
+    TrustPeer { node: NodeId },
+    ForgetPeer { node: NodeId },
+    GetDiagnostics,
+    /// Reserved for the future gateway phase. Current daemons must reject it.
+    SetInternetSharing { enabled: bool },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Response {
+    Ack,
+    Status(DaemonStatus),
+    Networks(Vec<NetworkSummary>),
+    Nodes(Vec<NodeSummary>),
+    Node(Option<NodeSummary>),
+    Diagnostics(DiagnosticSnapshot),
+}
+
+/// State-change events published by the daemon to local clients.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Event {
+    NetworkDiscovered(NetworkSummary),
+    NetworkLost(NetworkId),
+    NodeChanged(NodeSummary),
+    NodeDisconnected(NodeId),
+    MembershipChanged {
+        network: NetworkId,
+        state: MembershipState,
+    },
+    LinkChanged {
+        link: LinkId,
+        state: LinkState,
+        health: LinkHealth,
+    },
+    TopologyChanged {
+        network: NetworkId,
+    },
+    HealthChanged(HealthLevel),
+    AuthorizationFailed {
+        operation: String,
+    },
+    InternetAvailabilityChanged {
+        available: bool,
+    },
+    /// Reserved for the future gateway phase.
+    GatewayAvailabilityChanged {
+        node: NodeId,
+        available: bool,
+    },
+}
 
 /// The human-readable project name.
 pub const PROJECT_NAME: &str = "BlueRoute";
@@ -119,5 +217,28 @@ mod tests {
         assert!(DBUS_SERVICE_NAME.ends_with("Service1"));
         assert!(DBUS_OBJECT_PATH.ends_with("Service1"));
         assert!(DBUS_INTERFACE_NAME.ends_with("Service1"));
+    }
+
+    #[test]
+    fn commands_keep_friendly_names_separate_from_ids() {
+        let name = DisplayName::new("Lab network").unwrap();
+        let command = Command::CreateNetwork { name: name.clone() };
+        assert_eq!(command, Command::CreateNetwork { name });
+    }
+
+    #[test]
+    fn event_values_are_structurally_deterministic() {
+        let node = NodeId::from_bytes([4; 16]);
+        let first = Event::NodeDisconnected(node);
+        let second = Event::NodeDisconnected(NodeId::from_bytes([4; 16]));
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn internet_sharing_command_is_reserved_in_protocol() {
+        assert_eq!(
+            Command::SetInternetSharing { enabled: false },
+            Command::SetInternetSharing { enabled: false }
+        );
     }
 }
