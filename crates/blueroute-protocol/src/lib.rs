@@ -3,8 +3,8 @@
 use std::fmt;
 
 use blueroute_core::{
-    DisplayName, HealthLevel, LinkHealth, LinkId, LinkState, MembershipState, NetworkId, NodeId,
-    Reachability,
+    DisplayName, HealthLevel, LinkHealth, LinkId, LinkState, MembershipState, NetworkId,
+    NodeCapabilities, NodeId, Reachability, Route,
 };
 
 /// Version of the local daemon API contract.
@@ -67,7 +67,7 @@ pub const DBUS_INTERFACE_NAME: &str = "org.blueroute.Service1";
 pub struct NetworkSummary {
     pub id: NetworkId,
     pub name: DisplayName,
-    pub member_count: usize,
+    pub member_count: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -83,6 +83,7 @@ pub struct DaemonStatus {
     pub local_node: Option<NodeId>,
     pub current_network: Option<NetworkId>,
     pub health: HealthLevel,
+    pub capabilities: NodeCapabilities,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -90,13 +91,15 @@ pub struct DiagnosticSnapshot {
     pub api_version: ApiVersion,
     pub health: HealthLevel,
     pub current_network: Option<NetworkId>,
-    pub visible_nodes: usize,
+    pub visible_nodes: u32,
+    pub capabilities: NodeCapabilities,
 }
 
 /// Semantic local-daemon operations shared by all front ends.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Command {
     GetStatus,
+    GetCapabilities,
     ListNetworks,
     CreateNetwork { name: DisplayName },
     JoinNetwork { network: NetworkId },
@@ -117,6 +120,7 @@ pub enum Command {
 pub enum Response {
     Ack,
     Status(DaemonStatus),
+    Capabilities(NodeCapabilities),
     Networks(Vec<NetworkSummary>),
     Nodes(Vec<NodeSummary>),
     Node(Option<NodeSummary>),
@@ -130,6 +134,10 @@ pub enum Event {
     NetworkLost(NetworkId),
     NodeChanged(NodeSummary),
     NodeDisconnected(NodeId),
+    CapabilitiesChanged {
+        node: NodeId,
+        capabilities: NodeCapabilities,
+    },
     MembershipChanged {
         network: NetworkId,
         state: MembershipState,
@@ -142,6 +150,7 @@ pub enum Event {
     TopologyChanged {
         network: NetworkId,
     },
+    RouteChanged(Route),
     HealthChanged(HealthLevel),
     AuthorizationFailed {
         operation: String,
@@ -162,6 +171,10 @@ pub const PROJECT_NAME: &str = "BlueRoute";
 #[cfg(test)]
 mod tests {
     use std::cmp::Ordering;
+
+    use blueroute_core::{
+        CapabilitySource, NetworkId, NodeId, RouteDestination, RouteOwner, Sourced,
+    };
 
     use super::*;
 
@@ -227,11 +240,31 @@ mod tests {
     }
 
     #[test]
-    fn event_values_are_structurally_deterministic() {
-        let node = NodeId::from_bytes([4; 16]);
-        let first = Event::NodeDisconnected(node);
-        let second = Event::NodeDisconnected(NodeId::from_bytes([4; 16]));
+    fn capability_events_are_structurally_deterministic() {
+        let capabilities = NodeCapabilities {
+            panu: Some(Sourced::new(true, CapabilitySource::Measured)),
+            ..NodeCapabilities::default()
+        };
+        let first = Event::CapabilitiesChanged {
+            node: NodeId::from_bytes([4; 16]),
+            capabilities: capabilities.clone(),
+        };
+        let second = Event::CapabilitiesChanged {
+            node: NodeId::from_bytes([4; 16]),
+            capabilities,
+        };
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn route_events_are_structurally_deterministic() {
+        let route = Route {
+            destination: RouteDestination::Internet,
+            next_hop: NodeId::from_bytes([2; 16]),
+            cost: 10,
+            owner: RouteOwner::BlueRouteNetwork(NetworkId::from_bytes([3; 16])),
+        };
+        assert_eq!(Event::RouteChanged(route.clone()), Event::RouteChanged(route));
     }
 
     #[test]
