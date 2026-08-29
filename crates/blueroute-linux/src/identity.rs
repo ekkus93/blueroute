@@ -20,9 +20,8 @@ pub struct SystemNodeIdentityGenerator;
 impl NodeIdentityGenerator for SystemNodeIdentityGenerator {
     fn generate(&self) -> Result<NodeId, CoreError> {
         let mut bytes = [0_u8; NODE_ID_BYTES];
-        let mut random = File::open("/dev/urandom").map_err(|error| {
-            persistence_error("failed to open the Linux random source", error)
-        })?;
+        let mut random = File::open("/dev/urandom")
+            .map_err(|error| persistence_error("failed to open the Linux random source", error))?;
         random.read_exact(&mut bytes).map_err(|error| {
             persistence_error("failed to generate a stable node identity", error)
         })?;
@@ -91,14 +90,14 @@ where
                 }
                 Ok(identity)
             }
-            Err(error) if error.kind() == IoErrorKind::AlreadyExists => self
-                .load_existing()?
-                .ok_or_else(|| {
+            Err(error) if error.kind() == IoErrorKind::AlreadyExists => {
+                self.load_existing()?.ok_or_else(|| {
                     CoreError::new(
                         ErrorKind::PersistenceError,
                         "node identity appeared during creation but could not be loaded",
                     )
-                }),
+                })
+            }
             Err(error) => Err(persistence_error(
                 "failed to create the stable node identity file",
                 error,
@@ -222,10 +221,7 @@ mod tests {
         let store = NodeIdentityStore::with_generator(&path, FixedGenerator(expected));
 
         assert_eq!(store.load_or_create().unwrap(), expected);
-        assert_eq!(
-            fs::read_to_string(&path).unwrap(),
-            format!("{expected}\n")
-        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), format!("{expected}\n"));
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, IDENTITY_FILE_MODE);
     }
