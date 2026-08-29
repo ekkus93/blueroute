@@ -37,6 +37,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P2-001..P2-008 | `[x]` | Domain implementation and tests are complete; the full locked workspace test suite is green on `master`. |
 | P3-001 | `[x]` | Versioned hardware-agnostic configuration schema and validation are implemented and green in CI. |
 | P3-002 | `[x]` | Stable node identity generation/persistence is wired into daemon startup; owner-only storage and restart recovery tests are green in CI. |
+| P3-003 | `[x]` | Durable known-network and peer membership/trust state persists through restart; forget/cleanup and corruption handling are tested and green in CI. |
 | P4-001 | `[x]` | Backend-neutral adapter boundaries and fake-backend tests are implemented and green in CI. |
 | P5-001 | `[-]` | API version contract and compatibility rules are implemented/tested; client-side incompatibility enforcement remains pending P5-005. |
 | P5-002 | `[-]` | Semantic command/response model implemented; serialization round-trip tests remain. |
@@ -377,9 +378,9 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P3-003 — Implement network membership persistence
 
-- [ ] known networks.
-- [ ] peer membership/trust data.
-- [ ] cleanup/forget semantics.
+- [x] known networks.
+- [x] peer membership/trust data.
+- [x] cleanup/forget semantics.
 
 **Acceptance**
 
