@@ -8,8 +8,7 @@ use std::time::SystemTime;
 use blueroute_core::{CoreError, IpPrefix, NetworkBackend, NetworkId, NodeCapabilities};
 
 /// Boxed future used by Linux adapter traits without requiring an async-trait dependency.
-pub type BackendFuture<'a, T> =
-    Pin<Box<dyn Future<Output = Result<T, CoreError>> + Send + 'a>>;
+pub type BackendFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, CoreError>> + Send + 'a>>;
 
 macro_rules! opaque_handle {
     ($name:ident) => {
