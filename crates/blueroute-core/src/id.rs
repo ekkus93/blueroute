@@ -37,10 +37,16 @@ fn decode_hex(value: &str) -> Result<[u8; ID_BYTES], CoreError> {
     let mut bytes = [0_u8; ID_BYTES];
     for (index, byte) in bytes.iter_mut().enumerate() {
         let high = decode_nibble(input[index * 2]).ok_or_else(|| {
-            CoreError::new(ErrorKind::InvalidInput, "identifier contains non-hexadecimal data")
+            CoreError::new(
+                ErrorKind::InvalidInput,
+                "identifier contains non-hexadecimal data",
+            )
         })?;
         let low = decode_nibble(input[index * 2 + 1]).ok_or_else(|| {
-            CoreError::new(ErrorKind::InvalidInput, "identifier contains non-hexadecimal data")
+            CoreError::new(
+                ErrorKind::InvalidInput,
+                "identifier contains non-hexadecimal data",
+            )
         })?;
         *byte = (high << 4) | low;
     }
@@ -79,9 +85,18 @@ macro_rules! define_id {
     };
 }
 
-define_id!(NodeId, "Stable authorization identity for a BlueRoute node.");
-define_id!(NetworkId, "Stable identity for a logical BlueRoute network.");
-define_id!(LinkId, "Stable identity for a BlueRoute PAN link observation.");
+define_id!(
+    NodeId,
+    "Stable authorization identity for a BlueRoute node."
+);
+define_id!(
+    NetworkId,
+    "Stable identity for a logical BlueRoute network."
+);
+define_id!(
+    LinkId,
+    "Stable identity for a BlueRoute PAN link observation."
+);
 define_id!(SegmentId, "Stable identity for a routed PAN segment.");
 
 /// A user-editable presentation name that is intentionally separate from identity.
@@ -128,8 +143,8 @@ mod tests {
     #[test]
     fn identifiers_have_deterministic_lowercase_serialization() {
         let id = NodeId::from_bytes([
-            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc,
-            0xdd, 0xee, 0xff,
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd,
+            0xee, 0xff,
         ]);
         assert_eq!(id.to_string(), "00112233445566778899aabbccddeeff");
     }
@@ -143,7 +158,11 @@ mod tests {
     #[test]
     fn invalid_identifiers_are_rejected() {
         assert!("abc".parse::<NodeId>().is_err());
-        assert!("zz112233445566778899aabbccddeeff".parse::<NodeId>().is_err());
+        assert!(
+            "zz112233445566778899aabbccddeeff"
+                .parse::<NodeId>()
+                .is_err()
+        );
     }
 
     #[test]
