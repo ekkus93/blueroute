@@ -1,6 +1,7 @@
 #![doc = "Hardware-independent BlueRoute domain logic."]
 
 mod capability;
+mod config;
 mod error;
 mod health;
 mod id;
@@ -10,6 +11,9 @@ mod topology;
 
 pub use capability::{
     CapabilitySource, LinkQuality, NetworkBackend, NodeCapabilities, PowerState, Sourced,
+};
+pub use config::{
+    BackendPreference, ConfigVersion, DaemonConfig, GatewayPolicy, Ipv4AddressPool, TopologyPolicy,
 };
 pub use error::{CoreError, ErrorKind};
 pub use health::{HealthComponent, HealthLevel, NodeHealth};
