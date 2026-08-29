@@ -1,12 +1,22 @@
 from pathlib import Path
 
+
+def replace_once(text: str, old: str, new: str, label: str) -> str:
+    if text.count(old) != 1:
+        raise SystemExit(f"{label}: expected one marker, found {text.count(old)}")
+    return text.replace(old, new, 1)
+
+
 path = Path("crates/blueroute-linux/src/membership_store.rs")
 text = path.read_text()
 
-text = text.replace(
-    'const FORMAT_HEADER: &str = "BLUEROUTE_MEMBERSHIP_V1";\nconst MEMBERSHIP_FILE_MODE: u32 = 0o600;\n',
-    'const FORMAT_HEADER_PREFIX: &str = "BLUEROUTE_MEMBERSHIP_V";\nconst LEGACY_FORMAT_VERSION: u32 = 1;\nconst CURRENT_FORMAT_VERSION: u32 = 2;\nconst MEMBERSHIP_FILE_MODE: u32 = 0o600;\n',
-    1,
+text = replace_once(
+    text,
+    'const FORMAT_HEADER: &str = "BLUEROUTE_MEMBERSHIP_V1";\n',
+    'const FORMAT_HEADER_PREFIX: &str = "BLUEROUTE_MEMBERSHIP_V";\n'
+    'const LEGACY_FORMAT_VERSION: u32 = 1;\n'
+    'const CURRENT_FORMAT_VERSION: u32 = 2;\n',
+    "format constants",
 )
 
 old_load = '''        let serialized = fs::read_to_string(&self.path).map_err(|error| {
@@ -24,9 +34,7 @@ new_load = '''        let serialized = fs::read_to_string(&self.path).map_err(|e
         }
         Ok(registry)
 '''
-if old_load not in text:
-    raise SystemExit("load replacement marker not found")
-text = text.replace(old_load, new_load, 1)
+text = replace_once(text, old_load, new_load, "load migration entry point")
 
 migration_code = r'''#[derive(Debug, Eq, PartialEq)]
 struct MigrationResult {
@@ -104,7 +112,7 @@ fn migrate_v1_to_v2(serialized: &str) -> Result<String, CoreError> {
         migrated.push('\n');
     }
 
-    // Validate the complete migrated document before any caller is allowed to rewrite disk state.
+    // Validate the complete migrated document before any caller may rewrite disk state.
     parse_registry(&migrated)?;
     Ok(migrated)
 }
@@ -114,33 +122,28 @@ fn format_header(version: u32) -> String {
 }
 
 '''
-marker = 'fn serialize_registry(registry: &MembershipRegistry) -> Result<String, CoreError> {\n'
-if marker not in text:
-    raise SystemExit("serialize insertion marker not found")
-text = text.replace(marker, migration_code + marker, 1)
+serialize_marker = 'fn serialize_registry(registry: &MembershipRegistry) -> Result<String, CoreError> {\n'
+text = replace_once(
+    text,
+    serialize_marker,
+    migration_code + serialize_marker,
+    "migration function insertion",
+)
+text = replace_once(
+    text,
+    '    let mut output = String::from(FORMAT_HEADER);\n',
+    '    let mut output = format_header(CURRENT_FORMAT_VERSION);\n',
+    "current-version serialization",
+)
 
-old_serialize = '''fn serialize_registry(registry: &MembershipRegistry) -> Result<String, CoreError> {
-    let mut output = String::from(FORMAT_HEADER);
-    output.push('\n');
-'''
-new_serialize = '''fn serialize_registry(registry: &MembershipRegistry) -> Result<String, CoreError> {
-    let mut output = format_header(CURRENT_FORMAT_VERSION);
-    output.push('\n');
-'''
-if old_serialize not in text:
-    raise SystemExit("serialize header replacement marker not found")
-text = text.replace(old_serialize, new_serialize, 1)
-
-old_parse = '''fn parse_registry(serialized: &str) -> Result<MembershipRegistry, CoreError> {
-    let mut lines = serialized.lines();
+old_parse_header = '''    let mut lines = serialized.lines();
     if lines.next() != Some(FORMAT_HEADER) {
         return Err(malformed_state(
             "unsupported or missing membership format header",
         ));
     }
 '''
-new_parse = '''fn parse_registry(serialized: &str) -> Result<MembershipRegistry, CoreError> {
-    let mut lines = serialized.lines();
+new_parse_header = '''    let mut lines = serialized.lines();
     let current_header = format_header(CURRENT_FORMAT_VERSION);
     if lines.next() != Some(current_header.as_str()) {
         return Err(malformed_state(
@@ -148,9 +151,7 @@ new_parse = '''fn parse_registry(serialized: &str) -> Result<MembershipRegistry,
         ));
     }
 '''
-if old_parse not in text:
-    raise SystemExit("parse header replacement marker not found")
-text = text.replace(old_parse, new_parse, 1)
+text = replace_once(text, old_parse_header, new_parse_header, "current-version parser")
 
 test_marker = '''    #[test]
     fn malformed_state_is_rejected_without_quiet_reset() {
@@ -211,8 +212,6 @@ migration_tests = r'''    #[test]
     }
 
 '''
-if test_marker not in text:
-    raise SystemExit("migration test insertion marker not found")
-text = text.replace(test_marker, migration_tests + test_marker, 1)
+text = replace_once(text, test_marker, migration_tests + test_marker, "migration tests")
 
 path.write_text(text)
