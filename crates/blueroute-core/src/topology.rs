@@ -217,9 +217,7 @@ impl TopologyGraph {
         };
         node == segment.nap
             || self.links.values().any(|link| {
-                link.segment_id == segment_id
-                    && link.panu == node
-                    && link.is_forwarding_candidate()
+                link.segment_id == segment_id && link.panu == node && link.is_forwarding_candidate()
             })
     }
 
