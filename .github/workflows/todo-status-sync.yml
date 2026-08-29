@@ -1,0 +1,88 @@
+name: Temporary TODO status sync
+
+on:
+  push:
+    branches:
+      - docs/sync-todo-p3-002
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Synchronize TODO statuses
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("docs/TODO.md")
+          text = path.read_text()
+
+          start_marker = "## Current task status\n"
+          end_marker = "## Platform rule\n"
+          start = text.index(start_marker)
+          end = text.index(end_marker)
+
+          status = """## Current task status
+
+          **Status date:** 2026-08-29
+
+          | Task | Status | Current state |
+          | --- | --- | --- |
+          | P0-001 | `[x]` | Workspace structure is complete and `cargo check --workspace --locked` is green on `master`. |
+          | P0-002 | `[-]` | Toolchain/development policy documented; clean supported Debian validation pending. |
+          | P0-003 | `[x]` | Rust formatting/lint policy is configured; `cargo fmt --all -- --check` and locked Clippy with `-D warnings` are green on `master`. |
+          | P0-004 | `[-]` | CI runs on pull requests and `master`; green master execution and formatting-failure detection are proven, while an intentional test-failure probe is still pending. |
+          | P0-005 | `[x]` | Development documentation complete. |
+          | P1-001..P1-007 | `[!]` | Blocked pending physical Linux/Bluetooth test-system evidence. |
+          | P1-008 | `[x]` | Capability-matrix format complete. |
+          | P1-009 | `[!]` | Blocked pending a materially different second hardware class. |
+          | P2-001..P2-008 | `[x]` | Domain implementation and tests are complete; the full locked workspace test suite is green on `master`. |
+          | P3-001 | `[x]` | Versioned hardware-agnostic configuration schema and validation are implemented and green in CI. |
+          | P3-002 | `[x]` | Stable node identity generation/persistence is wired into daemon startup; owner-only storage and restart recovery tests are green in CI. |
+          | P4-001 | `[x]` | Backend-neutral adapter boundaries and fake-backend tests are implemented and green in CI. |
+          | P5-001 | `[-]` | API version contract and compatibility rules are implemented/tested; client-side incompatibility enforcement remains pending P5-005. |
+          | P5-002 | `[-]` | Semantic command/response model implemented; serialization round-trip tests remain. |
+          | P5-003 | `[x]` | Event model and deterministic structural tests are implemented and green in CI. |
+          | All other tasks | `[ ]` | Not started. |
+
+          """
+
+          text = text[:start] + status + text[end:]
+
+          old = """## P3-002 — Implement stable node identity persistence
+
+          - [ ] Generate identity first run.
+          - [ ] Persist securely.
+          - [ ] Recover after restart.
+          """
+          new = """## P3-002 — Implement stable node identity persistence
+
+          - [x] Generate identity first run.
+          - [x] Persist securely.
+          - [x] Recover after restart.
+          """
+          if old not in text:
+              raise SystemExit("expected P3-002 checklist was not found")
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+
+      - name: Commit synchronized TODO
+        shell: bash
+        run: |
+          if git diff --quiet -- docs/TODO.md; then
+            echo "TODO was already synchronized"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/TODO.md
+          git commit -m "docs: synchronize TODO after P3-002"
+          git push
