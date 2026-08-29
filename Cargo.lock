@@ -17,6 +17,9 @@ version = "0.1.0"
 [[package]]
 name = "blueroute-daemon"
 version = "0.1.0"
+dependencies = [
+ "blueroute-linux",
+]
 
 [[package]]
 name = "blueroute-desktop"
