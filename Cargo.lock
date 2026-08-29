@@ -25,6 +25,9 @@ version = "0.1.0"
 [[package]]
 name = "blueroute-linux"
 version = "0.1.0"
+dependencies = [
+ "blueroute-core",
+]
 
 [[package]]
 name = "blueroute-protocol"
