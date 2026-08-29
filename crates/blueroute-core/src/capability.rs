@@ -99,10 +99,7 @@ mod tests {
             panu: Some(Sourced::new(true, CapabilitySource::Measured)),
             nap: Some(Sourced::new(true, CapabilitySource::Measured)),
             routing: Some(Sourced::new(true, CapabilitySource::Configured)),
-            connection_policy_ceiling: Some(Sourced::new(
-                4,
-                CapabilitySource::ConservativeDefault,
-            )),
+            connection_policy_ceiling: Some(Sourced::new(4, CapabilitySource::ConservativeDefault)),
             ..NodeCapabilities::default()
         };
 
@@ -115,10 +112,7 @@ mod tests {
     fn internet_presence_is_distinct_from_willingness_to_share() {
         let capabilities = NodeCapabilities {
             has_internet: Some(Sourced::new(true, CapabilitySource::Discovered)),
-            willing_to_share_internet: Some(Sourced::new(
-                false,
-                CapabilitySource::Configured,
-            )),
+            willing_to_share_internet: Some(Sourced::new(false, CapabilitySource::Configured)),
             ..NodeCapabilities::default()
         };
 
