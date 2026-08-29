@@ -1,5 +1,9 @@
 #![doc = "Linux system adapter boundaries for BlueRoute."]
 
+mod identity;
+
+pub use identity::{NodeIdentityGenerator, NodeIdentityStore, SystemNodeIdentityGenerator};
+
 use std::future::Future;
 use std::net::IpAddr;
 use std::pin::Pin;
