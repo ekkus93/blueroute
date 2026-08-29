@@ -140,10 +140,7 @@ impl NetworkMembershipStore {
         drop(file);
 
         fs::rename(temporary_path, &self.path).map_err(|error| {
-            persistence_error(
-                "failed to replace the network membership state file",
-                error,
-            )
+            persistence_error("failed to replace the network membership state file", error)
         })?;
         sync_directory(self.parent_directory())
     }
@@ -153,16 +150,9 @@ impl NetworkMembershipStore {
             return Ok(());
         }
 
-        fs::set_permissions(
-            &self.path,
-            fs::Permissions::from_mode(MEMBERSHIP_FILE_MODE),
+        fs::set_permissions(&self.path, fs::Permissions::from_mode(MEMBERSHIP_FILE_MODE)).map_err(
+            |error| persistence_error("failed to secure the network membership state file", error),
         )
-        .map_err(|error| {
-            persistence_error(
-                "failed to secure the network membership state file",
-                error,
-            )
-        })
     }
 
     fn parent_directory(&self) -> &Path {
@@ -202,7 +192,9 @@ fn serialize_registry(registry: &MembershipRegistry) -> Result<String, CoreError
 fn parse_registry(serialized: &str) -> Result<MembershipRegistry, CoreError> {
     let mut lines = serialized.lines();
     if lines.next() != Some(FORMAT_HEADER) {
-        return Err(malformed_state("unsupported or missing membership format header"));
+        return Err(malformed_state(
+            "unsupported or missing membership format header",
+        ));
     }
 
     let mut registry = MembershipRegistry::default();
@@ -241,12 +233,14 @@ fn parse_network_record<'a>(
         return Err(malformed_line(line_number, "duplicate network record"));
     }
 
-    let state = parse_durable_state(required_field(fields, line_number, "membership state")?, line_number)?;
+    let state = parse_durable_state(
+        required_field(fields, line_number, "membership state")?,
+        line_number,
+    )?;
     let encoded_name = required_field(fields, line_number, "network name")?;
     let name_bytes = decode_hex(encoded_name, line_number)?;
-    let name = String::from_utf8(name_bytes).map_err(|error| {
-        malformed_value(line_number, "network name is not valid UTF-8", error)
-    })?;
+    let name = String::from_utf8(name_bytes)
+        .map_err(|error| malformed_value(line_number, "network name is not valid UTF-8", error))?;
     let display_name = DisplayName::new(name)
         .map_err(|error| malformed_value(line_number, "invalid network name", error))?;
 
@@ -267,8 +261,14 @@ fn parse_peer_record<'a>(
     let node_id = required_field(fields, line_number, "peer node id")?
         .parse::<NodeId>()
         .map_err(|error| malformed_value(line_number, "invalid peer node id", error))?;
-    let member = parse_bool(required_field(fields, line_number, "peer member flag")?, line_number)?;
-    let trusted = parse_bool(required_field(fields, line_number, "peer trust flag")?, line_number)?;
+    let member = parse_bool(
+        required_field(fields, line_number, "peer member flag")?,
+        line_number,
+    )?;
+    let trusted = parse_bool(
+        required_field(fields, line_number, "peer trust flag")?,
+        line_number,
+    )?;
 
     let membership = registry.network_mut(&network_id).ok_or_else(|| {
         malformed_line(
@@ -386,11 +386,7 @@ fn malformed_line(line_number: usize, message: &str) -> CoreError {
     malformed_state(&format!("line {line_number}: {message}"))
 }
 
-fn malformed_value(
-    line_number: usize,
-    message: &str,
-    error: impl std::fmt::Display,
-) -> CoreError {
+fn malformed_value(line_number: usize, message: &str, error: impl std::fmt::Display) -> CoreError {
     CoreError::with_diagnostic(
         ErrorKind::PersistenceError,
         format!("network membership state is malformed: line {line_number}: {message}"),
