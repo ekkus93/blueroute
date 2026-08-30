@@ -135,10 +135,9 @@ impl SecretFileStore {
     fn temporary_path(&self, name: &str) -> Result<PathBuf, CoreError> {
         self.secret_path(name)?;
         let sequence = NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed);
-        Ok(self.directory.join(format!(
-            ".{name}.tmp-{}-{sequence}",
-            std::process::id()
-        )))
+        Ok(self
+            .directory
+            .join(format!(".{name}.tmp-{}-{sequence}", std::process::id())))
     }
 
     fn write_temporary_and_replace(
@@ -269,9 +268,13 @@ mod tests {
 
         let store = SecretFileStore::new(&secret_directory);
         let restored = store.load("token").unwrap().unwrap();
-        assert_eq!(restored.expose(), b"token-value");
+        assert_eq!(restored.expose().as_slice(), b"token-value");
         assert_eq!(
-            fs::metadata(&secret_directory).unwrap().permissions().mode() & 0o777,
+            fs::metadata(&secret_directory)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
             SECRET_DIRECTORY_MODE
         );
         assert_eq!(
@@ -323,7 +326,7 @@ mod tests {
             .unwrap();
 
         let restored = store.load("control-key").unwrap().unwrap();
-        assert_eq!(restored.expose(), b"second");
+        assert_eq!(restored.expose().as_slice(), b"second");
         let entries = fs::read_dir(secret_directory).unwrap().count();
         assert_eq!(entries, 1);
     }
