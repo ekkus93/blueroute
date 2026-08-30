@@ -15,7 +15,7 @@ use blueroute_core::{CoreError, ErrorKind};
 use crate::{
     AdapterEventSubscription, AdapterHandle, BackendFuture, BluetoothAdapter,
     BluetoothAdapterEvent, BluetoothBackend, BluetoothPeerEvent, DiscoveredPeer,
-    PeerEventSubscription, PeerHandle,
+    IncomingPairingWindow, PeerEventSubscription, PeerHandle,
 };
 
 const BLUEZ_SERVICE: &str = "org.bluez";
@@ -30,6 +30,8 @@ const INTERFACES_ADDED: &str = "InterfacesAdded";
 const INTERFACES_REMOVED: &str = "InterfacesRemoved";
 const PROPERTIES_CHANGED: &str = "PropertiesChanged";
 const POWERED_PROPERTY: &str = "Powered";
+const PAIRABLE_PROPERTY: &str = "Pairable";
+const DISCOVERABLE_PROPERTY: &str = "Discoverable";
 const ALIAS_PROPERTY: &str = "Alias";
 const NAME_PROPERTY: &str = "Name";
 const PAIRED_PROPERTY: &str = "Paired";
@@ -39,6 +41,8 @@ const STOP_DISCOVERY_METHOD: &str = "StopDiscovery";
 const PAIR_METHOD: &str = "Pair";
 const CANCEL_PAIRING_METHOD: &str = "CancelPairing";
 const REGISTER_AGENT_METHOD: &str = "RegisterAgent";
+const UNREGISTER_AGENT_METHOD: &str = "UnregisterAgent";
+const REQUEST_DEFAULT_AGENT_METHOD: &str = "RequestDefaultAgent";
 const PAIRING_AGENT_PATH: &str = "/org/blueroute/PairingAgent";
 const PAIRING_AGENT_CAPABILITY: &str = "NoInputNoOutput";
 const PAIRING_TIMEOUT: Duration = Duration::from_secs(60);
@@ -124,6 +128,19 @@ impl BluetoothBackend for BluezBackend {
         })
     }
 
+    fn begin_incoming_pairing(
+        &self,
+        adapter: AdapterHandle,
+    ) -> BackendFuture<'_, IncomingPairingWindow> {
+        let pairing = Arc::clone(&self.pairing);
+        Box::pin(async move { begin_incoming_pairing(&self.connection, &pairing, &adapter).await })
+    }
+
+    fn end_incoming_pairing(&self, window: IncomingPairingWindow) -> BackendFuture<'_, ()> {
+        let pairing = Arc::clone(&self.pairing);
+        Box::pin(async move { end_incoming_pairing(&self.connection, &pairing, window).await })
+    }
+
     fn pair(&self, peer: PeerHandle) -> BackendFuture<'_, ()> {
         let pairing = Arc::clone(&self.pairing);
         Box::pin(async move { pair_peer(&self.connection, &pairing, &peer).await })
@@ -136,39 +153,87 @@ impl BluetoothBackend for BluezBackend {
 
 #[derive(Debug, Default)]
 struct PairingControl {
-    active_peer: Mutex<Option<String>>,
+    state: Mutex<PairingControlState>,
+}
+
+#[derive(Debug, Default)]
+struct PairingControlState {
+    active_peer: Option<String>,
+    incoming_adapter: Option<String>,
 }
 
 impl PairingControl {
     fn begin(self: &Arc<Self>, peer: &PeerHandle) -> Result<PairingPermit, CoreError> {
-        let mut active = self.active_peer.lock().map_err(|_| {
-            CoreError::new(
-                ErrorKind::Internal,
-                "Bluetooth pairing authorization state is unavailable",
-            )
-        })?;
-        if active.is_some() {
+        let mut state = self.lock_state()?;
+        if state.active_peer.is_some() || state.incoming_adapter.is_some() {
             return Err(CoreError::new(
                 ErrorKind::InvalidState,
                 "another Bluetooth pairing operation is already active",
             ));
         }
         let peer = peer.as_str().to_owned();
-        *active = Some(peer.clone());
+        state.active_peer = Some(peer.clone());
         Ok(PairingPermit {
             control: Arc::clone(self),
             peer,
         })
     }
 
+    fn begin_incoming(&self, adapter: &AdapterHandle) -> Result<(), CoreError> {
+        let mut state = self.lock_state()?;
+        if state.active_peer.is_some() || state.incoming_adapter.is_some() {
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "another Bluetooth pairing operation is already active",
+            ));
+        }
+        state.incoming_adapter = Some(adapter.as_str().to_owned());
+        Ok(())
+    }
+
+    fn end_incoming(&self, adapter: &AdapterHandle) -> Result<(), CoreError> {
+        let mut state = self.lock_state()?;
+        if state.incoming_adapter.as_deref() != Some(adapter.as_str()) {
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "incoming Bluetooth pairing window is not active for this adapter",
+            ));
+        }
+        state.incoming_adapter = None;
+        Ok(())
+    }
+
+    fn clear_incoming(&self, adapter: &AdapterHandle) {
+        if let Ok(mut state) = self.state.lock()
+            && state.incoming_adapter.as_deref() == Some(adapter.as_str())
+        {
+            state.incoming_adapter = None;
+        }
+    }
+
     fn authorizes(&self, device: &OwnedObjectPath) -> bool {
-        self.active_peer
+        self.state
             .lock()
-            .map(|active| active.as_deref() == Some(device.as_str()))
+            .map(|state| {
+                state.active_peer.as_deref() == Some(device.as_str())
+                    || state.incoming_adapter.as_deref().is_some_and(|adapter| {
+                        is_device_object_path_for_adapter_path(device.as_str(), adapter)
+                    })
+            })
             .unwrap_or(false)
+    }
+
+    fn lock_state(&self) -> Result<std::sync::MutexGuard<'_, PairingControlState>, CoreError> {
+        self.state.lock().map_err(|_| {
+            CoreError::new(
+                ErrorKind::Internal,
+                "Bluetooth pairing authorization state is unavailable",
+            )
+        })
     }
 }
 
+#[derive(Debug)]
 struct PairingPermit {
     control: Arc<PairingControl>,
     peer: String,
@@ -176,10 +241,10 @@ struct PairingPermit {
 
 impl Drop for PairingPermit {
     fn drop(&mut self) {
-        if let Ok(mut active) = self.control.active_peer.lock()
-            && active.as_deref() == Some(self.peer.as_str())
+        if let Ok(mut state) = self.control.state.lock()
+            && state.active_peer.as_deref() == Some(self.peer.as_str())
         {
-            *active = None;
+            state.active_peer = None;
         }
     }
 }
@@ -324,6 +389,221 @@ fn pairing_agent_registration_error(
         format!("failed to {operation}"),
         error.to_string(),
     )
+}
+
+async fn request_default_pairing_agent(connection: &Connection) -> Result<(), CoreError> {
+    let manager = Proxy::new(
+        connection,
+        BLUEZ_SERVICE,
+        BLUEZ_ROOT_PATH,
+        AGENT_MANAGER_INTERFACE,
+    )
+    .await
+    .map_err(|error| {
+        pairing_agent_registration_error("create the BlueZ agent-manager proxy", error)
+    })?;
+    let agent_path = OwnedObjectPath::try_from(PAIRING_AGENT_PATH).map_err(|error| {
+        CoreError::with_diagnostic(
+            ErrorKind::Internal,
+            "BlueRoute pairing-agent object path is invalid",
+            error.to_string(),
+        )
+    })?;
+    manager
+        .call_method(REQUEST_DEFAULT_AGENT_METHOD, &(agent_path,))
+        .await
+        .map(|_| ())
+        .map_err(|error| {
+            pairing_agent_registration_error("make the BlueRoute pairing agent the default", error)
+        })
+}
+
+async fn unregister_pairing_agent(connection: &Connection) -> Result<(), CoreError> {
+    let manager = Proxy::new(
+        connection,
+        BLUEZ_SERVICE,
+        BLUEZ_ROOT_PATH,
+        AGENT_MANAGER_INTERFACE,
+    )
+    .await
+    .map_err(|error| {
+        pairing_agent_registration_error("create the BlueZ agent-manager proxy", error)
+    })?;
+    let agent_path = OwnedObjectPath::try_from(PAIRING_AGENT_PATH).map_err(|error| {
+        CoreError::with_diagnostic(
+            ErrorKind::Internal,
+            "BlueRoute pairing-agent object path is invalid",
+            error.to_string(),
+        )
+    })?;
+    match manager
+        .call_method(UNREGISTER_AGENT_METHOD, &(agent_path,))
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(zbus::Error::MethodError(name, _, _))
+            if name.as_str() == "org.bluez.Error.DoesNotExist" =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(pairing_agent_registration_error(
+            "unregister the BlueRoute pairing agent",
+            error,
+        )),
+    }
+}
+
+async fn begin_incoming_pairing(
+    connection: &Connection,
+    control: &Arc<PairingControl>,
+    adapter: &AdapterHandle,
+) -> Result<IncomingPairingWindow, CoreError> {
+    let current = ensure_adapter_exists(connection, adapter).await?;
+    if !current.powered {
+        return Err(CoreError::new(
+            ErrorKind::AdapterDisabled,
+            "Bluetooth adapter must be powered before incoming pairing can start",
+        ));
+    }
+
+    let proxy = Proxy::new(
+        connection,
+        BLUEZ_SERVICE,
+        adapter.as_str(),
+        ADAPTER_INTERFACE,
+    )
+    .await
+    .map_err(|error| incoming_pairing_error("create the Bluetooth adapter proxy", error))?;
+    let restore_pairable: bool = proxy
+        .get_property(PAIRABLE_PROPERTY)
+        .await
+        .map_err(|error| incoming_pairing_error("read Bluetooth Pairable state", error))?;
+    let restore_discoverable: bool = proxy
+        .get_property(DISCOVERABLE_PROPERTY)
+        .await
+        .map_err(|error| incoming_pairing_error("read Bluetooth Discoverable state", error))?;
+
+    ensure_pairing_agent(connection, control).await?;
+    control.begin_incoming(adapter)?;
+    if let Err(error) = request_default_pairing_agent(connection).await {
+        control.clear_incoming(adapter);
+        return Err(error);
+    }
+    if let Err(error) = proxy.set_property(PAIRABLE_PROPERTY, true).await {
+        control.clear_incoming(adapter);
+        let _ = unregister_pairing_agent(connection).await;
+        return Err(incoming_pairing_property_error(
+            "enable Bluetooth Pairable state",
+            error,
+        ));
+    }
+    if let Err(error) = proxy.set_property(DISCOVERABLE_PROPERTY, true).await {
+        let _ = proxy
+            .set_property(PAIRABLE_PROPERTY, restore_pairable)
+            .await;
+        control.clear_incoming(adapter);
+        let _ = unregister_pairing_agent(connection).await;
+        return Err(incoming_pairing_property_error(
+            "enable Bluetooth Discoverable state",
+            error,
+        ));
+    }
+
+    Ok(IncomingPairingWindow {
+        adapter: adapter.clone(),
+        restore_discoverable,
+        restore_pairable,
+    })
+}
+
+async fn end_incoming_pairing(
+    connection: &Connection,
+    control: &Arc<PairingControl>,
+    window: IncomingPairingWindow,
+) -> Result<(), CoreError> {
+    control.end_incoming(&window.adapter)?;
+
+    let mut first_error = None;
+    match Proxy::new(
+        connection,
+        BLUEZ_SERVICE,
+        window.adapter.as_str(),
+        ADAPTER_INTERFACE,
+    )
+    .await
+    {
+        Ok(proxy) => {
+            if let Err(error) = proxy
+                .set_property(DISCOVERABLE_PROPERTY, window.restore_discoverable)
+                .await
+            {
+                first_error = Some(incoming_pairing_property_error(
+                    "restore Bluetooth Discoverable state",
+                    error,
+                ));
+            }
+            if let Err(error) = proxy
+                .set_property(PAIRABLE_PROPERTY, window.restore_pairable)
+                .await
+                && first_error.is_none()
+            {
+                first_error = Some(incoming_pairing_property_error(
+                    "restore Bluetooth Pairable state",
+                    error,
+                ));
+            }
+        }
+        Err(error) => {
+            first_error = Some(incoming_pairing_error(
+                "create the Bluetooth adapter proxy during pairing cleanup",
+                error,
+            ));
+        }
+    }
+
+    if let Err(error) = unregister_pairing_agent(connection).await
+        && first_error.is_none()
+    {
+        first_error = Some(error);
+    }
+    match first_error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+fn incoming_pairing_property_error(operation: &'static str, error: zbus::fdo::Error) -> CoreError {
+    let kind = match &error {
+        zbus::fdo::Error::UnknownObject(_) => ErrorKind::MissingAdapter,
+        zbus::fdo::Error::AccessDenied(_) | zbus::fdo::Error::AuthFailed(_) => {
+            ErrorKind::AuthenticationFailed
+        }
+        _ => ErrorKind::CapabilityUnavailable,
+    };
+    CoreError::with_diagnostic(kind, format!("failed to {operation}"), error.to_string())
+}
+
+fn incoming_pairing_error(operation: &'static str, error: zbus::Error) -> CoreError {
+    let kind = match &error {
+        zbus::Error::MethodError(name, _, _)
+            if matches!(
+                name.as_str(),
+                "org.bluez.Error.DoesNotExist" | "org.freedesktop.DBus.Error.UnknownObject"
+            ) =>
+        {
+            ErrorKind::MissingAdapter
+        }
+        zbus::Error::MethodError(name, _, _)
+            if matches!(
+                name.as_str(),
+                "org.bluez.Error.NotAuthorized" | "org.freedesktop.DBus.Error.AccessDenied"
+            ) =>
+        {
+            ErrorKind::AuthenticationFailed
+        }
+        _ => ErrorKind::CapabilityUnavailable,
+    };
+    CoreError::with_diagnostic(kind, format!("failed to {operation}"), error.to_string())
 }
 
 async fn peer_by_handle(
@@ -816,7 +1096,11 @@ fn optional_peer_string(
 }
 
 fn is_device_object_path_for_adapter(path: &str, adapter: &AdapterHandle) -> bool {
-    let prefix = format!("{}/", adapter.as_str().trim_end_matches('/'));
+    is_device_object_path_for_adapter_path(path, adapter.as_str())
+}
+
+fn is_device_object_path_for_adapter_path(path: &str, adapter: &str) -> bool {
+    let prefix = format!("{}/", adapter.trim_end_matches('/'));
     let Some(suffix) = path.strip_prefix(&prefix) else {
         return false;
     };
@@ -1314,5 +1598,36 @@ mod tests {
         assert!(agent.request_pin_code(path.clone()).is_err());
         assert!(agent.request_passkey(path.clone()).is_err());
         assert!(agent.request_confirmation(path, 123456).is_err());
+    }
+
+    #[test]
+    fn incoming_pairing_window_authorizes_only_selected_adapter_devices() {
+        let control = Arc::new(PairingControl::default());
+        let adapter = AdapterHandle::new("/org/bluez/hci0").unwrap();
+        control.begin_incoming(&adapter).unwrap();
+        let allowed = OwnedObjectPath::try_from("/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF").unwrap();
+        let other = OwnedObjectPath::try_from("/org/bluez/hci1/dev_AA_BB_CC_DD_EE_FF").unwrap();
+        assert!(control.authorizes(&allowed));
+        assert!(!control.authorizes(&other));
+        control.end_incoming(&adapter).unwrap();
+        assert!(!control.authorizes(&allowed));
+    }
+
+    #[test]
+    fn incoming_and_outgoing_pairing_modes_are_mutually_exclusive() {
+        let control = Arc::new(PairingControl::default());
+        let adapter = AdapterHandle::new("/org/bluez/hci0").unwrap();
+        let peer = PeerHandle::new("/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF").unwrap();
+        control.begin_incoming(&adapter).unwrap();
+        assert_eq!(
+            control.begin(&peer).unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
+        control.end_incoming(&adapter).unwrap();
+        let _permit = control.begin(&peer).unwrap();
+        assert_eq!(
+            control.begin_incoming(&adapter).unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
     }
 }
