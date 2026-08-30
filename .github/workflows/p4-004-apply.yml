@@ -24,7 +24,9 @@ jobs:
       - name: Select pinned Rust toolchain
         run: rustup override set 1.95.0
       - name: Apply implementation
-        run: python .github/p4-004-apply.py
+        run: |
+          python .github/p4-004-apply.py
+          python .github/p4-004-fix.py
       - name: Format
         run: cargo fmt --all
       - name: Refresh lockfile
@@ -37,7 +39,7 @@ jobs:
         run: cargo test --workspace --locked
       - name: Commit product changes and remove helper
         run: |
-          rm .github/p4-004-apply.py .github/workflows/p4-004-apply.yml
+          rm .github/p4-004-apply.py .github/p4-004-fix.py .github/workflows/p4-004-apply.yml
           git add -A
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
