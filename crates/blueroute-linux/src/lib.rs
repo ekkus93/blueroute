@@ -77,6 +77,20 @@ pub struct DiscoveredPeer {
     pub trusted: bool,
 }
 
+/// Opaque restore token for a bounded incoming Bluetooth pairing window.
+#[derive(Debug, Eq, PartialEq)]
+pub struct IncomingPairingWindow {
+    pub(crate) adapter: AdapterHandle,
+    pub(crate) restore_discoverable: bool,
+    pub(crate) restore_pairable: bool,
+}
+
+impl IncomingPairingWindow {
+    pub fn adapter(&self) -> &AdapterHandle {
+        &self.adapter
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BluetoothPeerEvent {
     Added(DiscoveredPeer),
@@ -100,6 +114,11 @@ pub trait BluetoothBackend: Send + Sync {
         &self,
         adapter: AdapterHandle,
     ) -> BackendFuture<'_, Box<dyn PeerEventSubscription>>;
+    fn begin_incoming_pairing(
+        &self,
+        adapter: AdapterHandle,
+    ) -> BackendFuture<'_, IncomingPairingWindow>;
+    fn end_incoming_pairing(&self, window: IncomingPairingWindow) -> BackendFuture<'_, ()>;
     fn pair(&self, peer: PeerHandle) -> BackendFuture<'_, ()>;
     fn set_trusted(&self, peer: PeerHandle, trusted: bool) -> BackendFuture<'_, ()>;
 }
@@ -279,6 +298,23 @@ mod tests {
             })
         }
 
+        fn begin_incoming_pairing(
+            &self,
+            adapter: AdapterHandle,
+        ) -> BackendFuture<'_, IncomingPairingWindow> {
+            Box::pin(async move {
+                Ok(IncomingPairingWindow {
+                    adapter,
+                    restore_discoverable: false,
+                    restore_pairable: false,
+                })
+            })
+        }
+
+        fn end_incoming_pairing(&self, _window: IncomingPairingWindow) -> BackendFuture<'_, ()> {
+            Box::pin(async { Ok(()) })
+        }
+
         fn pair(&self, _peer: PeerHandle) -> BackendFuture<'_, ()> {
             Box::pin(async { Ok(()) })
         }
@@ -343,6 +379,9 @@ mod tests {
         assert!(*backend.discovery_started.lock().unwrap());
         let mut peers = resolve(backend.subscribe_peer_events(adapters[0].handle.clone())).unwrap();
         assert_eq!(resolve(peers.next_event()).unwrap(), None);
+        let window = resolve(backend.begin_incoming_pairing(adapters[0].handle.clone())).unwrap();
+        assert_eq!(window.adapter(), &adapters[0].handle);
+        resolve(backend.end_incoming_pairing(window)).unwrap();
     }
 
     #[test]

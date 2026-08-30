@@ -20,12 +20,22 @@ BlueZ authentication rejection/cancellation/failure are translated into `ErrorKi
 
 Pairing and BlueZ trust are deliberately separate. `pair()` does not silently mark a peer trusted. `set_trusted(peer, true)` requires the peer to already be paired; untrusting is always allowed. Neither operation changes BlueRoute network membership.
 
-## Hardware acceptance probe
+## Hardware acceptance probes
 
-The probe below discovers a peer by exact BlueZ object path or exact display name, invokes the Rust pairing adapter, sets trust, and verifies the refreshed `Device1` state:
+For a fully Rust-controlled two-node test, run the bounded incoming pairing window on the receiving Linux node first:
+
+```bash
+cargo run -p blueroute-linux --example bluez_pair_accept --locked
+```
+
+The acceptor temporarily registers BlueRoute as the BlueZ default `NoInputNoOutput` agent and enables `Pairable` and `Discoverable` on the selected adapter for 120 seconds. It authorizes only Device1 objects under that adapter, restores the adapter's previous pairable/discoverable values when the window closes, clears authorization before cleanup, and unregisters the BlueRoute agent so it does not remain the system-wide default.
+
+Then, while that window is open, run the initiator from the other Linux node. The probe discovers a peer by exact BlueZ object path or exact display name, invokes the Rust pairing adapter, explicitly sets trust, and verifies the refreshed `Device1` state:
 
 ```bash
 cargo run -p blueroute-linux --example bluez_pair_probe --locked -- debiancb1
 ```
 
-The remote test node must be powered, discoverable/pairable as appropriate, and have an authentication agent capable of completing its side of the pairing exchange. The P4-004 task remains in progress until two Linux test nodes complete this Rust-initiated flow and the evidence is recorded.
+`RequestDefaultAgent` may require additional system policy authorization on some Linux distributions. BlueRoute reports that as a typed capability/authentication failure rather than falling back to a graphical agent or `bluetoothctl`.
+
+The P4-004 task remains in progress until two Linux test nodes complete this Rust-controlled acceptor/initiator flow and the evidence is recorded.
