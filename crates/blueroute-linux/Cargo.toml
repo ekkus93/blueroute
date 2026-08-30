@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 blueroute-core = { path = "../blueroute-core" }
+async-io = "2.6.0"
 futures-lite = "2.6.0"
 zbus = { version = "5.19.0", default-features = false, features = ["async-io"] }
 
