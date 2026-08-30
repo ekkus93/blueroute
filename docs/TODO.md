@@ -44,7 +44,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P4-002 | `[x]` | Direct system-D-Bus BlueZ service/adapter discovery, Powered-state mapping, and adapter-change subscriptions are implemented and green in locked CI; physical-controller validation remains in P1. |
 | P4-003 | `[x]` | BlueZ discovery lifecycle, Device1 mapping, peer events, and real nearby-Linux-node hardware acceptance are complete; `debiancb1` was observed through the Rust adapter. |
 | P4-004 | `[x]` | BlueZ pairing/trust, Rust-controlled Agent1 callbacks, typed rejection/timeout handling, and real two-node Rust-controlled hardware acceptance are complete. |
-| P4-005 | `[-]` | BlueZ Network1 PANU connect/interface mapping (including udev rename reconciliation), bounded connect timeout/cancellation, loss observation, and idempotent disconnect are implemented; working PANU data-plane hardware acceptance remains pending. |
+| P4-005 | `[x]` | BlueZ Network1 PANU connect/interface mapping (including udev rename reconciliation), bounded connect timeout/cancellation, loss observation, idempotent disconnect, and real two-node PANU data-plane hardware acceptance are complete. |
 | P5-001 | `[-]` | API version contract and compatibility rules are implemented/tested; client-side incompatibility enforcement remains pending P5-005. |
 | P5-002 | `[-]` | Semantic command/response model implemented; serialization round-trip tests remain. |
 | P5-003 | `[x]` | Event model and deterministic structural tests are implemented and green in CI. |
@@ -474,7 +474,7 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 **Acceptance**
 
 - Hardware integration path creates a working PANU data plane on supported test hardware.
-- Software implementation is complete; real PANU data-plane evidence is still required before this task becomes `[x]`.
+- Hardware acceptance is recorded in `docs/P4-005-HARDWARE-EVIDENCE-2026-08-30.md`; `arisu` established a Rust-controlled PANU link to `debiancb1` and carried IPv4/ICMP traffic over BNEP with 0% packet loss.
 - Implementation/design notes and the hardware probe are documented in `docs/P4-005-PANU.md`.
 
 ## P4-006 — Implement NAP lifecycle adapter
