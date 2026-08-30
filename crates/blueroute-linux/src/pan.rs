@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use futures_lite::StreamExt;
 use zbus::message::Type as MessageType;
 use zbus::names::OwnedInterfaceName;
-use zbus::zvariant::OwnedValue;
+use zbus::zvariant::{OwnedObjectPath, OwnedValue};
 use zbus::{Connection, MatchRule, Message, MessageStream, Proxy};
 
 use blueroute_core::{CoreError, ErrorKind};
@@ -16,7 +16,9 @@ use crate::{
 const BLUEZ_SERVICE: &str = "org.bluez";
 const NETWORK_INTERFACE: &str = "org.bluez.Network1";
 const DEVICE_INTERFACE: &str = "org.bluez.Device1";
+const OBJECT_MANAGER_INTERFACE: &str = "org.freedesktop.DBus.ObjectManager";
 const PROPERTIES_INTERFACE: &str = "org.freedesktop.DBus.Properties";
+const INTERFACES_REMOVED: &str = "InterfacesRemoved";
 const PROPERTIES_CHANGED: &str = "PropertiesChanged";
 const CONNECT_METHOD: &str = "Connect";
 const DISCONNECT_METHOD: &str = "Disconnect";
@@ -40,11 +42,13 @@ impl PanBackend for BluezBackend {
     ) -> BackendFuture<'_, Box<dyn PanuEventSubscription>> {
         Box::pin(async move {
             validate_panu_attachment(&attachment)?;
+            // Subscribe before taking the state snapshot so a loss cannot fall into a
+            // check-then-subscribe race window.
+            let stream = bluez_signal_stream(&self.connection).await?;
             let connected =
                 current_panu_attachment(&self.connection, attachment.peer.as_ref().unwrap())
                     .await?
                     .is_some();
-            let stream = bluez_signal_stream(&self.connection).await?;
             Ok(Box::new(BluezPanuSubscription {
                 connection: self.connection.clone(),
                 stream,
@@ -159,11 +163,24 @@ async fn connect_panu(
 }
 
 async fn disconnect_panu(connection: &Connection, peer: &PeerHandle) -> Result<(), CoreError> {
+    // Desired-state semantics: if the authoritative Network1 state is already down,
+    // disconnect is complete without issuing another method call.
+    if current_panu_attachment(connection, peer).await?.is_none() {
+        return Ok(());
+    }
+
     let proxy = network_proxy(connection, peer).await?;
     match proxy.call_method(DISCONNECT_METHOD, &()).await {
         Ok(_) => Ok(()),
         Err(error) if disconnect_is_already_absent(&error) => Ok(()),
-        Err(error) => Err(disconnect_error(error)),
+        Err(error) => {
+            // BlueZ Network1 has used generic Failed for some teardown paths. Re-read
+            // the desired state before deciding that a failed method call is fatal.
+            match current_panu_attachment(connection, peer).await {
+                Ok(None) => Ok(()),
+                Ok(Some(_)) | Err(_) => Err(disconnect_error(error)),
+            }
+        }
     }
 }
 
@@ -257,8 +274,26 @@ async fn bluez_signal_stream(connection: &Connection) -> Result<MessageStream, C
 
 fn panu_loss_trigger(message: &Message, peer: &PeerHandle) -> Result<bool, CoreError> {
     let header = message.header();
-    if header.interface().map(|name| name.as_str()) != Some(PROPERTIES_INTERFACE)
-        || header.member().map(|name| name.as_str()) != Some(PROPERTIES_CHANGED)
+    let interface = header.interface().map(|name| name.as_str());
+    let member = header.member().map(|name| name.as_str());
+
+    if interface == Some(OBJECT_MANAGER_INTERFACE) && member == Some(INTERFACES_REMOVED) {
+        let (path, interfaces): (OwnedObjectPath, Vec<OwnedInterfaceName>) =
+            message.body().deserialize().map_err(|error| {
+                pan_error(
+                    ErrorKind::ProtocolError,
+                    "failed to decode a Bluetooth PAN InterfacesRemoved signal",
+                    error,
+                )
+            })?;
+        return Ok(path.as_str() == peer.as_str()
+            && interfaces.iter().any(|name| {
+                matches!(name.as_str(), NETWORK_INTERFACE | DEVICE_INTERFACE)
+            }));
+    }
+
+    if interface != Some(PROPERTIES_INTERFACE)
+        || member != Some(PROPERTIES_CHANGED)
         || header.path().map(|path| path.as_str()) != Some(peer.as_str())
     {
         return Ok(false);
@@ -276,20 +311,32 @@ fn panu_loss_trigger(message: &Message, peer: &PeerHandle) -> Result<bool, CoreE
         )
     })?;
 
-    let property = match interface_name.as_str() {
+    Ok(properties_change_can_affect_panu_state(
+        interface_name.as_str(),
+        &changed,
+        &invalidated,
+    ))
+}
+
+fn properties_change_can_affect_panu_state(
+    interface: &str,
+    changed: &HashMap<String, OwnedValue>,
+    invalidated: &[String],
+) -> bool {
+    let properties = match interface {
         NETWORK_INTERFACE => Some(&[CONNECTED_PROPERTY, INTERFACE_PROPERTY][..]),
         DEVICE_INTERFACE => Some(&[CONNECTED_PROPERTY][..]),
         _ => None,
     };
-    let Some(properties) = property else {
-        return Ok(false);
+    let Some(properties) = properties else {
+        return false;
     };
-    Ok(properties.iter().any(|property| {
+    properties.iter().any(|property| {
         changed.contains_key(*property)
             || invalidated
                 .iter()
                 .any(|invalid| invalid.as_str() == *property)
-    }))
+    })
 }
 
 fn connect_error(error: zbus::Error) -> CoreError {
@@ -430,6 +477,33 @@ mod tests {
             validate_panu_attachment(&attachment).unwrap_err().kind(),
             ErrorKind::InvalidInput
         );
+    }
+
+    #[test]
+    fn network_and_device_connected_changes_trigger_state_refresh() {
+        let mut changed = HashMap::new();
+        changed.insert(CONNECTED_PROPERTY.to_owned(), OwnedValue::from(false));
+        assert!(properties_change_can_affect_panu_state(
+            NETWORK_INTERFACE,
+            &changed,
+            &[]
+        ));
+        assert!(properties_change_can_affect_panu_state(
+            DEVICE_INTERFACE,
+            &changed,
+            &[]
+        ));
+    }
+
+    #[test]
+    fn unrelated_properties_do_not_trigger_state_refresh() {
+        let mut changed = HashMap::new();
+        changed.insert("Alias".to_owned(), OwnedValue::from(false));
+        assert!(!properties_change_can_affect_panu_state(
+            DEVICE_INTERFACE,
+            &changed,
+            &[]
+        ));
     }
 
     #[test]
