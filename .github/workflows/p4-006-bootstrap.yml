@@ -1,0 +1,66 @@
+name: Temporary P4-006 implementation validation
+
+on:
+  push:
+    branches: [P4-006_nap_lifecycle]
+    paths:
+      - .github/p4-006-patch.00
+      - .github/p4-006-patch.01
+      - .github/p4-006-patch.02
+      - .github/workflows/p4-006-bootstrap.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-validate-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: P4-006_nap_lifecycle
+          fetch-depth: 0
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt,clippy
+
+      - name: Select pinned Rust toolchain
+        run: rustup override set 1.95.0
+
+      - name: Verify and apply implementation patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'f8cd613315f77d14e62aff79f98e2f5cc220e4571553ec9359d250121264972e  .github/p4-006-patch.00' | sha256sum -c -
+          echo '670458416df61e6bff57d7f28ce960f325ba357627211df265589c1319f95e18  .github/p4-006-patch.01' | sha256sum -c -
+          echo '691c620be67e43c46bb63a7b704e62723e73432aa3c7f5b2c0607624a011ed9a  .github/p4-006-patch.02' | sha256sum -c -
+          cat .github/p4-006-patch.00 .github/p4-006-patch.01 .github/p4-006-patch.02 > /tmp/p4-006.patch.gz.b64
+          base64 -d /tmp/p4-006.patch.gz.b64 | gzip -d > /tmp/p4-006.patch
+          echo 'b91e20c694c1e89950e7d89cc1559188d4807c04aa93f7bf29eb9054a4404d2e  /tmp/p4-006.patch' | sha256sum -c -
+          git apply --check /tmp/p4-006.patch
+          git apply /tmp/p4-006.patch
+          rm .github/p4-006-patch.00 .github/p4-006-patch.01 .github/p4-006-patch.02 .github/workflows/p4-006-bootstrap.yml
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check workspace
+        run: cargo check --workspace --locked
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace --locked
+
+      - name: Commit validated implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'feat: implement BlueZ NAP lifecycle'
+          git push origin HEAD:P4-006_nap_lifecycle
