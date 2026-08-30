@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::time::Duration;
 
 use async_io::Timer;
@@ -16,6 +17,7 @@ use crate::{
 };
 
 const BLUEZ_SERVICE: &str = "org.bluez";
+const ADAPTER_INTERFACE: &str = "org.bluez.Adapter1";
 const NETWORK_INTERFACE: &str = "org.bluez.Network1";
 const DEVICE_INTERFACE: &str = "org.bluez.Device1";
 const OBJECT_MANAGER_INTERFACE: &str = "org.freedesktop.DBus.ObjectManager";
@@ -26,9 +28,12 @@ const CONNECT_METHOD: &str = "Connect";
 const DISCONNECT_METHOD: &str = "Disconnect";
 const CONNECTED_PROPERTY: &str = "Connected";
 const INTERFACE_PROPERTY: &str = "Interface";
+const ADDRESS_PROPERTY: &str = "Address";
 const REMOTE_NAP_ROLE: &str = "nap";
 const SIGNAL_QUEUE_CAPACITY: usize = 64;
 const PANU_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const PANU_INTERFACE_SETTLE_DELAY: Duration = Duration::from_millis(300);
+const SYS_CLASS_NET: &str = "/sys/class/net";
 
 impl PanBackend for BluezBackend {
     fn connect_panu(&self, peer: PeerHandle) -> BackendFuture<'_, PanAttachment> {
@@ -141,6 +146,8 @@ async fn connect_panu(
         return Ok(attachment);
     }
 
+    let local_address = local_adapter_address_for_peer(connection, peer).await?;
+    let previous_interfaces = kernel_interfaces_with_address(&local_address)?;
     let proxy = network_proxy(connection, peer).await?;
     let connect = async {
         proxy
@@ -162,6 +169,16 @@ async fn connect_panu(
                     error,
                 )
             })?;
+            // BlueZ returns the kernel-created name (normally bnepN), but udev may
+            // immediately rename that netdev according to predictable-interface policy.
+            // Give udev a short settle window, then resolve the live kernel name.
+            Timer::after(PANU_INTERFACE_SETTLE_DELAY).await;
+            let current_interfaces = kernel_interfaces_with_address(&local_address)?;
+            let interface = select_panu_interface_name(
+                &interface,
+                &current_interfaces,
+                Some(&previous_interfaces),
+            )?;
             panu_attachment(peer, interface)
         }
         Ok(None) => match abort_pending_panu_connect(connection, peer).await {
@@ -251,7 +268,111 @@ async fn current_panu_attachment(
         .get_property(INTERFACE_PROPERTY)
         .await
         .map_err(|error| property_error(INTERFACE_PROPERTY, error))?;
+    let local_address = local_adapter_address_for_peer(connection, peer).await?;
+    let current_interfaces = kernel_interfaces_with_address(&local_address)?;
+    let interface = select_panu_interface_name(&interface, &current_interfaces, None)?;
     panu_attachment(peer, interface).map(Some)
+}
+
+async fn local_adapter_address_for_peer(
+    connection: &Connection,
+    peer: &PeerHandle,
+) -> Result<String, CoreError> {
+    let adapter_path = peer_adapter_path(peer)?;
+    let proxy = Proxy::new(connection, BLUEZ_SERVICE, adapter_path, ADAPTER_INTERFACE)
+        .await
+        .map_err(|error| {
+            pan_error(
+                ErrorKind::BluezUnavailable,
+                "failed to access the Bluetooth adapter for PAN interface resolution",
+                error,
+            )
+        })?;
+    proxy
+        .get_property(ADDRESS_PROPERTY)
+        .await
+        .map_err(|error| property_error(ADDRESS_PROPERTY, error))
+}
+
+fn peer_adapter_path(peer: &PeerHandle) -> Result<&str, CoreError> {
+    peer.as_str()
+        .rsplit_once("/dev_")
+        .map(|(adapter, _)| adapter)
+        .filter(|adapter| !adapter.is_empty())
+        .ok_or_else(|| {
+            CoreError::new(
+                ErrorKind::ProtocolError,
+                "Bluetooth peer handle does not identify its adapter",
+            )
+        })
+}
+
+fn kernel_interfaces_with_address(address: &str) -> Result<HashSet<String>, CoreError> {
+    let entries = fs::read_dir(SYS_CLASS_NET).map_err(|error| {
+        pan_error(
+            ErrorKind::PanFailure,
+            "failed to inspect Linux network interfaces for the Bluetooth PAN link",
+            error,
+        )
+    })?;
+    let mut interfaces = HashSet::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            pan_error(
+                ErrorKind::PanFailure,
+                "failed to inspect a Linux network interface for the Bluetooth PAN link",
+                error,
+            )
+        })?;
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let interface_address = match fs::read_to_string(entry.path().join("address")) {
+            Ok(value) => value,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(pan_error(
+                    ErrorKind::PanFailure,
+                    "failed to read a Linux network-interface address for PAN resolution",
+                    error,
+                ));
+            }
+        };
+        if interface_address.trim().eq_ignore_ascii_case(address) {
+            interfaces.insert(name);
+        }
+    }
+    Ok(interfaces)
+}
+
+fn select_panu_interface_name(
+    reported: &str,
+    current: &HashSet<String>,
+    previous: Option<&HashSet<String>>,
+) -> Result<String, CoreError> {
+    if current.contains(reported) {
+        return Ok(reported.to_owned());
+    }
+
+    if let Some(previous) = previous {
+        let new_interfaces = current
+            .difference(previous)
+            .cloned()
+            .collect::<Vec<String>>();
+        if new_interfaces.len() == 1 {
+            return Ok(new_interfaces[0].clone());
+        }
+    } else if current.len() == 1 {
+        return Ok(current.iter().next().expect("one interface exists").clone());
+    }
+
+    let mut candidates = current.iter().cloned().collect::<Vec<_>>();
+    candidates.sort();
+    Err(CoreError::with_diagnostic(
+        ErrorKind::PanFailure,
+        "Bluetooth PAN interface was renamed but its current Linux name could not be resolved",
+        format!("BlueZ reported {reported:?}; matching kernel interfaces: {candidates:?}"),
+    ))
 }
 
 async fn network_proxy<'a>(
@@ -593,6 +714,45 @@ mod tests {
         assert_eq!(
             connect_method_error("org.freedesktop.DBus.Error.UnknownMethod").0,
             ErrorKind::CapabilityUnavailable
+        );
+    }
+
+    #[test]
+    fn reported_kernel_interface_is_preferred_when_it_still_exists() {
+        let current = HashSet::from(["bnep0".to_owned(), "enx001122334455".to_owned()]);
+        assert_eq!(
+            select_panu_interface_name("bnep0", &current, None).unwrap(),
+            "bnep0"
+        );
+    }
+
+    #[test]
+    fn newly_renamed_interface_is_selected_after_connect() {
+        let previous = HashSet::from(["enxaaaaaaaaaaaa".to_owned()]);
+        let current = HashSet::from(["enxaaaaaaaaaaaa".to_owned(), "enx001122334455".to_owned()]);
+        assert_eq!(
+            select_panu_interface_name("bnep0", &current, Some(&previous)).unwrap(),
+            "enx001122334455"
+        );
+    }
+
+    #[test]
+    fn existing_connection_resolves_unique_renamed_interface() {
+        let current = HashSet::from(["enx001122334455".to_owned()]);
+        assert_eq!(
+            select_panu_interface_name("bnep0", &current, None).unwrap(),
+            "enx001122334455"
+        );
+    }
+
+    #[test]
+    fn ambiguous_renamed_interfaces_fail_instead_of_guessing() {
+        let current = HashSet::from(["enx001122334455".to_owned(), "enx001122334456".to_owned()]);
+        assert_eq!(
+            select_panu_interface_name("bnep0", &current, None)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::PanFailure
         );
     }
 }
