@@ -287,9 +287,9 @@ fn panu_loss_trigger(message: &Message, peer: &PeerHandle) -> Result<bool, CoreE
                 )
             })?;
         return Ok(path.as_str() == peer.as_str()
-            && interfaces.iter().any(|name| {
-                matches!(name.as_str(), NETWORK_INTERFACE | DEVICE_INTERFACE)
-            }));
+            && interfaces
+                .iter()
+                .any(|name| matches!(name.as_str(), NETWORK_INTERFACE | DEVICE_INTERFACE)));
     }
 
     if interface != Some(PROPERTIES_INTERFACE)
