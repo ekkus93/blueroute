@@ -1,0 +1,51 @@
+name: Temporary P4-005 hardware acceptance sync
+
+on:
+  push:
+    branches:
+      - P4-005_hardware_acceptance
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: P4-005_hardware_acceptance
+          fetch-depth: 0
+
+      - name: Mark P4-005 complete
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("docs/TODO.md")
+          text = path.read_text()
+
+          old_summary = "| P4-005 | `[-]` | BlueZ Network1 PANU connect/interface mapping (including udev rename reconciliation), bounded connect timeout/cancellation, loss observation, and idempotent disconnect are implemented; working PANU data-plane hardware acceptance remains pending. |"
+          new_summary = "| P4-005 | `[x]` | BlueZ Network1 PANU connect/interface mapping (including udev rename reconciliation), bounded connect timeout/cancellation, loss observation, idempotent disconnect, and real two-node PANU data-plane hardware acceptance are complete. |"
+          old_acceptance = "- Software implementation is complete; real PANU data-plane evidence is still required before this task becomes `[x]`."
+          new_acceptance = "- Hardware acceptance is recorded in `docs/P4-005-HARDWARE-EVIDENCE-2026-08-30.md`; `arisu` established a Rust-controlled PANU link to `debiancb1` and carried IPv4/ICMP traffic over BNEP with 0% packet loss."
+
+          if text.count(old_summary) != 1:
+              raise SystemExit(f"expected exactly one P4-005 summary row, found {text.count(old_summary)}")
+          if text.count(old_acceptance) != 1:
+              raise SystemExit(f"expected exactly one P4-005 acceptance note, found {text.count(old_acceptance)}")
+
+          text = text.replace(old_summary, new_summary)
+          text = text.replace(old_acceptance, new_acceptance)
+          path.write_text(text)
+
+      - name: Remove temporary workflow and commit
+        run: |
+          set -euo pipefail
+          rm .github/workflows/p4-005-acceptance.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/TODO.md .github/workflows/p4-005-acceptance.yml
+          git commit -m "docs: complete P4-005 hardware acceptance"
+          git push origin HEAD:P4-005_hardware_acceptance
