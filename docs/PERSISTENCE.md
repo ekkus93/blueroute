@@ -54,7 +54,7 @@ The classification must be updated when a new persistent field is introduced. A 
 
 Hardware-independent code wraps BlueRoute-owned secret values in `blueroute_core::Secret<T>`. Ordinary `Debug` and `Display` formatting of the wrapper emits only `[REDACTED]`; accessing the value requires an explicit `expose()` call. This is intended to prevent routine logging, debug dumps, and diagnostic formatting from leaking secret contents.
 
-Linux file persistence for future BlueRoute-owned secret material uses `blueroute_linux::SecretFileStore` unless a later design deliberately selects a stronger platform-backed secret service. `SecretFileStore`:
+Linux file persistence for future BlueRoute-owned secret material uses `blueroute_linux::SecretFileStore` unless a later design deliberately selects a stronger platform-backed secret service. When daemon wiring introduces the first such secret, the store must point at a dedicated `secrets/` child of the configured BlueRoute state directory rather than the state directory itself; `SecretFileStore` owns and tightens the directory passed to it. `SecretFileStore`:
 
 - owns a dedicated secret directory and enforces mode `0700`;
 - stores each secret in a regular file with mode `0600`;
