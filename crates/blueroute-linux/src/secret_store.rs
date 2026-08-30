@@ -1,7 +1,7 @@
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
 use std::io::{ErrorKind as IoErrorKind, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -96,7 +96,9 @@ impl SecretFileStore {
                 "secret store path is not a directory",
             )),
             Err(error) if error.kind() == IoErrorKind::NotFound => {
-                fs::create_dir_all(&self.directory).map_err(|error| {
+                let mut builder = fs::DirBuilder::new();
+                builder.recursive(true).mode(SECRET_DIRECTORY_MODE);
+                builder.create(&self.directory).map_err(|error| {
                     persistence_error("failed to create the secret store directory", error)
                 })?;
                 let metadata = fs::symlink_metadata(&self.directory).map_err(|error| {
@@ -311,6 +313,23 @@ mod tests {
             .load("control-key")
             .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::PersistenceError);
+    }
+
+    #[test]
+    fn persistence_error_formatting_does_not_include_secret_bytes() {
+        let directory = TestDirectory::new();
+        let invalid_store_path = directory.0.join("not-a-directory");
+        fs::write(&invalid_store_path, b"occupied").unwrap();
+        let store = SecretFileStore::new(invalid_store_path);
+        let secret_text = "never-log-this-secret";
+        let secret = Secret::new(secret_text.as_bytes().to_vec());
+
+        let error = store.save("control-key", &secret).unwrap_err();
+        let rendered = format!("{error:?}\n{error}");
+        assert!(!rendered.contains(secret_text));
+        if let Some(diagnostic) = error.diagnostic() {
+            assert!(!diagnostic.contains(secret_text));
+        }
     }
 
     #[test]
