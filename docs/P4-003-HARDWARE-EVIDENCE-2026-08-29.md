@@ -23,6 +23,8 @@ The Rust BlueRoute adapter successfully:
 
 A follow-up acceptance run discovered 13 device objects, including the known nearby Linux test node `debiancb1` as `/org/bluez/hci0/dev_F4_D1_08_70_B7_86` with `paired=false` and `trusted=false`.
 
+The operator explicitly identified `debiancb1` as the Linux test node used for this acceptance run.
+
 The raw scans also contained nearby third-party device addresses and names, so unrelated identifiers are intentionally not copied into the repository.
 
 ## Acceptance status
