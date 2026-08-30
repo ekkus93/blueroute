@@ -23,7 +23,7 @@ jobs:
         run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt,clippy
       - name: Select pinned Rust toolchain
         run: rustup override set 1.95.0
-      - name: Apply implementation
+      - name: Apply implementation and fixes
         run: |
           python .github/p4-004-apply.py
           python .github/p4-004-fix.py
