@@ -39,6 +39,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P3-002 | `[x]` | Stable node identity generation/persistence is wired into daemon startup; owner-only storage and restart recovery tests are green in CI. |
 | P3-003 | `[x]` | Durable known-network and peer membership/trust state persists through restart; forget/cleanup and corruption handling are tested and green in CI. |
 | P3-004 | `[x]` | Membership persistence uses an explicit v2 schema with tested in-place v1 migration; unsupported old/future schemas fail closed without rewriting state. |
+| P3-005 | `[x]` | Persistent-secret policy, redacting secret wrapper, and restrictive Linux secret storage are implemented with permission/redaction tests. |
 | P4-001 | `[x]` | Backend-neutral adapter boundaries and fake-backend tests are implemented and green in CI. |
 | P5-001 | `[-]` | API version contract and compatibility rules are implemented/tested; client-side incompatibility enforcement remains pending P5-005. |
 | P5-002 | `[-]` | Semantic command/response model implemented; serialization round-trip tests remain. |
@@ -399,9 +400,9 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P3-005 — Secure persistent secrets
 
-- [ ] identify secrets.
-- [ ] restrictive permissions.
-- [ ] log/debug redaction.
+- [x] identify secrets.
+- [x] restrictive permissions.
+- [x] log/debug redaction.
 
 **Acceptance**
 
