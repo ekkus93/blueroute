@@ -2,7 +2,7 @@ use std::env;
 use std::time::Duration;
 
 use async_io::Timer;
-use blueroute_linux::{BluetoothBackend, PanBackend, PanuEvent, BluezBackend};
+use blueroute_linux::{BluetoothBackend, BluezBackend, PanBackend, PanuEvent};
 use futures_lite::future::race;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -66,12 +66,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let completion = race(
-        async {
-            subscription
-                .next_event()
-                .await
-                .map(Completion::Lost)
-        },
+        async { subscription.next_event().await.map(Completion::Lost) },
         async {
             Timer::after(Duration::from_secs(hold_seconds)).await;
             Ok(Completion::HoldElapsed)

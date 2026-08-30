@@ -51,7 +51,7 @@ const PAIRING_TIMEOUT: Duration = Duration::from_secs(60);
 /// Production BlueZ backend using the Linux system D-Bus directly.
 #[derive(Clone, Debug)]
 pub struct BluezBackend {
-    connection: Connection,
+    pub(crate) connection: Connection,
     pairing: Arc<PairingControl>,
 }
 

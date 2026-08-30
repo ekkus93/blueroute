@@ -40,9 +40,10 @@ impl PanBackend for BluezBackend {
     ) -> BackendFuture<'_, Box<dyn PanuEventSubscription>> {
         Box::pin(async move {
             validate_panu_attachment(&attachment)?;
-            let connected = current_panu_attachment(&self.connection, attachment.peer.as_ref().unwrap())
-                .await?
-                .is_some();
+            let connected =
+                current_panu_attachment(&self.connection, attachment.peer.as_ref().unwrap())
+                    .await?
+                    .is_some();
             let stream = bluez_signal_stream(&self.connection).await?;
             Ok(Box::new(BluezPanuSubscription {
                 connection: self.connection.clone(),
@@ -144,12 +145,14 @@ async fn connect_panu(
         Err(zbus::Error::MethodError(name, _, _))
             if name.as_str() == "org.bluez.Error.AlreadyConnected" =>
         {
-            current_panu_attachment(connection, peer).await?.ok_or_else(|| {
-                CoreError::new(
-                    ErrorKind::ProtocolError,
-                    "BlueZ reported an existing PAN connection without an active interface",
-                )
-            })
+            current_panu_attachment(connection, peer)
+                .await?
+                .ok_or_else(|| {
+                    CoreError::new(
+                        ErrorKind::ProtocolError,
+                        "BlueZ reported an existing PAN connection without an active interface",
+                    )
+                })
         }
         Err(error) => Err(connect_error(error)),
     }
@@ -302,9 +305,10 @@ fn connect_error(error: zbus::Error) -> CoreError {
 
 fn connect_method_error(name: &str) -> (ErrorKind, &'static str) {
     match name {
-        "org.bluez.Error.ConnectionAttemptFailed" => {
-            (ErrorKind::PanFailure, "Bluetooth PAN connection attempt failed")
-        }
+        "org.bluez.Error.ConnectionAttemptFailed" => (
+            ErrorKind::PanFailure,
+            "Bluetooth PAN connection attempt failed",
+        ),
         "org.bluez.Error.NotAuthorized" | "org.freedesktop.DBus.Error.AccessDenied" => (
             ErrorKind::AuthenticationFailed,
             "Bluetooth PAN connection was not authorized",
@@ -408,7 +412,9 @@ mod tests {
     #[test]
     fn empty_interface_is_protocol_error() {
         assert_eq!(
-            panu_attachment(&peer(), "   ".to_owned()).unwrap_err().kind(),
+            panu_attachment(&peer(), "   ".to_owned())
+                .unwrap_err()
+                .kind(),
             ErrorKind::ProtocolError
         );
     }
