@@ -53,6 +53,7 @@ const PAIRING_TIMEOUT: Duration = Duration::from_secs(60);
 pub struct BluezBackend {
     pub(crate) connection: Connection,
     pairing: Arc<PairingControl>,
+    pub(crate) nap: Arc<crate::pan::NapControl>,
 }
 
 impl BluezBackend {
@@ -65,6 +66,7 @@ impl BluezBackend {
         Ok(Self {
             connection,
             pairing: Arc::new(PairingControl::default()),
+            nap: Arc::new(crate::pan::NapControl::default()),
         })
     }
 

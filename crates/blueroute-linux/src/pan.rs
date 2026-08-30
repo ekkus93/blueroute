@@ -1,24 +1,28 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_io::Timer;
 use futures_lite::{StreamExt, future};
+use zbus::fdo::DBusProxy;
 use zbus::message::Type as MessageType;
-use zbus::names::OwnedInterfaceName;
+use zbus::names::{BusName, OwnedInterfaceName};
 use zbus::zvariant::{OwnedObjectPath, OwnedValue};
 use zbus::{Connection, MatchRule, Message, MessageStream, Proxy};
 
 use blueroute_core::{CoreError, ErrorKind};
 
 use crate::{
-    AdapterHandle, BackendFuture, BluezBackend, NetworkInterfaceHandle, PanAttachment, PanBackend,
-    PanRole, PanuEvent, PanuEventSubscription, PeerHandle,
+    AdapterHandle, BackendFuture, BluezBackend, NapEvent, NapEventSubscription,
+    NetworkInterfaceHandle, PanAttachment, PanBackend, PanRole, PanuEvent, PanuEventSubscription,
+    PeerHandle,
 };
 
 const BLUEZ_SERVICE: &str = "org.bluez";
 const ADAPTER_INTERFACE: &str = "org.bluez.Adapter1";
 const NETWORK_INTERFACE: &str = "org.bluez.Network1";
+const NETWORK_SERVER_INTERFACE: &str = "org.bluez.NetworkServer1";
 const DEVICE_INTERFACE: &str = "org.bluez.Device1";
 const OBJECT_MANAGER_INTERFACE: &str = "org.freedesktop.DBus.ObjectManager";
 const PROPERTIES_INTERFACE: &str = "org.freedesktop.DBus.Properties";
@@ -26,14 +30,37 @@ const INTERFACES_REMOVED: &str = "InterfacesRemoved";
 const PROPERTIES_CHANGED: &str = "PropertiesChanged";
 const CONNECT_METHOD: &str = "Connect";
 const DISCONNECT_METHOD: &str = "Disconnect";
+const REGISTER_METHOD: &str = "Register";
+const UNREGISTER_METHOD: &str = "Unregister";
 const CONNECTED_PROPERTY: &str = "Connected";
+const POWERED_PROPERTY: &str = "Powered";
 const INTERFACE_PROPERTY: &str = "Interface";
 const ADDRESS_PROPERTY: &str = "Address";
 const REMOTE_NAP_ROLE: &str = "nap";
+const LOCAL_NAP_ROLE: &str = "nap";
 const SIGNAL_QUEUE_CAPACITY: usize = 64;
 const PANU_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const PANU_INTERFACE_SETTLE_DELAY: Duration = Duration::from_millis(300);
+const NAP_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const SYS_CLASS_NET: &str = "/sys/class/net";
+
+#[derive(Debug, Default)]
+pub(crate) struct NapControl {
+    states: Mutex<HashMap<AdapterHandle, NapLifecycleState>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum NapLifecycleState {
+    Registering(NapRegistration),
+    Active(NapRegistration),
+    Stopping(NapRegistration),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NapRegistration {
+    bridge: NetworkInterfaceHandle,
+    bluez_owner: String,
+}
 
 impl PanBackend for BluezBackend {
     fn connect_panu(&self, peer: PeerHandle) -> BackendFuture<'_, PanAttachment> {
@@ -67,22 +94,44 @@ impl PanBackend for BluezBackend {
         })
     }
 
-    fn start_nap(&self, _adapter: AdapterHandle) -> BackendFuture<'_, PanAttachment> {
-        Box::pin(async {
-            Err(CoreError::new(
-                ErrorKind::CapabilityUnavailable,
-                "BlueZ NAP lifecycle is not implemented yet",
-            ))
+    fn start_nap(
+        &self,
+        adapter: AdapterHandle,
+        bridge: NetworkInterfaceHandle,
+    ) -> BackendFuture<'_, PanAttachment> {
+        let control = Arc::clone(&self.nap);
+        Box::pin(async move { start_nap(&self.connection, &control, &adapter, &bridge).await })
+    }
+
+    fn subscribe_nap_events(
+        &self,
+        adapter: AdapterHandle,
+        attachment: PanAttachment,
+    ) -> BackendFuture<'_, Box<dyn NapEventSubscription>> {
+        let control = Arc::clone(&self.nap);
+        Box::pin(async move {
+            validate_nap_service_attachment(&attachment)?;
+            let owner = current_bluez_owner(&self.connection)
+                .await?
+                .ok_or_else(|| {
+                    CoreError::new(
+                        ErrorKind::BluezUnavailable,
+                        "BlueZ is not available on the system D-Bus",
+                    )
+                })?;
+            ensure_owned_nap_registration(&control, &adapter, &attachment.interface, &owner)?;
+            let clients = nap_client_interfaces(&attachment.interface)?;
+            Ok(Box::new(BluezNapSubscription {
+                bridge: attachment.interface,
+                clients,
+                pending: VecDeque::new(),
+            }) as Box<dyn NapEventSubscription>)
         })
     }
 
-    fn stop_nap(&self, _adapter: AdapterHandle) -> BackendFuture<'_, ()> {
-        Box::pin(async {
-            Err(CoreError::new(
-                ErrorKind::CapabilityUnavailable,
-                "BlueZ NAP lifecycle is not implemented yet",
-            ))
-        })
+    fn stop_nap(&self, adapter: AdapterHandle) -> BackendFuture<'_, ()> {
+        let control = Arc::clone(&self.nap);
+        Box::pin(async move { stop_nap(&self.connection, &control, &adapter).await })
     }
 }
 
@@ -136,6 +185,601 @@ impl PanuEventSubscription for BluezPanuSubscription {
             }
         })
     }
+}
+
+struct BluezNapSubscription {
+    bridge: NetworkInterfaceHandle,
+    clients: BTreeSet<NetworkInterfaceHandle>,
+    pending: VecDeque<NapEvent>,
+}
+
+impl NapEventSubscription for BluezNapSubscription {
+    fn next_event(&mut self) -> BackendFuture<'_, Option<NapEvent>> {
+        Box::pin(async move {
+            if let Some(event) = self.pending.pop_front() {
+                return Ok(Some(event));
+            }
+
+            loop {
+                Timer::after(NAP_EVENT_POLL_INTERVAL).await;
+                let current = nap_client_interfaces(&self.bridge)?;
+                queue_nap_client_changes(&self.clients, &current, &mut self.pending);
+                self.clients = current;
+                if let Some(event) = self.pending.pop_front() {
+                    return Ok(Some(event));
+                }
+            }
+        })
+    }
+}
+
+async fn start_nap(
+    connection: &Connection,
+    control: &NapControl,
+    adapter: &AdapterHandle,
+    bridge: &NetworkInterfaceHandle,
+) -> Result<PanAttachment, CoreError> {
+    validate_nap_bridge(bridge)?;
+    ensure_adapter_powered(connection, adapter).await?;
+    let owner = current_bluez_owner(connection).await?.ok_or_else(|| {
+        CoreError::new(
+            ErrorKind::BluezUnavailable,
+            "BlueZ is not available on the system D-Bus",
+        )
+    })?;
+    let registration = NapRegistration {
+        bridge: bridge.clone(),
+        bluez_owner: owner,
+    };
+
+    if let Some(existing) = begin_nap_registration(control, adapter, &registration)? {
+        return nap_service_attachment(existing.bridge);
+    }
+
+    let proxy = network_server_proxy(connection, adapter).await?;
+    match proxy
+        .call_method(REGISTER_METHOD, &(LOCAL_NAP_ROLE, bridge.as_str()))
+        .await
+    {
+        Ok(_) => {
+            if let Err(error) = activate_nap_registration(control, adapter, &registration) {
+                let cleanup = proxy
+                    .call_method(UNREGISTER_METHOD, &(LOCAL_NAP_ROLE,))
+                    .await;
+                let state_cleanup = clear_nap_registration(control, adapter);
+                return match (cleanup, state_cleanup) {
+                    (Ok(_), Ok(())) => Err(error),
+                    (cleanup, state_cleanup) => Err(CoreError::with_diagnostic(
+                        ErrorKind::Internal,
+                        "registered the Bluetooth NAP but failed to record or fully roll back its ownership state",
+                        format!(
+                            "state error: {error}; D-Bus rollback: {cleanup:?}; local-state rollback: {state_cleanup:?}"
+                        ),
+                    )),
+                };
+            }
+            nap_service_attachment(bridge.clone())
+        }
+        Err(error) => match clear_nap_registration(control, adapter) {
+            Ok(()) => Err(nap_register_error(error)),
+            Err(state_error) => Err(CoreError::with_diagnostic(
+                ErrorKind::Internal,
+                "Bluetooth NAP registration failed and local ownership state could not be cleared",
+                format!("register error: {error}; state error: {state_error}"),
+            )),
+        },
+    }
+}
+
+async fn stop_nap(
+    connection: &Connection,
+    control: &NapControl,
+    adapter: &AdapterHandle,
+) -> Result<(), CoreError> {
+    let owner = current_bluez_owner(connection).await?;
+    let Some(registration) = begin_nap_stop(control, adapter, owner.as_deref())? else {
+        return Ok(());
+    };
+
+    let proxy = match network_server_proxy(connection, adapter).await {
+        Ok(proxy) => proxy,
+        Err(error) => {
+            return match restore_nap_registration(control, adapter, &registration) {
+                Ok(()) => Err(error),
+                Err(state_error) => Err(CoreError::with_diagnostic(
+                    ErrorKind::Internal,
+                    "failed to access the Bluetooth NAP server and failed to restore local ownership state",
+                    format!("server error: {error}; state error: {state_error}"),
+                )),
+            };
+        }
+    };
+
+    match proxy
+        .call_method(UNREGISTER_METHOD, &(LOCAL_NAP_ROLE,))
+        .await
+    {
+        Ok(_) => clear_nap_registration(control, adapter),
+        Err(error) if nap_unregister_is_already_absent(&error) => {
+            clear_nap_registration(control, adapter)
+        }
+        Err(error) => match restore_nap_registration(control, adapter, &registration) {
+            Ok(()) => Err(nap_unregister_error(error)),
+            Err(state_error) => Err(CoreError::with_diagnostic(
+                ErrorKind::Internal,
+                "failed to stop the Bluetooth NAP and failed to restore local ownership state",
+                format!("unregister error: {error}; state error: {state_error}"),
+            )),
+        },
+    }
+}
+
+fn begin_nap_registration(
+    control: &NapControl,
+    adapter: &AdapterHandle,
+    requested: &NapRegistration,
+) -> Result<Option<NapRegistration>, CoreError> {
+    let mut states = control.states.lock().map_err(nap_state_lock_error)?;
+    match states.get(adapter).cloned() {
+        Some(NapLifecycleState::Active(existing))
+            if existing.bluez_owner == requested.bluez_owner
+                && existing.bridge == requested.bridge =>
+        {
+            Ok(Some(existing))
+        }
+        Some(NapLifecycleState::Active(existing))
+            if existing.bluez_owner == requested.bluez_owner =>
+        {
+            Err(CoreError::with_diagnostic(
+                ErrorKind::InvalidState,
+                "Bluetooth NAP is already active on a different bridge",
+                format!(
+                    "active bridge {:?}; requested bridge {:?}",
+                    existing.bridge.as_str(),
+                    requested.bridge.as_str()
+                ),
+            ))
+        }
+        Some(NapLifecycleState::Registering(existing))
+        | Some(NapLifecycleState::Stopping(existing))
+            if existing.bluez_owner == requested.bluez_owner =>
+        {
+            Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "another Bluetooth NAP lifecycle operation is already in progress",
+            ))
+        }
+        Some(_) | None => {
+            states.insert(
+                adapter.clone(),
+                NapLifecycleState::Registering(requested.clone()),
+            );
+            Ok(None)
+        }
+    }
+}
+
+fn activate_nap_registration(
+    control: &NapControl,
+    adapter: &AdapterHandle,
+    registration: &NapRegistration,
+) -> Result<(), CoreError> {
+    let mut states = control.states.lock().map_err(nap_state_lock_error)?;
+    match states.get(adapter) {
+        Some(NapLifecycleState::Registering(current)) if current == registration => {
+            states.insert(
+                adapter.clone(),
+                NapLifecycleState::Active(registration.clone()),
+            );
+            Ok(())
+        }
+        _ => Err(CoreError::new(
+            ErrorKind::Internal,
+            "Bluetooth NAP ownership state changed during registration",
+        )),
+    }
+}
+
+fn begin_nap_stop(
+    control: &NapControl,
+    adapter: &AdapterHandle,
+    current_owner: Option<&str>,
+) -> Result<Option<NapRegistration>, CoreError> {
+    let mut states = control.states.lock().map_err(nap_state_lock_error)?;
+    let Some(state) = states.get(adapter).cloned() else {
+        return Ok(None);
+    };
+    let registration = match state {
+        NapLifecycleState::Active(registration) => registration,
+        NapLifecycleState::Registering(_) | NapLifecycleState::Stopping(_) => {
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "another Bluetooth NAP lifecycle operation is already in progress",
+            ));
+        }
+    };
+
+    if current_owner != Some(registration.bluez_owner.as_str()) {
+        states.remove(adapter);
+        return Ok(None);
+    }
+
+    states.insert(
+        adapter.clone(),
+        NapLifecycleState::Stopping(registration.clone()),
+    );
+    Ok(Some(registration))
+}
+
+fn restore_nap_registration(
+    control: &NapControl,
+    adapter: &AdapterHandle,
+    registration: &NapRegistration,
+) -> Result<(), CoreError> {
+    let mut states = control.states.lock().map_err(nap_state_lock_error)?;
+    states.insert(
+        adapter.clone(),
+        NapLifecycleState::Active(registration.clone()),
+    );
+    Ok(())
+}
+
+fn clear_nap_registration(control: &NapControl, adapter: &AdapterHandle) -> Result<(), CoreError> {
+    let mut states = control.states.lock().map_err(nap_state_lock_error)?;
+    states.remove(adapter);
+    Ok(())
+}
+
+fn ensure_owned_nap_registration(
+    control: &NapControl,
+    adapter: &AdapterHandle,
+    bridge: &NetworkInterfaceHandle,
+    owner: &str,
+) -> Result<(), CoreError> {
+    let states = control.states.lock().map_err(nap_state_lock_error)?;
+    match states.get(adapter) {
+        Some(NapLifecycleState::Active(registration))
+            if registration.bluez_owner == owner && registration.bridge == *bridge =>
+        {
+            Ok(())
+        }
+        _ => Err(CoreError::new(
+            ErrorKind::InvalidState,
+            "NAP event subscription requires an active NAP owned by this backend",
+        )),
+    }
+}
+
+fn nap_state_lock_error<T>(error: std::sync::PoisonError<T>) -> CoreError {
+    CoreError::with_diagnostic(
+        ErrorKind::Internal,
+        "Bluetooth NAP ownership-state lock failed",
+        error.to_string(),
+    )
+}
+
+async fn current_bluez_owner(connection: &Connection) -> Result<Option<String>, CoreError> {
+    let proxy = DBusProxy::new(connection).await.map_err(|error| {
+        pan_error(
+            ErrorKind::BluezUnavailable,
+            "failed to create a system D-Bus service proxy for Bluetooth NAP ownership",
+            error,
+        )
+    })?;
+    let service = BusName::try_from(BLUEZ_SERVICE).map_err(|error| {
+        CoreError::with_diagnostic(
+            ErrorKind::Internal,
+            "BlueZ service name is invalid",
+            error.to_string(),
+        )
+    })?;
+    let has_owner = proxy
+        .name_has_owner(service.clone())
+        .await
+        .map_err(|error| {
+            pan_error(
+                ErrorKind::BluezUnavailable,
+                "failed to query BlueZ service availability for Bluetooth NAP ownership",
+                error,
+            )
+        })?;
+    if !has_owner {
+        return Ok(None);
+    }
+    proxy
+        .get_name_owner(service)
+        .await
+        .map(|owner| Some(owner.as_str().to_owned()))
+        .map_err(|error| {
+            pan_error(
+                ErrorKind::BluezUnavailable,
+                "failed to identify the current BlueZ service instance",
+                error,
+            )
+        })
+}
+
+async fn ensure_adapter_powered(
+    connection: &Connection,
+    adapter: &AdapterHandle,
+) -> Result<(), CoreError> {
+    let proxy = Proxy::new(
+        connection,
+        BLUEZ_SERVICE,
+        adapter.as_str(),
+        ADAPTER_INTERFACE,
+    )
+    .await
+    .map_err(|error| {
+        pan_error(
+            ErrorKind::BluezUnavailable,
+            "failed to access the Bluetooth adapter for NAP registration",
+            error,
+        )
+    })?;
+    let powered: bool = proxy
+        .get_property(POWERED_PROPERTY)
+        .await
+        .map_err(|error| {
+            let kind = if dbus_object_is_absent(&error) {
+                ErrorKind::MissingAdapter
+            } else {
+                ErrorKind::BluezUnavailable
+            };
+            pan_error(kind, "failed to read Bluetooth adapter power state", error)
+        })?;
+    if powered {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            ErrorKind::AdapterDisabled,
+            "Bluetooth adapter is powered off",
+        ))
+    }
+}
+
+async fn network_server_proxy<'a>(
+    connection: &'a Connection,
+    adapter: &'a AdapterHandle,
+) -> Result<Proxy<'a>, CoreError> {
+    Proxy::new(
+        connection,
+        BLUEZ_SERVICE,
+        adapter.as_str(),
+        NETWORK_SERVER_INTERFACE,
+    )
+    .await
+    .map_err(|error| {
+        pan_error(
+            ErrorKind::BluezUnavailable,
+            "failed to create the BlueZ NAP server proxy",
+            error,
+        )
+    })
+}
+
+fn validate_nap_bridge(bridge: &NetworkInterfaceHandle) -> Result<(), CoreError> {
+    let name = bridge.as_str();
+    if !valid_linux_interface_name(name) {
+        return Err(CoreError::new(
+            ErrorKind::InvalidInput,
+            "NAP bridge is not a valid Linux interface name",
+        ));
+    }
+    let path = std::path::Path::new(SYS_CLASS_NET).join(name);
+    if !path.is_dir() {
+        return Err(CoreError::with_diagnostic(
+            ErrorKind::InvalidInput,
+            "NAP bridge does not exist",
+            path.display().to_string(),
+        ));
+    }
+    if !path.join("bridge").is_dir() {
+        return Err(CoreError::with_diagnostic(
+            ErrorKind::InvalidInput,
+            "NAP interface is not a Linux bridge",
+            name.to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn valid_linux_interface_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 15
+        && name != "."
+        && name != ".."
+        && !name.contains('/')
+        && !name.contains('\0')
+}
+
+fn validate_nap_service_attachment(attachment: &PanAttachment) -> Result<(), CoreError> {
+    if attachment.role != PanRole::Nap {
+        return Err(CoreError::new(
+            ErrorKind::InvalidInput,
+            "NAP event subscription requires a NAP attachment",
+        ));
+    }
+    if attachment.peer.is_some() {
+        return Err(CoreError::new(
+            ErrorKind::InvalidInput,
+            "NAP service attachment must not identify a remote peer",
+        ));
+    }
+    validate_nap_bridge(&attachment.interface)
+}
+
+fn nap_service_attachment(bridge: NetworkInterfaceHandle) -> Result<PanAttachment, CoreError> {
+    validate_nap_bridge(&bridge)?;
+    Ok(PanAttachment {
+        role: PanRole::Nap,
+        interface: bridge,
+        peer: None,
+    })
+}
+
+fn nap_client_attachment(interface: NetworkInterfaceHandle) -> PanAttachment {
+    PanAttachment {
+        role: PanRole::Nap,
+        interface,
+        peer: None,
+    }
+}
+
+fn nap_client_interfaces(
+    bridge: &NetworkInterfaceHandle,
+) -> Result<BTreeSet<NetworkInterfaceHandle>, CoreError> {
+    validate_nap_bridge(bridge)?;
+    let path = std::path::Path::new(SYS_CLASS_NET)
+        .join(bridge.as_str())
+        .join("brif");
+    let entries = fs::read_dir(&path).map_err(|error| {
+        pan_error(
+            ErrorKind::PanFailure,
+            "failed to inspect NAP bridge client interfaces",
+            error,
+        )
+    })?;
+    let mut clients = BTreeSet::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            pan_error(
+                ErrorKind::PanFailure,
+                "failed to inspect a NAP bridge member",
+                error,
+            )
+        })?;
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if network_interface_is_bluetooth(&name)? {
+            clients.insert(NetworkInterfaceHandle::new(name)?);
+        }
+    }
+    Ok(clients)
+}
+
+fn network_interface_is_bluetooth(name: &str) -> Result<bool, CoreError> {
+    let uevent = std::path::Path::new(SYS_CLASS_NET)
+        .join(name)
+        .join("uevent");
+    let content = fs::read_to_string(&uevent).map_err(|error| {
+        pan_error(
+            ErrorKind::PanFailure,
+            "failed to identify a NAP bridge member",
+            error,
+        )
+    })?;
+    Ok(uevent_reports_bluetooth(&content))
+}
+
+fn uevent_reports_bluetooth(content: &str) -> bool {
+    content
+        .lines()
+        .any(|line| line.trim().eq_ignore_ascii_case("DEVTYPE=bluetooth"))
+}
+
+fn queue_nap_client_changes(
+    previous: &BTreeSet<NetworkInterfaceHandle>,
+    current: &BTreeSet<NetworkInterfaceHandle>,
+    pending: &mut VecDeque<NapEvent>,
+) {
+    for interface in previous.difference(current) {
+        pending.push_back(NapEvent::ClientDetached(nap_client_attachment(
+            interface.clone(),
+        )));
+    }
+    for interface in current.difference(previous) {
+        pending.push_back(NapEvent::ClientAttached(nap_client_attachment(
+            interface.clone(),
+        )));
+    }
+}
+
+fn nap_register_error(error: zbus::Error) -> CoreError {
+    let (kind, message) = match &error {
+        zbus::Error::MethodError(name, _, _) => nap_register_method_error(name.as_str()),
+        _ => (
+            ErrorKind::BluezUnavailable,
+            "Bluetooth NAP registration failed because BlueZ is unavailable",
+        ),
+    };
+    pan_error(kind, message, error)
+}
+
+fn nap_register_method_error(name: &str) -> (ErrorKind, &'static str) {
+    match name {
+        "org.bluez.Error.AlreadyExists" => (
+            ErrorKind::InvalidState,
+            "a Bluetooth NAP server is already registered on this adapter",
+        ),
+        "org.bluez.Error.NotReady" => (
+            ErrorKind::AdapterDisabled,
+            "Bluetooth adapter is not ready to provide a NAP",
+        ),
+        "org.bluez.Error.InvalidArguments" => (
+            ErrorKind::ProtocolError,
+            "BlueZ rejected the NAP registration arguments",
+        ),
+        "org.bluez.Error.NotAuthorized" | "org.freedesktop.DBus.Error.AccessDenied" => (
+            ErrorKind::CapabilityUnavailable,
+            "Bluetooth NAP registration is not authorized on this system",
+        ),
+        "org.freedesktop.DBus.Error.UnknownMethod"
+        | "org.freedesktop.DBus.Error.UnknownInterface"
+        | "org.bluez.Error.NotSupported"
+        | "org.bluez.Error.NotAvailable" => (
+            ErrorKind::CapabilityUnavailable,
+            "BlueZ does not provide the NAP server capability on this adapter",
+        ),
+        _ => (ErrorKind::PanFailure, "Bluetooth NAP registration failed"),
+    }
+}
+
+fn nap_unregister_error(error: zbus::Error) -> CoreError {
+    let kind = match &error {
+        zbus::Error::MethodError(name, _, _)
+            if matches!(
+                name.as_str(),
+                "org.freedesktop.DBus.Error.UnknownMethod"
+                    | "org.freedesktop.DBus.Error.UnknownInterface"
+                    | "org.bluez.Error.NotSupported"
+                    | "org.bluez.Error.NotAvailable"
+            ) =>
+        {
+            ErrorKind::CapabilityUnavailable
+        }
+        zbus::Error::MethodError(_, _, _) => ErrorKind::PanFailure,
+        _ => ErrorKind::BluezUnavailable,
+    };
+    pan_error(kind, "failed to stop the Bluetooth NAP server", error)
+}
+
+fn nap_unregister_is_already_absent(error: &zbus::Error) -> bool {
+    matches!(
+        error,
+        zbus::Error::MethodError(name, _, _)
+            if matches!(
+                name.as_str(),
+                "org.bluez.Error.DoesNotExist"
+                    | "org.freedesktop.DBus.Error.UnknownObject"
+                    | "org.freedesktop.DBus.Error.UnknownInterface"
+                    | "org.freedesktop.DBus.Error.UnknownMethod"
+            )
+    )
+}
+
+fn dbus_object_is_absent(error: &zbus::Error) -> bool {
+    matches!(
+        error,
+        zbus::Error::MethodError(name, _, _)
+            if matches!(
+                name.as_str(),
+                "org.bluez.Error.DoesNotExist"
+                    | "org.freedesktop.DBus.Error.UnknownObject"
+                    | "org.freedesktop.DBus.Error.UnknownInterface"
+            )
+    )
 }
 
 async fn connect_panu(
@@ -640,6 +1284,21 @@ mod tests {
         PeerHandle::new("/org/bluez/hci0/dev_00_11_22_33_44_55").unwrap()
     }
 
+    fn adapter() -> AdapterHandle {
+        AdapterHandle::new("/org/bluez/hci0").unwrap()
+    }
+
+    fn bridge(name: &str) -> NetworkInterfaceHandle {
+        NetworkInterfaceHandle::new(name).unwrap()
+    }
+
+    fn registration(bridge_name: &str, owner: &str) -> NapRegistration {
+        NapRegistration {
+            bridge: bridge(bridge_name),
+            bluez_owner: owner.to_owned(),
+        }
+    }
+
     #[test]
     fn panu_attachment_preserves_peer_and_interface() {
         let attachment = panu_attachment(&peer(), "bnep7".to_owned()).unwrap();
@@ -753,6 +1412,166 @@ mod tests {
                 .unwrap_err()
                 .kind(),
             ErrorKind::PanFailure
+        );
+    }
+
+    #[test]
+    fn nap_registration_is_idempotent_for_same_owned_bridge() {
+        let control = NapControl::default();
+        let adapter = adapter();
+        let registration = registration("br-blue", ":1.42");
+
+        assert_eq!(
+            begin_nap_registration(&control, &adapter, &registration).unwrap(),
+            None
+        );
+        assert_eq!(
+            control.states.lock().unwrap().get(&adapter),
+            Some(&NapLifecycleState::Registering(registration.clone()))
+        );
+        activate_nap_registration(&control, &adapter, &registration).unwrap();
+        assert_eq!(
+            begin_nap_registration(&control, &adapter, &registration).unwrap(),
+            Some(registration.clone())
+        );
+        assert_eq!(
+            control.states.lock().unwrap().get(&adapter),
+            Some(&NapLifecycleState::Active(registration))
+        );
+    }
+
+    #[test]
+    fn nap_registration_rejects_different_bridge_for_same_bluez_instance() {
+        let control = NapControl::default();
+        let adapter = adapter();
+        let first = registration("br-blue", ":1.42");
+        let second = registration("br-other", ":1.42");
+
+        begin_nap_registration(&control, &adapter, &first).unwrap();
+        activate_nap_registration(&control, &adapter, &first).unwrap();
+        assert_eq!(
+            begin_nap_registration(&control, &adapter, &second)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidState
+        );
+    }
+
+    #[test]
+    fn new_bluez_owner_replaces_stale_local_nap_ownership() {
+        let control = NapControl::default();
+        let adapter = adapter();
+        let old = registration("br-blue", ":1.42");
+        let new = registration("br-blue", ":1.99");
+
+        begin_nap_registration(&control, &adapter, &old).unwrap();
+        activate_nap_registration(&control, &adapter, &old).unwrap();
+        assert_eq!(
+            begin_nap_registration(&control, &adapter, &new).unwrap(),
+            None
+        );
+        assert_eq!(
+            control.states.lock().unwrap().get(&adapter),
+            Some(&NapLifecycleState::Registering(new))
+        );
+    }
+
+    #[test]
+    fn nap_stop_does_not_unregister_state_from_an_old_bluez_instance() {
+        let control = NapControl::default();
+        let adapter = adapter();
+        let registration = registration("br-blue", ":1.42");
+
+        begin_nap_registration(&control, &adapter, &registration).unwrap();
+        activate_nap_registration(&control, &adapter, &registration).unwrap();
+        assert_eq!(
+            begin_nap_stop(&control, &adapter, Some(":1.99")).unwrap(),
+            None
+        );
+        assert!(!control.states.lock().unwrap().contains_key(&adapter));
+    }
+
+    #[test]
+    fn nap_stop_marks_owned_registration_as_stopping() {
+        let control = NapControl::default();
+        let adapter = adapter();
+        let registration = registration("br-blue", ":1.42");
+
+        begin_nap_registration(&control, &adapter, &registration).unwrap();
+        activate_nap_registration(&control, &adapter, &registration).unwrap();
+        assert_eq!(
+            begin_nap_stop(&control, &adapter, Some(":1.42")).unwrap(),
+            Some(registration.clone())
+        );
+        assert_eq!(
+            control.states.lock().unwrap().get(&adapter),
+            Some(&NapLifecycleState::Stopping(registration))
+        );
+    }
+
+    #[test]
+    fn nap_client_changes_are_deterministic_and_backend_neutral() {
+        let previous = BTreeSet::from([bridge("bnep7"), bridge("bnep9")]);
+        let current = BTreeSet::from([bridge("bnep8"), bridge("bnep9")]);
+        let mut pending = VecDeque::new();
+
+        queue_nap_client_changes(&previous, &current, &mut pending);
+        assert_eq!(
+            pending.pop_front(),
+            Some(NapEvent::ClientDetached(PanAttachment {
+                role: PanRole::Nap,
+                interface: bridge("bnep7"),
+                peer: None,
+            }))
+        );
+        assert_eq!(
+            pending.pop_front(),
+            Some(NapEvent::ClientAttached(PanAttachment {
+                role: PanRole::Nap,
+                interface: bridge("bnep8"),
+                peer: None,
+            }))
+        );
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn linux_bnep_uevent_is_recognized_as_bluetooth() {
+        assert!(uevent_reports_bluetooth(
+            "INTERFACE=bnep0\nIFINDEX=17\nDEVTYPE=bluetooth\n"
+        ));
+        assert!(!uevent_reports_bluetooth(
+            "INTERFACE=eth0\nIFINDEX=2\nDEVTYPE=wlan\n"
+        ));
+    }
+
+    #[test]
+    fn nap_bridge_name_validation_is_bounded_and_path_safe() {
+        assert!(valid_linux_interface_name("br-blue"));
+        assert!(!valid_linux_interface_name(""));
+        assert!(!valid_linux_interface_name("."));
+        assert!(!valid_linux_interface_name(".."));
+        assert!(!valid_linux_interface_name("a/b"));
+        assert!(!valid_linux_interface_name("1234567890123456"));
+    }
+
+    #[test]
+    fn unavailable_nap_server_maps_to_capability_error() {
+        assert_eq!(
+            nap_register_method_error("org.freedesktop.DBus.Error.UnknownMethod").0,
+            ErrorKind::CapabilityUnavailable
+        );
+        assert_eq!(
+            nap_register_method_error("org.bluez.Error.NotSupported").0,
+            ErrorKind::CapabilityUnavailable
+        );
+    }
+
+    #[test]
+    fn existing_nap_registration_maps_to_invalid_state() {
+        assert_eq!(
+            nap_register_method_error("org.bluez.Error.AlreadyExists").0,
+            ErrorKind::InvalidState
         );
     }
 }
