@@ -1,0 +1,28 @@
+name: Temporary P4-002 TODO sync
+
+on:
+  push:
+    branches:
+      - P4-002_bluez_adapter_discovery
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: P4-002_bluez_adapter_discovery
+          fetch-depth: 0
+      - name: Synchronize TODO
+        run: python3 .github/p4_002_todo.py
+      - name: Commit TODO and remove helpers
+        run: |
+          rm .github/workflows/p4-002-todo.yml .github/p4_002_todo.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "docs: mark P4-002 complete"
+          git push origin HEAD:P4-002_bluez_adapter_discovery
