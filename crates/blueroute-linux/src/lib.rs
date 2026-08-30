@@ -77,6 +77,18 @@ pub struct DiscoveredPeer {
     pub trusted: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BluetoothPeerEvent {
+    Added(DiscoveredPeer),
+    Changed(DiscoveredPeer),
+    Removed(PeerHandle),
+}
+
+/// Pull-based peer event subscription independent of BlueZ/D-Bus stream types.
+pub trait PeerEventSubscription: Send {
+    fn next_event(&mut self) -> BackendFuture<'_, Option<BluetoothPeerEvent>>;
+}
+
 /// Bluetooth operations that are independent of how PAN profiles are created.
 pub trait BluetoothBackend: Send + Sync {
     fn adapters(&self) -> BackendFuture<'_, Vec<BluetoothAdapter>>;
@@ -84,6 +96,10 @@ pub trait BluetoothBackend: Send + Sync {
     fn start_discovery(&self, adapter: AdapterHandle) -> BackendFuture<'_, ()>;
     fn stop_discovery(&self, adapter: AdapterHandle) -> BackendFuture<'_, ()>;
     fn discovered_peers(&self, adapter: AdapterHandle) -> BackendFuture<'_, Vec<DiscoveredPeer>>;
+    fn subscribe_peer_events(
+        &self,
+        adapter: AdapterHandle,
+    ) -> BackendFuture<'_, Box<dyn PeerEventSubscription>>;
     fn pair(&self, peer: PeerHandle) -> BackendFuture<'_, ()>;
     fn set_trusted(&self, peer: PeerHandle, trusted: bool) -> BackendFuture<'_, ()>;
 }
@@ -197,6 +213,14 @@ mod tests {
         }
     }
 
+    struct EmptyPeerSubscription;
+
+    impl PeerEventSubscription for EmptyPeerSubscription {
+        fn next_event(&mut self) -> BackendFuture<'_, Option<BluetoothPeerEvent>> {
+            Box::pin(async { Ok(None) })
+        }
+    }
+
     impl BluetoothBackend for FakeBluetooth {
         fn adapters(&self) -> BackendFuture<'_, Vec<BluetoothAdapter>> {
             Box::pin(async {
@@ -244,6 +268,15 @@ mod tests {
             _adapter: AdapterHandle,
         ) -> BackendFuture<'_, Vec<DiscoveredPeer>> {
             Box::pin(async { Ok(Vec::new()) })
+        }
+
+        fn subscribe_peer_events(
+            &self,
+            _adapter: AdapterHandle,
+        ) -> BackendFuture<'_, Box<dyn PeerEventSubscription>> {
+            Box::pin(async {
+                Ok(Box::new(EmptyPeerSubscription) as Box<dyn PeerEventSubscription>)
+            })
         }
 
         fn pair(&self, _peer: PeerHandle) -> BackendFuture<'_, ()> {
@@ -308,6 +341,8 @@ mod tests {
         assert_eq!(resolve(subscription.next_event()).unwrap(), None);
         resolve(backend.start_discovery(adapters[0].handle.clone())).unwrap();
         assert!(*backend.discovery_started.lock().unwrap());
+        let mut peers = resolve(backend.subscribe_peer_events(adapters[0].handle.clone())).unwrap();
+        assert_eq!(resolve(peers.next_event()).unwrap(), None);
     }
 
     #[test]
