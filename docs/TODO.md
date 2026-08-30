@@ -42,7 +42,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P3-005 | `[x]` | Persistent-secret policy, redacting secret wrapper, and restrictive Linux secret storage are implemented with permission/redaction tests. |
 | P4-001 | `[x]` | Backend-neutral adapter boundaries and fake-backend tests are implemented and green in CI. |
 | P4-002 | `[x]` | Direct system-D-Bus BlueZ service/adapter discovery, Powered-state mapping, and adapter-change subscriptions are implemented and green in locked CI; physical-controller validation remains in P1. |
-| P4-003 | `[-]` | BlueZ StartDiscovery/StopDiscovery, Device1 snapshot mapping, and peer add/change/remove subscriptions are implemented; physical nearby-node acceptance is still pending. |
+| P4-003 | `[x]` | BlueZ discovery lifecycle, Device1 mapping, peer events, and real nearby-Linux-node hardware acceptance are complete; `debiancb1` was observed through the Rust adapter. |
 | P5-001 | `[-]` | API version contract and compatibility rules are implemented/tested; client-side incompatibility enforcement remains pending P5-005. |
 | P5-002 | `[-]` | Semantic command/response model implemented; serialization round-trip tests remain. |
 | P5-003 | `[x]` | Event model and deterministic structural tests are implemented and green in CI. |
@@ -448,7 +448,7 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 **Acceptance**
 
 - Nearby compatible Linux test nodes appear through Rust adapter.
-- Software implementation is complete; physical nearby-node evidence is still required before this task becomes `[x]`.
+- Hardware acceptance is recorded in `docs/P4-003-HARDWARE-EVIDENCE-2026-08-29.md`; the known Linux node `debiancb1` appeared through the Rust adapter.
 
 ## P4-004 — Implement pairing/trust adapter
 
