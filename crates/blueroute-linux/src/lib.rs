@@ -2,9 +2,11 @@
 
 mod identity;
 mod membership_store;
+mod secret_store;
 
 pub use identity::{NodeIdentityGenerator, NodeIdentityStore, SystemNodeIdentityGenerator};
 pub use membership_store::NetworkMembershipStore;
+pub use secret_store::SecretFileStore;
 
 use std::future::Future;
 use std::net::IpAddr;
