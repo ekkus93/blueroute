@@ -1,0 +1,43 @@
+name: Temporary P4-004 implementation helper
+
+on:
+  push:
+    branches:
+      - P4-004_pairing_trust
+    paths:
+      - .github/workflows/p4-004-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: P4-004_pairing_trust
+          fetch-depth: 0
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt,clippy
+      - name: Select pinned Rust toolchain
+        run: rustup override set 1.95.0
+      - name: Apply implementation
+        run: python .github/p4-004-apply.py
+      - name: Format
+        run: cargo fmt --all
+      - name: Check workspace
+        run: cargo check --workspace --locked
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Run tests
+        run: cargo test --workspace --locked
+      - name: Commit product changes and remove helper
+        run: |
+          rm .github/p4-004-apply.py .github/workflows/p4-004-apply.yml
+          git add -A
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "feat: implement BlueZ pairing and trust" 
+          git push origin HEAD:P4-004_pairing_trust
