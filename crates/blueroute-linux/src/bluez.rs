@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use futures_lite::StreamExt;
 use zbus::fdo::{DBusProxy, ManagedObjects, ObjectManagerProxy};
 use zbus::message::Type as MessageType;
-use zbus::zvariant::{OwnedInterfaceName, OwnedObjectPath, OwnedValue};
+use zbus::names::{BusName, OwnedInterfaceName};
+use zbus::zvariant::{OwnedObjectPath, OwnedValue};
 use zbus::{Connection, MatchRule, Message, MessageStream};
 
 use blueroute_core::{CoreError, ErrorKind};
@@ -55,9 +56,7 @@ impl BluetoothBackend for BluezBackend {
         Box::pin(async move { self.snapshot().await })
     }
 
-    fn subscribe_adapter_events(
-        &self,
-    ) -> BackendFuture<'_, Box<dyn AdapterEventSubscription>> {
+    fn subscribe_adapter_events(&self) -> BackendFuture<'_, Box<dyn AdapterEventSubscription>> {
         Box::pin(async move {
             ensure_bluez_available(&self.connection).await?;
             let stream = bluez_signal_stream(&self.connection).await?;
@@ -134,14 +133,15 @@ async fn bluez_service_available(connection: &Connection) -> Result<bool, CoreEr
     let proxy = DBusProxy::new(connection)
         .await
         .map_err(|error| bluez_error("failed to create a system D-Bus service proxy", error))?;
+    let service_name = BusName::try_from(BLUEZ_SERVICE).map_err(|error| {
+        CoreError::with_diagnostic(
+            ErrorKind::Internal,
+            "BlueZ service name is invalid",
+            error.to_string(),
+        )
+    })?;
     proxy
-        .name_has_owner(BLUEZ_SERVICE.try_into().map_err(|error| {
-            CoreError::with_diagnostic(
-                ErrorKind::Internal,
-                "BlueZ service name is invalid",
-                error.to_string(),
-            )
-        })?)
+        .name_has_owner(service_name)
         .await
         .map_err(|error| bluez_error("failed to query BlueZ service availability", error))
 }
@@ -169,13 +169,14 @@ async fn enumerate_adapters(connection: &Connection) -> Result<Vec<BluetoothAdap
     adapters_from_managed_objects(&objects)
 }
 
-fn adapters_from_managed_objects(objects: &ManagedObjects) -> Result<Vec<BluetoothAdapter>, CoreError> {
+fn adapters_from_managed_objects(
+    objects: &ManagedObjects,
+) -> Result<Vec<BluetoothAdapter>, CoreError> {
     let mut adapters = Vec::new();
     for (path, interfaces) in objects {
-        let Some(properties) = interfaces
-            .iter()
-            .find_map(|(name, properties)| (name.as_str() == ADAPTER_INTERFACE).then_some(properties))
-        else {
+        let Some(properties) = interfaces.iter().find_map(|(name, properties)| {
+            (name.as_str() == ADAPTER_INTERFACE).then_some(properties)
+        }) else {
             continue;
         };
 
@@ -230,7 +231,9 @@ fn is_adapter_change_signal(message: &Message) -> Result<bool, CoreError> {
                 bluez_error("failed to decode BlueZ InterfacesAdded signal", error)
             })?;
             Ok(is_adapter_object_path(path.as_str())
-                && interfaces.keys().any(|name| name.as_str() == ADAPTER_INTERFACE))
+                && interfaces
+                    .keys()
+                    .any(|name| name.as_str() == ADAPTER_INTERFACE))
         }
         (Some(OBJECT_MANAGER_INTERFACE), Some(INTERFACES_REMOVED)) => {
             let (path, interfaces): (OwnedObjectPath, Vec<OwnedInterfaceName>) =
@@ -238,7 +241,9 @@ fn is_adapter_change_signal(message: &Message) -> Result<bool, CoreError> {
                     bluez_error("failed to decode BlueZ InterfacesRemoved signal", error)
                 })?;
             Ok(is_adapter_object_path(path.as_str())
-                && interfaces.iter().any(|name| name.as_str() == ADAPTER_INTERFACE))
+                && interfaces
+                    .iter()
+                    .any(|name| name.as_str() == ADAPTER_INTERFACE))
         }
         (Some(PROPERTIES_INTERFACE), Some(PROPERTIES_CHANGED)) => {
             let Some(path) = header.path() else {
@@ -326,7 +331,9 @@ mod tests {
     fn adapter_object_paths_exclude_nested_device_objects() {
         assert!(is_adapter_object_path("/org/bluez/hci0"));
         assert!(is_adapter_object_path("/org/bluez/controller-name"));
-        assert!(!is_adapter_object_path("/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF"));
+        assert!(!is_adapter_object_path(
+            "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF"
+        ));
         assert!(!is_adapter_object_path("/org/bluez/"));
         assert!(!is_adapter_object_path("/other/hci0"));
     }

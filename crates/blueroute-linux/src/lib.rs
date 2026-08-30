@@ -208,7 +208,9 @@ mod tests {
         }
 
         fn subscribe_adapter_events(&self) -> BackendFuture<'_, Box<dyn AdapterEventSubscription>> {
-            Box::pin(async { Ok(Box::new(EmptyAdapterSubscription) as Box<dyn AdapterEventSubscription>) })
+            Box::pin(async {
+                Ok(Box::new(EmptyAdapterSubscription) as Box<dyn AdapterEventSubscription>)
+            })
         }
 
         fn start_discovery(&self, _adapter: AdapterHandle) -> BackendFuture<'_, ()> {
