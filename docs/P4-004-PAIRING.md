@@ -2,6 +2,8 @@
 
 BlueRoute performs pairing directly through `org.bluez.Device1.Pair` and changes BlueZ trust through the `org.bluez.Device1.Trusted` property. Production code does not invoke or parse `bluetoothctl`.
 
+BlueZ pairing-agent management is performed through `org.bluez.AgentManager1` at `/org/bluez`; `/` remains reserved for BlueZ's `org.freedesktop.DBus.ObjectManager`.
+
 ## Application agent
 
 Before an outgoing pairing operation, the Linux backend serves `org.bluez.Agent1` at `/org/blueroute/PairingAgent` and registers it with `org.bluez.AgentManager1` using the `NoInputNoOutput` capability. It is an application agent, not a requested system-wide default agent.

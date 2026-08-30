@@ -20,6 +20,7 @@ use crate::{
 
 const BLUEZ_SERVICE: &str = "org.bluez";
 const BLUEZ_ROOT_PATH: &str = "/";
+const BLUEZ_AGENT_MANAGER_PATH: &str = "/org/bluez";
 const BLUEZ_OBJECT_PREFIX: &str = "/org/bluez/";
 const ADAPTER_INTERFACE: &str = "org.bluez.Adapter1";
 const DEVICE_INTERFACE: &str = "org.bluez.Device1";
@@ -345,7 +346,7 @@ async fn ensure_pairing_agent(
     let manager = Proxy::new(
         connection,
         BLUEZ_SERVICE,
-        BLUEZ_ROOT_PATH,
+        BLUEZ_AGENT_MANAGER_PATH,
         AGENT_MANAGER_INTERFACE,
     )
     .await
@@ -395,7 +396,7 @@ async fn request_default_pairing_agent(connection: &Connection) -> Result<(), Co
     let manager = Proxy::new(
         connection,
         BLUEZ_SERVICE,
-        BLUEZ_ROOT_PATH,
+        BLUEZ_AGENT_MANAGER_PATH,
         AGENT_MANAGER_INTERFACE,
     )
     .await
@@ -422,7 +423,7 @@ async fn unregister_pairing_agent(connection: &Connection) -> Result<(), CoreErr
     let manager = Proxy::new(
         connection,
         BLUEZ_SERVICE,
-        BLUEZ_ROOT_PATH,
+        BLUEZ_AGENT_MANAGER_PATH,
         AGENT_MANAGER_INTERFACE,
     )
     .await
