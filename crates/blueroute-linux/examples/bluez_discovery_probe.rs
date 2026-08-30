@@ -3,7 +3,7 @@ use std::io;
 use std::thread;
 use std::time::Duration;
 
-use blueroute_linux::{BluezBackend, BluetoothBackend};
+use blueroute_linux::{BluetoothBackend, BluezBackend};
 use futures_lite::future;
 
 const DISCOVERY_WINDOW: Duration = Duration::from_secs(10);

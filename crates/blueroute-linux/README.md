@@ -4,8 +4,8 @@ Linux-specific system integration for BlueRoute.
 
 The crate keeps Linux implementation details such as system D-Bus, BlueZ, persistence, and future network backends out of `blueroute-core`.
 
-## BlueZ adapter discovery
+## BlueZ integration
 
-`BluezBackend` uses the system D-Bus directly through `zbus` to detect the `org.bluez` service, enumerate `org.bluez.Adapter1` objects, read their `Powered` state, and observe adapter add/remove/power changes. It does not invoke `bluetoothctl`.
+`BluezBackend` uses the system D-Bus directly through `zbus`. It detects the `org.bluez` service, enumerates `org.bluez.Adapter1` objects, reads their `Powered` state, and observes adapter add/remove/power changes. It does not invoke `bluetoothctl`.
 
-Device discovery, pairing/trust, and Bluetooth PAN lifecycle are intentionally separate follow-on tasks.
+Device discovery uses `org.bluez.Adapter1.StartDiscovery` and `StopDiscovery`, maps `org.bluez.Device1` objects into D-Bus-neutral `DiscoveredPeer` values, and exposes peer add/change/remove events without maintaining an unbounded local peer cache. Pairing/trust and Bluetooth PAN lifecycle remain separate follow-on tasks.
