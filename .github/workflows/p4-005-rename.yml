@@ -1,0 +1,51 @@
+name: Temporary P4-005 interface rename validation
+
+on:
+  push:
+    branches:
+      - P4-005_panu_interface_rename
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: P4-005_panu_interface_rename
+          fetch-depth: 0
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Apply interface rename fix
+        run: python .github/p4-005-rename.py
+
+      - name: Format
+        run: cargo fmt --all
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check workspace
+        run: cargo check --workspace --locked
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace --locked
+
+      - name: Commit product changes and remove helper
+        run: |
+          rm .github/p4-005-rename.py .github/workflows/p4-005-rename.yml
+          git add crates/blueroute-linux/src/pan.rs docs/P4-005-PANU.md docs/TODO.md .github
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: resolve udev-renamed PAN interfaces'
+          git push origin HEAD:P4-005_panu_interface_rename
