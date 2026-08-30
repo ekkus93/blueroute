@@ -26,7 +26,7 @@ A successful connection returns:
 - the BlueZ-created interface name;
 - the selected peer handle.
 
-If BlueZ reports `AlreadyConnected`, BlueRoute reconciles the authoritative `Network1.Connected` and `Network1.Interface` properties and returns the existing attachment rather than treating an already-satisfied connection as a fatal error.
+Before starting a new connection, BlueRoute reconciles the authoritative `Network1.Connected` and `Network1.Interface` properties and returns an existing attachment when the requested state is already satisfied. The `Connect("nap")` call is bounded to 30 seconds. If it times out, BlueRoute calls `Network1.Disconnect()` to abort the pending attempt, as permitted by the BlueZ Network API, so a stalled operation is not left behind for the next retry. BlueZ `InProgress` responses (including the older generic `Failed: Operation already in progress` form observed on hardware) are surfaced as `InvalidState` rather than an undifferentiated PAN failure.
 
 Common BlueZ errors are mapped into typed `CoreError` categories. Missing/unsupported PAN profile APIs map to `CapabilityUnavailable`, authorization failures map to `AuthenticationFailed`, and connection failures map to `PanFailure`.
 
