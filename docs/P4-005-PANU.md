@@ -34,13 +34,13 @@ Common BlueZ errors are mapped into typed `CoreError` categories. Missing/unsupp
 
 `PanBackend::subscribe_panu_events` creates a bounded D-Bus signal stream. It listens for relevant `PropertiesChanged` notifications from both `org.bluez.Network1` and `org.bluez.Device1`, then re-reads the authoritative `Network1.Connected` state before emitting `PanuEvent::Lost`.
 
-Using `Device1.Connected` as a secondary trigger is intentional. Some BlueZ teardown paths have historically been inconsistent about emitting a `Network1` property-change signal for local disconnects. P4-005 therefore does not rely on one exact signal sequence.
+Using `Device1.Connected` as a secondary trigger is intentional. Some BlueZ teardown paths have historically been inconsistent about emitting a `Network1` property-change signal for local disconnects. The subscription also treats `ObjectManager.InterfacesRemoved` for the tracked `Network1` or `Device1` object as a state-refresh trigger. P4-005 therefore does not rely on one exact signal sequence, and every trigger is reconciled against authoritative `Network1` state before a loss event is emitted.
 
-The subscription retains only one tracked attachment and uses a bounded signal queue; it does not accumulate link history.
+The subscription installs its bounded signal match before taking the initial link-state snapshot so a disconnect cannot fall into a check-then-subscribe race window. It retains only one tracked attachment and does not accumulate link history.
 
 ## Idempotent disconnect
 
-`disconnect_panu` treats an already-absent peer/network connection as success when BlueZ reports an already-disconnected or disappeared object. The hardware probe calls disconnect twice so real acceptance can verify the desired-state operation is idempotent.
+`disconnect_panu` treats an already-absent peer/network connection as success when BlueZ reports an already-disconnected or disappeared object. It also checks authoritative state before issuing `Disconnect()` and re-checks state after an ambiguous method failure, so a teardown that already reached the requested disconnected state is still treated as success. The hardware probe calls disconnect twice so real acceptance can verify the desired-state operation is idempotent.
 
 ## Hardware probe
 
