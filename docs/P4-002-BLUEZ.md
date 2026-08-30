@@ -34,4 +34,6 @@ Re-enumerating after a signal deliberately makes the object-manager snapshot aut
 
 P4-002 only covers BlueZ service availability, local adapter enumeration, adapter power state, and adapter-change observation. Nearby device discovery remains P4-003, pairing/trust remains P4-004, and PAN lifecycle remains P4-005/P4-006.
 
+BlueZ daemon disappearance/restart recovery is intentionally not treated as ordinary adapter churn here. Reconciliation after a system-service restart belongs to the later reliability/reconciliation work, where daemon-wide backend state can be rebuilt consistently rather than partially repaired inside this discovery adapter.
+
 GitHub Actions validates the D-Bus-independent parsing/diff logic and the Rust API integration. Physical-controller behavior remains part of the separate P1 hardware-characterization track and must not be inferred from CI alone.
