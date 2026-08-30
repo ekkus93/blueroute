@@ -6,7 +6,7 @@ BlueRoute performs pairing directly through `org.bluez.Device1.Pair` and changes
 
 Before an outgoing pairing operation, the Linux backend serves `org.bluez.Agent1` at `/org/blueroute/PairingAgent` and registers it with `org.bluez.AgentManager1` using the `NoInputNoOutput` capability. It is an application agent, not a requested system-wide default agent.
 
-The agent authorizes confirmation, authorization, and service callbacks only for the exact peer whose `BluetoothBackend::pair` operation is active. Unrelated callbacks are rejected. PIN-code and passkey-input requests are rejected because a `NoInputNoOutput` BlueRoute process cannot honestly satisfy them.
+The agent authorizes just-works authorization and service callbacks only for the exact peer whose `BluetoothBackend::pair` operation is active. Unrelated callbacks are rejected. PIN-code input, passkey input, and numeric passkey confirmation requests are rejected because a `NoInputNoOutput` BlueRoute process cannot honestly satisfy them.
 
 Only one outgoing pairing operation may be active through a backend instance at a time. Authorization is automatically revoked when that operation finishes or fails.
 

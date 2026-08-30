@@ -234,7 +234,10 @@ impl PairingAgent {
         device: OwnedObjectPath,
         _passkey: u32,
     ) -> Result<(), PairingAgentError> {
-        self.require_authorized(&device)
+        self.require_authorized(&device)?;
+        Err(PairingAgentError::Rejected(
+            "BlueRoute NoInputNoOutput pairing cannot confirm a displayed passkey".to_owned(),
+        ))
     }
 
     fn request_authorization(&self, device: OwnedObjectPath) -> Result<(), PairingAgentError> {
@@ -1309,6 +1312,7 @@ mod tests {
         let agent = PairingAgent { control };
         let path = OwnedObjectPath::try_from(peer.as_str()).unwrap();
         assert!(agent.request_pin_code(path.clone()).is_err());
-        assert!(agent.request_passkey(path).is_err());
+        assert!(agent.request_passkey(path.clone()).is_err());
+        assert!(agent.request_confirmation(path, 123456).is_err());
     }
 }
