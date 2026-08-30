@@ -1,9 +1,11 @@
 #![doc = "Linux system adapter boundaries for BlueRoute."]
 
+mod bluez;
 mod identity;
 mod membership_store;
 mod secret_store;
 
+pub use bluez::BluezBackend;
 pub use identity::{NodeIdentityGenerator, NodeIdentityStore, SystemNodeIdentityGenerator};
 pub use membership_store::NetworkMembershipStore;
 pub use secret_store::SecretFileStore;
@@ -53,6 +55,21 @@ pub struct BluetoothAdapter {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BluetoothAdapterEvent {
+    Added(BluetoothAdapter),
+    Removed(AdapterHandle),
+    PoweredChanged {
+        handle: AdapterHandle,
+        powered: bool,
+    },
+}
+
+/// Pull-based adapter event subscription that remains independent of D-Bus stream types.
+pub trait AdapterEventSubscription: Send {
+    fn next_event(&mut self) -> BackendFuture<'_, Option<BluetoothAdapterEvent>>;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DiscoveredPeer {
     pub handle: PeerHandle,
     pub display_name: Option<String>,
@@ -63,6 +80,7 @@ pub struct DiscoveredPeer {
 /// Bluetooth operations that are independent of how PAN profiles are created.
 pub trait BluetoothBackend: Send + Sync {
     fn adapters(&self) -> BackendFuture<'_, Vec<BluetoothAdapter>>;
+    fn subscribe_adapter_events(&self) -> BackendFuture<'_, Box<dyn AdapterEventSubscription>>;
     fn start_discovery(&self, adapter: AdapterHandle) -> BackendFuture<'_, ()>;
     fn stop_discovery(&self, adapter: AdapterHandle) -> BackendFuture<'_, ()>;
     fn discovered_peers(&self, adapter: AdapterHandle) -> BackendFuture<'_, Vec<DiscoveredPeer>>;
@@ -171,6 +189,14 @@ mod tests {
         discovery_started: Mutex<bool>,
     }
 
+    struct EmptyAdapterSubscription;
+
+    impl AdapterEventSubscription for EmptyAdapterSubscription {
+        fn next_event(&mut self) -> BackendFuture<'_, Option<BluetoothAdapterEvent>> {
+            Box::pin(async { Ok(None) })
+        }
+    }
+
     impl BluetoothBackend for FakeBluetooth {
         fn adapters(&self) -> BackendFuture<'_, Vec<BluetoothAdapter>> {
             Box::pin(async {
@@ -178,6 +204,12 @@ mod tests {
                     handle: AdapterHandle::new("fake0")?,
                     powered: true,
                 }])
+            })
+        }
+
+        fn subscribe_adapter_events(&self) -> BackendFuture<'_, Box<dyn AdapterEventSubscription>> {
+            Box::pin(async {
+                Ok(Box::new(EmptyAdapterSubscription) as Box<dyn AdapterEventSubscription>)
             })
         }
 
@@ -272,6 +304,8 @@ mod tests {
         let backend = FakeBluetooth::default();
         let adapters = resolve(backend.adapters()).unwrap();
         assert_eq!(adapters.len(), 1);
+        let mut subscription = resolve(backend.subscribe_adapter_events()).unwrap();
+        assert_eq!(resolve(subscription.next_event()).unwrap(), None);
         resolve(backend.start_discovery(adapters[0].handle.clone())).unwrap();
         assert!(*backend.discovery_started.lock().unwrap());
     }
