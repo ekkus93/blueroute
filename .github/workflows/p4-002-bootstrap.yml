@@ -20,6 +20,8 @@ jobs:
         run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt,clippy
       - name: Select pinned Rust toolchain
         run: rustup override set 1.95.0
+      - name: Apply staged zbus API fix
+        run: python3 .github/p4_002_fix.py
       - name: Format
         run: cargo fmt --all
       - name: Check workspace and update lockfile
@@ -30,7 +32,7 @@ jobs:
         run: cargo test --workspace
       - name: Commit generated lockfile and formatting
         run: |
-          rm .github/workflows/p4-002-bootstrap.yml
+          rm .github/workflows/p4-002-bootstrap.yml .github/p4_002_fix.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
