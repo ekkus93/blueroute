@@ -1,6 +1,8 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
-use futures_lite::StreamExt;
+use async_io::Timer;
+use futures_lite::{StreamExt, future};
 use zbus::message::Type as MessageType;
 use zbus::names::OwnedInterfaceName;
 use zbus::zvariant::{OwnedObjectPath, OwnedValue};
@@ -26,6 +28,7 @@ const CONNECTED_PROPERTY: &str = "Connected";
 const INTERFACE_PROPERTY: &str = "Interface";
 const REMOTE_NAP_ROLE: &str = "nap";
 const SIGNAL_QUEUE_CAPACITY: usize = 64;
+const PANU_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 impl PanBackend for BluezBackend {
     fn connect_panu(&self, peer: PeerHandle) -> BackendFuture<'_, PanAttachment> {
@@ -134,9 +137,24 @@ async fn connect_panu(
     connection: &Connection,
     peer: &PeerHandle,
 ) -> Result<PanAttachment, CoreError> {
+    if let Some(attachment) = current_panu_attachment(connection, peer).await? {
+        return Ok(attachment);
+    }
+
     let proxy = network_proxy(connection, peer).await?;
-    match proxy.call_method(CONNECT_METHOD, &(REMOTE_NAP_ROLE,)).await {
-        Ok(reply) => {
+    let connect = async {
+        proxy
+            .call_method(CONNECT_METHOD, &(REMOTE_NAP_ROLE,))
+            .await
+            .map(Some)
+    };
+    let timeout = async {
+        Timer::after(PANU_CONNECT_TIMEOUT).await;
+        Ok::<Option<Message>, zbus::Error>(None)
+    };
+
+    match future::race(connect, timeout).await {
+        Ok(Some(reply)) => {
             let interface: String = reply.body().deserialize().map_err(|error| {
                 pan_error(
                     ErrorKind::ProtocolError,
@@ -146,19 +164,51 @@ async fn connect_panu(
             })?;
             panu_attachment(peer, interface)
         }
-        Err(zbus::Error::MethodError(name, _, _))
-            if name.as_str() == "org.bluez.Error.AlreadyConnected" =>
-        {
-            current_panu_attachment(connection, peer)
-                .await?
-                .ok_or_else(|| {
-                    CoreError::new(
-                        ErrorKind::ProtocolError,
-                        "BlueZ reported an existing PAN connection without an active interface",
-                    )
-                })
+        Ok(None) => match abort_pending_panu_connect(connection, peer).await {
+            Ok(()) => Err(CoreError::new(
+                ErrorKind::PanFailure,
+                "Bluetooth PAN connection timed out and was cancelled",
+            )),
+            Err(cleanup) => Err(CoreError::with_diagnostic(
+                ErrorKind::PanFailure,
+                "Bluetooth PAN connection timed out and cleanup failed",
+                cleanup
+                    .diagnostic()
+                    .unwrap_or_else(|| cleanup.message())
+                    .to_owned(),
+            )),
+        },
+        Err(error) => {
+            if let Ok(Some(attachment)) = current_panu_attachment(connection, peer).await {
+                return Ok(attachment);
+            }
+            if connect_is_in_progress(&error) {
+                return Err(pan_error(
+                    ErrorKind::InvalidState,
+                    "another Bluetooth PAN connection attempt is already in progress",
+                    error,
+                ));
+            }
+            if connect_is_already_connected(&error) {
+                return Err(CoreError::new(
+                    ErrorKind::ProtocolError,
+                    "BlueZ reported an existing PAN connection without an active interface",
+                ));
+            }
+            Err(connect_error(error))
         }
-        Err(error) => Err(connect_error(error)),
+    }
+}
+
+async fn abort_pending_panu_connect(
+    connection: &Connection,
+    peer: &PeerHandle,
+) -> Result<(), CoreError> {
+    let proxy = network_proxy(connection, peer).await?;
+    match proxy.call_method(DISCONNECT_METHOD, &()).await {
+        Ok(_) => Ok(()),
+        Err(error) if disconnect_is_already_absent(&error) => Ok(()),
+        Err(error) => Err(disconnect_error(error)),
     }
 }
 
@@ -337,6 +387,27 @@ fn properties_change_can_affect_panu_state(
                 .iter()
                 .any(|invalid| invalid.as_str() == *property)
     })
+}
+
+fn connect_is_already_connected(error: &zbus::Error) -> bool {
+    matches!(
+        error,
+        zbus::Error::MethodError(name, _, _)
+            if name.as_str() == "org.bluez.Error.AlreadyConnected"
+    )
+}
+
+fn connect_is_in_progress(error: &zbus::Error) -> bool {
+    match error {
+        zbus::Error::MethodError(name, detail, _) => {
+            name.as_str() == "org.bluez.Error.InProgress"
+                || (name.as_str() == "org.bluez.Error.Failed"
+                    && detail
+                        .as_deref()
+                        .is_some_and(|message| message.contains("already in progress")))
+        }
+        _ => false,
+    }
 }
 
 fn connect_error(error: zbus::Error) -> CoreError {
