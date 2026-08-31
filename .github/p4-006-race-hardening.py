@@ -4,15 +4,17 @@ path = Path("crates/blueroute-linux/src/pan.rs")
 text = path.read_text()
 
 
-def replace_once(old: str, new: str) -> None:
+def replace_exact(old: str, new: str, expected: int = 1) -> None:
     global text
     count = text.count(old)
-    if count != 1:
-        raise SystemExit(f"expected exactly one match, found {count}: {old[:120]!r}")
-    text = text.replace(old, new, 1)
+    if count != expected:
+        raise SystemExit(
+            f"expected exactly {expected} match(es), found {count}: {old[:120]!r}"
+        )
+    text = text.replace(old, new, expected)
 
 
-replace_once(
+replace_exact(
 '''            ensure_owned_nap_registration(&control, &adapter, &attachment.interface, &owner)?;
             let clients = nap_client_interfaces(&attachment.interface)?;
             Ok(Box::new(BluezNapSubscription {
@@ -43,22 +45,15 @@ replace_once(
 ''',
 )
 
-replace_once(
+replace_exact(
 '''    let proxy = match network_server_proxy(connection, adapter).await {
 ''',
 '''    let proxy = match network_server_proxy(connection, adapter, &registration.bluez_owner).await {
 ''',
+    expected=2,
 )
 
-# The stop path contains the same proxy construction after its local registration is recovered.
-replace_once(
-'''    let proxy = match network_server_proxy(connection, adapter).await {
-''',
-'''    let proxy = match network_server_proxy(connection, adapter, &registration.bluez_owner).await {
-''',
-)
-
-replace_once(
+replace_exact(
 '''async fn network_server_proxy<'a>(
     connection: &'a Connection,
     adapter: &'a AdapterHandle,
@@ -87,7 +82,7 @@ replace_once(
 ''',
 )
 
-replace_once(
+replace_exact(
 '''        "org.bluez.Error.NotAuthorized" | "org.freedesktop.DBus.Error.AccessDenied" => (
             ErrorKind::CapabilityUnavailable,
             "Bluetooth NAP registration is not authorized on this system",
@@ -107,7 +102,7 @@ replace_once(
 ''',
 )
 
-replace_once(
+replace_exact(
 '''                "org.bluez.Error.DoesNotExist"
                     | "org.freedesktop.DBus.Error.UnknownObject"
                     | "org.freedesktop.DBus.Error.UnknownInterface"
@@ -122,7 +117,7 @@ replace_once(
 ''',
 )
 
-replace_once(
+replace_exact(
 '''    #[test]
     fn nap_client_changes_are_deterministic_and_backend_neutral() {
 ''',
@@ -156,7 +151,7 @@ replace_once(
 ''',
 )
 
-replace_once(
+replace_exact(
 '''        assert_eq!(
             nap_register_method_error("org.bluez.Error.NotSupported").0,
             ErrorKind::CapabilityUnavailable
