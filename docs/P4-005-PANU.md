@@ -64,4 +64,4 @@ For P4-005 hardware acceptance, the remote Linux node must already provide a NAP
 
 ## P4-006 boundary
 
-NAP registration/acceptance is intentionally left to P4-006. The `BluezBackend` `start_nap` and `stop_nap` methods continue to return a typed capability-unavailable error until that task is implemented.
+NAP registration/acceptance is implemented by P4-006 through BlueZ `org.bluez.NetworkServer1`. PANU and NAP remain separate lifecycle operations behind the same backend-neutral `PanBackend`; bridge creation and IP configuration remain outside both tasks and are handled by the later network-backend/IP work.

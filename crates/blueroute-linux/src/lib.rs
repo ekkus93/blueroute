@@ -147,6 +147,17 @@ pub trait PanuEventSubscription: Send {
     fn next_event(&mut self) -> BackendFuture<'_, Option<PanuEvent>>;
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum NapEvent {
+    ClientAttached(PanAttachment),
+    ClientDetached(PanAttachment),
+}
+
+/// Pull-based NAP client event subscription independent of BlueZ/D-Bus stream types.
+pub trait NapEventSubscription: Send {
+    fn next_event(&mut self) -> BackendFuture<'_, Option<NapEvent>>;
+}
+
 /// PAN lifecycle boundary. Its implementation may ultimately use BlueZ, NetworkManager, or both.
 pub trait PanBackend: Send + Sync {
     fn connect_panu(&self, peer: PeerHandle) -> BackendFuture<'_, PanAttachment>;
@@ -155,7 +166,16 @@ pub trait PanBackend: Send + Sync {
         &self,
         attachment: PanAttachment,
     ) -> BackendFuture<'_, Box<dyn PanuEventSubscription>>;
-    fn start_nap(&self, adapter: AdapterHandle) -> BackendFuture<'_, PanAttachment>;
+    fn start_nap(
+        &self,
+        adapter: AdapterHandle,
+        bridge: NetworkInterfaceHandle,
+    ) -> BackendFuture<'_, PanAttachment>;
+    fn subscribe_nap_events(
+        &self,
+        adapter: AdapterHandle,
+        attachment: PanAttachment,
+    ) -> BackendFuture<'_, Box<dyn NapEventSubscription>>;
     fn stop_nap(&self, adapter: AdapterHandle) -> BackendFuture<'_, ()>;
 }
 
