@@ -121,6 +121,10 @@ impl PanBackend for BluezBackend {
                 })?;
             ensure_owned_nap_registration(&control, &adapter, &attachment.interface, &owner)?;
             let clients = nap_client_interfaces(&attachment.interface)?;
+            // Treat the initial authoritative bridge snapshot as attachments so a PANU
+            // that connected between start_nap and subscription cannot be lost.
+            let mut pending = VecDeque::new();
+            queue_nap_client_changes(&BTreeSet::new(), &clients, &mut pending);
             Ok(Box::new(BluezNapSubscription {
                 connection: self.connection.clone(),
                 control,
@@ -128,7 +132,7 @@ impl PanBackend for BluezBackend {
                 bridge: attachment.interface,
                 bluez_owner: owner,
                 clients,
-                pending: VecDeque::new(),
+                pending,
             }) as Box<dyn NapEventSubscription>)
         })
     }
@@ -267,7 +271,7 @@ async fn start_nap(
         return nap_service_attachment(existing.bridge);
     }
 
-    let proxy = match network_server_proxy(connection, adapter).await {
+    let proxy = match network_server_proxy(connection, adapter, &registration.bluez_owner).await {
         Ok(proxy) => proxy,
         Err(error) => {
             return Err(cleanup_nap_setup_failure(control, adapter, error));
@@ -317,7 +321,7 @@ async fn stop_nap(
         return Ok(());
     };
 
-    let proxy = match network_server_proxy(connection, adapter).await {
+    let proxy = match network_server_proxy(connection, adapter, &registration.bluez_owner).await {
         Ok(proxy) => proxy,
         Err(error) => {
             return match restore_nap_registration(control, adapter, &registration) {
@@ -607,10 +611,14 @@ async fn ensure_adapter_powered(
 async fn network_server_proxy<'a>(
     connection: &'a Connection,
     adapter: &'a AdapterHandle,
+    bluez_owner: &'a str,
 ) -> Result<Proxy<'a>, CoreError> {
+    // Target the exact BlueZ service instance that owns our lifecycle state. Using the
+    // well-known org.bluez name here would allow a restart between ownership checks and
+    // a destructive Unregister call to redirect that call to a different service instance.
     Proxy::new(
         connection,
-        BLUEZ_SERVICE,
+        bluez_owner,
         adapter.as_str(),
         NETWORK_SERVER_INTERFACE,
     )
@@ -791,6 +799,11 @@ fn nap_register_method_error(name: &str) -> (ErrorKind, &'static str) {
             ErrorKind::CapabilityUnavailable,
             "Bluetooth NAP registration is not authorized on this system",
         ),
+        "org.freedesktop.DBus.Error.ServiceUnknown"
+        | "org.freedesktop.DBus.Error.NameHasNoOwner" => (
+            ErrorKind::BluezUnavailable,
+            "BlueZ restarted or became unavailable during NAP registration",
+        ),
         "org.freedesktop.DBus.Error.UnknownMethod"
         | "org.freedesktop.DBus.Error.UnknownInterface"
         | "org.bluez.Error.NotSupported"
@@ -831,6 +844,8 @@ fn nap_unregister_is_already_absent(error: &zbus::Error) -> bool {
                     | "org.freedesktop.DBus.Error.UnknownObject"
                     | "org.freedesktop.DBus.Error.UnknownInterface"
                     | "org.freedesktop.DBus.Error.UnknownMethod"
+                    | "org.freedesktop.DBus.Error.ServiceUnknown"
+                    | "org.freedesktop.DBus.Error.NameHasNoOwner"
             )
     )
 }
@@ -1622,6 +1637,31 @@ mod tests {
     }
 
     #[test]
+    fn nap_initial_client_snapshot_reports_existing_clients() {
+        let current = BTreeSet::from([bridge("bnep7"), bridge("bnep8")]);
+        let mut pending = VecDeque::new();
+
+        queue_nap_client_changes(&BTreeSet::new(), &current, &mut pending);
+        assert_eq!(
+            pending.pop_front(),
+            Some(NapEvent::ClientAttached(PanAttachment {
+                role: PanRole::Nap,
+                interface: bridge("bnep7"),
+                peer: None,
+            }))
+        );
+        assert_eq!(
+            pending.pop_front(),
+            Some(NapEvent::ClientAttached(PanAttachment {
+                role: PanRole::Nap,
+                interface: bridge("bnep8"),
+                peer: None,
+            }))
+        );
+        assert!(pending.is_empty());
+    }
+
+    #[test]
     fn nap_client_changes_are_deterministic_and_backend_neutral() {
         let previous = BTreeSet::from([bridge("bnep7"), bridge("bnep9")]);
         let current = BTreeSet::from([bridge("bnep8"), bridge("bnep9")]);
@@ -1676,6 +1716,10 @@ mod tests {
         assert_eq!(
             nap_register_method_error("org.bluez.Error.NotSupported").0,
             ErrorKind::CapabilityUnavailable
+        );
+        assert_eq!(
+            nap_register_method_error("org.freedesktop.DBus.Error.ServiceUnknown").0,
+            ErrorKind::BluezUnavailable
         );
     }
 
