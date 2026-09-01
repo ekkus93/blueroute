@@ -159,8 +159,8 @@ impl IpNetworkBackend for NetworkManagerBackend {
     }
 
     fn set_ipv4_forwarding(&self, enabled: bool) -> BackendFuture<'_, ()> {
-    Box::pin(async move { crate::forwarding::set_ipv4_forwarding(enabled) })
-}
+        Box::pin(async move { crate::forwarding::set_ipv4_forwarding(enabled) })
+    }
 }
 
 struct NetworkManagerSubscription {
