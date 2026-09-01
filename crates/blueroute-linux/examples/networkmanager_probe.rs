@@ -65,12 +65,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut subscription = backend.subscribe_network_state().await?;
 
-    let first = backend
-        .ensure_bridge(PROBE_OWNER, bridge.clone())
-        .await?;
-    let second = backend
-        .ensure_bridge(PROBE_OWNER, bridge.clone())
-        .await?;
+    let first = backend.ensure_bridge(PROBE_OWNER, bridge.clone()).await?;
+    let second = backend.ensure_bridge(PROBE_OWNER, bridge.clone()).await?;
     if first.handle != second.handle {
         return Err(CoreError::new(
             ErrorKind::InvalidState,
@@ -213,12 +209,18 @@ async fn observe_bridge_present(
                 if profile.owner == Some(owner) && profile.interface.as_ref() == Some(bridge) =>
             {
                 connection_seen = true;
-                println!("observed NetworkManager connection event for {}", bridge.as_str());
+                println!(
+                    "observed NetworkManager connection event for {}",
+                    bridge.as_str()
+                );
             }
             NetworkStateEvent::DeviceAdded(device) | NetworkStateEvent::DeviceChanged(device)
                 if &device.interface == bridge =>
             {
-                println!("observed NetworkManager device event for {}", bridge.as_str());
+                println!(
+                    "observed NetworkManager device event for {}",
+                    bridge.as_str()
+                );
                 device_handle = Some(device.handle);
             }
             _ => {}
@@ -246,11 +248,17 @@ async fn observe_bridge_absent(
         match event {
             NetworkStateEvent::ConnectionRemoved(handle) if handle == profile.handle => {
                 connection_removed = true;
-                println!("observed NetworkManager connection removal for {}", bridge.as_str());
+                println!(
+                    "observed NetworkManager connection removal for {}",
+                    bridge.as_str()
+                );
             }
             NetworkStateEvent::DeviceRemoved(handle) if &handle == device => {
                 device_removed = true;
-                println!("observed NetworkManager device removal for {}", bridge.as_str());
+                println!(
+                    "observed NetworkManager device removal for {}",
+                    bridge.as_str()
+                );
             }
             _ => {}
         }

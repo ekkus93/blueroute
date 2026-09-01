@@ -491,7 +491,7 @@ async fn ensure_bridge(
             profile.path
         }
         None => {
-            reject_foreign_interface_claim(connection, bridge).await?;
+            reject_foreign_interface_claim(connection, owner, bridge).await?;
             add_owned_profile(connection, owner, bridge, KIND_BRIDGE).await?
         }
     };
@@ -712,17 +712,19 @@ fn exactly_one_owned_profile(
 
 async fn reject_foreign_interface_claim(
     connection: &Connection,
+    owner: NetworkId,
     interface: &NetworkInterfaceHandle,
 ) -> Result<(), CoreError> {
     for profile in list_connections(connection).await? {
-        if profile.interface.as_ref() == Some(interface) && profile.owner.is_none() {
+        if profile.interface.as_ref() == Some(interface) && profile.owner != Some(owner) {
             return Err(CoreError::with_diagnostic(
                 ErrorKind::InvalidState,
-                "refusing to create a BlueRoute profile for an interface claimed by a foreign NetworkManager profile",
+                "refusing to create a BlueRoute profile for an interface claimed by another NetworkManager profile",
                 format!(
-                    "interface={} foreign-profile={}",
+                    "owner={owner} interface={} conflicting-profile={} conflicting-owner={:?}",
                     interface.as_str(),
-                    profile.id
+                    profile.id,
+                    profile.owner
                 ),
             ));
         }
@@ -1093,6 +1095,20 @@ fn profile_owner(settings: &NmSettings) -> Result<Option<NetworkId>, CoreError> 
             ErrorKind::InvalidState,
             "NetworkManager profile has an unsupported BlueRoute ownership schema",
             format!("owner={owner} schema={:?}", data.get(SCHEMA_KEY)),
+        ));
+    }
+    let Some(kind) = data.get(KIND_KEY) else {
+        return Err(CoreError::with_diagnostic(
+            ErrorKind::InvalidState,
+            "NetworkManager profile has incomplete BlueRoute ownership metadata",
+            format!("owner={owner} missing={KIND_KEY}"),
+        ));
+    };
+    if !matches!(kind.as_str(), KIND_BRIDGE | KIND_INTERFACE) {
+        return Err(CoreError::with_diagnostic(
+            ErrorKind::InvalidState,
+            "NetworkManager profile has an unsupported BlueRoute ownership kind",
+            format!("owner={owner} kind={kind}"),
         ));
     }
     NetworkId::from_str(owner).map(Some).map_err(|error| {
@@ -1468,6 +1484,34 @@ mod tests {
         let mut user = HashMap::new();
         user.insert(USER_DATA_PROPERTY.to_owned(), OwnedValue::from(data));
         let mut settings = HashMap::new();
+        settings.insert(USER_SETTING.to_owned(), user);
+        assert_eq!(
+            profile_owner(&settings).unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
+    }
+
+    #[test]
+    fn incomplete_or_unknown_blueroute_kind_fails_closed() {
+        let owner = network(9);
+        let mut data = HashMap::<String, String>::new();
+        data.insert(OWNER_KEY.to_owned(), owner.to_string());
+        data.insert(SCHEMA_KEY.to_owned(), OWNERSHIP_SCHEMA.to_owned());
+        let mut user = HashMap::new();
+        user.insert(
+            USER_DATA_PROPERTY.to_owned(),
+            OwnedValue::from(data.clone()),
+        );
+        let mut settings = HashMap::new();
+        settings.insert(USER_SETTING.to_owned(), user);
+        assert_eq!(
+            profile_owner(&settings).unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
+
+        data.insert(KIND_KEY.to_owned(), "unknown".to_owned());
+        let mut user = HashMap::new();
+        user.insert(USER_DATA_PROPERTY.to_owned(), OwnedValue::from(data));
         settings.insert(USER_SETTING.to_owned(), user);
         assert_eq!(
             profile_owner(&settings).unwrap_err().kind(),
