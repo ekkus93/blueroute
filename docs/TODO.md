@@ -22,7 +22,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 
 ## Current task status
 
-**Status date:** 2026-08-31
+**Status date:** 2026-09-01
 
 | Task | Status | Current state |
 | --- | --- | --- |
@@ -46,6 +46,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P4-004 | `[x]` | BlueZ pairing/trust, Rust-controlled Agent1 callbacks, typed rejection/timeout handling, and real two-node Rust-controlled hardware acceptance are complete. |
 | P4-005 | `[x]` | BlueZ Network1 PANU connect/interface mapping (including udev rename reconciliation), bounded connect timeout/cancellation, loss observation, idempotent disconnect, and real two-node PANU data-plane hardware acceptance are complete. |
 | P4-006 | `[x]` | BlueZ NetworkServer1 NAP registration, client attach/detach observation, ownership-aware idempotent cleanup, typed capability failures, and real two-node Rust NAP/PANU data-plane hardware acceptance are complete. |
+| P4-007 | `[x]` | Direct NetworkManager system-D-Bus backend, bounded state observation, explicit ownership, BlueRoute-owned bridge/address lifecycle, fail-closed cross-owner handling, and real Debian 13 hardware acceptance are complete. |
 | P5-001 | `[-]` | API version contract and compatibility rules are implemented/tested; client-side incompatibility enforcement remains pending P5-005. |
 | P5-002 | `[-]` | Semantic command/response model implemented; serialization round-trip tests remain. |
 | P5-003 | `[x]` | Event model and deterministic structural tests are implemented and green in CI. |
@@ -494,14 +495,16 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P4-007 — Implement NetworkManager backend
 
-- [ ] enumerate relevant connections/devices.
-- [ ] observe changes.
-- [ ] apply BlueRoute-owned addressing.
-- [ ] remove only BlueRoute-owned state.
+- [x] enumerate relevant connections/devices.
+- [x] observe changes.
+- [x] apply BlueRoute-owned addressing.
+- [x] remove only BlueRoute-owned state.
 
 **Acceptance**
 
 - No production operation parses `nmcli` output.
+- Hardware acceptance is recorded in `docs/P4-007-HARDWARE-EVIDENCE-2026-09-01.md`; the Rust NetworkManager backend on `debiancb1` enumerated live state, observed bridge/profile events, applied `10.254.89.1/30`, rejected cross-owner takeover without leaking state, completed repeated idempotent cleanup, and preserved all 15 baseline foreign NetworkManager profiles.
+- Implementation/design notes and the hardware probe are documented in `docs/P4-007-NETWORKMANAGER.md`.
 
 ## P4-008 — Implement route adapter
 

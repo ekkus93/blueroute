@@ -3,12 +3,14 @@
 mod bluez;
 mod identity;
 mod membership_store;
+mod networkmanager;
 mod pan;
 mod secret_store;
 
 pub use bluez::BluezBackend;
 pub use identity::{NodeIdentityGenerator, NodeIdentityStore, SystemNodeIdentityGenerator};
 pub use membership_store::NetworkMembershipStore;
+pub use networkmanager::NetworkManagerBackend;
 pub use secret_store::SecretFileStore;
 
 use std::future::Future;
@@ -48,6 +50,8 @@ macro_rules! opaque_handle {
 opaque_handle!(AdapterHandle);
 opaque_handle!(PeerHandle);
 opaque_handle!(NetworkInterfaceHandle);
+opaque_handle!(NetworkConnectionHandle);
+opaque_handle!(NetworkDeviceHandle);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BluetoothAdapter {
@@ -180,9 +184,62 @@ pub trait PanBackend: Send + Sync {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NetworkConnection {
+    pub handle: NetworkConnectionHandle,
+    pub id: String,
+    pub uuid: String,
+    pub connection_type: String,
+    pub interface: Option<NetworkInterfaceHandle>,
+    pub owner: Option<NetworkId>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NetworkDevice {
+    pub handle: NetworkDeviceHandle,
+    pub interface: NetworkInterfaceHandle,
+    pub managed: bool,
+    pub device_type: u32,
+    pub state: u32,
+    pub active_connection: Option<NetworkConnectionHandle>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum NetworkStateEvent {
+    ConnectionAdded(NetworkConnection),
+    ConnectionChanged(NetworkConnection),
+    ConnectionRemoved(NetworkConnectionHandle),
+    DeviceAdded(NetworkDevice),
+    DeviceChanged(NetworkDevice),
+    DeviceRemoved(NetworkDeviceHandle),
+}
+
+/// Pull-based NetworkManager state observation without exposing D-Bus stream types.
+pub trait NetworkStateSubscription: Send {
+    fn next_event(&mut self) -> BackendFuture<'_, Option<NetworkStateEvent>>;
+}
+
+/// Connection/device lifecycle boundary implemented by the selected Linux network manager.
+pub trait NetworkStateBackend: Send + Sync {
+    fn network_connections(&self) -> BackendFuture<'_, Vec<NetworkConnection>>;
+    fn network_devices(&self) -> BackendFuture<'_, Vec<NetworkDevice>>;
+    fn subscribe_network_state(&self) -> BackendFuture<'_, Box<dyn NetworkStateSubscription>>;
+    fn ensure_bridge(
+        &self,
+        owner: NetworkId,
+        bridge: NetworkInterfaceHandle,
+    ) -> BackendFuture<'_, NetworkConnection>;
+    fn remove_owned_interface(
+        &self,
+        owner: NetworkId,
+        interface: NetworkInterfaceHandle,
+    ) -> BackendFuture<'_, ()>;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InterfaceAddress {
     pub interface: NetworkInterfaceHandle,
     pub prefix: IpPrefix,
+    pub owner: NetworkId,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
