@@ -33,7 +33,7 @@ Relevant interfaces include:
 
 Connection creation uses `AddConnection2` with `to-disk` and `block-autoconnect`; updates use `Update2` with `to-disk`. Explicit activation is performed through `ActivateConnection`. Address changes on an already-active device are applied with `Device.Reapply`.
 
-NetworkManager `address-data` is encoded as an array of variant dictionaries containing at least the string `address` and uint32 `prefix` fields.
+NetworkManager `address-data` is encoded as an array of variant dictionaries containing at least the string `address` and uint32 `prefix` fields. When BlueRoute writes `address-data`, it removes NetworkManager's deprecated `addresses` key first because NetworkManager ignores `address-data` when the legacy property is present in the same update.
 
 ## Ownership model
 
@@ -152,4 +152,4 @@ ip link show br-blue-nm
 
 ## Acceptance evidence
 
-P4-007 remains in progress until the live NetworkManager probe is run on the physical Debian test node and the evidence is recorded in a dedicated hardware-evidence document. CI proves compilation/unit behavior; it does not prove NetworkManager/Polkit/kernel application behavior on the target host.
+Physical acceptance is recorded in `docs/P4-007-HARDWARE-EVIDENCE-2026-09-01.md`. On `debiancb1` (Debian 13, kernel `6.12.86+deb13-amd64`, BlueZ 5.82, NetworkManager 1.52.1), the Rust probe created and observed `br-blue-nm`, applied `10.254.89.1/30`, proved idempotent ensure/remove behavior, rejected a second BlueRoute owner without leaking a profile, treated wrong-owner cleanup as a no-op, and preserved all 15 baseline foreign NetworkManager profiles. The accepted run ended with `P4-007 NetworkManager probe PASS`.
