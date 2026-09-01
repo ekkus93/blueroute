@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use async_io::Timer;
 use zbus::fdo::DBusProxy;
 use zbus::names::BusName;
-use zbus::zvariant::{OwnedObjectPath, OwnedValue, Str};
+use zbus::zvariant::{OwnedObjectPath, OwnedValue, Str, Value};
 use zbus::{Connection, Proxy};
 
 use blueroute_core::{CoreError, ErrorKind, IpPrefix, NetworkId};
@@ -1079,7 +1079,7 @@ fn profile_owner(settings: &NmSettings) -> Result<Option<NetworkId>, CoreError> 
     let Some(value) = user.get(USER_DATA_PROPERTY) else {
         return Ok(None);
     };
-    let data: HashMap<String, String> = value.clone().try_into().map_err(|error| {
+    let data = HashMap::<String, String>::try_from(value.clone()).map_err(|error| {
         CoreError::with_diagnostic(
             ErrorKind::ProtocolError,
             "NetworkManager returned malformed user connection metadata",
@@ -1114,8 +1114,8 @@ fn address_prefixes(settings: &NmSettings) -> Result<Vec<IpPrefix>, CoreError> {
         let Some(value) = group.get("address-data") else {
             continue;
         };
-        let entries: Vec<HashMap<String, OwnedValue>> =
-            value.clone().try_into().map_err(|error| {
+        let entries =
+            Vec::<HashMap<String, OwnedValue>>::try_from(value.clone()).map_err(|error| {
                 CoreError::with_diagnostic(
                     ErrorKind::ProtocolError,
                     "NetworkManager returned malformed address-data",
@@ -1192,7 +1192,14 @@ fn set_address_prefixes(settings: &mut NmSettings, prefixes: &[IpPrefix]) -> Res
             );
             entries.push(entry);
         }
-        group.insert("address-data".to_owned(), OwnedValue::from(entries));
+        let address_data = Value::from(entries).try_into_owned().map_err(|error| {
+            CoreError::with_diagnostic(
+                ErrorKind::Internal,
+                "failed to encode NetworkManager address-data",
+                error.to_string(),
+            )
+        })?;
+        group.insert("address-data".to_owned(), address_data);
     }
     Ok(())
 }
