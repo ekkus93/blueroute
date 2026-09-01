@@ -1124,23 +1124,24 @@ fn address_prefixes(settings: &NmSettings) -> Result<Vec<IpPrefix>, CoreError> {
             })?;
         for entry in entries {
             let address = setting_string(&entry, "address")?;
-            let prefix: u32 = entry
-                .get("prefix")
-                .ok_or_else(|| {
-                    CoreError::new(
-                        ErrorKind::ProtocolError,
-                        "NetworkManager address-data entry is missing a prefix",
-                    )
-                })?
-                .clone()
-                .try_into()
-                .map_err(|error| {
-                    CoreError::with_diagnostic(
-                        ErrorKind::ProtocolError,
-                        "NetworkManager returned an invalid address prefix",
-                        error.to_string(),
-                    )
-                })?;
+            let prefix = u32::try_from(
+                entry
+                    .get("prefix")
+                    .ok_or_else(|| {
+                        CoreError::new(
+                            ErrorKind::ProtocolError,
+                            "NetworkManager address-data entry is missing a prefix",
+                        )
+                    })?
+                    .clone(),
+            )
+            .map_err(|error| {
+                CoreError::with_diagnostic(
+                    ErrorKind::ProtocolError,
+                    "NetworkManager returned an invalid address prefix",
+                    error.to_string(),
+                )
+            })?;
             let address = IpAddr::from_str(address).map_err(|error| {
                 CoreError::with_diagnostic(
                     ErrorKind::ProtocolError,
