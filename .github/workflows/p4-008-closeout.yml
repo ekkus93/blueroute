@@ -1,0 +1,49 @@
+name: P4-008 closeout
+
+on:
+  push:
+    branches:
+      - P4-008_route_adapter
+    paths:
+      - .github/workflows/p4-008-closeout.yml
+
+permissions:
+  contents: write
+
+jobs:
+  closeout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: P4-008_route_adapter
+      - name: Mark P4-008 complete
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('docs/TODO.md')
+          text = path.read_text()
+
+          old_status = '| P4-008 | `[-]` | NetworkManager route inspection/add-update-remove, ownership enforcement, and fresh-backend route reconciliation are implemented and tested; live kernel route hardware acceptance is pending. |'
+          new_status = '| P4-008 | `[x]` | NetworkManager route inspection/add-update-remove, ownership enforcement, fresh-backend reconciliation, idempotent cleanup, foreign/default-route preservation, and live Debian 13 kernel-route hardware acceptance are complete. |'
+          if text.count(old_status) != 1:
+              raise SystemExit(f'expected P4-008 status row once, found {text.count(old_status)}')
+          text = text.replace(old_status, new_status, 1)
+
+          old_acceptance = '- Physical NetworkManager/kernel route acceptance and foreign-route preservation evidence are still pending; keep P4-008 `[-]` until that evidence is recorded.'
+          new_acceptance = '- Hardware acceptance is recorded in `docs/P4-008-HARDWARE-EVIDENCE-2026-09-01.md`; the Rust NetworkManager backend on `debiancb1` installed and rediscovered `10.254.91.0/24 via 10.254.90.2 dev br-blue-rt` at metric 77 in the live kernel, reconciled a stale metric-177 variant without duplication, rejected cross-owner mutation without leaked state, completed repeated idempotent cleanup, preserved all 15 baseline foreign NetworkManager profiles, and left the pre-existing default route unchanged.'
+          if text.count(old_acceptance) != 1:
+              raise SystemExit(f'expected pending acceptance line once, found {text.count(old_acceptance)}')
+          text = text.replace(old_acceptance, new_acceptance, 1)
+
+          path.write_text(text)
+          PY
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/TODO.md
+          git commit -m 'docs: complete P4-008 route acceptance'
+          git push origin HEAD:P4-008_route_adapter
