@@ -21,7 +21,42 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -c "from pathlib import Path; p=Path('docs/TODO.md'); s=p.read_text(); s=s.replace('**Status date:** 2026-08-31','**Status date:** 2026-09-01',1); marker='| P4-006 | `[x]` | BlueZ NetworkServer1 NAP registration, client attach/detach observation, ownership-aware idempotent cleanup, typed capability failures, and real two-node Rust NAP/PANU data-plane hardware acceptance are complete. |'; row='| P4-007 | `[x]` | Direct NetworkManager system-D-Bus backend, bounded state observation, explicit ownership, BlueRoute-owned bridge/address lifecycle, fail-closed cross-owner handling, and real Debian 13 hardware acceptance are complete. |'; assert marker in s; s=s.replace(marker,marker+'\\n'+row,1) if row not in s else s; s=s.replace('- [ ] enumerate relevant connections/devices.','- [x] enumerate relevant connections/devices.',1); s=s.replace('- [ ] observe changes.','- [x] observe changes.',1); s=s.replace('- [ ] apply BlueRoute-owned addressing.','- [x] apply BlueRoute-owned addressing.',1); s=s.replace('- [ ] remove only BlueRoute-owned state.','- [x] remove only BlueRoute-owned state.',1); accept='- No production operation parses `nmcli` output.'; extra=accept+'\\n- Hardware acceptance is recorded in `docs/P4-007-HARDWARE-EVIDENCE-2026-09-01.md`; the Rust NetworkManager backend on `debiancb1` enumerated live state, observed bridge/profile events, applied `10.254.89.1/30`, rejected cross-owner takeover without leaking state, completed repeated idempotent cleanup, and preserved all 15 baseline foreign NetworkManager profiles.\\n- Implementation/design notes and the hardware probe are documented in `docs/P4-007-NETWORKMANAGER.md`.'; assert accept in s; s=s.replace(accept,extra,1); p.write_text(s)"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('docs/TODO.md')
+          text = path.read_text()
+
+          if '**Status date:** 2026-08-31' not in text:
+              raise SystemExit('expected current TODO status date')
+          text = text.replace('**Status date:** 2026-08-31', '**Status date:** 2026-09-01', 1)
+
+          marker = '| P4-006 | `[x]` | BlueZ NetworkServer1 NAP registration, client attach/detach observation, ownership-aware idempotent cleanup, typed capability failures, and real two-node Rust NAP/PANU data-plane hardware acceptance are complete. |'
+          row = '| P4-007 | `[x]` | Direct NetworkManager system-D-Bus backend, bounded state observation, explicit ownership, BlueRoute-owned bridge/address lifecycle, fail-closed cross-owner handling, and real Debian 13 hardware acceptance are complete. |'
+          if row not in text:
+              if text.count(marker) != 1:
+                  raise SystemExit('expected exactly one P4-006 status row')
+              text = text.replace(marker, marker + '\n' + row, 1)
+
+          replacements = {
+              '- [ ] enumerate relevant connections/devices.': '- [x] enumerate relevant connections/devices.',
+              '- [ ] observe changes.': '- [x] observe changes.',
+              '- [ ] apply BlueRoute-owned addressing.': '- [x] apply BlueRoute-owned addressing.',
+              '- [ ] remove only BlueRoute-owned state.': '- [x] remove only BlueRoute-owned state.',
+          }
+          for old, new in replacements.items():
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected exactly one TODO line: {old}')
+              text = text.replace(old, new, 1)
+
+          acceptance = '- No production operation parses `nmcli` output.'
+          expanded = acceptance + '\n- Hardware acceptance is recorded in `docs/P4-007-HARDWARE-EVIDENCE-2026-09-01.md`; the Rust NetworkManager backend on `debiancb1` enumerated live state, observed bridge/profile events, applied `10.254.89.1/30`, rejected cross-owner takeover without leaking state, completed repeated idempotent cleanup, and preserved all 15 baseline foreign NetworkManager profiles.\n- Implementation/design notes and the hardware probe are documented in `docs/P4-007-NETWORKMANAGER.md`.'
+          if text.count(acceptance) != 1:
+              raise SystemExit('expected exactly one P4-007 acceptance line')
+          text = text.replace(acceptance, expanded, 1)
+
+          path.write_text(text)
+          PY
           rm .github/workflows/p4-007-todo-closeout.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
