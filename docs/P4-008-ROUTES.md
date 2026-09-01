@@ -135,4 +135,6 @@ The temporary bridge must be absent, the probe route must be absent, and the pre
 
 ## Acceptance status
 
-Implementation/unit acceptance is complete when the locked workspace CI suite is green. P4-008 remains in progress until the physical NetworkManager/kernel route probe is run, foreign/default route preservation is verified, and the result is recorded in a dedicated hardware-evidence document.
+P4-008 physical acceptance passed on `debiancb1` on 2026-09-01 using accepted branch revision `c800c08e7e1e8cd3e8bfff4a3e8a8e304137f4c4`. The Rust backend installed `10.254.91.0/24 via 10.254.90.2 dev br-blue-rt` with metric 77 into the live kernel, a fresh backend rediscovered the durable route, cross-owner mutation failed closed, repeated ensure/remove operations were idempotent, all 15 baseline foreign NetworkManager profiles were preserved, and the host's pre-existing default route remained unchanged before, during, and after cleanup.
+
+Full hardware evidence is recorded in `docs/P4-008-HARDWARE-EVIDENCE-2026-09-01.md`.
