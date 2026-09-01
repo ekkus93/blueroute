@@ -34,22 +34,13 @@ jobs:
 
           nm = Path('crates/blueroute-linux/src/networkmanager.rs')
           text = nm.read_text()
-          old = '''    fn set_ipv4_forwarding(&self, _enabled: bool) -> BackendFuture<'_, ()> {
-              Box::pin(async {
-                  Err(CoreError::new(
-                      ErrorKind::CapabilityUnavailable,
-                      "IPv4 forwarding is implemented by P4-009, not P4-007",
-                  ))
-              })
-          }
-          '''
-          new = '''    fn set_ipv4_forwarding(&self, enabled: bool) -> BackendFuture<'_, ()> {
+          start = text.index('    fn set_ipv4_forwarding(')
+          marker = '\n    }\n}\n\nstruct NetworkManagerSubscription'
+          end = text.index(marker, start) + len('\n    }')
+          replacement = '''    fn set_ipv4_forwarding(&self, enabled: bool) -> BackendFuture<'_, ()> {
               Box::pin(async move { crate::forwarding::set_ipv4_forwarding(enabled) })
-          }
-          '''
-          if text.count(old) != 1:
-              raise SystemExit(f'expected forwarding stub once, found {text.count(old)}')
-          nm.write_text(text.replace(old, new, 1))
+          }'''
+          nm.write_text(text[:start] + replacement + text[end:])
           PY
           git diff --check
           git config user.name 'github-actions[bot]'
