@@ -1,0 +1,66 @@
+name: P4-007 zvariant compile fix
+
+on:
+  push:
+    branches:
+      - P4-007_networkmanager_backend
+    paths:
+      - .github/workflows/p4-007-zvariant-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: P4-007_networkmanager_backend
+          fetch-depth: 2
+      - name: Patch zvariant conversions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('crates/blueroute-linux/src/networkmanager.rs')
+          text = path.read_text()
+
+          replacements = [
+              (
+                  'use zbus::zvariant::{OwnedObjectPath, OwnedValue, Str};',
+                  'use zbus::zvariant::{OwnedObjectPath, OwnedValue, Str, Value};',
+              ),
+              (
+                  '''    let data: HashMap<String, String> = value.clone().try_into().map_err(|error| {\n        CoreError::with_diagnostic(\n            ErrorKind::ProtocolError,\n            "NetworkManager returned malformed user connection metadata",\n            error.to_string(),\n        )\n    })?;''',
+                  '''    let data = HashMap::<String, String>::try_from(value.clone()).map_err(|error| {\n        CoreError::with_diagnostic(\n            ErrorKind::ProtocolError,\n            "NetworkManager returned malformed user connection metadata",\n            error.to_string(),\n        )\n    })?;''',
+              ),
+              (
+                  '''        let entries: Vec<HashMap<String, OwnedValue>> =\n            value.clone().try_into().map_err(|error| {\n                CoreError::with_diagnostic(\n                    ErrorKind::ProtocolError,\n                    "NetworkManager returned malformed address-data",\n                    error.to_string(),\n                )\n            })?;''',
+                  '''        let entries = Vec::<HashMap<String, OwnedValue>>::try_from(value.clone()).map_err(\n            |error| {\n                CoreError::with_diagnostic(\n                    ErrorKind::ProtocolError,\n                    "NetworkManager returned malformed address-data",\n                    error.to_string(),\n                )\n            },\n        )?;''',
+              ),
+              (
+                  '''        group.insert("address-data".to_owned(), OwnedValue::from(entries));''',
+                  '''        let address_data = Value::from(entries).try_into_owned().map_err(|error| {\n            CoreError::with_diagnostic(\n                ErrorKind::Internal,\n                "failed to encode NetworkManager address-data",\n                error.to_string(),\n            )\n        })?;\n        group.insert("address-data".to_owned(), address_data);''',
+              ),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one replacement target, found {count}: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+          rustup override set 1.95.0
+          cargo fmt --all
+          rm .github/workflows/p4-007-zvariant-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: encode NetworkManager zvariant settings explicitly'
+          git push origin HEAD:P4-007_networkmanager_backend
