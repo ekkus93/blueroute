@@ -12,10 +12,10 @@ Device discovery uses `org.bluez.Adapter1.StartDiscovery` and `StopDiscovery`, m
 
 ## NetworkManager integration
 
-`NetworkManagerBackend` uses the NetworkManager system D-Bus API directly through `zbus`; production operations never invoke or parse `nmcli`. It enumerates connection profiles and devices, exposes bounded add/change/remove observation, creates and activates BlueRoute-owned bridge/interface profiles, and applies/removes BlueRoute-owned IP addresses.
+`NetworkManagerBackend` uses the NetworkManager system D-Bus API directly through `zbus`; production operations never invoke or parse `nmcli`. It enumerates connection profiles and devices, exposes bounded add/change/remove observation, creates and activates BlueRoute-owned bridge/interface profiles, applies/removes BlueRoute-owned IP addresses, and manages BlueRoute-owned configured routes through NetworkManager `route-data`.
 
-Ownership is explicit in NetworkManager `user.data` metadata and scoped by BlueRoute `NetworkId`. The backend fails closed on malformed ownership metadata, conflicting foreign profiles, and profiles owned by another BlueRoute network. Cleanup removes only state carrying the requested BlueRoute owner metadata.
+Ownership is explicit in NetworkManager `user.data` metadata and scoped by BlueRoute `NetworkId`. The backend fails closed on malformed ownership metadata, conflicting foreign profiles, profiles owned by another BlueRoute network, and route attributes that the current backend-neutral route model cannot preserve safely. Cleanup removes only state carrying the requested BlueRoute owner metadata.
 
-Route lifecycle and IPv4 forwarding remain intentionally unavailable until P4-008 and P4-009.
+Route ensure/remove is idempotent, changed next-hop/metric state is reconciled by destination, and durable configured routes are rediscovered after a fresh backend connection. IPv4 forwarding remains intentionally unavailable until P4-009.
 
-The live P4-007 acceptance procedure and `networkmanager_probe` are documented in `../../docs/P4-007-NETWORKMANAGER.md`.
+The live P4-007 NetworkManager acceptance procedure is documented in `../../docs/P4-007-NETWORKMANAGER.md`. P4-008 route design and hardware acceptance are documented in `../../docs/P4-008-ROUTES.md`.
