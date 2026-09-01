@@ -5,8 +5,9 @@ use std::time::{Duration, Instant};
 use async_io::Timer;
 use blueroute_core::{CoreError, ErrorKind, IpPrefix, NetworkId};
 use blueroute_linux::{
-    InterfaceAddress, IpNetworkBackend, NetworkConnection, NetworkInterfaceHandle,
-    NetworkManagerBackend, NetworkStateBackend, NetworkStateEvent, NetworkStateSubscription,
+    InterfaceAddress, IpNetworkBackend, NetworkConnection, NetworkDeviceHandle,
+    NetworkInterfaceHandle, NetworkManagerBackend, NetworkStateBackend, NetworkStateEvent,
+    NetworkStateSubscription,
 };
 use futures_lite::future::race;
 
@@ -91,7 +92,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         PROBE_OWNER
     );
 
-    observe_bridge_present(&mut *subscription, &bridge, PROBE_OWNER).await?;
+    let bridge_device = observe_bridge_present(&mut *subscription, &bridge, PROBE_OWNER).await?;
 
     backend.ensure_address(address.clone()).await?;
     backend.ensure_address(address.clone()).await?;
@@ -177,7 +178,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     backend
         .remove_owned_interface(PROBE_OWNER, bridge.clone())
         .await?;
-    observe_bridge_absent(&mut *subscription, &bridge, &first).await?;
+    observe_bridge_absent(&mut *subscription, &bridge, &first, &bridge_device).await?;
 
     let final_connections = backend.network_connections().await?;
     if final_connections.iter().any(|profile| {
@@ -200,11 +201,11 @@ async fn observe_bridge_present(
     subscription: &mut dyn NetworkStateSubscription,
     bridge: &NetworkInterfaceHandle,
     owner: NetworkId,
-) -> Result<(), CoreError> {
+) -> Result<NetworkDeviceHandle, CoreError> {
     let deadline = Instant::now() + EVENT_TIMEOUT;
     let mut connection_seen = false;
-    let mut device_seen = false;
-    while !(connection_seen && device_seen) {
+    let mut device_handle = None;
+    while !connection_seen || device_handle.is_none() {
         let event = next_event_before(subscription, deadline).await?;
         match event {
             NetworkStateEvent::ConnectionAdded(profile)
@@ -217,19 +218,25 @@ async fn observe_bridge_present(
             NetworkStateEvent::DeviceAdded(device) | NetworkStateEvent::DeviceChanged(device)
                 if &device.interface == bridge =>
             {
-                device_seen = true;
                 println!("observed NetworkManager device event for {}", bridge.as_str());
+                device_handle = Some(device.handle);
             }
             _ => {}
         }
     }
-    Ok(())
+    device_handle.ok_or_else(|| {
+        CoreError::new(
+            ErrorKind::Internal,
+            "NetworkManager bridge event loop completed without a device handle",
+        )
+    })
 }
 
 async fn observe_bridge_absent(
     subscription: &mut dyn NetworkStateSubscription,
     bridge: &NetworkInterfaceHandle,
     profile: &NetworkConnection,
+    device: &NetworkDeviceHandle,
 ) -> Result<(), CoreError> {
     let deadline = Instant::now() + EVENT_TIMEOUT;
     let mut connection_removed = false;
@@ -241,14 +248,9 @@ async fn observe_bridge_absent(
                 connection_removed = true;
                 println!("observed NetworkManager connection removal for {}", bridge.as_str());
             }
-            NetworkStateEvent::DeviceRemoved(_) => {
-                // The probe owns the only virtual device it creates, and cleanup is not allowed to
-                // remove foreign devices. Confirm the named device is actually absent below.
-                let bridge_still_present = false;
-                if !bridge_still_present {
-                    device_removed = true;
-                    println!("observed NetworkManager device removal after bridge cleanup");
-                }
+            NetworkStateEvent::DeviceRemoved(handle) if &handle == device => {
+                device_removed = true;
+                println!("observed NetworkManager device removal for {}", bridge.as_str());
             }
             _ => {}
         }
