@@ -22,7 +22,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 
 ## Current task status
 
-**Status date:** 2026-08-30
+**Status date:** 2026-08-31
 
 | Task | Status | Current state |
 | --- | --- | --- |
@@ -45,7 +45,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P4-003 | `[x]` | BlueZ discovery lifecycle, Device1 mapping, peer events, and real nearby-Linux-node hardware acceptance are complete; `debiancb1` was observed through the Rust adapter. |
 | P4-004 | `[x]` | BlueZ pairing/trust, Rust-controlled Agent1 callbacks, typed rejection/timeout handling, and real two-node Rust-controlled hardware acceptance are complete. |
 | P4-005 | `[x]` | BlueZ Network1 PANU connect/interface mapping (including udev rename reconciliation), bounded connect timeout/cancellation, loss observation, idempotent disconnect, and real two-node PANU data-plane hardware acceptance are complete. |
-| P4-006 | `[-]` | BlueZ NetworkServer1 NAP registration, bounded client attach/detach observation, ownership-aware idempotent cleanup, and typed capability failures are implemented; real Rust NAP/PANU hardware acceptance remains pending. |
+| P4-006 | `[x]` | BlueZ NetworkServer1 NAP registration, client attach/detach observation, ownership-aware idempotent cleanup, typed capability failures, and real two-node Rust NAP/PANU data-plane hardware acceptance are complete. |
 | P5-001 | `[-]` | API version contract and compatibility rules are implemented/tested; client-side incompatibility enforcement remains pending P5-005. |
 | P5-002 | `[-]` | Semantic command/response model implemented; serialization round-trip tests remain. |
 | P5-003 | `[x]` | Event model and deterministic structural tests are implemented and green in CI. |
@@ -489,7 +489,7 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 **Acceptance**
 
 - Rust path replaces manual P1 setup for a supported NAP/PANU pair.
-- Software implementation is complete; real two-node Rust NAP/PANU data-plane and attach/detach evidence is still required before this task becomes `[x]`.
+- Hardware acceptance is recorded in `docs/P4-006-HARDWARE-EVIDENCE-2026-08-31.md`; the Rust NAP on `debiancb1` accepted the Rust PANU from `arisu`, observed attach/detach, carried IPv4/ICMP traffic over BNEP with 0% packet loss, and completed repeated idempotent NAP teardown.
 - Implementation/design notes and the hardware probe are documented in `docs/P4-006-NAP.md`.
 
 ## P4-007 — Implement NetworkManager backend
