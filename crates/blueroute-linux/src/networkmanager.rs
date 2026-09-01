@@ -1187,6 +1187,9 @@ fn set_address_prefixes(settings: &mut NmSettings, prefixes: &[IpPrefix]) -> Res
             .filter(|prefix| prefix.address.is_ipv4() == ipv4)
             .collect();
         let group = settings.entry(family_name.to_owned()).or_default();
+        // NetworkManager ignores address-data when deprecated addresses is present in the same update.
+        // GetSettings() may return that legacy key, so remove it before writing address-data.
+        group.remove("addresses");
         if family_prefixes.is_empty() {
             group.insert("method".to_owned(), owned_string("disabled"));
             group.remove("address-data");
@@ -1537,6 +1540,25 @@ mod tests {
             setting_string(settings.get(IPV4_SETTING).unwrap(), "method").unwrap(),
             "disabled"
         );
+    }
+
+    #[test]
+    fn address_mutation_removes_legacy_addresses_property() {
+        let owner = network(5);
+        let mut settings = base_owned_settings(owner, &interface("br-blue0"), KIND_BRIDGE).unwrap();
+        settings
+            .get_mut(IPV4_SETTING)
+            .unwrap()
+            .insert("addresses".to_owned(), OwnedValue::from(true));
+        let prefix = IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 42, 0, 1)), 24).unwrap();
+        set_address_prefixes(&mut settings, &[prefix]).unwrap();
+        assert!(
+            !settings
+                .get(IPV4_SETTING)
+                .unwrap()
+                .contains_key("addresses")
+        );
+        assert_eq!(address_prefixes(&settings).unwrap(), vec![prefix]);
     }
 
     #[test]
