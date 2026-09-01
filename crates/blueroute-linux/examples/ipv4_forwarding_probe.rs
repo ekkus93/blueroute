@@ -78,11 +78,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err(CoreError::with_diagnostic(
             ErrorKind::InvalidState,
             "IPv4 forwarding did not return to the pre-probe baseline",
-            format!(
-                "baseline={} restored={}",
-                bit(baseline),
-                bit(restored)
-            ),
+            format!("baseline={} restored={}", bit(baseline), bit(restored)),
         )
         .into());
     }
