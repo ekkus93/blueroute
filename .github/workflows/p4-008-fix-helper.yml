@@ -33,6 +33,7 @@ jobs:
               raise SystemExit('unexpected route template block')
           fixed = '\n'.join([lines[0], *['    ' + line for line in lines[1:]]]) + '\n'
           text = text[:start] + fixed + text[end:]
+          text = '\n'.join(line.rstrip() for line in text.splitlines()) + '\n'
           path.write_text(text)
           PY
           rm .github/workflows/p4-008-fix-helper.yml
