@@ -1,6 +1,7 @@
 #![doc = "Linux system adapter boundaries for BlueRoute."]
 
 mod bluez;
+mod forwarding;
 mod identity;
 mod membership_store;
 mod networkmanager;

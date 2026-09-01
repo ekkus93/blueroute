@@ -158,14 +158,9 @@ impl IpNetworkBackend for NetworkManagerBackend {
         Box::pin(async move { remove_route(&self.connection, &route).await })
     }
 
-    fn set_ipv4_forwarding(&self, _enabled: bool) -> BackendFuture<'_, ()> {
-        Box::pin(async {
-            Err(CoreError::new(
-                ErrorKind::CapabilityUnavailable,
-                "IPv4 forwarding is implemented by P4-009, not P4-007",
-            ))
-        })
-    }
+    fn set_ipv4_forwarding(&self, enabled: bool) -> BackendFuture<'_, ()> {
+    Box::pin(async move { crate::forwarding::set_ipv4_forwarding(enabled) })
+}
 }
 
 struct NetworkManagerSubscription {
