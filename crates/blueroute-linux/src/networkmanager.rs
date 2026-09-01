@@ -1513,13 +1513,17 @@ fn set_route_present(
     let mut kept = Vec::with_capacity(entries.len() + if present { 1 } else { 0 });
     for entry in entries.drain(..) {
         let key = route_key_from_entry(&entry, ipv4)?;
-        if key == target {
-            found = true;
-            if present {
+        if present && key.0 == route.destination {
+            if key == target && !found {
+                found = true;
                 kept.push(entry);
             } else {
+                // Destination is the route identity for the current LinuxRoute model.
+                // Reconcile stale next-hop/metric variants instead of accumulating them.
                 changed = true;
             }
+        } else if !present && key == target {
+            changed = true;
         } else {
             kept.push(entry);
         }
@@ -1913,14 +1917,34 @@ mod tests {
         assert!(set_route_present(&mut settings, &second, true).unwrap());
         let entries = route_data_entries(&settings, IPV4_SETTING).unwrap();
         assert_eq!(entries.len(), 2);
-        assert!(set_route_present(&mut settings, &first, false).unwrap());
+
+        let updated = LinuxRoute {
+            destination: first.destination,
+            via: None,
+            interface: first.interface.clone(),
+            metric: 99,
+            owner,
+        };
+        assert!(set_route_present(&mut settings, &updated, true).unwrap());
+        assert!(!set_route_present(&mut settings, &updated, true).unwrap());
+        let entries = route_data_entries(&settings, IPV4_SETTING).unwrap();
+        assert_eq!(entries.len(), 2);
+        let keys: Vec<_> = entries
+            .iter()
+            .map(|entry| route_key_from_entry(entry, true).unwrap())
+            .collect();
+        assert!(keys.contains(&(updated.destination, updated.via, updated.metric)));
+        assert!(keys.contains(&(second.destination, second.via, second.metric)));
+        assert!(!keys.contains(&(first.destination, first.via, first.metric)));
+
+        assert!(set_route_present(&mut settings, &updated, false).unwrap());
         let entries = route_data_entries(&settings, IPV4_SETTING).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(
             route_key_from_entry(&entries[0], true).unwrap(),
             (second.destination, second.via, second.metric)
         );
-        assert!(!set_route_present(&mut settings, &first, false).unwrap());
+        assert!(!set_route_present(&mut settings, &updated, false).unwrap());
     }
 
     #[test]
