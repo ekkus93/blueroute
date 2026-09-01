@@ -630,10 +630,10 @@ async fn remove_owned_interface(
             "refusing to remove a NetworkManager profile not owned by the requested BlueRoute network",
         ));
     }
-    if let Some(device) = device_by_interface(connection, interface).await? {
-        if device.active_connection.as_ref() == Some(&profile.connection.handle) {
-            deactivate_device_connection(connection, &device).await?;
-        }
+    if let Some(device) = device_by_interface(connection, interface).await?
+        && device.active_connection.as_ref() == Some(&profile.connection.handle)
+    {
+        deactivate_device_connection(connection, &device).await?;
     }
     settings_connection_proxy(connection, &profile.path)
         .await?
@@ -727,14 +727,14 @@ async fn reject_foreign_interface_claim(
             ));
         }
     }
-    if let Some(device) = device_by_interface(connection, interface).await? {
-        if device.active_connection.is_some() {
-            return Err(CoreError::with_diagnostic(
-                ErrorKind::InvalidState,
-                "refusing to take over an already-active foreign NetworkManager interface",
-                format!("interface={}", interface.as_str()),
-            ));
-        }
+    if let Some(device) = device_by_interface(connection, interface).await?
+        && device.active_connection.is_some()
+    {
+        return Err(CoreError::with_diagnostic(
+            ErrorKind::InvalidState,
+            "refusing to take over an already-active foreign NetworkManager interface",
+            format!("interface={}", interface.as_str()),
+        ));
     }
     Ok(())
 }
@@ -998,15 +998,14 @@ async fn wait_for_profile_active(
 ) -> Result<(), CoreError> {
     let deadline = Instant::now() + APPLY_TIMEOUT;
     loop {
-        if let Some(device) = device_by_interface(connection, interface).await? {
-            if device
+        if let Some(device) = device_by_interface(connection, interface).await?
+            && device
                 .active_connection
                 .as_ref()
                 .map(NetworkConnectionHandle::as_str)
                 == Some(profile_path)
-            {
-                return Ok(());
-            }
+        {
+            return Ok(());
         }
         if Instant::now() >= deadline {
             return Err(CoreError::with_diagnostic(
@@ -1252,7 +1251,7 @@ fn object_path(value: &str) -> Result<OwnedObjectPath, CoreError> {
 }
 
 fn validate_interface_name(interface: &NetworkInterfaceHandle) -> Result<(), CoreError> {
-    if interface.as_str().as_bytes().len() > 15 {
+    if interface.as_str().len() > 15 {
         return Err(CoreError::with_diagnostic(
             ErrorKind::InvalidInput,
             "Linux network interface names cannot exceed 15 bytes",
