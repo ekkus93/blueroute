@@ -47,7 +47,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P4-005 | `[x]` | BlueZ Network1 PANU connect/interface mapping (including udev rename reconciliation), bounded connect timeout/cancellation, loss observation, idempotent disconnect, and real two-node PANU data-plane hardware acceptance are complete. |
 | P4-006 | `[x]` | BlueZ NetworkServer1 NAP registration, client attach/detach observation, ownership-aware idempotent cleanup, typed capability failures, and real two-node Rust NAP/PANU data-plane hardware acceptance are complete. |
 | P4-007 | `[x]` | Direct NetworkManager system-D-Bus backend, bounded state observation, explicit ownership, BlueRoute-owned bridge/address lifecycle, fail-closed cross-owner handling, and real Debian 13 hardware acceptance are complete. |
-| P4-008 | `[-]` | NetworkManager route inspection/add-update-remove, ownership enforcement, and fresh-backend route reconciliation are implemented and tested; live kernel route hardware acceptance is pending. |
+| P4-008 | `[x]` | NetworkManager route inspection/add-update-remove, ownership enforcement, fresh-backend reconciliation, idempotent cleanup, foreign/default-route preservation, and live Debian 13 kernel-route hardware acceptance are complete. |
 | P5-001 | `[-]` | API version contract and compatibility rules are implemented/tested; client-side incompatibility enforcement remains pending P5-005. |
 | P5-002 | `[-]` | Semantic command/response model implemented; serialization round-trip tests remain. |
 | P5-003 | `[x]` | Event model and deterministic structural tests are implemented and green in CI. |
@@ -518,7 +518,7 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 - Repeated application is idempotent and foreign routes are preserved.
 - Implementation/design notes and the live route probe are documented in `docs/P4-008-ROUTES.md`.
-- Physical NetworkManager/kernel route acceptance and foreign-route preservation evidence are still pending; keep P4-008 `[-]` until that evidence is recorded.
+- Hardware acceptance is recorded in `docs/P4-008-HARDWARE-EVIDENCE-2026-09-01.md`; the Rust NetworkManager backend on `debiancb1` installed and rediscovered `10.254.91.0/24 via 10.254.90.2 dev br-blue-rt` at metric 77 in the live kernel, reconciled a stale metric-177 variant without duplication, rejected cross-owner mutation without leaked state, completed repeated idempotent cleanup, preserved all 15 baseline foreign NetworkManager profiles, and left the pre-existing default route unchanged.
 
 ## P4-009 — Implement forwarding adapter
 
