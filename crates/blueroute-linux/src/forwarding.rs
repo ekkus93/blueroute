@@ -12,8 +12,7 @@ const LEASE_SCHEMA: &str = "1";
 const LEASE_FILE_MODE: u32 = 0o600;
 
 pub(crate) fn set_ipv4_forwarding(enabled: bool) -> Result<(), CoreError> {
-    let controller = ForwardingController::system();
-    controller.set(enabled)
+    ForwardingController::system().set(enabled)
 }
 
 #[derive(Clone, Debug)]
@@ -48,9 +47,9 @@ impl ForwardingController {
 
     fn enable(&self) -> Result<(), CoreError> {
         let current = read_forwarding_value(&self.sysctl_path)?;
-        let (lease, created) = match read_lease(&self.lease_path)? {
-            Some(lease) => (lease, false),
-            None => (self.create_lease(current)?, true),
+        let created = match read_lease(&self.lease_path)? {
+            Some(_) => false,
+            None => self.create_lease(current)?,
         };
 
         if current {
@@ -58,37 +57,27 @@ impl ForwardingController {
         }
 
         if let Err(write_error) = write_forwarding_value(&self.sysctl_path, true) {
-            if created {
-                if let Err(cleanup_error) = remove_lease(&self.lease_path) {
-                    return Err(CoreError::with_diagnostic(
-                        ErrorKind::NetworkBackendUnavailable,
-                        "failed to enable IPv4 forwarding and could not roll back the BlueRoute forwarding lease",
-                        format!(
-                            "write-error={}; lease-cleanup-error={}",
-                            diagnostic(&write_error),
-                            diagnostic(&cleanup_error)
-                        ),
-                    ));
-                }
+            if created && let Err(cleanup_error) = remove_lease(&self.lease_path) {
+                return Err(combined_rollback_error(&write_error, &cleanup_error));
             }
             return Err(write_error);
         }
 
         // Re-read the procfs control instead of trusting a successful write. This catches
         // restricted/containerized runtimes that accept the write without changing the node.
-        if !read_forwarding_value(&self.sysctl_path)? {
-            if created {
-                remove_lease(&self.lease_path)?;
+        match read_forwarding_value(&self.sysctl_path) {
+            Ok(true) => Ok(()),
+            Ok(false) => {
+                if created {
+                    remove_lease(&self.lease_path)?;
+                }
+                Err(CoreError::new(
+                    ErrorKind::NetworkBackendUnavailable,
+                    "kernel IPv4 forwarding did not become enabled after the requested write",
+                ))
             }
-            return Err(CoreError::new(
-                ErrorKind::NetworkBackendUnavailable,
-                "kernel IPv4 forwarding did not become enabled after the requested write",
-            ));
+            Err(error) => Err(error),
         }
-
-        // Touch the value so a corrupt/unsupported future lease cannot be silently accepted.
-        let _ = lease.baseline;
-        Ok(())
     }
 
     fn release(&self) -> Result<(), CoreError> {
@@ -113,7 +102,8 @@ impl ForwardingController {
         remove_lease(&self.lease_path)
     }
 
-    fn create_lease(&self, baseline: bool) -> Result<ForwardingLease, CoreError> {
+    /// Ensure a runtime lease exists and return whether this call created it.
+    fn create_lease(&self, baseline: bool) -> Result<bool, CoreError> {
         let parent = self.lease_path.parent().ok_or_else(|| {
             CoreError::new(
                 ErrorKind::Internal,
@@ -137,29 +127,41 @@ impl ForwardingController {
             .open(&self.lease_path)
         {
             Ok(mut file) => {
-                file.write_all(serialized.as_bytes()).map_err(|error| {
-                    io_error(
-                        "failed to write the BlueRoute IPv4 forwarding lease",
-                        &self.lease_path,
-                        error,
-                    )
-                })?;
-                file.sync_all().map_err(|error| {
-                    io_error(
-                        "failed to synchronize the BlueRoute IPv4 forwarding lease",
-                        &self.lease_path,
-                        error,
-                    )
-                })?;
-                Ok(lease)
+                let write_result = (|| {
+                    file.write_all(serialized.as_bytes()).map_err(|error| {
+                        io_error(
+                            "failed to write the BlueRoute IPv4 forwarding lease",
+                            &self.lease_path,
+                            error,
+                        )
+                    })?;
+                    file.sync_all().map_err(|error| {
+                        io_error(
+                            "failed to synchronize the BlueRoute IPv4 forwarding lease",
+                            &self.lease_path,
+                            error,
+                        )
+                    })?;
+                    Ok::<(), CoreError>(())
+                })();
+                if let Err(write_error) = write_result {
+                    if let Err(cleanup_error) = remove_lease(&self.lease_path) {
+                        return Err(combined_rollback_error(&write_error, &cleanup_error));
+                    }
+                    return Err(write_error);
+                }
+                Ok(true)
             }
             Err(error) if error.kind() == IoErrorKind::AlreadyExists => {
+                // A concurrent BlueRoute caller may have created the lease after our first read.
+                // Parse it before proceeding; never overwrite or silently accept corrupt state.
                 read_lease(&self.lease_path)?.ok_or_else(|| {
                     CoreError::new(
                         ErrorKind::InvalidState,
                         "BlueRoute IPv4 forwarding lease disappeared during concurrent creation",
                     )
-                })
+                })?;
+                Ok(false)
             }
             Err(error) => Err(io_error(
                 "failed to create the BlueRoute IPv4 forwarding lease",
@@ -266,6 +268,18 @@ fn io_error(message: &str, path: &Path, error: std::io::Error) -> CoreError {
         ErrorKind::NetworkBackendUnavailable,
         message,
         format!("path={} error={error}", path.display()),
+    )
+}
+
+fn combined_rollback_error(primary: &CoreError, cleanup: &CoreError) -> CoreError {
+    CoreError::with_diagnostic(
+        ErrorKind::NetworkBackendUnavailable,
+        "IPv4 forwarding operation failed and BlueRoute could not roll back its forwarding lease",
+        format!(
+            "primary-error={}; lease-cleanup-error={}",
+            diagnostic(primary),
+            diagnostic(cleanup)
+        ),
     )
 }
 
