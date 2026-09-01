@@ -91,11 +91,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     assert_exact_route(&backend, &route, &initial_route).await?;
     println!(
         "route ready: destination={}/{} via={} metric={} repeated-ensure=single-route update-from-metric={}",
-        ROUTE_DESTINATION,
-        ROUTE_PREFIX_LEN,
-        ROUTE_NEXT_HOP,
-        FINAL_METRIC,
-        INITIAL_METRIC
+        ROUTE_DESTINATION, ROUTE_PREFIX_LEN, ROUTE_NEXT_HOP, FINAL_METRIC, INITIAL_METRIC
     );
 
     // Reconnect to NetworkManager through a fresh backend instance. P4-008 must rediscover
