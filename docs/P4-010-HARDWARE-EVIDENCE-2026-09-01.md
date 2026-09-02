@@ -83,6 +83,8 @@ GitHub Actions run `33576973532` passed for candidate `90244456658e61d983cd5ca3c
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`;
 - `cargo test --workspace --locked`.
 
+A later closeout commit only records this evidence and updates task documentation; it does not change the hardware-tested capability implementation.
+
 ## Result
 
 **PASS.** P4-010 acceptance is satisfied on the supported Debian hardware baseline. The probe explains the host's support state and exposes the required runtime/capability evidence without requiring shell-tool parsing for production networking operations or mutating the system.
