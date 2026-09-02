@@ -59,13 +59,14 @@ async fn active_ipv4_prefixes() -> Result<Vec<IpPrefix>, CoreError> {
                     error,
                 )
             })?;
-        let config_path: OwnedObjectPath = device.get_property("Ip4Config").await.map_err(|error| {
-            network_error(
-                ErrorKind::NetworkBackendUnavailable,
-                "failed to read a NetworkManager device IPv4 configuration",
-                error,
-            )
-        })?;
+        let config_path: OwnedObjectPath =
+            device.get_property("Ip4Config").await.map_err(|error| {
+                network_error(
+                    ErrorKind::NetworkBackendUnavailable,
+                    "failed to read a NetworkManager device IPv4 configuration",
+                    error,
+                )
+            })?;
         if config_path.as_str() == "/" {
             continue;
         }
@@ -93,7 +94,11 @@ async fn active_ipv4_prefixes() -> Result<Vec<IpPrefix>, CoreError> {
                 )
             })?;
         for entry in addresses {
-            prefixes.push(observed_ipv4_prefix(&entry, "address", "active IPv4 address")?);
+            prefixes.push(observed_ipv4_prefix(
+                &entry,
+                "address",
+                "active IPv4 address",
+            )?);
         }
 
         let routes: Vec<HashMap<String, OwnedValue>> =
@@ -250,10 +255,7 @@ mod tests {
 
     #[test]
     fn malformed_observed_ipv4_prefix_fails_closed() {
-        let entry = HashMap::from([(
-            "address".to_owned(),
-            owned_string("10.201.44.99"),
-        )]);
+        let entry = HashMap::from([("address".to_owned(), owned_string("10.201.44.99"))]);
         let error = observed_ipv4_prefix(&entry, "address", "active IPv4 address").unwrap_err();
         assert_eq!(error.kind(), ErrorKind::ProtocolError);
     }
