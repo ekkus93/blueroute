@@ -231,7 +231,7 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct LinuxJoinRuntime {
     pool: Ipv4AddressPool,
 }
@@ -240,14 +240,6 @@ impl LinuxJoinRuntime {
     pub fn new(pool: Ipv4AddressPool) -> Result<Self, CoreError> {
         pool.validate()?;
         Ok(Self { pool })
-    }
-}
-
-impl Default for LinuxJoinRuntime {
-    fn default() -> Self {
-        Self {
-            pool: Ipv4AddressPool::default(),
-        }
     }
 }
 
