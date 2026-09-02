@@ -1,6 +1,7 @@
 #![doc = "Linux system adapter boundaries for BlueRoute."]
 
 mod bluez;
+mod capability_report;
 mod forwarding;
 mod identity;
 mod membership_store;
@@ -9,6 +10,10 @@ mod pan;
 mod secret_store;
 
 pub use bluez::BluezBackend;
+pub use capability_report::{
+    BluetoothControllerReport, CapabilityDiagnostic, CapabilityDiagnosticLevel,
+    RuntimePrerequisite, SystemCapabilityProbe, SystemCapabilityReport, SystemSupportLevel,
+};
 pub use identity::{NodeIdentityGenerator, NodeIdentityStore, SystemNodeIdentityGenerator};
 pub use membership_store::NetworkMembershipStore;
 pub use networkmanager::NetworkManagerBackend;
