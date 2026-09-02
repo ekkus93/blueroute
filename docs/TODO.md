@@ -50,6 +50,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P4-008 | `[x]` | NetworkManager route inspection/add-update-remove, ownership enforcement, fresh-backend reconciliation, idempotent cleanup, foreign/default-route preservation, and live Debian 13 kernel-route hardware acceptance are complete. |
 | P4-009 | `[x]` | Node-global IPv4 forwarding control, boot-local ownership lease, fresh-backend reconciliation, idempotent release, foreign forwarding preservation, NAT/firewall separation, and live kernel hardware acceptance are complete. |
 | P4-010 | `[x]` | Read-only system capability reporting, support classification, runtime diagnostics, and live Debian hardware acceptance are complete. |
+| P4-011 | `[x]` | Reusable fake-backend contract tests, NetworkManager trait conformance, and core/topology architecture guards are implemented and green in CI. |
 | P5-001 | `[-]` | API version contract and compatibility rules are implemented/tested; client-side incompatibility enforcement remains pending P5-005. |
 | P5-002 | `[-]` | Semantic command/response model implemented; serialization round-trip tests remain. |
 | P5-003 | `[x]` | Event model and deterministic structural tests are implemented and green in CI. |
@@ -552,13 +553,14 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P4-011 — Define network-backend abstraction tests
 
-- [ ] Fake backend contract tests.
-- [ ] NetworkManager implementation conformance tests.
-- [ ] Ensure topology/core never imports NetworkManager-specific types.
+- [x] Fake backend contract tests.
+- [x] NetworkManager implementation conformance tests.
+- [x] Ensure topology/core never imports NetworkManager-specific types.
 
 **Acceptance**
 
 - A future backend can be tested against the same contract.
+- The reusable contract, NetworkManager conformance strategy, and architecture guard are documented in `docs/P4-011-NETWORK-BACKEND-CONTRACTS.md` and exercised by `crates/blueroute-linux/tests/network_backend_contract.rs`.
 
 ---
 
