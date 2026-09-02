@@ -93,13 +93,7 @@ pub async fn authorize_command(
     let result: (bool, bool, HashMap<String, String>) = proxy
         .call(
             "CheckAuthorization",
-            &(
-                subject,
-                action_id,
-                details,
-                ALLOW_USER_INTERACTION,
-                "",
-            ),
+            &(subject, action_id, details, ALLOW_USER_INTERACTION, ""),
         )
         .await
         .map_err(|_| authorization_service_failure(command))?;
@@ -140,7 +134,10 @@ mod tests {
             Command::GetDiagnostics,
         ];
         for command in read_only {
-            assert_eq!(command_authorization(&command), CommandAuthorization::ReadOnly);
+            assert_eq!(
+                command_authorization(&command),
+                CommandAuthorization::ReadOnly
+            );
         }
 
         let mutations = [
