@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use zbus::Proxy;
 use zbus::fdo::{ManagedObjects, ObjectManagerProxy};
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
-use zbus::Proxy;
 
 use blueroute_core::{CoreError, ErrorKind, NetworkId};
 
@@ -118,7 +118,8 @@ impl BluezBackend {
             .call_method(REGISTER_ADVERTISEMENT_METHOD, &(path, options))
             .await
         {
-            let registration_error = advertisement_method_error(REGISTER_ADVERTISEMENT_METHOD, error);
+            let registration_error =
+                advertisement_method_error(REGISTER_ADVERTISEMENT_METHOD, error);
             return match self
                 .connection
                 .object_server()
@@ -232,7 +233,10 @@ fn decode_advertisement(payload: &[u8]) -> Option<NetworkId> {
 }
 
 fn advertised_network_id(properties: &HashMap<String, OwnedValue>) -> Option<NetworkId> {
-    let manufacturer = properties.get(MANUFACTURER_DATA_PROPERTY)?.try_clone().ok()?;
+    let manufacturer = properties
+        .get(MANUFACTURER_DATA_PROPERTY)?
+        .try_clone()
+        .ok()?;
     let manufacturer = HashMap::<u16, OwnedValue>::try_from(manufacturer).ok()?;
     let payload = manufacturer
         .get(&BLUEROUTE_MANUFACTURER_ID)?
