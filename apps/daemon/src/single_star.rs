@@ -7,14 +7,13 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use blueroute_core::{
-    CoreError, DaemonConfig, DisplayName, ErrorKind, Ipv4StarAddressPlan,
-    MembershipRegistry, MembershipState, NetworkId, NetworkMembership, NodeCapabilities,
-    ensure_ipv4_segment_available,
+    CoreError, DaemonConfig, DisplayName, ErrorKind, Ipv4StarAddressPlan, MembershipRegistry,
+    MembershipState, NetworkId, NetworkMembership, NodeCapabilities, ensure_ipv4_segment_available,
 };
 use blueroute_linux::{
-    BluetoothBackend, BluezBackend, InterfaceAddress, IpNetworkBackend, IpNetworkObservationBackend,
-    NetworkAdvertisement, NetworkInterfaceHandle, NetworkManagerBackend, NetworkMembershipStore,
-    NetworkStateBackend, PanBackend,
+    BluetoothBackend, BluezBackend, InterfaceAddress, IpNetworkBackend,
+    IpNetworkObservationBackend, NetworkAdvertisement, NetworkInterfaceHandle,
+    NetworkManagerBackend, NetworkMembershipStore, NetworkStateBackend, PanBackend,
 };
 use blueroute_protocol::NetworkSummary;
 
@@ -1002,7 +1001,10 @@ mod tests {
             assert_eq!(runtime.starts(), 2);
             let registry = operations.store.load().unwrap();
             assert!(registry.network(&first).is_none());
-            assert_eq!(registry.network(&second).unwrap().state, MembershipState::Member);
+            assert_eq!(
+                registry.network(&second).unwrap().state,
+                MembershipState::Member
+            );
             fs::remove_dir_all(root).unwrap();
         });
     }
