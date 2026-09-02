@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use blueroute_core::{
@@ -8,8 +8,8 @@ use blueroute_core::{
 use zbus::fdo::ObjectManagerProxy;
 
 use crate::{
-    BackendFuture, BluetoothBackend, CapabilityProbe, NetworkManagerBackend, RuntimeCapabilities,
-    BluezBackend,
+    BackendFuture, BluetoothBackend, BluezBackend, CapabilityProbe, NetworkManagerBackend,
+    RuntimeCapabilities,
 };
 
 const BLUEZ_SERVICE: &str = "org.bluez";
@@ -268,10 +268,7 @@ impl SystemCapabilityProbe {
         ];
 
         let mut node = NodeCapabilities {
-            adapter_usable: Some(Sourced::new(
-                powered_adapter,
-                CapabilitySource::Discovered,
-            )),
+            adapter_usable: Some(Sourced::new(powered_adapter, CapabilitySource::Discovered)),
             panu: Some(Sourced::new(panu_available, CapabilitySource::Discovered)),
             nap: nap_available.map(|value| Sourced::new(value, CapabilitySource::Discovered)),
             routing: Some(Sourced::new(
@@ -280,7 +277,9 @@ impl SystemCapabilityProbe {
             )),
             connection_policy_ceiling: Some(Sourced::new(
                 effective_peer_ceiling,
-                if configured_peer_ceiling.is_some() && effective_peer_ceiling < practical_peer_ceiling {
+                if configured_peer_ceiling.is_some()
+                    && effective_peer_ceiling < practical_peer_ceiling
+                {
                     CapabilitySource::Configured
                 } else {
                     CapabilitySource::ConservativeDefault
@@ -313,17 +312,20 @@ impl SystemCapabilityProbe {
             nap_available,
             forwarding_available,
         );
-        diagnostics.insert(0, CapabilityDiagnostic {
-            level: match support {
-                SystemSupportLevel::Unsupported => CapabilityDiagnosticLevel::Error,
-                SystemSupportLevel::Degraded => CapabilityDiagnosticLevel::Warning,
-                SystemSupportLevel::ClientOnly | SystemSupportLevel::FullySupported => {
-                    CapabilityDiagnosticLevel::Info
-                }
+        diagnostics.insert(
+            0,
+            CapabilityDiagnostic {
+                level: match support {
+                    SystemSupportLevel::Unsupported => CapabilityDiagnosticLevel::Error,
+                    SystemSupportLevel::Degraded => CapabilityDiagnosticLevel::Warning,
+                    SystemSupportLevel::ClientOnly | SystemSupportLevel::FullySupported => {
+                        CapabilityDiagnosticLevel::Info
+                    }
+                },
+                component: "summary".into(),
+                message: support_message(support).into(),
             },
-            component: "summary".into(),
-            message: support_message(support).into(),
-        });
+        );
 
         Ok(SystemCapabilityReport {
             support,
@@ -359,7 +361,10 @@ impl CapabilityProbe for SystemCapabilityProbe {
     }
 }
 
-async fn has_bluez_interface(backend: &BluezBackend, interface_name: &str) -> Result<bool, CoreError> {
+async fn has_bluez_interface(
+    backend: &BluezBackend,
+    interface_name: &str,
+) -> Result<bool, CoreError> {
     let proxy = ObjectManagerProxy::new(&backend.connection, BLUEZ_SERVICE, BLUEZ_ROOT_PATH)
         .await
         .map_err(|error| {
@@ -391,7 +396,10 @@ fn controller_report(handle: &str, powered: bool) -> BluetoothControllerReport {
             let address = read_trimmed(&base.join("address"));
             let driver = fs::read_link(base.join("device/driver"))
                 .ok()
-                .and_then(|path| path.file_name().map(|value| value.to_string_lossy().into_owned()));
+                .and_then(|path| {
+                    path.file_name()
+                        .map(|value| value.to_string_lossy().into_owned())
+                });
             (address, driver)
         }
         None => (None, None),
