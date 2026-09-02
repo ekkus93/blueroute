@@ -115,20 +115,21 @@ impl KernelAddressBackend {
     pub fn remove_panu_address(&self, lease: KernelAddressLease) -> Result<(), CoreError> {
         let requested = ipv4_prefix(lease.address.prefix)?;
         let socket = route_socket()?;
-        let current_index = match netdevice::name_to_index(&socket, lease.address.interface.as_str()) {
-            Ok(index) => index,
-            Err(error) if error == rustix::io::Errno::NODEV => return Ok(()),
-            Err(error) => {
-                return Err(CoreError::with_diagnostic(
-                    ErrorKind::NetworkBackendUnavailable,
-                    "failed to resolve the PANU interface during address cleanup",
-                    format!(
-                        "interface={} error={error}",
-                        lease.address.interface.as_str()
-                    ),
-                ));
-            }
-        };
+        let current_index =
+            match netdevice::name_to_index(&socket, lease.address.interface.as_str()) {
+                Ok(index) => index,
+                Err(error) if error == rustix::io::Errno::NODEV => return Ok(()),
+                Err(error) => {
+                    return Err(CoreError::with_diagnostic(
+                        ErrorKind::NetworkBackendUnavailable,
+                        "failed to resolve the PANU interface during address cleanup",
+                        format!(
+                            "interface={} error={error}",
+                            lease.address.interface.as_str()
+                        ),
+                    ));
+                }
+            };
 
         if current_index != lease.interface_index {
             return Ok(());
@@ -211,10 +212,7 @@ fn route_socket() -> Result<OwnedFd, CoreError> {
     Ok(socket)
 }
 
-fn interface_index(
-    socket: &OwnedFd,
-    interface: &NetworkInterfaceHandle,
-) -> Result<u32, CoreError> {
+fn interface_index(socket: &OwnedFd, interface: &NetworkInterfaceHandle) -> Result<u32, CoreError> {
     netdevice::name_to_index(socket, interface.as_str()).map_err(|error| {
         CoreError::with_diagnostic(
             ErrorKind::NetworkBackendUnavailable,
@@ -476,19 +474,15 @@ fn push_u32(buffer: &mut Vec<u8>, value: u32) {
 }
 
 fn read_u16(bytes: &[u8]) -> Result<u16, CoreError> {
-    Ok(u16::from_ne_bytes(
-        bytes
-            .try_into()
-            .map_err(|_| protocol_error("invalid two-byte netlink field"))?,
-    ))
+    Ok(u16::from_ne_bytes(bytes.try_into().map_err(|_| {
+        protocol_error("invalid two-byte netlink field")
+    })?))
 }
 
 fn read_u32(bytes: &[u8]) -> Result<u32, CoreError> {
-    Ok(u32::from_ne_bytes(
-        bytes
-            .try_into()
-            .map_err(|_| protocol_error("invalid four-byte netlink field"))?,
-    ))
+    Ok(u32::from_ne_bytes(bytes.try_into().map_err(|_| {
+        protocol_error("invalid four-byte netlink field")
+    })?))
 }
 
 const fn align4(length: usize) -> usize {
