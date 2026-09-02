@@ -8,7 +8,14 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+blueroute-core = { path = "../../crates/blueroute-core" }
 blueroute-linux = { path = "../../crates/blueroute-linux" }
+blueroute-protocol = { path = "../../crates/blueroute-protocol" }
+futures-lite = "2.6.0"
+zbus = { version = "5.19.0", default-features = false, features = ["async-io"] }
+
+[dev-dependencies]
+async-io = "2.6.0"
 
 [lints]
 workspace = true

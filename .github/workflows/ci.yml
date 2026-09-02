@@ -48,3 +48,6 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace --locked
+
+      - name: Run daemon D-Bus integration test
+        run: dbus-run-session -- cargo test -p blueroute-daemon --test dbus_service --locked dbus_service_round_trip_and_event -- --ignored --exact
