@@ -127,4 +127,10 @@ Static/CI acceptance verifies the unit syntax, critical systemd policy settings,
 4. after a reboot, the enabled service starts automatically under `multi-user.target` and has current-boot journal entries.
 5. after GUI logout and login, the system service remains active independently of the user session.
 
-P5-006 is not complete until the boot and GUI-logout behavior is recorded from real Debian hardware.
+## Hardware acceptance result
+
+P5-006 passed all five live acceptance checks on `debiancb1` running Debian 13, kernel `6.12.86+deb13-amd64`, BlueZ `5.82`, NetworkManager `1.52.1`, and systemd `257 (257.9-1~deb13u1)`.
+
+The forced-crash test changed the daemon PID from `11248` to `11295`, incremented `NRestarts` to `1`, and returned the service to `active`. After reboot, systemd automatically started the enabled service at `20:02:16 PDT` with `MainPID=810`, `NRestarts=0`, and `InvocationID=a6d7da075daa45d98c33122aacccbf08`. A subsequent GUI logout/login left that same PID and InvocationID unchanged with no restart, proving the daemon is independent of the graphical user session.
+
+The complete transcript and initial fail-closed D-Bus ownership-policy discovery are recorded in `docs/P5-006-HARDWARE-EVIDENCE-2026-09-01.md`.
