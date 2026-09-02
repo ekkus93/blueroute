@@ -1,12 +1,13 @@
 use std::error::Error;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use blueroute_core::HealthLevel;
-use blueroute_daemon::DaemonService;
+use blueroute_core::{DaemonConfig, HealthLevel};
+use blueroute_daemon::{DaemonService, SingleStarNetworkOperations, current_network};
 use blueroute_linux::{
     NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
 };
-use blueroute_protocol::{DBUS_OBJECT_PATH, DBUS_SERVICE_NAME};
+use blueroute_protocol::{ApiVersion, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, DaemonStatus};
 use futures_lite::future;
 use zbus::connection::Builder;
 
@@ -27,17 +28,33 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let identity_store = NodeIdentityStore::new(node_identity_path(&state_directory));
     let local_node = identity_store.load_or_create()?;
 
-    let membership_store = NetworkMembershipStore::new(network_membership_path(&state_directory));
+    let membership_path = network_membership_path(&state_directory);
+    let membership_store = NetworkMembershipStore::new(membership_path.clone());
     // Fail closed instead of quietly forgetting membership/trust state when durable data is invalid.
-    let _membership_registry = membership_store.load()?;
+    let membership_registry = membership_store.load()?;
+    let current_network = current_network(&membership_registry)?;
 
-    let capability_report = SystemCapabilityProbe::default().report().await?;
+    let config = DaemonConfig::default();
+    let capability_report = SystemCapabilityProbe::new(config.clone())?.report().await?;
     let health = match capability_report.support {
         SystemSupportLevel::FullySupported | SystemSupportLevel::ClientOnly => HealthLevel::Healthy,
         SystemSupportLevel::Degraded => HealthLevel::Degraded,
         SystemSupportLevel::Unsupported => HealthLevel::Error,
     };
-    let service = DaemonService::new(local_node, health, capability_report.runtime.node);
+    let capabilities = capability_report.runtime.node;
+    let status = DaemonStatus {
+        api_version: ApiVersion::CURRENT,
+        local_node: Some(local_node),
+        current_network,
+        health,
+        capabilities: capabilities.clone(),
+    };
+    let network_operations = Arc::new(SingleStarNetworkOperations::new(
+        NetworkMembershipStore::new(membership_path),
+        config,
+        capabilities,
+    ));
+    let service = DaemonService::with_network_operations(status, network_operations);
 
     let _connection = Builder::system()?
         .name(DBUS_SERVICE_NAME)?
