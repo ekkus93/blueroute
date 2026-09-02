@@ -21,18 +21,11 @@ P6-006 uses two acceptance-only setup probes. They compose the same production a
 - `single_star_traffic_host` creates the NetworkManager-owned bridge/address and registers a BlueZ NAP;
 - `single_star_traffic_client` establishes a BlueZ PANU and applies the deterministic first-client address with NetworkManager.
 
-The host probe normally runs in explicit `auto` mode. That mode mirrors the P6-005 production conflict policy: it generates a fresh `NetworkId`, derives the corresponding segment, observes active local IPv4 prefixes, rejects conflicting candidates, and prints every rejection. It does **not** silently change the subnet for an explicit `NetworkId`.
-
-Once a conflict-free candidate is selected, the host prints:
-
-```text
-network=<selected-network-id>
-segment=<selected-segment>/24 host=<host-ip>/24 client=<client-ip>/24 bridge=<bridge>
-```
-
-Copy the printed `network=` value into the client command and use the printed host IP for the ordinary application tests. If an explicit network ID is supplied instead of `auto`, any overlap causes a fail-closed error with the conflicting-prefix diagnostic.
+The host supports an `auto` selector for acceptance. In this mode it generates fresh `NetworkId` candidates until the P6-005 deterministic subnet derived from the candidate does not conflict with active local IPv4 state. The selected `network=` value printed by the host is then passed explicitly to the client. Supplying an explicit `NetworkId` never remaps it to another subnet; a conflict remains a fail-closed error.
 
 Both probes check for a live IPv4 conflict before mutation and use owner-scoped NetworkManager cleanup. They do not configure DNS, `/etc/hosts`, forwarding, NAT, or any application-specific route.
+
+The PANU interface is created asynchronously by BlueZ. The client therefore waits, for a bounded eight-second window, for NetworkManager to observe that kernel interface before asking NetworkManager to create/apply BlueRoute-owned address state. A timeout fails closed and disconnects the PANU; there is no shell-command or foreign-profile fallback.
 
 ## Build
 
@@ -55,29 +48,48 @@ On the NAP node:
 sudo ./target/release/examples/single_star_traffic_host auto 600
 ```
 
-Leave it running during all traffic checks.
+The host prints the selected network and addresses, for example:
+
+```text
+P6-006 auto-selected conflict-free network on attempt 1: network=<network-id> segment=<segment>/24
+P6-006 host ready
+network=<network-id>
+segment=<segment>/24 host=<host-ip>/24 client=<client-ip>/24 bridge=<bridge>
+```
+
+Leave the host probe running during all traffic checks. Record the exact `network=`, host IP, client IP, and bridge values; all following commands must use those actual values.
+
+An explicit network can still be tested with:
+
+```bash
+sudo ./target/release/examples/single_star_traffic_host <network-id> 600
+```
+
+If its deterministic subnet conflicts, the probe fails closed and prints the conflict diagnostic instead of choosing a different subnet.
 
 ## Start the client/PANU
 
-On the PANU node, replace `<nap-bluetooth-name>` with the discovered Bluetooth display name of the NAP node and `<network-id-from-host>` with the exact `network=` value printed by the host probe:
+On the PANU node, replace `<nap-bluetooth-name>` and `<network-id>` with the NAP Bluetooth display name and the exact `network=` value printed by the host:
 
 ```bash
 sudo ./target/release/examples/single_star_traffic_client \
   <nap-bluetooth-name> \
-  <network-id-from-host> \
+  <network-id> \
   600
 ```
+
+The client does not have a default network ID. This prevents an acceptance run from silently deriving a segment different from the one selected by the host.
 
 The probe prints the actual PANU interface and the derived host/client addresses. Leave it running during all traffic checks.
 
 ## Raw-IP tests
 
-Run these from the PANU/client node unless otherwise stated.
+Run these from the PANU/client node unless otherwise stated. Replace `<host-ip>` with the host address printed by the host/client probes.
 
 ### ICMP
 
 ```bash
-ping -c 10 <host-ip-from-host>
+ping -c 10 <host-ip>
 ```
 
 Acceptance requires replies over the BlueRoute segment with no hidden hostname dependency.
@@ -87,7 +99,7 @@ Acceptance requires replies over the BlueRoute segment with no hidden hostname d
 Use an existing account and normal SSH authentication on the NAP node:
 
 ```bash
-ssh <nap-user>@<host-ip-from-host> 'printf "P6-006 SSH PASS\\n"'
+ssh <nap-user>@<host-ip> 'printf "P6-006 SSH PASS\\n"'
 ```
 
 Do not add a special BlueRoute SSH transport or proxy. Normal OpenSSH must operate directly on the BlueRoute IPv4 address.
@@ -97,13 +109,13 @@ Do not add a special BlueRoute SSH transport or proxy. Normal OpenSSH must opera
 On the NAP node:
 
 ```bash
-python3 scripts/p6_006_socket_traffic.py tcp-server --bind <host-ip-from-host>
+python3 scripts/p6_006_socket_traffic.py tcp-server --bind <host-ip>
 ```
 
 On the PANU node:
 
 ```bash
-python3 scripts/p6_006_socket_traffic.py tcp-client <host-ip-from-host> --bytes 16777216
+python3 scripts/p6_006_socket_traffic.py tcp-client <host-ip> --bytes 16777216
 ```
 
 The helper uses only Python's standard `socket` and `hashlib` modules. The client sends 16 MiB and requires the server to report the identical byte count and SHA-256 digest.
@@ -114,14 +126,14 @@ On the NAP node:
 
 ```bash
 python3 scripts/p6_006_socket_traffic.py udp-server \
-  --bind <host-ip-from-host> --count 256 --payload 1024
+  --bind <host-ip> --count 256 --payload 1024
 ```
 
 On the PANU node:
 
 ```bash
 python3 scripts/p6_006_socket_traffic.py udp-client \
-  <host-ip-from-host> --count 256 --payload 1024
+  <host-ip> --count 256 --payload 1024
 ```
 
 Each datagram carries a sequence number and deterministic payload. Acceptance requires all 256 datagrams to arrive with valid payloads. This is an application-layer loss/integrity check, not a BlueRoute protocol.
@@ -145,6 +157,7 @@ Let both setup probes exit normally so they exercise owner-scoped NetworkManager
 
 - exact Git commit on both nodes;
 - node names and roles;
+- selected `NetworkId`, segment, host address, and client address;
 - printed bridge/PANU interface names;
 - raw IPv4 ping result;
 - SSH command result;
