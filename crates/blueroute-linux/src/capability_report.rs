@@ -77,9 +77,21 @@ pub struct SystemCapabilityReport {
     pub diagnostics: Vec<CapabilityDiagnostic>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct SystemCapabilityProbe {
     config: DaemonConfig,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SupportInputs {
+    bluez_available: bool,
+    network_backend_available: bool,
+    adapter_present: bool,
+    powered_adapter: bool,
+    bnep_available: bool,
+    panu_available: bool,
+    nap_available: Option<bool>,
+    forwarding_available: bool,
 }
 
 impl SystemCapabilityProbe {
@@ -225,9 +237,7 @@ impl SystemCapabilityProbe {
 
         let practical_peer_ceiling = CONSERVATIVE_ACTIVE_PEER_CEILING;
         let configured_peer_ceiling = self.config.topology.max_active_links;
-        let effective_peer_ceiling = configured_peer_ceiling
-            .unwrap_or(practical_peer_ceiling)
-            .min(practical_peer_ceiling);
+        let effective_peer_ceiling = effective_peer_ceiling(configured_peer_ceiling);
         if configured_peer_ceiling.is_some_and(|value| value > practical_peer_ceiling) {
             diagnostics.push(CapabilityDiagnostic {
                 level: CapabilityDiagnosticLevel::Warning,
@@ -277,12 +287,9 @@ impl SystemCapabilityProbe {
             )),
             connection_policy_ceiling: Some(Sourced::new(
                 effective_peer_ceiling,
-                if configured_peer_ceiling.is_some()
-                    && effective_peer_ceiling < practical_peer_ceiling
-                {
-                    CapabilitySource::Configured
-                } else {
-                    CapabilitySource::ConservativeDefault
+                match configured_peer_ceiling {
+                    Some(value) if value <= practical_peer_ceiling => CapabilitySource::Configured,
+                    _ => CapabilitySource::ConservativeDefault,
                 },
             )),
             ..NodeCapabilities::default()
@@ -302,16 +309,16 @@ impl SystemCapabilityProbe {
             node,
         };
 
-        let support = classify_support(
+        let support = classify_support(SupportInputs {
             bluez_available,
-            network_manager.is_some(),
-            !controllers.is_empty(),
+            network_backend_available: network_manager.is_some(),
+            adapter_present: !controllers.is_empty(),
             powered_adapter,
             bnep_available,
             panu_available,
             nap_available,
             forwarding_available,
-        );
+        });
         diagnostics.insert(
             0,
             CapabilityDiagnostic {
@@ -344,14 +351,6 @@ impl SystemCapabilityProbe {
             prerequisites,
             diagnostics,
         })
-    }
-}
-
-impl Default for SystemCapabilityProbe {
-    fn default() -> Self {
-        Self {
-            config: DaemonConfig::default(),
-        }
     }
 }
 
@@ -453,26 +452,27 @@ fn read_trimmed(path: &Path) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn classify_support(
-    bluez_available: bool,
-    network_backend_available: bool,
-    adapter_present: bool,
-    powered_adapter: bool,
-    bnep_available: bool,
-    panu_available: bool,
-    nap_available: Option<bool>,
-    forwarding_available: bool,
-) -> SystemSupportLevel {
-    if !bluez_available || !network_backend_available || !adapter_present || !bnep_available {
+fn effective_peer_ceiling(configured: Option<u16>) -> u16 {
+    configured
+        .unwrap_or(CONSERVATIVE_ACTIVE_PEER_CEILING)
+        .min(CONSERVATIVE_ACTIVE_PEER_CEILING)
+}
+
+fn classify_support(input: SupportInputs) -> SystemSupportLevel {
+    if !input.bluez_available
+        || !input.network_backend_available
+        || !input.adapter_present
+        || !input.bnep_available
+    {
         return SystemSupportLevel::Unsupported;
     }
-    if !powered_adapter || nap_available.is_none() {
+    if !input.powered_adapter || input.nap_available.is_none() {
         return SystemSupportLevel::Degraded;
     }
-    if panu_available && nap_available == Some(false) {
+    if input.panu_available && input.nap_available == Some(false) {
         return SystemSupportLevel::ClientOnly;
     }
-    if panu_available && nap_available == Some(true) && forwarding_available {
+    if input.panu_available && input.nap_available == Some(true) && input.forwarding_available {
         return SystemSupportLevel::FullySupported;
     }
     SystemSupportLevel::Degraded
@@ -499,38 +499,56 @@ fn support_message(level: SystemSupportLevel) -> &'static str {
 mod tests {
     use super::*;
 
+    fn support_inputs() -> SupportInputs {
+        SupportInputs {
+            bluez_available: true,
+            network_backend_available: true,
+            adapter_present: true,
+            powered_adapter: true,
+            bnep_available: true,
+            panu_available: true,
+            nap_available: Some(true),
+            forwarding_available: true,
+        }
+    }
+
     #[test]
     fn classification_distinguishes_supported_modes() {
         assert_eq!(
-            classify_support(true, true, true, true, true, true, Some(true), true),
+            classify_support(support_inputs()),
             SystemSupportLevel::FullySupported
         );
         assert_eq!(
-            classify_support(true, true, true, true, true, true, Some(false), true),
+            classify_support(SupportInputs {
+                nap_available: Some(false),
+                ..support_inputs()
+            }),
             SystemSupportLevel::ClientOnly
         );
         assert_eq!(
-            classify_support(true, true, true, false, true, false, Some(false), true),
+            classify_support(SupportInputs {
+                powered_adapter: false,
+                panu_available: false,
+                nap_available: Some(false),
+                ..support_inputs()
+            }),
             SystemSupportLevel::Degraded
         );
         assert_eq!(
-            classify_support(false, true, true, true, true, true, Some(true), true),
+            classify_support(SupportInputs {
+                bluez_available: false,
+                ..support_inputs()
+            }),
             SystemSupportLevel::Unsupported
         );
     }
 
     #[test]
     fn configured_peer_ceiling_is_capped_by_conservative_runtime_limit() {
-        let config = DaemonConfig {
-            topology: blueroute_core::TopologyPolicy {
-                max_active_links: Some(9),
-                ..blueroute_core::TopologyPolicy::default()
-            },
-            ..DaemonConfig::default()
-        };
-        let probe = SystemCapabilityProbe::new(config).unwrap();
-        assert_eq!(probe.config.topology.max_active_links, Some(9));
-        assert_eq!(CONSERVATIVE_ACTIVE_PEER_CEILING, 4);
+        assert_eq!(effective_peer_ceiling(None), 4);
+        assert_eq!(effective_peer_ceiling(Some(2)), 2);
+        assert_eq!(effective_peer_ceiling(Some(4)), 4);
+        assert_eq!(effective_peer_ceiling(Some(9)), 4);
     }
 
     #[test]
