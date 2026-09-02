@@ -1,0 +1,69 @@
+name: P4-009 closeout TODO
+
+on:
+  push:
+    branches:
+      - P4-009_forwarding_adapter
+    paths:
+      - .github/workflows/p4-009-closeout-todo.yml
+
+permissions:
+  contents: write
+
+jobs:
+  closeout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: P4-009_forwarding_adapter
+      - name: Mark P4-009 complete
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('docs/TODO.md')
+          text = path.read_text()
+
+          row_anchor = "| P4-008 | `[x]` | NetworkManager route inspection/add-update-remove, ownership enforcement, fresh-backend reconciliation, idempotent cleanup, foreign/default-route preservation, and live Debian 13 kernel-route hardware acceptance are complete. |\n"
+          row = "| P4-009 | `[x]` | Node-global IPv4 forwarding control, boot-local ownership lease, fresh-backend reconciliation, idempotent release, foreign forwarding preservation, NAT/firewall separation, and live kernel hardware acceptance are complete. |\n"
+          if text.count(row_anchor) != 1:
+              raise SystemExit(f'expected P4-008 status row once, found {text.count(row_anchor)}')
+          if row not in text:
+              text = text.replace(row_anchor, row_anchor + row, 1)
+
+          old_section = """## P4-009 — Implement forwarding adapter
+
+- [ ] per-node forwarding abstraction.
+- [ ] enable only when routed topology requires it.
+- [ ] keep NAT/firewall separate for gateway phase.
+
+**Acceptance**
+
+- Routed implementation can enable forwarding without coupling to Internet NAT.
+"""
+          new_section = """## P4-009 — Implement forwarding adapter
+
+- [x] per-node forwarding abstraction.
+- [x] enable only when routed topology requires it.
+- [x] keep NAT/firewall separate for gateway phase.
+
+**Acceptance**
+
+- Routed implementation can enable forwarding without coupling to Internet NAT.
+- Implementation/design notes and the live forwarding probe are documented in `docs/P4-009-FORWARDING.md`.
+- Hardware acceptance is recorded in `docs/P4-009-HARDWARE-EVIDENCE-2026-09-01.md`; `debiancb1` completed a live kernel `0 -> 1 -> 0` forwarding lifecycle with a restrictive BlueRoute runtime lease, fresh-backend reconciliation, repeated idempotent release, lease removal, and default-route preservation, while a supplementary `arisu` run proved pre-existing forwarding remains enabled after BlueRoute releases its lease.
+"""
+          if text.count(old_section) != 1:
+              raise SystemExit(f'expected P4-009 section once, found {text.count(old_section)}')
+          text = text.replace(old_section, new_section, 1)
+          path.write_text(text)
+          PY
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/TODO.md
+          git commit -m 'docs: mark P4-009 forwarding complete'
+          git push origin HEAD:P4-009_forwarding_adapter
