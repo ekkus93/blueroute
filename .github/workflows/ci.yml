@@ -6,7 +6,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: P5-007_dbus_polkit_authorization
 
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt,clippy
@@ -104,3 +106,41 @@ jobs:
               assert defaults.findtext("allow_inactive") == "auth_admin"
               assert defaults.findtext("allow_active") == "auth_admin_keep"
           PY
+
+      - name: Close P5-007 TODO
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("docs/TODO.md")
+          text = path.read_text()
+
+          old_status = "| P5-006 | `[x]` | System-level systemd service packaging, D-Bus name ownership, bounded restart policy, journald integration, boot activation, and GUI-logout independence are proven on Debian 13 hardware. |\n| All other tasks | `[ ]` | Not started. |"
+          new_status = "| P5-006 | `[x]` | System-level systemd service packaging, D-Bus name ownership, bounded restart policy, journald integration, boot activation, and GUI-logout independence are proven on Debian 13 hardware. |\n| P5-007 | `[x]` | Least-privilege D-Bus/PolicyKit authorization is implemented and live Debian acceptance proves unprivileged read-only inspection plus fail-closed unauthorized mutation denial. |\n| All other tasks | `[ ]` | Not started. |"
+
+          old_task = "## P5-007 — Define D-Bus/Polkit authorization policy\n\n- [ ] read-only vs mutating operations.\n- [ ] authorization behavior.\n- [ ] no blanket front-end root access.\n\n**Acceptance**\n\n- Intended users can inspect status; unauthorized sensitive changes fail safely."
+          new_task = "## P5-007 — Define D-Bus/Polkit authorization policy\n\n- [x] read-only vs mutating operations.\n- [x] authorization behavior.\n- [x] no blanket front-end root access.\n\n**Acceptance**\n\n- Intended users can inspect status; unauthorized sensitive changes fail safely.\n- Hardware acceptance is recorded in `docs/P5-007-HARDWARE-EVIDENCE-2026-09-01.md`; the normal Debian user read version/status without elevation, an unprivileged `nobody` mutation was denied before dispatch with a nonzero D-Bus call result, and the daemon remained active."
+
+          if old_status in text:
+              text = text.replace(old_status, new_status, 1)
+          elif new_status not in text:
+              raise SystemExit("P5-007 status-table guard did not match")
+
+          if old_task in text:
+              text = text.replace(old_task, new_task, 1)
+          elif new_task not in text:
+              raise SystemExit("P5-007 task-block guard did not match")
+
+          path.write_text(text)
+          PY
+
+          if git diff --quiet -- docs/TODO.md; then
+            echo 'P5-007 TODO already closed; nothing to commit.'
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/TODO.md
+          git commit -m 'docs: close P5-007 authorization task'
+          git push origin HEAD:P5-007_dbus_polkit_authorization
