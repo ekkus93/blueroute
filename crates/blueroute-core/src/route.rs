@@ -1,8 +1,10 @@
 use std::net::IpAddr;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{CoreError, ErrorKind, NetworkId, NodeId, SegmentId};
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct IpPrefix {
     pub address: IpAddr,
     pub prefix_len: u8,
@@ -27,7 +29,8 @@ impl IpPrefix {
     }
 }
 
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RouteDestination {
     Node(NodeId),
     Segment(SegmentId),
@@ -36,12 +39,13 @@ pub enum RouteDestination {
     Internet,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RouteOwner {
     BlueRouteNetwork(NetworkId),
 }
 
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct Route {
     pub destination: RouteDestination,
     pub next_hop: NodeId,

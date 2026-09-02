@@ -1,8 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use serde::{Deserialize, Serialize};
+
 use crate::{CoreError, ErrorKind, LinkId, NodeCapabilities, NodeId, SegmentId};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum LinkState {
     Planned,
     Connecting,
@@ -11,7 +14,8 @@ pub enum LinkState {
     Failed,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum LinkHealth {
     Unknown,
     Healthy,
@@ -20,7 +24,8 @@ pub enum LinkHealth {
 }
 
 /// User/data-plane reachability class derived from the active PAN graph.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Reachability {
     Local,
     DirectLink,

@@ -1,8 +1,11 @@
 use std::collections::{BTreeMap, btree_map::Entry};
 
+use serde::{Deserialize, Serialize};
+
 use crate::{CoreError, DisplayName, ErrorKind, NetworkId, NodeId};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MembershipState {
     NotMember,
     Joining,

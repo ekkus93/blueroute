@@ -52,7 +52,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P4-010 | `[x]` | Read-only system capability reporting, support classification, runtime diagnostics, and live Debian hardware acceptance are complete. |
 | P4-011 | `[x]` | Reusable fake-backend contract tests, NetworkManager trait conformance, and core/topology architecture guards are implemented and green in CI. |
 | P5-001 | `[-]` | API version contract and compatibility rules are implemented/tested; client-side incompatibility enforcement remains pending P5-005. |
-| P5-002 | `[-]` | Semantic command/response model implemented; serialization round-trip tests remain. |
+| P5-002 | `[x]` | Shared command/response types now have deterministic validated JSON serialization, comprehensive round-trip tests, and fail-closed malformed-payload coverage. |
 | P5-003 | `[x]` | Event model and deterministic structural tests are implemented and green in CI. |
 | All other tasks | `[ ]` | Not started. |
 
@@ -585,11 +585,12 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 - [x] trust/forget.
 - [x] diagnostics.
 - [x] reserve Internet-sharing command.
-- [ ] deterministic serialization/round-trip tests.
+- [x] deterministic serialization/round-trip tests.
 
 **Acceptance**
 
 - Types live in shared protocol crate and are serialization tested.
+- The stable JSON payload contract, validated identifier/name encoding, round-trip coverage, and reserved gateway behavior are documented in `docs/P5-PROTOCOL.md`.
 
 ## P5-003 — Define event types
 
