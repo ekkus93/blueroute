@@ -1,5 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 /// Describes where a capability value came from.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CapabilitySource {
     Discovered,
     Measured,
@@ -8,7 +11,7 @@ pub enum CapabilitySource {
 }
 
 /// A value paired with evidence provenance.
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct Sourced<T> {
     pub value: T,
     pub source: CapabilitySource,
@@ -21,7 +24,8 @@ impl<T> Sourced<T> {
 }
 
 /// Linux networking implementation available on a node.
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum NetworkBackend {
     NetworkManager,
     SystemdNetworkd,
@@ -30,7 +34,7 @@ pub enum NetworkBackend {
 }
 
 /// Optional topology-quality information exposed by a platform.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct LinkQuality {
     /// Normalized 0-100 score. Interpretation is backend-specific.
     pub score: u8,
@@ -43,14 +47,15 @@ impl LinkQuality {
 }
 
 /// Coarse power information that may influence future topology policy.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PowerState {
     AcPowered,
     Battery { percent: u8 },
 }
 
 /// Capabilities are optional because unknown must remain distinguishable from false.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct NodeCapabilities {
     pub adapter_usable: Option<Sourced<bool>>,
     pub panu: Option<Sourced<bool>>,
