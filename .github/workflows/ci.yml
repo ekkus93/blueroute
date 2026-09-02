@@ -54,3 +54,20 @@ jobs:
 
       - name: Run client D-Bus integration test
         run: dbus-run-session -- cargo test -p blueroute-client --test dbus_client --locked client_queries_events_reconnects_and_fails_closed_on_incompatibility -- --ignored --exact
+
+      - name: Validate systemd service
+        run: |
+          sudo install -Dm0755 /bin/true /usr/libexec/blueroute/blueroute-daemon
+          stub_dir="$(mktemp -d)"
+          trap 'rm -rf "$stub_dir"' EXIT
+          for unit in bluetooth.service NetworkManager.service; do
+            printf '[Unit]\nDescription=CI dependency stub\n[Service]\nType=oneshot\nExecStart=/bin/true\n' > "$stub_dir/$unit"
+          done
+          SYSTEMD_UNIT_PATH="$PWD/packaging/systemd:$stub_dir:/usr/lib/systemd/system:/lib/systemd/system" \
+            systemd-analyze verify blueroute.service
+          grep -Fxq 'Type=dbus' packaging/systemd/blueroute.service
+          grep -Fxq 'BusName=org.blueroute.Service1' packaging/systemd/blueroute.service
+          grep -Fxq 'Restart=on-failure' packaging/systemd/blueroute.service
+          grep -Fxq 'StandardOutput=journal' packaging/systemd/blueroute.service
+          grep -Fxq 'StandardError=journal' packaging/systemd/blueroute.service
+          grep -Fxq 'WantedBy=multi-user.target' packaging/systemd/blueroute.service
