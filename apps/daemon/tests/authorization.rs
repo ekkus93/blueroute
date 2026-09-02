@@ -3,11 +3,14 @@ use std::error::Error;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use blueroute_core::{DisplayName, HealthLevel, NodeCapabilities, NodeId};
-use blueroute_daemon::{DaemonService, INTERNET_SHARING_ACTION_ID, MODIFY_ACTION_ID};
+use blueroute_core::{DisplayName, HealthLevel, NetworkId, NodeCapabilities, NodeId};
+use blueroute_daemon::{
+    DaemonService, INTERNET_SHARING_ACTION_ID, MODIFY_ACTION_ID, NetworkOperationFuture,
+    NetworkOperations,
+};
 use blueroute_protocol::{
-    Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, Response, decode_response,
-    encode_command,
+    ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, DaemonStatus,
+    NetworkSummary, Response, decode_response, encode_command,
 };
 use futures_lite::future;
 use zbus::connection::Builder;
@@ -53,6 +56,25 @@ impl MockAuthority {
     }
 }
 
+#[derive(Clone)]
+struct FakeNetworkOperations {
+    created_network: NetworkId,
+    create_calls: Arc<AtomicUsize>,
+}
+
+impl NetworkOperations for FakeNetworkOperations {
+    fn create_network(&self, _name: DisplayName) -> NetworkOperationFuture<'_, NetworkId> {
+        Box::pin(async move {
+            self.create_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(self.created_network)
+        })
+    }
+
+    fn list_networks(&self) -> Result<Vec<NetworkSummary>, blueroute_core::CoreError> {
+        Ok(Vec::new())
+    }
+}
+
 #[test]
 #[ignore = "requires an isolated D-Bus session; CI runs this under dbus-run-session"]
 fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<(), Box<dyn Error>>
@@ -78,10 +100,20 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
             .build()
             .await?;
 
-        let service = DaemonService::new(
-            NodeId::from_bytes([7; 16]),
-            HealthLevel::Healthy,
-            NodeCapabilities::default(),
+        let created_network = NetworkId::from_bytes([8; 16]);
+        let create_calls = Arc::new(AtomicUsize::new(0));
+        let service = DaemonService::with_network_operations(
+            DaemonStatus {
+                api_version: ApiVersion::CURRENT,
+                local_node: Some(NodeId::from_bytes([7; 16])),
+                current_network: None,
+                health: HealthLevel::Healthy,
+                capabilities: NodeCapabilities::default(),
+            },
+            Arc::new(FakeNetworkOperations {
+                created_network,
+                create_calls: create_calls.clone(),
+            }),
         );
         let _server = Builder::session()?
             .name(DBUS_SERVICE_NAME)?
@@ -98,7 +130,7 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
         .await?;
 
         let get_status = encode_command(&Command::GetStatus)?;
-        let payload: String = proxy.call("Request", &(get_status,)).await?;
+        let payload: String = proxy.call("Request", &(get_status.clone(),)).await?;
         assert!(matches!(decode_response(&payload)?, Response::Status(_)));
         assert_eq!(
             calls.load(Ordering::SeqCst),
@@ -121,6 +153,7 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
         let denied = denied.expect_err("unauthorized mutation must fail closed");
         assert!(denied.to_string().contains("AccessDenied"));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(create_calls.load(Ordering::SeqCst), 0);
         assert_eq!(
             last_action.lock().unwrap().as_deref(),
             Some(MODIFY_ACTION_ID)
@@ -132,12 +165,21 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
         assert_eq!(*last_flags.lock().unwrap(), Some(1));
 
         authorized.store(true, Ordering::SeqCst);
-        let allowed_but_unimplemented: zbus::Result<String> =
-            proxy.call("Request", &(create_network,)).await;
-        let error = allowed_but_unimplemented
-            .expect_err("authorized mutation should reach the current NotSupported handler");
-        assert!(error.to_string().contains("NotSupported"));
+        let payload: String = proxy.call("Request", &(create_network,)).await?;
+        assert_eq!(decode_response(&payload)?, Response::Ack);
+        assert_eq!(create_calls.load(Ordering::SeqCst), 1);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+        let payload: String = proxy.call("Request", &(get_status,)).await?;
+        let Response::Status(status) = decode_response(&payload)? else {
+            panic!("GetStatus must return a status response");
+        };
+        assert_eq!(status.current_network, Some(created_network));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "status inspection after creation must remain read-only"
+        );
 
         let internet = encode_command(&Command::SetInternetSharing { enabled: true })?;
         let reserved: zbus::Result<String> = proxy.call("Request", &(internet,)).await;

@@ -58,6 +58,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P5-005 | `[x]` | Shared system-D-Bus client, mandatory version gating, typed requests/events, bounded reconnect, and real-broker restart/incompatibility acceptance are complete. |
 | P5-006 | `[x]` | System-level systemd service packaging, D-Bus name ownership, bounded restart policy, journald integration, boot activation, and GUI-logout independence are proven on Debian 13 hardware. |
 | P5-007 | `[x]` | Least-privilege D-Bus/PolicyKit authorization is implemented and live Debian acceptance proves unprivileged read-only inspection plus fail-closed unauthorized mutation denial. |
+| P6-001 | `[x]` | CreateNetwork establishes durable member state, a deterministic BlueRoute-owned NetworkManager bridge/address, a live BlueZ NAP, and real PANU attachment on physical hardware. |
 | All other tasks | `[ ]` | Not started. |
 
 ## Platform rule
@@ -667,15 +668,16 @@ This is the first complete product slice.
 
 ## P6-001 — Implement create-network operation
 
-- [ ] create logical network ID/name.
-- [ ] persist membership.
-- [ ] select local NAP only if capability permits.
-- [ ] establish local subnet.
+- [x] create logical network ID/name.
+- [x] persist membership.
+- [x] select local NAP only if capability permits.
+- [x] establish local subnet.
 
 **Acceptance**
 
 - `CreateNetwork` yields stable daemon state on a NAP-capable Linux node.
 - Unsupported NAP capability produces a clear error rather than a model-name special case.
+- Hardware acceptance is recorded in `docs/P6-001-HARDWARE-EVIDENCE-2026-09-01.md`; the production daemon created network `26ed3f29d622ae9c5c68635f4d548bbe`, persisted stable member state, created `brb-26ed3f29` with `10.201.41.1/24`, registered a live NAP, and accepted `arisu` so the server-side Bluetooth interface `enxf4d10870b786` became a kernel member of that exact bridge.
 
 ## P6-002 — Implement discoverable BlueRoute network identity
 
@@ -1259,11 +1261,14 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 - [ ] daemon/backend unavailable.
 - [ ] permission denied.
 - [ ] peer unreachable.
-- [ ] advanced/copy report.
+- [ ] address conflict.
+- [ ] stale/reconnecting state.
+- [ ] routed peer unavailable.
+- [ ] driver/firmware quirks.
 
 **Acceptance**
 
-- Common failures provide next actions, not raw exceptions only.
+- Common UI errors point to useful guidance.
 
 ## P12-011 — Desktop accessibility pass
 
