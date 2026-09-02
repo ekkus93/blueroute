@@ -59,8 +59,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
         config,
         capabilities,
     ));
-    let service =
-        DaemonService::with_operations(status, network_operations, peer_trust_operations);
+    let service = DaemonService::with_operations(status, network_operations, peer_trust_operations);
 
     let _connection = Builder::system()?
         .name(DBUS_SERVICE_NAME)?
