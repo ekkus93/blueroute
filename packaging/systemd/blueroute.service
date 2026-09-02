@@ -1,0 +1,29 @@
+[Unit]
+Description=BlueRoute Bluetooth PAN networking daemon
+Documentation=https://github.com/ekkus93/blueroute
+Wants=bluetooth.service NetworkManager.service
+After=dbus.service bluetooth.service NetworkManager.service
+StartLimitIntervalSec=30s
+StartLimitBurst=5
+
+[Service]
+Type=dbus
+BusName=org.blueroute.Service1
+ExecStart=/usr/libexec/blueroute/blueroute-daemon
+User=root
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=15s
+StateDirectory=blueroute
+StateDirectoryMode=0700
+RuntimeDirectory=blueroute
+RuntimeDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=blueroute
+
+[Install]
+WantedBy=multi-user.target
