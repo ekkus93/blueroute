@@ -16,7 +16,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "network backend: {:?} version={}",
         report.runtime.network_backend,
-        report.network_backend_version.as_deref().unwrap_or("unknown")
+        report
+            .network_backend_version
+            .as_deref()
+            .unwrap_or("unknown")
     );
     println!(
         "kernel: {}",
