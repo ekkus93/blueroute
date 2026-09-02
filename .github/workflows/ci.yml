@@ -6,7 +6,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -48,50 +48,3 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace --locked
-
-      - name: Close P4-011 and restore workflow
-        if: github.event_name == 'pull_request' && github.head_ref == 'P4-011_network_backend_contract_tests'
-        shell: bash
-        run: |
-          git fetch origin "$GITHUB_HEAD_REF" master --depth=1
-          git switch -C "$GITHUB_HEAD_REF" "origin/$GITHUB_HEAD_REF"
-          python3 <<'PY'
-          from pathlib import Path
-
-          path = Path('docs/TODO.md')
-          text = path.read_text()
-
-          p4_010 = '| P4-010 | `[x]` | Read-only system capability reporting, support classification, runtime diagnostics, and live Debian hardware acceptance are complete. |\n'
-          p4_011 = '| P4-011 | `[x]` | Reusable fake-backend contract tests, NetworkManager trait conformance, and core/topology architecture guards are implemented and green in CI. |\n'
-          if p4_011 not in text:
-              if p4_010 not in text:
-                  raise SystemExit('P4-010 status row missing')
-              text = text.replace(p4_010, p4_010 + p4_011, 1)
-
-          replacements = {
-              '- [ ] Fake backend contract tests.': '- [x] Fake backend contract tests.',
-              '- [ ] NetworkManager implementation conformance tests.': '- [x] NetworkManager implementation conformance tests.',
-              '- [ ] Ensure topology/core never imports NetworkManager-specific types.': '- [x] Ensure topology/core never imports NetworkManager-specific types.',
-          }
-          for old, new in replacements.items():
-              if old in text:
-                  text = text.replace(old, new, 1)
-              elif new not in text:
-                  raise SystemExit(f'P4-011 TODO item missing: {old}')
-
-          acceptance = '- A future backend can be tested against the same contract.\n'
-          evidence = '- The reusable contract, NetworkManager conformance strategy, and architecture guard are documented in `docs/P4-011-NETWORK-BACKEND-CONTRACTS.md` and exercised by `crates/blueroute-linux/tests/network_backend_contract.rs`.\n'
-          if evidence not in text:
-              if acceptance not in text:
-                  raise SystemExit('P4-011 acceptance line missing')
-              text = text.replace(acceptance, acceptance + evidence, 1)
-
-          path.write_text(text)
-          PY
-          git show origin/master:.github/workflows/ci.yml > .github/workflows/ci.yml
-          git diff --check
-          git config user.name "Phillip Chin"
-          git config user.email "ekkus93@gmail.com"
-          git add docs/TODO.md .github/workflows/ci.yml
-          git commit -m "docs: close P4-011 acceptance"
-          git push origin HEAD:"$GITHUB_HEAD_REF"
