@@ -1,24 +1,24 @@
 name: CI
 
 on:
+  push:
+    branches: [master]
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  prepare:
-    name: Prepare P5-005
+  rust:
+    name: Rust
     runs-on: ubuntu-latest
     steps:
-      - name: Check out P5-005 branch
+      - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          ref: P5-005_blueroute_client
 
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt,clippy
@@ -26,19 +26,31 @@ jobs:
       - name: Select pinned Rust toolchain
         run: rustup override set 1.95.0
 
-      - name: Refresh lockfile, compile all targets, and format
-        run: |
-          cargo check --workspace --all-targets
-          cargo fmt --all
+      - name: Cache Cargo data
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
 
-      - name: Commit generated source and lockfile changes
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.lock crates/blueroute-client
-          if git diff --cached --quiet; then
-            echo "No generated changes to commit"
-          else
-            git commit -m "chore: prepare P5-005 generated state"
-            git push origin HEAD:P5-005_blueroute_client
-          fi
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check workspace
+        run: cargo check --workspace --locked
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace --locked
+
+      - name: Run daemon D-Bus integration test
+        run: dbus-run-session -- cargo test -p blueroute-daemon --test dbus_service --locked dbus_service_round_trip_and_event -- --ignored --exact
+
+      - name: Run client D-Bus integration test
+        run: dbus-run-session -- cargo test -p blueroute-client --test dbus_client --locked client_queries_events_reconnects_and_fails_closed_on_incompatibility -- --ignored --exact
