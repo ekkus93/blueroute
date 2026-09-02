@@ -29,7 +29,7 @@ Protocol enums use an explicit snake-case `type` discriminator and a `data` fiel
 
 Stable identifiers are encoded as their canonical 32-character lowercase hexadecimal strings rather than implementation-specific byte arrays. `DisplayName` is decoded through its domain validator, so malformed or whitespace-only names do not bypass the same validation applied to locally constructed values.
 
-The wire format intentionally contains no D-Bus object paths, BlueZ types, NetworkManager types, or front-end-specific types.
+Only protocol-facing core domain types implement serde. The wire format intentionally contains no D-Bus object paths, BlueZ types, NetworkManager types, or front-end-specific types.
 
 ## Determinism and fail-closed parsing
 
