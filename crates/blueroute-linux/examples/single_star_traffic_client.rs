@@ -8,8 +8,8 @@ use blueroute_core::{
     ensure_ipv4_segment_available,
 };
 use blueroute_linux::{
-    BluetoothBackend, BluezBackend, InterfaceAddress, IpNetworkBackend, IpNetworkObservationBackend,
-    NetworkManagerBackend, NetworkStateBackend, PanBackend,
+    BluetoothBackend, BluezBackend, InterfaceAddress, IpNetworkBackend,
+    IpNetworkObservationBackend, NetworkManagerBackend, NetworkStateBackend, PanBackend,
 };
 
 const DEFAULT_NETWORK: NetworkId = NetworkId::from_bytes([0x66; 16]);
