@@ -12,13 +12,13 @@ pub use authorization::{
     CommandAuthorization, INTERNET_SHARING_ACTION_ID, MODIFY_ACTION_ID, command_authorization,
     command_operation,
 };
-pub use peer_trust::{
-    DurablePeerTrustOperations, PeerTrustFuture, PeerTrustOperations, pair_and_trust_bluetooth_peer,
-};
 use blueroute_core::{CoreError, ErrorKind, HealthLevel, NetworkId, NodeCapabilities, NodeId};
 use blueroute_protocol::{
     ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, Event,
     ProtocolCodecError, Response, decode_command, encode_event, encode_response,
+};
+pub use peer_trust::{
+    DurablePeerTrustOperations, PeerTrustFuture, PeerTrustOperations, pair_and_trust_bluetooth_peer,
 };
 pub use single_star::{
     LinuxStarHostRuntime, NetworkIdGenerator, NetworkOperationFuture, NetworkOperations,
@@ -119,7 +119,12 @@ impl DaemonService {
     }
 
     fn ensure_not_local_node(&self, node: NodeId) -> fdo::Result<()> {
-        if self.status_snapshot().map_err(core_error_to_dbus)?.local_node == Some(node) {
+        if self
+            .status_snapshot()
+            .map_err(core_error_to_dbus)?
+            .local_node
+            == Some(node)
+        {
             Err(fdo::Error::InvalidArgs(
                 "the local BlueRoute node cannot be approved as its own peer".into(),
             ))
