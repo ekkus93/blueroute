@@ -100,4 +100,4 @@ Deterministic CI proves ordering, capability rejection, no durable commit after 
 
 Physical acceptance is recorded in `docs/P6-001-HARDWARE-EVIDENCE-2026-09-01.md`. On `debiancb1`, the production `CreateNetwork` path persisted network `26ed3f29d622ae9c5c68635f4d548bbe`, created `brb-26ed3f29` with `10.201.41.1/24`, registered the NAP, and accepted the real `arisu` PANU so server interface `enxf4d10870b786` became a kernel member of that exact bridge.
 
-P6-001 is complete; discovery, approval, join orchestration, automatic client addressing, leave, reconciliation, and reconnect remain later P6 tasks.
+P6-001 is complete. Discovery, approval, join orchestration, automatic client addressing, leave, reconciliation, and reconnect remain later P6 tasks.
