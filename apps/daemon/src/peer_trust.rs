@@ -6,8 +6,7 @@ use blueroute_linux::{BluetoothBackend, BluezBackend, NetworkMembershipStore, Pe
 
 use crate::current_network;
 
-pub type PeerTrustFuture<'a, T> =
-    Pin<Box<dyn Future<Output = Result<T, CoreError>> + Send + 'a>>;
+pub type PeerTrustFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, CoreError>> + Send + 'a>>;
 
 pub trait PeerTrustOperations: Send + Sync {
     fn trust_peer(&self, node: NodeId) -> PeerTrustFuture<'_, ()>;
@@ -23,11 +22,7 @@ impl DurablePeerTrustOperations {
         Self { store }
     }
 
-    pub fn require_peer_approved(
-        &self,
-        network: NetworkId,
-        node: NodeId,
-    ) -> Result<(), CoreError> {
+    pub fn require_peer_approved(&self, network: NetworkId, node: NodeId) -> Result<(), CoreError> {
         let registry = self.store.load()?;
         let current = current_network(&registry)?.ok_or_else(no_current_network)?;
         if current != network {
@@ -124,7 +119,10 @@ mod tests {
             NEXT_TEST.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir_all(&root).unwrap();
-        (root.clone(), NetworkMembershipStore::new(root.join("memberships-v1")))
+        (
+            root.clone(),
+            NetworkMembershipStore::new(root.join("memberships-v1")),
+        )
     }
 
     fn seed_current_network(store: &NetworkMembershipStore, network: NetworkId) {
