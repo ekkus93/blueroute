@@ -21,19 +21,16 @@ P6-006 uses two acceptance-only setup probes. They compose the same production a
 - `single_star_traffic_host` creates the NetworkManager-owned bridge/address and registers a BlueZ NAP;
 - `single_star_traffic_client` establishes a BlueZ PANU and applies the deterministic first-client address with NetworkManager.
 
-The default acceptance `NetworkId` is:
+The host probe normally runs in explicit `auto` mode. That mode mirrors the P6-005 production conflict policy: it generates a fresh `NetworkId`, derives the corresponding segment, observes active local IPv4 prefixes, rejects conflicting candidates, and prints every rejection. It does **not** silently change the subnet for an explicit `NetworkId`.
+
+Once a conflict-free candidate is selected, the host prints:
 
 ```text
-66666666666666666666666666666666
+network=<selected-network-id>
+segment=<selected-segment>/24 host=<host-ip>/24 client=<client-ip>/24 bridge=<bridge>
 ```
 
-With the P6-005 default pool this derives:
-
-```text
-segment: 10.201.102.0/24
-host:    10.201.102.1/24
-client:  10.201.102.2/24
-```
+Copy the printed `network=` value into the client command and use the printed host IP for the ordinary application tests. If an explicit network ID is supplied instead of `auto`, any overlap causes a fail-closed error with the conflicting-prefix diagnostic.
 
 Both probes check for a live IPv4 conflict before mutation and use owner-scoped NetworkManager cleanup. They do not configure DNS, `/etc/hosts`, forwarding, NAT, or any application-specific route.
 
@@ -55,20 +52,19 @@ The Python socket helper requires only Python 3 and the standard library.
 On the NAP node:
 
 ```bash
-sudo ./target/release/examples/single_star_traffic_host \
-  66666666666666666666666666666666 600
+sudo ./target/release/examples/single_star_traffic_host auto 600
 ```
 
 Leave it running during all traffic checks.
 
 ## Start the client/PANU
 
-On the PANU node, replace `<nap-bluetooth-name>` with the discovered Bluetooth display name of the NAP node:
+On the PANU node, replace `<nap-bluetooth-name>` with the discovered Bluetooth display name of the NAP node and `<network-id-from-host>` with the exact `network=` value printed by the host probe:
 
 ```bash
 sudo ./target/release/examples/single_star_traffic_client \
   <nap-bluetooth-name> \
-  66666666666666666666666666666666 \
+  <network-id-from-host> \
   600
 ```
 
@@ -81,7 +77,7 @@ Run these from the PANU/client node unless otherwise stated.
 ### ICMP
 
 ```bash
-ping -c 10 10.201.102.1
+ping -c 10 <host-ip-from-host>
 ```
 
 Acceptance requires replies over the BlueRoute segment with no hidden hostname dependency.
@@ -91,7 +87,7 @@ Acceptance requires replies over the BlueRoute segment with no hidden hostname d
 Use an existing account and normal SSH authentication on the NAP node:
 
 ```bash
-ssh <nap-user>@10.201.102.1 'printf "P6-006 SSH PASS\\n"'
+ssh <nap-user>@<host-ip-from-host> 'printf "P6-006 SSH PASS\\n"'
 ```
 
 Do not add a special BlueRoute SSH transport or proxy. Normal OpenSSH must operate directly on the BlueRoute IPv4 address.
@@ -101,13 +97,13 @@ Do not add a special BlueRoute SSH transport or proxy. Normal OpenSSH must opera
 On the NAP node:
 
 ```bash
-python3 scripts/p6_006_socket_traffic.py tcp-server --bind 10.201.102.1
+python3 scripts/p6_006_socket_traffic.py tcp-server --bind <host-ip-from-host>
 ```
 
 On the PANU node:
 
 ```bash
-python3 scripts/p6_006_socket_traffic.py tcp-client 10.201.102.1 --bytes 16777216
+python3 scripts/p6_006_socket_traffic.py tcp-client <host-ip-from-host> --bytes 16777216
 ```
 
 The helper uses only Python's standard `socket` and `hashlib` modules. The client sends 16 MiB and requires the server to report the identical byte count and SHA-256 digest.
@@ -118,14 +114,14 @@ On the NAP node:
 
 ```bash
 python3 scripts/p6_006_socket_traffic.py udp-server \
-  --bind 10.201.102.1 --count 256 --payload 1024
+  --bind <host-ip-from-host> --count 256 --payload 1024
 ```
 
 On the PANU node:
 
 ```bash
 python3 scripts/p6_006_socket_traffic.py udp-client \
-  10.201.102.1 --count 256 --payload 1024
+  <host-ip-from-host> --count 256 --payload 1024
 ```
 
 Each datagram carries a sequence number and deterministic payload. Acceptance requires all 256 datagrams to arrive with valid payloads. This is an application-layer loss/integrity check, not a BlueRoute protocol.
