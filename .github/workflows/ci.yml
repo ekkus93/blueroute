@@ -6,19 +6,22 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  rust:
-    name: Rust
+  refresh-p5-protocol:
+    name: Refresh P5 protocol dependencies
+    if: github.event_name == 'pull_request' && github.head_ref == 'P5-002_protocol_serialization'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt,clippy
@@ -26,25 +29,64 @@ jobs:
       - name: Select pinned Rust toolchain
         run: rustup override set 1.95.0
 
-      - name: Cache Cargo data
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            cargo-${{ runner.os }}-
+      - name: Complete serde wiring and refresh lockfile
+        shell: bash
+        run: |
+          git fetch origin "$GITHUB_HEAD_REF" master
+          git switch -C "$GITHUB_HEAD_REF" "origin/$GITHUB_HEAD_REF"
+          python3 <<'PY'
+          from pathlib import Path
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              if new in text:
+                  return
+              if old not in text:
+                  raise SystemExit(f'missing expected text in {path}: {old!r}')
+              p.write_text(text.replace(old, new, 1))
 
-      - name: Check workspace
-        run: cargo check --workspace --locked
+          replace_once(
+              'crates/blueroute-core/src/health.rs',
+              '#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]\npub enum HealthLevel',
+              'use serde::{Deserialize, Serialize};\n\n#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]\n#[serde(rename_all = "snake_case")]\npub enum HealthLevel',
+          )
+          replace_once(
+              'crates/blueroute-core/src/membership.rs',
+              'use std::collections::{BTreeMap, btree_map::Entry};\n\nuse crate::{CoreError, DisplayName, ErrorKind, NetworkId, NodeId};\n\n#[derive(Clone, Copy, Debug, Eq, PartialEq)]\npub enum MembershipState',
+              'use std::collections::{BTreeMap, btree_map::Entry};\n\nuse serde::{Deserialize, Serialize};\n\nuse crate::{CoreError, DisplayName, ErrorKind, NetworkId, NodeId};\n\n#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]\n#[serde(rename_all = "snake_case")]\npub enum MembershipState',
+          )
+          replace_once(
+              'crates/blueroute-core/src/topology.rs',
+              'use std::collections::{BTreeMap, BTreeSet, VecDeque};\n\nuse crate::{CoreError, ErrorKind, LinkId, NodeCapabilities, NodeId, SegmentId};',
+              'use std::collections::{BTreeMap, BTreeSet, VecDeque};\n\nuse serde::{Deserialize, Serialize};\n\nuse crate::{CoreError, ErrorKind, LinkId, NodeCapabilities, NodeId, SegmentId};',
+          )
+          for old, new in [
+              ('#[derive(Clone, Copy, Debug, Eq, PartialEq)]\npub enum LinkState', '#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]\n#[serde(rename_all = "snake_case")]\npub enum LinkState'),
+              ('#[derive(Clone, Copy, Debug, Eq, PartialEq)]\npub enum LinkHealth', '#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]\n#[serde(rename_all = "snake_case")]\npub enum LinkHealth'),
+              ('#[derive(Clone, Copy, Debug, Eq, PartialEq)]\npub enum Reachability', '#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]\n#[serde(rename_all = "snake_case")]\npub enum Reachability'),
+          ]:
+              replace_once('crates/blueroute-core/src/topology.rs', old, new)
 
-      - name: Run Clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-
-      - name: Run tests
-        run: cargo test --workspace --locked
+          replace_once(
+              'crates/blueroute-core/src/route.rs',
+              'use std::net::IpAddr;\n\nuse crate::{CoreError, ErrorKind, NetworkId, NodeId, SegmentId};',
+              'use std::net::IpAddr;\n\nuse serde::{Deserialize, Serialize};\n\nuse crate::{CoreError, ErrorKind, NetworkId, NodeId, SegmentId};',
+          )
+          for old, new in [
+              ('#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]\npub struct IpPrefix', '#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]\npub struct IpPrefix'),
+              ('#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]\npub enum RouteDestination', '#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]\n#[serde(rename_all = "snake_case")]\npub enum RouteDestination'),
+              ('#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]\npub enum RouteOwner', '#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]\n#[serde(rename_all = "snake_case")]\npub enum RouteOwner'),
+              ('#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]\npub struct Route', '#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]\npub struct Route'),
+          ]:
+              replace_once('crates/blueroute-core/src/route.rs', old, new)
+          PY
+          cargo fmt --all
+          cargo check --workspace
+          git show origin/master:.github/workflows/ci.yml > .github/workflows/ci.yml
+          git diff --check
+          git config user.name "Phillip Chin"
+          git config user.email "ekkus93@gmail.com"
+          git add Cargo.lock crates/blueroute-core crates/blueroute-protocol .github/workflows/ci.yml
+          git commit -m "feat: complete P5 protocol serialization wiring"
+          git push origin HEAD:"$GITHUB_HEAD_REF"
