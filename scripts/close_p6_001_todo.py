@@ -1,3 +1,4 @@
+# Temporary one-shot helper; removed before merge.
 from pathlib import Path
 
 path = Path("docs/TODO.md")
