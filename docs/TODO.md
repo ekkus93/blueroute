@@ -51,10 +51,11 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P4-009 | `[x]` | Node-global IPv4 forwarding control, boot-local ownership lease, fresh-backend reconciliation, idempotent release, foreign forwarding preservation, NAT/firewall separation, and live kernel hardware acceptance are complete. |
 | P4-010 | `[x]` | Read-only system capability reporting, support classification, runtime diagnostics, and live Debian hardware acceptance are complete. |
 | P4-011 | `[x]` | Reusable fake-backend contract tests, NetworkManager trait conformance, and core/topology architecture guards are implemented and green in CI. |
-| P5-001 | `[-]` | API version contract and compatibility rules are implemented/tested; client-side incompatibility enforcement remains pending P5-005. |
+| P5-001 | `[x]` | Versioned local API contract and real-broker client enforcement are complete; incompatible daemon replacement is rejected before normal commands. |
 | P5-002 | `[x]` | Shared command/response types now have deterministic validated JSON serialization, comprehensive round-trip tests, and fail-closed malformed-payload coverage. |
 | P5-003 | `[x]` | Event model and deterministic structural tests are implemented and green in CI. |
 | P5-004 | `[x]` | Versioned daemon D-Bus service ownership, status/capability queries, fail-closed request decoding, typed event signaling, and real broker-level CI acceptance are complete. |
+| P5-005 | `[x]` | Shared system-D-Bus client, mandatory version gating, typed requests/events, bounded reconnect, and real-broker restart/incompatibility acceptance are complete. |
 | All other tasks | `[ ]` | Not started. |
 
 ## Platform rule
@@ -576,6 +577,7 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 **Acceptance**
 
 - Client detects incompatibility before normal commands.
+- Real-broker incompatibility enforcement is recorded in `docs/P5-005-CLIENT.md`; an incompatible replacement daemon was rejected with zero calls to its normal `Request` method.
 
 ## P5-002 — Define command/response types
 
@@ -621,15 +623,16 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P5-005 — Implement `blueroute-client`
 
-- [ ] connect.
-- [ ] version negotiation.
-- [ ] typed requests.
-- [ ] events.
-- [ ] reconnect after daemon restart.
+- [x] connect.
+- [x] version negotiation.
+- [x] typed requests.
+- [x] events.
+- [x] reconnect after daemon restart.
 
 **Acceptance**
 
 - CLI/TUI/Tauri share the crate with no duplicate system-D-Bus networking logic.
+- Client design, non-replay reconnect semantics, and real-broker acceptance are documented in `docs/P5-005-CLIENT.md`.
 
 ## P5-006 — Add systemd service
 
