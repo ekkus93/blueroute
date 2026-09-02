@@ -3,9 +3,7 @@ use std::error::Error;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use blueroute_core::{
-    DisplayName, HealthLevel, NetworkId, NodeCapabilities, NodeId,
-};
+use blueroute_core::{DisplayName, HealthLevel, NetworkId, NodeCapabilities, NodeId};
 use blueroute_daemon::{
     DaemonService, INTERNET_SHARING_ACTION_ID, MODIFY_ACTION_ID, NetworkOperationFuture,
     NetworkOperations,
