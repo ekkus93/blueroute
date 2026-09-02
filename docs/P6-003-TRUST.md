@@ -96,4 +96,4 @@ Tests cover:
 - PolicyKit denial preventing `TrustPeer` dispatch;
 - authorized `TrustPeer` and `ForgetPeer` dispatch.
 
-Physical P6-003 acceptance should reuse the already-proven P4-004 Bluetooth pairing backend and additionally demonstrate that a real daemon `TrustPeer` request persists the intended `NodeId` as trusted while leaving it non-member, and that `ForgetPeer` removes that approval.
+Physical P6-003 acceptance reused the already-proven P4-004 Bluetooth pairing backend and passed on real hardware. The production daemon on `debiancb1` approved `arisu` node `4d5f049ad9b6ea51d782250478fa3ebf` for network `4bc4e5b829838b47c985ec66881306fa`, persisted it as trusted while leaving it non-member, proved repeated approval idempotent by an unchanged durable-file SHA-256, and removed the approval through `ForgetPeer` while preserving the network record. Full evidence is recorded in `docs/P6-003-HARDWARE-EVIDENCE-2026-09-02.md`.
