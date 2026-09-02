@@ -8,8 +8,9 @@ use blueroute_core::{
     ensure_ipv4_segment_available,
 };
 use blueroute_linux::{
-    BluetoothBackend, BluezBackend, InterfaceAddress, IpNetworkBackend, IpNetworkObservationBackend,
-    NetworkInterfaceHandle, NetworkManagerBackend, NetworkStateBackend, PanBackend,
+    BluetoothBackend, BluezBackend, InterfaceAddress, IpNetworkBackend,
+    IpNetworkObservationBackend, NetworkInterfaceHandle, NetworkManagerBackend,
+    NetworkStateBackend, PanBackend,
 };
 
 const DEFAULT_NETWORK: NetworkId = NetworkId::from_bytes([0x66; 16]);
@@ -59,7 +60,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err(with_cleanup(error, cleanup).into());
     }
 
-    let nap = match bluez.start_nap(adapter.handle.clone(), bridge.clone()).await {
+    let nap = match bluez
+        .start_nap(adapter.handle.clone(), bridge.clone())
+        .await
+    {
         Ok(nap) => nap,
         Err(error) => {
             let cleanup = cleanup_network(&network_backend, &address).await;
