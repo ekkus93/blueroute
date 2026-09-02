@@ -91,4 +91,4 @@ Consequently:
 
 Deterministic tests cover payload round-trip, malformed/unknown advertisement rejection, independence from Bluetooth names, remembered-network precedence, and authorized daemon dispatch.
 
-Physical acceptance still requires a second compatible Linux node to run the production daemon/client discovery path and observe the hosted network's exact `NetworkId` without providing a Bluetooth MAC address. Hardware evidence is recorded separately before P6-002 is closed.
+Physical acceptance passed on 2026-09-02. `debiancb1` created and advertised network `4bc4e5b829838b47c985ec66881306fa`; the production `network_discovery_probe` on `arisu` discovered that exact logical `NetworkId` during its bounded scan without being given a Bluetooth MAC address. The complete transcript and acceptance boundary are recorded in `docs/P6-002-HARDWARE-EVIDENCE-2026-09-02.md`.
