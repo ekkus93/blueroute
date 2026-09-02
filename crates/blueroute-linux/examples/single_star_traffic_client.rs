@@ -1,5 +1,4 @@
 use std::env;
-use std::str::FromStr;
 use std::time::Duration;
 
 use async_io::Timer;
@@ -12,34 +11,34 @@ use blueroute_linux::{
     IpNetworkObservationBackend, NetworkManagerBackend, NetworkStateBackend, PanBackend,
 };
 
-const DEFAULT_NETWORK: NetworkId = NetworkId::from_bytes([0x66; 16]);
-
 fn main() {
     if let Err(error) = futures_lite::future::block_on(run()) {
-        eprintln!("P6-006 client setup failed: {error}");
+        eprintln!("P6-006 client setup failed: {}", error.message());
+        if let Some(diagnostic) = error.diagnostic() {
+            eprintln!("diagnostic: {diagnostic}");
+        }
         std::process::exit(1);
     }
 }
 
-async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let target_name = env::args().nth(1).ok_or(
-        "usage: cargo run -p blueroute-linux --example single_star_traffic_client --locked -- <peer-name> [network-id] [hold-seconds]",
-    )?;
-    let network = env::args()
-        .nth(2)
-        .map(|value| NetworkId::from_str(&value))
-        .transpose()?
-        .unwrap_or(DEFAULT_NETWORK);
-    let hold_seconds = env::args()
-        .nth(3)
-        .map(|value| value.parse::<u64>())
-        .transpose()?
-        .unwrap_or(300);
+async fn run() -> Result<(), CoreError> {
+    let (target_name, network, hold_seconds) = parse_arguments()?;
     let plan = Ipv4StarAddressPlan::for_network(network, Ipv4AddressPool::default())?;
 
     let network_backend = NetworkManagerBackend::connect_system().await?;
     let active = network_backend.active_ipv4_prefixes().await?;
-    ensure_ipv4_segment_available(plan.segment, active)?;
+    if let Err(error) = ensure_ipv4_segment_available(plan.segment, active) {
+        return Err(CoreError::with_diagnostic(
+            error.kind(),
+            error.message(),
+            format!(
+                "network={network} segment={}/{}; {}",
+                plan.segment.address,
+                plan.segment.prefix_len,
+                error.diagnostic().unwrap_or("no conflict diagnostic")
+            ),
+        ));
+    }
 
     let bluez = BluezBackend::connect_system().await?;
     let adapter = bluez
@@ -47,7 +46,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .await?
         .into_iter()
         .find(|adapter| adapter.powered)
-        .ok_or("no powered Bluetooth adapter is available")?;
+        .ok_or_else(|| {
+            CoreError::new(
+                ErrorKind::CapabilityUnavailable,
+                "no powered Bluetooth adapter is available",
+            )
+        })?;
 
     bluez.start_discovery(adapter.handle.clone()).await?;
     Timer::after(Duration::from_secs(10)).await;
@@ -58,7 +62,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let peer = peers
         .into_iter()
         .find(|peer| peer.display_name.as_deref() == Some(target_name.as_str()))
-        .ok_or_else(|| format!("Bluetooth peer {target_name:?} was not discovered"))?;
+        .ok_or_else(|| {
+            CoreError::with_diagnostic(
+                ErrorKind::CapabilityUnavailable,
+                "requested Bluetooth peer was not discovered",
+                format!("peer_name={target_name}"),
+            )
+        })?;
 
     let attachment = bluez.connect_panu(peer.handle.clone()).await?;
     let address = InterfaceAddress {
@@ -69,7 +79,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Err(error) = network_backend.ensure_address(address.clone()).await {
         let network_cleanup = cleanup_network(&network_backend, &address).await;
         let disconnect = bluez.disconnect_panu(peer.handle.clone()).await;
-        return Err(with_cleanup(error, [network_cleanup, disconnect]).into());
+        return Err(with_cleanup(error, [network_cleanup, disconnect]));
     }
 
     println!("P6-006 client ready");
@@ -98,6 +108,30 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     combine_cleanup([network_cleanup, first_disconnect, second_disconnect])?;
     println!("P6-006 client cleanup PASS");
     Ok(())
+}
+
+fn parse_arguments() -> Result<(String, NetworkId, u64), CoreError> {
+    let arguments: Vec<String> = env::args().skip(1).collect();
+    let usage = "usage: single_star_traffic_client <peer-name> <network-id> [hold-seconds]";
+    match arguments.as_slice() {
+        [target_name, network] => Ok((target_name.clone(), network.parse()?, 300)),
+        [target_name, network, hold_seconds] => Ok((
+            target_name.clone(),
+            network.parse()?,
+            parse_hold_seconds(hold_seconds)?,
+        )),
+        _ => Err(CoreError::new(ErrorKind::InvalidInput, usage)),
+    }
+}
+
+fn parse_hold_seconds(value: &str) -> Result<u64, CoreError> {
+    value.parse::<u64>().map_err(|error| {
+        CoreError::with_diagnostic(
+            ErrorKind::InvalidInput,
+            "hold-seconds must be an unsigned integer",
+            error.to_string(),
+        )
+    })
 }
 
 async fn cleanup_network(
