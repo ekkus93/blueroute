@@ -9,10 +9,10 @@ use blueroute_core::{HealthLevel, NodeCapabilities, NodeId};
 use blueroute_daemon::{DaemonService, emit_event};
 use blueroute_protocol::{ApiVersion, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, Event};
 use futures_lite::future;
+use zbus::Connection;
 use zbus::connection::Builder;
 use zbus::fdo;
 use zbus::interface;
-use zbus::Connection;
 
 #[derive(Clone)]
 struct IncompatibleService {
@@ -35,7 +35,8 @@ impl IncompatibleService {
 
 #[test]
 #[ignore = "requires an isolated D-Bus session; CI runs this under dbus-run-session"]
-fn client_queries_events_reconnects_and_fails_closed_on_incompatibility() -> Result<(), Box<dyn Error>> {
+fn client_queries_events_reconnects_and_fails_closed_on_incompatibility()
+-> Result<(), Box<dyn Error>> {
     future::block_on(async {
         let first_node = NodeId::from_bytes([1; 16]);
         let first_server = Builder::session()?

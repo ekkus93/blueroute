@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use async_io::Timer;
 use blueroute_core::NodeCapabilities;
 use blueroute_protocol::{
-    ApiVersion, Command, DaemonStatus, Event, ProtocolCodecError, Response, DBUS_INTERFACE_NAME,
-    DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, decode_event, decode_response, encode_command,
+    ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, DaemonStatus,
+    Event, ProtocolCodecError, Response, decode_event, decode_response, encode_command,
 };
 use futures_lite::StreamExt;
 use zbus::proxy::SignalStream;
@@ -147,10 +147,7 @@ impl EventSubscription {
 
 async fn negotiate_version(connection: &Connection) -> Result<ApiVersion, ClientError> {
     let proxy = service_proxy(connection).await?;
-    let (major, minor): (u16, u16) = proxy
-        .call("Version", &())
-        .await
-        .map_err(ClientError::Bus)?;
+    let (major, minor): (u16, u16) = proxy.call("Version", &()).await.map_err(ClientError::Bus)?;
     let server = ApiVersion::new(major, minor);
     if !ApiVersion::CURRENT.is_compatible_with_server(server) {
         return Err(ClientError::IncompatibleVersion {
@@ -218,7 +215,10 @@ impl fmt::Display for ClientError {
                 "daemon returned response type {actual} where {expected} was required"
             ),
             Self::InvalidTransportPayload(error) => {
-                write!(formatter, "daemon event carried an invalid D-Bus payload: {error}")
+                write!(
+                    formatter,
+                    "daemon event carried an invalid D-Bus payload: {error}"
+                )
             }
             Self::EventStreamClosed => formatter.write_str("daemon event stream closed"),
             Self::ReconnectTimeout {
