@@ -48,6 +48,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P4-006 | `[x]` | BlueZ NetworkServer1 NAP registration, client attach/detach observation, ownership-aware idempotent cleanup, typed capability failures, and real two-node Rust NAP/PANU data-plane hardware acceptance are complete. |
 | P4-007 | `[x]` | Direct NetworkManager system-D-Bus backend, bounded state observation, explicit ownership, BlueRoute-owned bridge/address lifecycle, fail-closed cross-owner handling, and real Debian 13 hardware acceptance are complete. |
 | P4-008 | `[x]` | NetworkManager route inspection/add-update-remove, ownership enforcement, fresh-backend reconciliation, idempotent cleanup, foreign/default-route preservation, and live Debian 13 kernel-route hardware acceptance are complete. |
+| P4-009 | `[x]` | Node-global IPv4 forwarding control, boot-local ownership lease, fresh-backend reconciliation, idempotent release, foreign forwarding preservation, NAT/firewall separation, and live kernel hardware acceptance are complete. |
 | P5-001 | `[-]` | API version contract and compatibility rules are implemented/tested; client-side incompatibility enforcement remains pending P5-005. |
 | P5-002 | `[-]` | Semantic command/response model implemented; serialization round-trip tests remain. |
 | P5-003 | `[x]` | Event model and deterministic structural tests are implemented and green in CI. |
@@ -522,13 +523,15 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P4-009 — Implement forwarding adapter
 
-- [ ] per-node forwarding abstraction.
-- [ ] enable only when routed topology requires it.
-- [ ] keep NAT/firewall separate for gateway phase.
+- [x] per-node forwarding abstraction.
+- [x] enable only when routed topology requires it.
+- [x] keep NAT/firewall separate for gateway phase.
 
 **Acceptance**
 
 - Routed implementation can enable forwarding without coupling to Internet NAT.
+- Implementation/design notes and the live forwarding probe are documented in `docs/P4-009-FORWARDING.md`.
+- Hardware acceptance is recorded in `docs/P4-009-HARDWARE-EVIDENCE-2026-09-01.md`; `debiancb1` completed a live kernel `0 -> 1 -> 0` forwarding lifecycle with a restrictive BlueRoute runtime lease, fresh-backend reconciliation, repeated idempotent release, lease removal, and default-route preservation, while a supplementary `arisu` run proved pre-existing forwarding remains enabled after BlueRoute releases its lease.
 
 ## P4-010 — Implement system capability report
 
