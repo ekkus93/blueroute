@@ -68,10 +68,7 @@ pub fn ensure_ipv4_segment_available(
                 "BlueRoute IPv4 segment overlaps an active local network",
                 format!(
                     "candidate={}/{} conflicting={}/{}",
-                    candidate.address,
-                    candidate.prefix_len,
-                    prefix.address,
-                    prefix.prefix_len
+                    candidate.address, candidate.prefix_len, prefix.address, prefix.prefix_len
                 ),
             ));
         }
@@ -170,8 +167,8 @@ mod tests {
         let candidate = v4([10, 201, 44, 1], 24);
         ensure_ipv4_segment_available(candidate, [v4([0, 0, 0, 0], 0)]).unwrap();
 
-        let error = ensure_ipv4_segment_available(candidate, [v4([10, 201, 44, 99], 24)])
-            .unwrap_err();
+        let error =
+            ensure_ipv4_segment_available(candidate, [v4([10, 201, 44, 99], 24)]).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::AddressConflict);
         assert!(error.diagnostic().unwrap().contains("10.201.44.0/24"));
     }
