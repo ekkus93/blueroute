@@ -5,8 +5,9 @@ use std::sync::{Arc, Mutex};
 
 use blueroute_core::{DisplayName, HealthLevel, NetworkId, NodeCapabilities, NodeId};
 use blueroute_daemon::{
-    DaemonService, INTERNET_SHARING_ACTION_ID, MODIFY_ACTION_ID, NetworkOperationFuture,
-    NetworkOperations, PeerTrustFuture, PeerTrustOperations,
+    DaemonService, INTERNET_SHARING_ACTION_ID, JoinNetworkFuture, JoinNetworkOperations,
+    MODIFY_ACTION_ID, NetworkOperationFuture, NetworkOperations, PeerTrustFuture,
+    PeerTrustOperations,
 };
 use blueroute_protocol::{
     ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, DaemonStatus,
@@ -92,6 +93,20 @@ impl NetworkOperations for FakeNetworkOperations {
 }
 
 #[derive(Clone, Default)]
+struct FakeJoinNetworkOperations {
+    calls: Arc<AtomicUsize>,
+}
+
+impl JoinNetworkOperations for FakeJoinNetworkOperations {
+    fn join_network(&self, _network: NetworkId) -> JoinNetworkFuture<'_, ()> {
+        Box::pin(async move {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        })
+    }
+}
+
+#[derive(Clone, Default)]
 struct FakePeerTrustOperations {
     trust_calls: Arc<AtomicUsize>,
     forget_calls: Arc<AtomicUsize>,
@@ -145,6 +160,8 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
         let peer_trust = FakePeerTrustOperations::default();
         let trust_calls = peer_trust.trust_calls.clone();
         let forget_calls = peer_trust.forget_calls.clone();
+        let join_network = FakeJoinNetworkOperations::default();
+        let join_calls = join_network.calls.clone();
         let service = DaemonService::with_operations(
             DaemonStatus {
                 api_version: ApiVersion::CURRENT,
@@ -160,7 +177,8 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
                 stop_discovery_calls: stop_discovery_calls.clone(),
             }),
             Arc::new(peer_trust),
-        );
+        )
+        .with_join_network_operations(Arc::new(join_network));
         let _server = Builder::session()?
             .name(DBUS_SERVICE_NAME)?
             .serve_at(DBUS_OBJECT_PATH, service)?
@@ -210,6 +228,19 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
         );
         assert_eq!(*last_flags.lock().unwrap(), Some(1));
 
+        let join_network_command = encode_command(&Command::JoinNetwork {
+            network: created_network,
+        })?;
+        let denied: zbus::Result<String> =
+            proxy.call("Request", &(join_network_command.clone(),)).await;
+        assert!(
+            denied
+                .expect_err("unauthorized join must fail closed")
+                .to_string()
+                .contains("AccessDenied")
+        );
+        assert_eq!(join_calls.load(Ordering::SeqCst), 0);
+
         let peer = NodeId::from_bytes([9; 16]);
         let trust_peer = encode_command(&Command::TrustPeer { node: peer })?;
         let denied: zbus::Result<String> = proxy.call("Request", &(trust_peer.clone(),)).await;
@@ -225,7 +256,11 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
         let payload: String = proxy.call("Request", &(create_network,)).await?;
         assert_eq!(decode_response(&payload)?, Response::Ack);
         assert_eq!(create_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        assert_eq!(calls.load(Ordering::SeqCst), 4);
+
+        let payload: String = proxy.call("Request", &(join_network_command,)).await?;
+        assert_eq!(decode_response(&payload)?, Response::Ack);
+        assert_eq!(join_calls.load(Ordering::SeqCst), 1);
 
         let payload: String = proxy.call("Request", &(trust_peer,)).await?;
         assert_eq!(decode_response(&payload)?, Response::Ack);
@@ -243,8 +278,8 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
         assert_eq!(status.current_network, Some(created_network));
         assert_eq!(
             calls.load(Ordering::SeqCst),
-            5,
-            "status inspection after trust mutations must remain read-only"
+            7,
+            "status inspection after join/trust mutations must remain read-only"
         );
 
         let start_discovery = encode_command(&Command::StartDiscovery)?;
