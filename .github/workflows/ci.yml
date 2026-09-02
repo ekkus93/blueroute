@@ -52,6 +52,9 @@ jobs:
       - name: Run daemon D-Bus integration test
         run: dbus-run-session -- cargo test -p blueroute-daemon --test dbus_service --locked dbus_service_round_trip_and_event -- --ignored --exact
 
+      - name: Run daemon authorization integration test
+        run: dbus-run-session -- cargo test -p blueroute-daemon --test authorization --locked authorization_is_read_only_by_default_and_polkit_gates_mutations -- --ignored --exact
+
       - name: Run client D-Bus integration test
         run: dbus-run-session -- cargo test -p blueroute-client --test dbus_client --locked client_queries_events_reconnects_and_fails_closed_on_incompatibility -- --ignored --exact
 
@@ -72,21 +75,32 @@ jobs:
           grep -Fxq 'StandardError=journal' packaging/systemd/blueroute.service
           grep -Fxq 'WantedBy=multi-user.target' packaging/systemd/blueroute.service
 
-      - name: Validate D-Bus service ownership policy
+      - name: Validate D-Bus and PolicyKit authorization packaging
         run: |
           python - <<'PY'
           import xml.etree.ElementTree as ET
           from pathlib import Path
 
-          path = Path("packaging/dbus/org.blueroute.Service1.conf")
-          root = ET.parse(path).getroot()
-          policies = root.findall("policy")
-          assert len(policies) == 1, "P5-006 policy must contain exactly one policy block"
-          policy = policies[0]
-          assert policy.attrib == {"user": "root"}, "ownership must be restricted to root"
-          children = list(policy)
-          assert len(children) == 1, "P5-006 must not add method/caller authorization rules"
-          allow = children[0]
-          assert allow.tag == "allow"
-          assert allow.attrib == {"own": "org.blueroute.Service1"}
+          bus_root = ET.parse(Path("packaging/dbus/org.blueroute.Service1.conf")).getroot()
+          policies = bus_root.findall("policy")
+          assert len(policies) == 2
+          root_policy = next(p for p in policies if p.attrib == {"user": "root"})
+          default_policy = next(p for p in policies if p.attrib == {"context": "default"})
+          assert [child.attrib for child in root_policy] == [{"own": "org.blueroute.Service1"}]
+          assert [child.attrib for child in default_policy] == [
+              {"send_destination": "org.blueroute.Service1"}
+          ]
+
+          polkit_root = ET.parse(Path("packaging/polkit/org.blueroute.policy")).getroot()
+          actions = {action.attrib["id"]: action for action in polkit_root.findall("action")}
+          assert set(actions) == {
+              "org.blueroute.modify",
+              "org.blueroute.internet-sharing",
+          }
+          for action in actions.values():
+              defaults = action.find("defaults")
+              assert defaults is not None
+              assert defaults.findtext("allow_any") == "no"
+              assert defaults.findtext("allow_inactive") == "auth_admin"
+              assert defaults.findtext("allow_active") == "auth_admin_keep"
           PY
