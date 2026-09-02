@@ -465,14 +465,22 @@ fn fake_backend_preserves_other_owner_state_and_refuses_takeover() {
 
     let error = resolve(backend.ensure_bridge(network(1), foreign_bridge.clone())).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidState);
-    let error = resolve(backend.remove_owned_interface(network(1), foreign_bridge.clone())).unwrap_err();
+    let error =
+        resolve(backend.remove_owned_interface(network(1), foreign_bridge.clone())).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidState);
 
-    assert!(resolve(backend.network_connections())
-        .unwrap()
-        .iter()
-        .any(|value| value.owner == Some(other_owner) && value.interface.as_ref() == Some(&foreign_bridge)));
-    assert!(resolve(backend.addresses()).unwrap().contains(&foreign_address));
+    assert!(
+        resolve(backend.network_connections())
+            .unwrap()
+            .iter()
+            .any(|value| value.owner == Some(other_owner)
+                && value.interface.as_ref() == Some(&foreign_bridge))
+    );
+    assert!(
+        resolve(backend.addresses())
+            .unwrap()
+            .contains(&foreign_address)
+    );
     assert!(resolve(backend.routes()).unwrap().contains(&foreign_route));
 }
 
