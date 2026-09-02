@@ -5,6 +5,7 @@ mod capability_report;
 mod forwarding;
 mod identity;
 mod membership_store;
+mod network_discovery;
 mod networkmanager;
 mod pan;
 mod secret_store;
@@ -16,6 +17,7 @@ pub use capability_report::{
 };
 pub use identity::{NodeIdentityGenerator, NodeIdentityStore, SystemNodeIdentityGenerator};
 pub use membership_store::NetworkMembershipStore;
+pub use network_discovery::NetworkAdvertisement;
 pub use networkmanager::NetworkManagerBackend;
 pub use secret_store::SecretFileStore;
 

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::future::Future;
 use std::io::Read;
@@ -11,8 +12,9 @@ use blueroute_core::{
     NetworkId, NetworkMembership, NodeCapabilities,
 };
 use blueroute_linux::{
-    BluetoothBackend, BluezBackend, InterfaceAddress, IpNetworkBackend, NetworkInterfaceHandle,
-    NetworkManagerBackend, NetworkMembershipStore, NetworkStateBackend, PanBackend,
+    BluetoothBackend, BluezBackend, InterfaceAddress, IpNetworkBackend, NetworkAdvertisement,
+    NetworkInterfaceHandle, NetworkManagerBackend, NetworkMembershipStore,
+    NetworkStateBackend, PanBackend,
 };
 use blueroute_protocol::NetworkSummary;
 
@@ -21,7 +23,9 @@ pub type NetworkOperationFuture<'a, T> =
 
 pub trait NetworkOperations: Send + Sync {
     fn create_network(&self, name: DisplayName) -> NetworkOperationFuture<'_, NetworkId>;
-    fn list_networks(&self) -> Result<Vec<NetworkSummary>, CoreError>;
+    fn list_networks(&self) -> NetworkOperationFuture<'_, Vec<NetworkSummary>>;
+    fn start_discovery(&self) -> NetworkOperationFuture<'_, ()>;
+    fn stop_discovery(&self) -> NetworkOperationFuture<'_, ()>;
 }
 
 pub trait NetworkIdGenerator: Send + Sync {
@@ -80,6 +84,7 @@ struct ActiveLinuxStarHost {
     bridge: NetworkInterfaceHandle,
     address: InterfaceAddress,
     adapter: blueroute_linux::AdapterHandle,
+    advertisement: NetworkAdvertisement,
     bluez: BluezBackend,
     network_backend: NetworkManagerBackend,
 }
@@ -145,11 +150,33 @@ impl StarHostRuntime for LinuxStarHostRuntime {
                 .await);
             }
 
+            let advertisement = match bluez
+                .start_network_advertisement(adapter.clone(), network)
+                .await
+            {
+                Ok(advertisement) => advertisement,
+                Err(error) => {
+                    return Err(rollback_setup(
+                        error,
+                        &bluez,
+                        &network_backend,
+                        network,
+                        &adapter,
+                        &bridge,
+                        &address,
+                        true,
+                        true,
+                    )
+                    .await);
+                }
+            };
+
             let active_host = ActiveLinuxStarHost {
                 network,
                 bridge,
                 address,
                 adapter,
+                advertisement,
                 bluez,
                 network_backend,
             };
@@ -221,6 +248,12 @@ impl StarHostRuntime for LinuxStarHostRuntime {
     }
 }
 
+#[derive(Clone)]
+struct ActiveNetworkDiscovery {
+    adapter: blueroute_linux::AdapterHandle,
+    bluez: BluezBackend,
+}
+
 pub struct SingleStarNetworkOperations<R = LinuxStarHostRuntime, G = SystemNetworkIdGenerator> {
     store: NetworkMembershipStore,
     config: DaemonConfig,
@@ -228,6 +261,8 @@ pub struct SingleStarNetworkOperations<R = LinuxStarHostRuntime, G = SystemNetwo
     runtime: R,
     generator: G,
     creating: AtomicBool,
+    discovery: Mutex<Option<ActiveNetworkDiscovery>>,
+    discovery_transition: AtomicBool,
 }
 
 impl SingleStarNetworkOperations<LinuxStarHostRuntime, SystemNetworkIdGenerator> {
@@ -265,6 +300,8 @@ where
             runtime,
             generator,
             creating: AtomicBool::new(false),
+            discovery: Mutex::new(None),
+            discovery_transition: AtomicBool::new(false),
         }
     }
 
@@ -324,25 +361,128 @@ where
         self.create_network_inner(name)
     }
 
-    fn list_networks(&self) -> Result<Vec<NetworkSummary>, CoreError> {
-        let registry = self.store.load()?;
-        Ok(registry
-            .networks()
-            .map(|membership| {
+    fn list_networks(&self) -> NetworkOperationFuture<'_, Vec<NetworkSummary>> {
+        Box::pin(async move {
+            let registry = self.store.load()?;
+            let mut networks = BTreeMap::new();
+            for membership in registry.networks() {
                 let local_member = if membership.state == MembershipState::Member {
                     1
                 } else {
                     0
                 };
-                NetworkSummary {
-                    id: membership.network_id,
-                    name: membership.network_name.clone(),
-                    member_count: local_member
-                        + membership.peers().filter(|peer| peer.is_member()).count() as u32,
-                }
-            })
-            .collect())
+                networks.insert(
+                    membership.network_id,
+                    NetworkSummary {
+                        id: membership.network_id,
+                        name: membership.network_name.clone(),
+                        member_count: local_member
+                            + membership.peers().filter(|peer| peer.is_member()).count() as u32,
+                    },
+                );
+            }
+
+            let discovery = self.discovery.lock().map_err(lock_error)?.clone();
+            if let Some(discovery) = discovery {
+                let discovered = discovery
+                    .bluez
+                    .discovered_network_ids(discovery.adapter.clone())
+                    .await?;
+                merge_discovered_networks(&mut networks, discovered)?;
+            }
+
+            Ok(networks.into_values().collect())
+        })
     }
+
+    fn start_discovery(&self) -> NetworkOperationFuture<'_, ()> {
+        Box::pin(async move {
+            let _transition = TransitionGuard::claim(&self.discovery_transition)?;
+            if self.discovery.lock().map_err(lock_error)?.is_some() {
+                return Ok(());
+            }
+
+            let bluez = BluezBackend::connect_system().await?;
+            let adapter = select_powered_discovery_adapter(&bluez).await?;
+            bluez.start_discovery(adapter.clone()).await?;
+            let active = ActiveNetworkDiscovery { adapter, bluez };
+
+            let install_error = match self.discovery.lock() {
+                Ok(mut slot) if slot.is_none() => {
+                    *slot = Some(active.clone());
+                    None
+                }
+                Ok(_) => Some(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "BlueRoute discovery state changed unexpectedly while starting discovery",
+                )),
+                Err(error) => Some(lock_error(error)),
+            };
+            if let Some(error) = install_error {
+                return match active.bluez.stop_discovery(active.adapter).await {
+                    Ok(()) => Err(error),
+                    Err(cleanup_error) => Err(CoreError::with_diagnostic(
+                        error.kind(),
+                        error.message(),
+                        format!(
+                            "{}; discovery rollback also failed: {cleanup_error}",
+                            error.diagnostic().unwrap_or("no discovery diagnostic")
+                        ),
+                    )),
+                };
+            }
+            Ok(())
+        })
+    }
+
+    fn stop_discovery(&self) -> NetworkOperationFuture<'_, ()> {
+        Box::pin(async move {
+            let _transition = TransitionGuard::claim(&self.discovery_transition)?;
+            let active = self.discovery.lock().map_err(lock_error)?.clone();
+            let Some(active) = active else {
+                return Ok(());
+            };
+
+            active
+                .bluez
+                .stop_discovery(active.adapter.clone())
+                .await?;
+            let mut slot = self.discovery.lock().map_err(lock_error)?;
+            if slot
+                .as_ref()
+                .is_some_and(|current| current.adapter == active.adapter)
+            {
+                *slot = None;
+                Ok(())
+            } else {
+                Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "BlueRoute discovery state changed unexpectedly while stopping discovery",
+                ))
+            }
+        })
+    }
+}
+
+fn merge_discovered_networks(
+    networks: &mut BTreeMap<NetworkId, NetworkSummary>,
+    discovered: impl IntoIterator<Item = NetworkId>,
+) -> Result<(), CoreError> {
+    for network in discovered {
+        if let std::collections::btree_map::Entry::Vacant(entry) = networks.entry(network) {
+            entry.insert(discovered_network_summary(network)?);
+        }
+    }
+    Ok(())
+}
+
+fn discovered_network_summary(network: NetworkId) -> Result<NetworkSummary, CoreError> {
+    let id = network.to_string();
+    Ok(NetworkSummary {
+        id: network,
+        name: DisplayName::new(format!("BlueRoute {}", &id[..8]))?,
+        member_count: 0,
+    })
 }
 
 pub fn current_network(registry: &MembershipRegistry) -> Result<Option<NetworkId>, CoreError> {
@@ -437,6 +577,19 @@ async fn select_powered_adapter(
     ))
 }
 
+async fn select_powered_discovery_adapter(
+    bluez: &BluezBackend,
+) -> Result<blueroute_linux::AdapterHandle, CoreError> {
+    let adapters = bluez.adapters().await?;
+    if let Some(adapter) = adapters.into_iter().find(|adapter| adapter.powered) {
+        return Ok(adapter.handle);
+    }
+    Err(CoreError::new(
+        ErrorKind::AdapterDisabled,
+        "no powered Bluetooth adapter is available for BlueRoute discovery",
+    ))
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn rollback_setup(
     original: CoreError,
@@ -482,6 +635,13 @@ async fn rollback_active_host(original: CoreError, active: &ActiveLinuxStarHost)
 
 async fn cleanup_active_host(active: &ActiveLinuxStarHost) -> Result<(), CoreError> {
     let mut failures = Vec::new();
+    if let Err(error) = active
+        .bluez
+        .stop_network_advertisement(active.advertisement.clone())
+        .await
+    {
+        failures.push(format!("stop discovery advertisement: {error}"));
+    }
     if let Err(error) = active.bluez.stop_nap(active.adapter.clone()).await {
         failures.push(format!("stop NAP: {error}"));
     }
@@ -659,6 +819,27 @@ mod tests {
     static NEXT_TEST: AtomicUsize = AtomicUsize::new(0);
 
     #[test]
+    fn discovered_network_merge_preserves_remembered_metadata() {
+        let remembered = NetworkId::from_bytes([0x11; 16]);
+        let discovered = NetworkId::from_bytes([0x22; 16]);
+        let mut networks = BTreeMap::from([(
+            remembered,
+            NetworkSummary {
+                id: remembered,
+                name: DisplayName::new("Remembered name").unwrap(),
+                member_count: 1,
+            },
+        )]);
+
+        merge_discovered_networks(&mut networks, [remembered, discovered, discovered]).unwrap();
+
+        assert_eq!(networks.len(), 2);
+        assert_eq!(networks[&remembered].name.as_str(), "Remembered name");
+        assert_eq!(networks[&discovered].name.as_str(), "BlueRoute 22222222");
+        assert_eq!(networks[&discovered].member_count, 0);
+    }
+
+    #[test]
     fn create_network_commits_membership_only_after_runtime_setup() {
         futures_lite::future::block_on(async {
             let (root, store) = temp_store("commit");
@@ -678,7 +859,7 @@ mod tests {
                 .unwrap();
             assert_eq!(created, network);
             assert_eq!(runtime.starts(), 1);
-            let networks = operations.list_networks().unwrap();
+            let networks = operations.list_networks().await.unwrap();
             assert_eq!(networks.len(), 1);
             assert_eq!(networks[0].id, network);
             assert_eq!(networks[0].name.as_str(), "Workshop");
@@ -731,7 +912,7 @@ mod tests {
                 .unwrap_err();
             assert_eq!(error.kind(), ErrorKind::PanFailure);
             assert_eq!(runtime.starts(), 1);
-            assert!(operations.list_networks().unwrap().is_empty());
+            assert!(operations.list_networks().await.unwrap().is_empty());
             fs::remove_dir_all(root).unwrap();
         });
     }

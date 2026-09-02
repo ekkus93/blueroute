@@ -60,6 +60,8 @@ impl MockAuthority {
 struct FakeNetworkOperations {
     created_network: NetworkId,
     create_calls: Arc<AtomicUsize>,
+    start_discovery_calls: Arc<AtomicUsize>,
+    stop_discovery_calls: Arc<AtomicUsize>,
 }
 
 impl NetworkOperations for FakeNetworkOperations {
@@ -70,8 +72,22 @@ impl NetworkOperations for FakeNetworkOperations {
         })
     }
 
-    fn list_networks(&self) -> Result<Vec<NetworkSummary>, blueroute_core::CoreError> {
-        Ok(Vec::new())
+    fn list_networks(&self) -> NetworkOperationFuture<'_, Vec<NetworkSummary>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn start_discovery(&self) -> NetworkOperationFuture<'_, ()> {
+        Box::pin(async move {
+            self.start_discovery_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        })
+    }
+
+    fn stop_discovery(&self) -> NetworkOperationFuture<'_, ()> {
+        Box::pin(async move {
+            self.stop_discovery_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        })
     }
 }
 
@@ -102,6 +118,8 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
 
         let created_network = NetworkId::from_bytes([8; 16]);
         let create_calls = Arc::new(AtomicUsize::new(0));
+        let start_discovery_calls = Arc::new(AtomicUsize::new(0));
+        let stop_discovery_calls = Arc::new(AtomicUsize::new(0));
         let service = DaemonService::with_network_operations(
             DaemonStatus {
                 api_version: ApiVersion::CURRENT,
@@ -113,6 +131,8 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
             Arc::new(FakeNetworkOperations {
                 created_network,
                 create_calls: create_calls.clone(),
+                start_discovery_calls: start_discovery_calls.clone(),
+                stop_discovery_calls: stop_discovery_calls.clone(),
             }),
         );
         let _server = Builder::session()?
@@ -181,6 +201,16 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
             "status inspection after creation must remain read-only"
         );
 
+        let start_discovery = encode_command(&Command::StartDiscovery)?;
+        let payload: String = proxy.call("Request", &(start_discovery,)).await?;
+        assert_eq!(decode_response(&payload)?, Response::Ack);
+        assert_eq!(start_discovery_calls.load(Ordering::SeqCst), 1);
+
+        let stop_discovery = encode_command(&Command::StopDiscovery)?;
+        let payload: String = proxy.call("Request", &(stop_discovery,)).await?;
+        assert_eq!(decode_response(&payload)?, Response::Ack);
+        assert_eq!(stop_discovery_calls.load(Ordering::SeqCst), 1);
+
         let internet = encode_command(&Command::SetInternetSharing { enabled: true })?;
         let reserved: zbus::Result<String> = proxy.call("Request", &(internet,)).await;
         let error = reserved.expect_err("reserved gateway command remains unimplemented");
@@ -200,6 +230,11 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
                 .expect_err("missing PolicyKit must fail closed")
                 .to_string()
                 .contains("AccessDenied")
+        );
+        assert_eq!(
+            start_discovery_calls.load(Ordering::SeqCst),
+            1,
+            "authorization failure must prevent discovery dispatch"
         );
 
         Ok(())
