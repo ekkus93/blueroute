@@ -133,6 +133,7 @@ impl DaemonService {
                 let networks = self
                     .network_operations()?
                     .list_networks()
+                    .await
                     .map_err(core_error_to_dbus)?;
                 Self::encode_response(&Response::Networks(networks))
             }
@@ -143,6 +144,20 @@ impl DaemonService {
                     .await
                     .map_err(core_error_to_dbus)?;
                 self.update_current_network(Some(network))?;
+                Self::encode_response(&Response::Ack)
+            }
+            Command::StartDiscovery => {
+                self.network_operations()?
+                    .start_discovery()
+                    .await
+                    .map_err(core_error_to_dbus)?;
+                Self::encode_response(&Response::Ack)
+            }
+            Command::StopDiscovery => {
+                self.network_operations()?
+                    .stop_discovery()
+                    .await
+                    .map_err(core_error_to_dbus)?;
                 Self::encode_response(&Response::Ack)
             }
             _ => Err(fdo::Error::NotSupported(

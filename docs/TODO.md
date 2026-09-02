@@ -22,7 +22,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 
 ## Current task status
 
-**Status date:** 2026-09-01
+**Status date:** 2026-09-02
 
 | Task | Status | Current state |
 | --- | --- | --- |
@@ -59,6 +59,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P5-006 | `[x]` | System-level systemd service packaging, D-Bus name ownership, bounded restart policy, journald integration, boot activation, and GUI-logout independence are proven on Debian 13 hardware. |
 | P5-007 | `[x]` | Least-privilege D-Bus/PolicyKit authorization is implemented and live Debian acceptance proves unprivileged read-only inspection plus fail-closed unauthorized mutation denial. |
 | P6-001 | `[x]` | CreateNetwork establishes durable member state, a deterministic BlueRoute-owned NetworkManager bridge/address, a live BlueZ NAP, and real PANU attachment on physical hardware. |
+| P6-002 | `[x]` | Hosted networks advertise the full logical `NetworkId` through BlueZ LE manufacturer data; `arisu` discovered the exact `debiancb1` network without manual MAC entry, with discovery metadata explicitly non-authoritative for security. |
 | All other tasks | `[ ]` | Not started. |
 
 ## Platform rule
@@ -681,13 +682,14 @@ This is the first complete product slice.
 
 ## P6-002 — Implement discoverable BlueRoute network identity
 
-- [ ] identify nearby BlueRoute-capable peers/networks.
-- [ ] do not rely on display/Bluetooth name for security.
-- [ ] document limitations.
+- [x] identify nearby BlueRoute-capable peers/networks.
+- [x] do not rely on display/Bluetooth name for security.
+- [x] document limitations.
 
 **Acceptance**
 
 - Second compatible Linux node discovers a candidate network without manual MAC entry.
+- Hardware acceptance is recorded in `docs/P6-002-HARDWARE-EVIDENCE-2026-09-02.md`; `debiancb1` created network `4bc4e5b829838b47c985ec66881306fa` and `arisu` discovered that exact logical `NetworkId` through the production discovery probe without receiving a Bluetooth MAC address.
 
 ## P6-003 — Implement join approval/trust workflow
 
