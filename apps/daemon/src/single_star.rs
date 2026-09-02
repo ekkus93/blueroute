@@ -13,8 +13,8 @@ use blueroute_core::{
 };
 use blueroute_linux::{
     BluetoothBackend, BluezBackend, InterfaceAddress, IpNetworkBackend, NetworkAdvertisement,
-    NetworkInterfaceHandle, NetworkManagerBackend, NetworkMembershipStore,
-    NetworkStateBackend, PanBackend,
+    NetworkInterfaceHandle, NetworkManagerBackend, NetworkMembershipStore, NetworkStateBackend,
+    PanBackend,
 };
 use blueroute_protocol::NetworkSummary;
 
@@ -443,10 +443,7 @@ where
                 return Ok(());
             };
 
-            active
-                .bluez
-                .stop_discovery(active.adapter.clone())
-                .await?;
+            active.bluez.stop_discovery(active.adapter.clone()).await?;
             let mut slot = self.discovery.lock().map_err(lock_error)?;
             if slot
                 .as_ref()
