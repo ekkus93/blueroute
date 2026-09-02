@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use blueroute_core::{DisplayName, HealthLevel, NetworkId, NodeCapabilities, NodeId};
 use blueroute_daemon::{
     DaemonService, INTERNET_SHARING_ACTION_ID, MODIFY_ACTION_ID, NetworkOperationFuture,
-    NetworkOperations,
+    NetworkOperations, PeerTrustFuture, PeerTrustOperations,
 };
 use blueroute_protocol::{
     ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, DaemonStatus,
@@ -91,6 +91,28 @@ impl NetworkOperations for FakeNetworkOperations {
     }
 }
 
+#[derive(Clone, Default)]
+struct FakePeerTrustOperations {
+    trust_calls: Arc<AtomicUsize>,
+    forget_calls: Arc<AtomicUsize>,
+}
+
+impl PeerTrustOperations for FakePeerTrustOperations {
+    fn trust_peer(&self, _node: NodeId) -> PeerTrustFuture<'_, ()> {
+        Box::pin(async move {
+            self.trust_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        })
+    }
+
+    fn forget_peer(&self, _node: NodeId) -> PeerTrustFuture<'_, ()> {
+        Box::pin(async move {
+            self.forget_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        })
+    }
+}
+
 #[test]
 #[ignore = "requires an isolated D-Bus session; CI runs this under dbus-run-session"]
 fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<(), Box<dyn Error>>
@@ -120,7 +142,10 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
         let create_calls = Arc::new(AtomicUsize::new(0));
         let start_discovery_calls = Arc::new(AtomicUsize::new(0));
         let stop_discovery_calls = Arc::new(AtomicUsize::new(0));
-        let service = DaemonService::with_network_operations(
+        let peer_trust = FakePeerTrustOperations::default();
+        let trust_calls = peer_trust.trust_calls.clone();
+        let forget_calls = peer_trust.forget_calls.clone();
+        let service = DaemonService::with_operations(
             DaemonStatus {
                 api_version: ApiVersion::CURRENT,
                 local_node: Some(NodeId::from_bytes([7; 16])),
@@ -134,6 +159,7 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
                 start_discovery_calls: start_discovery_calls.clone(),
                 stop_discovery_calls: stop_discovery_calls.clone(),
             }),
+            Arc::new(peer_trust),
         );
         let _server = Builder::session()?
             .name(DBUS_SERVICE_NAME)?
@@ -184,11 +210,31 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
         );
         assert_eq!(*last_flags.lock().unwrap(), Some(1));
 
+        let peer = NodeId::from_bytes([9; 16]);
+        let trust_peer = encode_command(&Command::TrustPeer { node: peer })?;
+        let denied: zbus::Result<String> = proxy.call("Request", &(trust_peer.clone(),)).await;
+        assert!(
+            denied
+                .expect_err("unauthorized peer approval must fail closed")
+                .to_string()
+                .contains("AccessDenied")
+        );
+        assert_eq!(trust_calls.load(Ordering::SeqCst), 0);
+
         authorized.store(true, Ordering::SeqCst);
         let payload: String = proxy.call("Request", &(create_network,)).await?;
         assert_eq!(decode_response(&payload)?, Response::Ack);
         assert_eq!(create_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+
+        let payload: String = proxy.call("Request", &(trust_peer,)).await?;
+        assert_eq!(decode_response(&payload)?, Response::Ack);
+        assert_eq!(trust_calls.load(Ordering::SeqCst), 1);
+
+        let forget_peer = encode_command(&Command::ForgetPeer { node: peer })?;
+        let payload: String = proxy.call("Request", &(forget_peer,)).await?;
+        assert_eq!(decode_response(&payload)?, Response::Ack);
+        assert_eq!(forget_calls.load(Ordering::SeqCst), 1);
 
         let payload: String = proxy.call("Request", &(get_status,)).await?;
         let Response::Status(status) = decode_response(&payload)? else {
@@ -197,8 +243,8 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
         assert_eq!(status.current_network, Some(created_network));
         assert_eq!(
             calls.load(Ordering::SeqCst),
-            2,
-            "status inspection after creation must remain read-only"
+            5,
+            "status inspection after trust mutations must remain read-only"
         );
 
         let start_discovery = encode_command(&Command::StartDiscovery)?;

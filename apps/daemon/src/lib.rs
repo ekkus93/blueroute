@@ -1,9 +1,11 @@
 #![doc = "BlueRoute daemon D-Bus service implementation."]
 
 mod authorization;
+mod peer_trust;
 mod single_star;
 
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 pub use authorization::{
@@ -14,6 +16,9 @@ use blueroute_core::{CoreError, ErrorKind, HealthLevel, NetworkId, NodeCapabilit
 use blueroute_protocol::{
     ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, Event,
     ProtocolCodecError, Response, decode_command, encode_event, encode_response,
+};
+pub use peer_trust::{
+    DurablePeerTrustOperations, PeerTrustFuture, PeerTrustOperations, pair_and_trust_bluetooth_peer,
 };
 pub use single_star::{
     LinuxStarHostRuntime, NetworkIdGenerator, NetworkOperationFuture, NetworkOperations,
@@ -29,6 +34,8 @@ use zbus::{Connection, interface};
 pub struct DaemonService {
     status: Arc<Mutex<DaemonStatus>>,
     network_operations: Option<Arc<dyn NetworkOperations>>,
+    peer_trust_operations: Option<Arc<dyn PeerTrustOperations>>,
+    mutation_in_progress: Arc<AtomicBool>,
 }
 
 impl DaemonService {
@@ -46,6 +53,8 @@ impl DaemonService {
         Self {
             status: Arc::new(Mutex::new(status)),
             network_operations: None,
+            peer_trust_operations: None,
+            mutation_in_progress: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -56,6 +65,21 @@ impl DaemonService {
         Self {
             status: Arc::new(Mutex::new(status)),
             network_operations: Some(network_operations),
+            peer_trust_operations: None,
+            mutation_in_progress: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub fn with_operations(
+        status: DaemonStatus,
+        network_operations: Arc<dyn NetworkOperations>,
+        peer_trust_operations: Arc<dyn PeerTrustOperations>,
+    ) -> Self {
+        Self {
+            status: Arc::new(Mutex::new(status)),
+            network_operations: Some(network_operations),
+            peer_trust_operations: Some(peer_trust_operations),
+            mutation_in_progress: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -84,6 +108,29 @@ impl DaemonService {
                 "network lifecycle operations are unavailable in this daemon instance".into(),
             )
         })
+    }
+
+    fn peer_trust_operations(&self) -> fdo::Result<&Arc<dyn PeerTrustOperations>> {
+        self.peer_trust_operations.as_ref().ok_or_else(|| {
+            fdo::Error::NotSupported(
+                "peer trust operations are unavailable in this daemon instance".into(),
+            )
+        })
+    }
+
+    fn ensure_not_local_node(&self, node: NodeId) -> fdo::Result<()> {
+        if self
+            .status_snapshot()
+            .map_err(core_error_to_dbus)?
+            .local_node
+            == Some(node)
+        {
+            Err(fdo::Error::InvalidArgs(
+                "the local BlueRoute node cannot be approved as its own peer".into(),
+            ))
+        } else {
+            Ok(())
+        }
     }
 
     fn update_current_network(&self, network: Option<NetworkId>) -> fdo::Result<()> {
@@ -125,6 +172,12 @@ impl DaemonService {
             .map_err(|_| fdo::Error::InvalidArgs("malformed BlueRoute command payload".into()))?;
 
         authorization::authorize_command(connection, &header, &command).await?;
+        let _mutation = matches!(
+            authorization::command_authorization(&command),
+            CommandAuthorization::PolicyKit(_)
+        )
+        .then(|| MutationGuard::claim(&self.mutation_in_progress))
+        .transpose()?;
 
         match command {
             Command::GetStatus => self.status(),
@@ -144,6 +197,22 @@ impl DaemonService {
                     .await
                     .map_err(core_error_to_dbus)?;
                 self.update_current_network(Some(network))?;
+                Self::encode_response(&Response::Ack)
+            }
+            Command::TrustPeer { node } => {
+                self.ensure_not_local_node(node)?;
+                self.peer_trust_operations()?
+                    .trust_peer(node)
+                    .await
+                    .map_err(core_error_to_dbus)?;
+                Self::encode_response(&Response::Ack)
+            }
+            Command::ForgetPeer { node } => {
+                self.ensure_not_local_node(node)?;
+                self.peer_trust_operations()?
+                    .forget_peer(node)
+                    .await
+                    .map_err(core_error_to_dbus)?;
                 Self::encode_response(&Response::Ack)
             }
             Command::StartDiscovery => {
@@ -173,6 +242,7 @@ impl DaemonService {
 fn core_error_to_dbus(error: CoreError) -> fdo::Error {
     match error.kind() {
         ErrorKind::InvalidInput => fdo::Error::InvalidArgs(error.message().to_owned()),
+        ErrorKind::AuthenticationFailed => fdo::Error::AccessDenied(error.message().to_owned()),
         ErrorKind::CapabilityUnavailable
         | ErrorKind::MissingAdapter
         | ErrorKind::AdapterDisabled
@@ -184,6 +254,28 @@ fn core_error_to_dbus(error: CoreError) -> fdo::Error {
             };
             fdo::Error::Failed(message)
         }
+    }
+}
+
+struct MutationGuard<'a> {
+    flag: &'a AtomicBool,
+}
+
+impl<'a> MutationGuard<'a> {
+    fn claim(flag: &'a AtomicBool) -> fdo::Result<Self> {
+        flag.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| {
+                fdo::Error::Failed(
+                    "another BlueRoute mutation is already in progress; retry the request".into(),
+                )
+            })?;
+        Ok(Self { flag })
+    }
+}
+
+impl Drop for MutationGuard<'_> {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::Release);
     }
 }
 
