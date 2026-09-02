@@ -60,6 +60,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P5-007 | `[x]` | Least-privilege D-Bus/PolicyKit authorization is implemented and live Debian acceptance proves unprivileged read-only inspection plus fail-closed unauthorized mutation denial. |
 | P6-001 | `[x]` | CreateNetwork establishes durable member state, a deterministic BlueRoute-owned NetworkManager bridge/address, a live BlueZ NAP, and real PANU attachment on physical hardware. |
 | P6-002 | `[x]` | Hosted networks advertise the full logical `NetworkId` through BlueZ LE manufacturer data; `arisu` discovered the exact `debiancb1` network without manual MAC entry, with discovery metadata explicitly non-authoritative for security. |
+| P6-003 | `[x]` | Explicit BlueRoute peer approval/revocation is PolicyKit-gated and durable; live acceptance persisted `arisu` as trusted but non-member, proved idempotent reapproval, and removed the approval without disturbing network state. |
 | All other tasks | `[ ]` | Not started. |
 
 ## Platform rule
@@ -693,14 +694,15 @@ This is the first complete product slice.
 
 ## P6-003 — Implement join approval/trust workflow
 
-- [ ] pair if needed.
-- [ ] BlueRoute membership approval.
-- [ ] persist accepted membership.
-- [ ] reject unauthorized nodes.
+- [x] pair if needed.
+- [x] BlueRoute membership approval.
+- [x] persist accepted membership.
+- [x] reject unauthorized nodes.
 
 **Acceptance**
 
 - Joining requires intended trust under initial security model.
+- Hardware acceptance is recorded in `docs/P6-003-HARDWARE-EVIDENCE-2026-09-02.md`; the production daemon on `debiancb1` approved `arisu` node `4d5f049ad9b6ea51d782250478fa3ebf` for network `4bc4e5b829838b47c985ec66881306fa` as `member=0, trusted=1`, repeated approval without changing the durable file hash, and then revoked the peer while preserving the network record.
 
 ## P6-004 — Implement join-network operation
 
