@@ -1,6 +1,7 @@
 #![doc = "BlueRoute daemon D-Bus service implementation."]
 
 mod authorization;
+mod join_network;
 mod peer_trust;
 mod single_star;
 
@@ -16,6 +17,10 @@ use blueroute_core::{CoreError, ErrorKind, HealthLevel, NetworkId, NodeCapabilit
 use blueroute_protocol::{
     ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, Event,
     ProtocolCodecError, Response, decode_command, encode_event, encode_response,
+};
+pub use join_network::{
+    JoinControlSession, JoinIpLease, JoinNetworkFuture, JoinNetworkOperations, JoinPanLink,
+    JoinRuntime, LinuxJoinRuntime, TransactionalJoinNetworkOperations,
 };
 pub use peer_trust::{
     DurablePeerTrustOperations, PeerTrustFuture, PeerTrustOperations, pair_and_trust_bluetooth_peer,
@@ -35,6 +40,7 @@ pub struct DaemonService {
     status: Arc<Mutex<DaemonStatus>>,
     network_operations: Option<Arc<dyn NetworkOperations>>,
     peer_trust_operations: Option<Arc<dyn PeerTrustOperations>>,
+    join_network_operations: Option<Arc<dyn JoinNetworkOperations>>,
     mutation_in_progress: Arc<AtomicBool>,
 }
 
@@ -54,6 +60,7 @@ impl DaemonService {
             status: Arc::new(Mutex::new(status)),
             network_operations: None,
             peer_trust_operations: None,
+            join_network_operations: None,
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -66,6 +73,7 @@ impl DaemonService {
             status: Arc::new(Mutex::new(status)),
             network_operations: Some(network_operations),
             peer_trust_operations: None,
+            join_network_operations: None,
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -79,8 +87,17 @@ impl DaemonService {
             status: Arc::new(Mutex::new(status)),
             network_operations: Some(network_operations),
             peer_trust_operations: Some(peer_trust_operations),
+            join_network_operations: None,
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub fn with_join_network_operations(
+        mut self,
+        join_network_operations: Arc<dyn JoinNetworkOperations>,
+    ) -> Self {
+        self.join_network_operations = Some(join_network_operations);
+        self
     }
 
     pub fn status_snapshot(&self) -> Result<DaemonStatus, CoreError> {
@@ -114,6 +131,14 @@ impl DaemonService {
         self.peer_trust_operations.as_ref().ok_or_else(|| {
             fdo::Error::NotSupported(
                 "peer trust operations are unavailable in this daemon instance".into(),
+            )
+        })
+    }
+
+    fn join_network_operations(&self) -> fdo::Result<&Arc<dyn JoinNetworkOperations>> {
+        self.join_network_operations.as_ref().ok_or_else(|| {
+            fdo::Error::NotSupported(
+                "join-network operations are unavailable in this daemon instance".into(),
             )
         })
     }
@@ -194,6 +219,14 @@ impl DaemonService {
                 let network = self
                     .network_operations()?
                     .create_network(name)
+                    .await
+                    .map_err(core_error_to_dbus)?;
+                self.update_current_network(Some(network))?;
+                Self::encode_response(&Response::Ack)
+            }
+            Command::JoinNetwork { network } => {
+                self.join_network_operations()?
+                    .join_network(network)
                     .await
                     .map_err(core_error_to_dbus)?;
                 self.update_current_network(Some(network))?;
