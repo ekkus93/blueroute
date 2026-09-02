@@ -108,7 +108,10 @@ impl TransactionalJoinNetworkOperations<LinuxJoinRuntime> {
         Self::with_runtime(store, LinuxJoinRuntime::default())
     }
 
-    pub fn with_ipv4_pool(store: NetworkMembershipStore, pool: Ipv4AddressPool) -> Result<Self, CoreError> {
+    pub fn with_ipv4_pool(
+        store: NetworkMembershipStore,
+        pool: Ipv4AddressPool,
+    ) -> Result<Self, CoreError> {
         Ok(Self::with_runtime(store, LinuxJoinRuntime::new(pool)?))
     }
 }
@@ -495,11 +498,9 @@ mod tests {
                         "injected address failure",
                     ))
                 } else {
-                    let plan = Ipv4StarAddressPlan::for_network(
-                        _network,
-                        Ipv4AddressPool::default(),
-                    )
-                    .unwrap();
+                    let plan =
+                        Ipv4StarAddressPlan::for_network(_network, Ipv4AddressPool::default())
+                            .unwrap();
                     Ok(JoinIpLease::new(InterfaceAddress {
                         interface: link.interface().clone(),
                         prefix: plan.first_client,
