@@ -89,7 +89,9 @@ async fn run() -> Result<(), Box<dyn Error>> {
                     && connection.interface.as_ref() == Some(&interface)
             })
         {
-            return Err(format!("cycle {cycle}: BlueRoute-owned profile remained after cleanup").into());
+            return Err(
+                format!("cycle {cycle}: BlueRoute-owned profile remained after cleanup").into(),
+            );
         }
         let active = backend.active_ipv4_prefixes().await?;
         ensure_ipv4_segment_available(plan.segment, active)?;
@@ -135,7 +137,9 @@ async fn cleanup_cycle(
             error.message(),
             format!(
                 "{}; profile cleanup also failed: {profile_error}",
-                error.diagnostic().unwrap_or("no address cleanup diagnostic")
+                error
+                    .diagnostic()
+                    .unwrap_or("no address cleanup diagnostic")
             ),
         )),
     }
