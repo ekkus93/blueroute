@@ -162,4 +162,6 @@ The final forwarding value must equal the baseline printed by the probe, the lea
 
 ## Acceptance status
 
-Implementation/unit acceptance is complete when the locked workspace CI suite is green. P4-009 remains in progress until the physical kernel forwarding probe is run and the result is recorded in a dedicated hardware-evidence document.
+**Complete.** Hardware acceptance is recorded in `P4-009-HARDWARE-EVIDENCE-2026-09-01.md`.
+
+On `debiancb1`, the exact candidate revision performed the live kernel `0 -> 1 -> 0` transition, recorded `baseline=0` in a `0600` root-owned runtime lease, rediscovered the lease through a fresh backend instance, completed repeated idempotent release, removed the lease, and preserved the pre-existing default route. A supplementary `arisu` run started with forwarding already enabled and proved release preserves that pre-existing/foreign state (`1 -> 1`) rather than blindly disabling it.
