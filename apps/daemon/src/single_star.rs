@@ -153,22 +153,23 @@ impl StarHostRuntime for LinuxStarHostRuntime {
                 bluez,
                 network_backend,
             };
-            match self.active.lock() {
-                Ok(mut active) if active.is_none() => {
-                    *active = Some(active_host);
-                    Ok(())
-                }
-                Ok(_) => {
-                    let error = CoreError::new(
+            let install_error = {
+                match self.active.lock() {
+                    Ok(mut active) if active.is_none() => {
+                        *active = Some(active_host.clone());
+                        None
+                    }
+                    Ok(_) => Some(CoreError::new(
                         ErrorKind::InvalidState,
                         "BlueRoute host runtime changed unexpectedly while creating a network",
-                    );
-                    Err(rollback_active_host(error, &active_host).await)
+                    )),
+                    Err(lock) => Some(lock_error(lock)),
                 }
-                Err(lock) => {
-                    let error = lock_error(lock);
-                    Err(rollback_active_host(error, &active_host).await)
-                }
+            };
+            if let Some(error) = install_error {
+                Err(rollback_active_host(error, &active_host).await)
+            } else {
+                Ok(())
             }
         })
     }
