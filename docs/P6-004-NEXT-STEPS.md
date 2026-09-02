@@ -1,0 +1,1 @@
+P6-004 production activation resumes after P6-005 address allocation and the minimum authenticated P7 control-session support are available. This file is intentionally minimal; the authoritative design and blocker rationale are in `docs/P6-004-JOIN-ORCHESTRATION.md`.
