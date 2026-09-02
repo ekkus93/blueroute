@@ -4,9 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use blueroute_core::{DisplayName, HealthLevel, NodeCapabilities, NodeId};
-use blueroute_daemon::{
-    DaemonService, INTERNET_SHARING_ACTION_ID, MODIFY_ACTION_ID,
-};
+use blueroute_daemon::{DaemonService, INTERNET_SHARING_ACTION_ID, MODIFY_ACTION_ID};
 use blueroute_protocol::{
     Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, Response, decode_response,
     encode_command,
@@ -57,7 +55,8 @@ impl MockAuthority {
 
 #[test]
 #[ignore = "requires an isolated D-Bus session; CI runs this under dbus-run-session"]
-fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<(), Box<dyn Error>> {
+fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<(), Box<dyn Error>>
+{
     future::block_on(async {
         let authorized = Arc::new(AtomicBool::new(false));
         let calls = Arc::new(AtomicUsize::new(0));
