@@ -231,8 +231,9 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
         let join_network_command = encode_command(&Command::JoinNetwork {
             network: created_network,
         })?;
-        let denied: zbus::Result<String> =
-            proxy.call("Request", &(join_network_command.clone(),)).await;
+        let denied: zbus::Result<String> = proxy
+            .call("Request", &(join_network_command.clone(),))
+            .await;
         assert!(
             denied
                 .expect_err("unauthorized join must fail closed")
