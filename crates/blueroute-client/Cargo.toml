@@ -7,5 +7,15 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[dependencies]
+async-io = "2.6.0"
+blueroute-protocol = { path = "../blueroute-protocol" }
+futures-lite = "2.6.0"
+zbus = { version = "5.19.0", default-features = false, features = ["async-io"] }
+
+[dev-dependencies]
+blueroute-core = { path = "../blueroute-core" }
+blueroute-daemon = { path = "../../apps/daemon" }
+
 [lints]
 workspace = true
