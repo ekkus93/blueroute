@@ -8,8 +8,8 @@ use blueroute_core::{
 };
 use blueroute_linux::{
     BluetoothBackend, BluezBackend, InterfaceAddress, IpNetworkBackend,
-    IpNetworkObservationBackend, NetworkInterfaceHandle, NetworkManagerBackend, NetworkStateBackend,
-    PanBackend,
+    IpNetworkObservationBackend, NetworkInterfaceHandle, NetworkManagerBackend,
+    NetworkStateBackend, PanBackend,
 };
 
 const NETWORKMANAGER_DEVICE_WAIT: Duration = Duration::from_secs(8);
