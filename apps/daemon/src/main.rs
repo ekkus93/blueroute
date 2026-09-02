@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use blueroute_core::{DaemonConfig, HealthLevel};
-use blueroute_daemon::{DaemonService, SingleStarNetworkOperations, current_network};
+use blueroute_daemon::{
+    DaemonService, DurablePeerTrustOperations, SingleStarNetworkOperations, current_network,
+};
 use blueroute_linux::{
     NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
 };
@@ -49,12 +51,16 @@ async fn run() -> Result<(), Box<dyn Error>> {
         health,
         capabilities: capabilities.clone(),
     };
+    let peer_trust_operations = Arc::new(DurablePeerTrustOperations::new(
+        NetworkMembershipStore::new(membership_path.clone()),
+    ));
     let network_operations = Arc::new(SingleStarNetworkOperations::new(
         NetworkMembershipStore::new(membership_path),
         config,
         capabilities,
     ));
-    let service = DaemonService::with_network_operations(status, network_operations);
+    let service =
+        DaemonService::with_operations(status, network_operations, peer_trust_operations);
 
     let _connection = Builder::system()?
         .name(DBUS_SERVICE_NAME)?
