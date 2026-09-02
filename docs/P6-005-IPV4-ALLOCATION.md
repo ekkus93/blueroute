@@ -99,3 +99,5 @@ cargo run -p blueroute-linux --example ipv4_allocation_probe --locked -- <option
 ```
 
 It uses the production NetworkManager backend to apply and remove the planned host address on a temporary BlueRoute-owned bridge twice. Each cycle verifies that the owned address/profile are present while active, absent after cleanup, and that the selected segment is conflict-free again after cleanup. No `ip`, `nmcli`, or manual network mutation is used as part of the operation.
+
+Live Debian acceptance on `debiancb1` is recorded in `docs/P6-005-HARDWARE-EVIDENCE-2026-09-02.md`. The probe derived `10.201.101.0/24` for test network `65656565656565656565656565656565`, applied `10.201.101.1/24` twice through the production NetworkManager backend, cleaned the owned state after each cycle, and finished with `P6-005 IPv4 allocation probe PASS`.
