@@ -1,24 +1,24 @@
 name: CI
 
 on:
+  push:
+    branches: [master]
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  prepare:
-    name: Prepare P5-004
+  rust:
+    name: Rust
     runs-on: ubuntu-latest
     steps:
-      - name: Check out P5-004 branch
+      - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          ref: P5-004_daemon_dbus_service
 
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt,clippy
@@ -26,19 +26,28 @@ jobs:
       - name: Select pinned Rust toolchain
         run: rustup override set 1.95.0
 
-      - name: Refresh lockfile and formatting
-        run: |
-          cargo check --workspace
-          cargo fmt --all
+      - name: Cache Cargo data
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
 
-      - name: Commit generated source and lockfile changes
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.lock apps/daemon
-          if git diff --cached --quiet; then
-            echo "No generated changes to commit"
-          else
-            git commit -m "chore: prepare P5-004 generated state"
-            git push origin HEAD:P5-004_daemon_dbus_service
-          fi
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check workspace
+        run: cargo check --workspace --locked
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace --locked
+
+      - name: Run daemon D-Bus integration test
+        run: dbus-run-session -- cargo test -p blueroute-daemon --test dbus_service --locked dbus_service_round_trip_and_event -- --ignored --exact
