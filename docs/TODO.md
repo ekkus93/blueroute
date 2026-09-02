@@ -57,6 +57,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P5-004 | `[x]` | Versioned daemon D-Bus service ownership, status/capability queries, fail-closed request decoding, typed event signaling, and real broker-level CI acceptance are complete. |
 | P5-005 | `[x]` | Shared system-D-Bus client, mandatory version gating, typed requests/events, bounded reconnect, and real-broker restart/incompatibility acceptance are complete. |
 | P5-006 | `[x]` | System-level systemd service packaging, D-Bus name ownership, bounded restart policy, journald integration, boot activation, and GUI-logout independence are proven on Debian 13 hardware. |
+| P5-007 | `[x]` | Least-privilege D-Bus/PolicyKit authorization is implemented and live Debian acceptance proves unprivileged read-only inspection plus fail-closed unauthorized mutation denial. |
 | All other tasks | `[ ]` | Not started. |
 
 ## Platform rule
@@ -649,13 +650,14 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P5-007 — Define D-Bus/Polkit authorization policy
 
-- [ ] read-only vs mutating operations.
-- [ ] authorization behavior.
-- [ ] no blanket front-end root access.
+- [x] read-only vs mutating operations.
+- [x] authorization behavior.
+- [x] no blanket front-end root access.
 
 **Acceptance**
 
 - Intended users can inspect status; unauthorized sensitive changes fail safely.
+- Hardware acceptance is recorded in `docs/P5-007-HARDWARE-EVIDENCE-2026-09-01.md`; the normal Debian user read version/status without elevation, an unprivileged `nobody` mutation was denied before dispatch with a nonzero D-Bus call result, and the daemon remained active.
 
 ---
 

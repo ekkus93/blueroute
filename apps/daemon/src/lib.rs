@@ -1,13 +1,20 @@
 #![doc = "BlueRoute daemon D-Bus service implementation."]
 
+mod authorization;
+
 use std::fmt;
 
+pub use authorization::{
+    CommandAuthorization, INTERNET_SHARING_ACTION_ID, MODIFY_ACTION_ID, command_authorization,
+    command_operation,
+};
 use blueroute_core::{HealthLevel, NodeCapabilities, NodeId};
 use blueroute_protocol::{
     ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, Event,
     ProtocolCodecError, Response, decode_command, encode_event, encode_response,
 };
 use zbus::fdo;
+use zbus::message::Header;
 use zbus::object_server::SignalEmitter;
 use zbus::{Connection, interface};
 
@@ -59,14 +66,22 @@ impl DaemonService {
         Self::encode_response(&Response::Capabilities(self.status.capabilities.clone()))
     }
 
-    fn request(&self, payload: &str) -> fdo::Result<String> {
+    async fn request(
+        &self,
+        payload: &str,
+        #[zbus(connection)] connection: &Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> fdo::Result<String> {
         let command = decode_command(payload)
             .map_err(|_| fdo::Error::InvalidArgs("malformed BlueRoute command payload".into()))?;
+
+        authorization::authorize_command(connection, &header, &command).await?;
+
         match command {
             Command::GetStatus => self.status(),
             Command::GetCapabilities => self.capabilities(),
             _ => Err(fdo::Error::NotSupported(
-                "command is not implemented by the P5-004 daemon skeleton".into(),
+                "command is not implemented by the current daemon".into(),
             )),
         }
     }
