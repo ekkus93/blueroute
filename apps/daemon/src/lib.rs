@@ -4,8 +4,8 @@ use std::fmt;
 
 use blueroute_core::{HealthLevel, NodeCapabilities, NodeId};
 use blueroute_protocol::{
-    ApiVersion, Command, DaemonStatus, Event, ProtocolCodecError, Response, DBUS_INTERFACE_NAME,
-    DBUS_OBJECT_PATH, decode_command, encode_event, encode_response,
+    ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, Event,
+    ProtocolCodecError, Response, decode_command, encode_event, encode_response,
 };
 use zbus::fdo;
 use zbus::object_server::SignalEmitter;
@@ -60,9 +60,8 @@ impl DaemonService {
     }
 
     fn request(&self, payload: &str) -> fdo::Result<String> {
-        let command = decode_command(payload).map_err(|_| {
-            fdo::Error::InvalidArgs("malformed BlueRoute command payload".into())
-        })?;
+        let command = decode_command(payload)
+            .map_err(|_| fdo::Error::InvalidArgs("malformed BlueRoute command payload".into()))?;
         match command {
             Command::GetStatus => self.status(),
             Command::GetCapabilities => self.capabilities(),

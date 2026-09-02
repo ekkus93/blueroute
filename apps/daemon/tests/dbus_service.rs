@@ -5,7 +5,7 @@ use async_io::Timer;
 use blueroute_core::{HealthLevel, NodeCapabilities, NodeId};
 use blueroute_daemon::{DaemonService, emit_event};
 use blueroute_protocol::{
-    ApiVersion, Event, Response, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME,
+    ApiVersion, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, Event, Response,
     decode_event, decode_response,
 };
 use futures_lite::{StreamExt, future};
@@ -37,7 +37,10 @@ fn dbus_service_round_trip_and_event() -> Result<(), Box<dyn Error>> {
         .await?;
 
         let version: (u16, u16) = proxy.call("Version", &()).await?;
-        assert_eq!(version, (ApiVersion::CURRENT.major, ApiVersion::CURRENT.minor));
+        assert_eq!(
+            version,
+            (ApiVersion::CURRENT.major, ApiVersion::CURRENT.minor)
+        );
 
         let status_payload: String = proxy.call("Status", &()).await?;
         let Response::Status(status) = decode_response(&status_payload)? else {
@@ -59,13 +62,10 @@ fn dbus_service_round_trip_and_event() -> Result<(), Box<dyn Error>> {
         let mut events = proxy.receive_signal("Event").await?;
         let expected = Event::HealthChanged(HealthLevel::Degraded);
         emit_event(&server, &expected).await?;
-        let message = future::or(
-            events.next(),
-            async {
-                Timer::after(Duration::from_secs(3)).await;
-                None
-            },
-        )
+        let message = future::or(events.next(), async {
+            Timer::after(Duration::from_secs(3)).await;
+            None
+        })
         .await
         .ok_or("timed out waiting for the daemon event signal")?;
         let payload: String = message.body().deserialize()?;

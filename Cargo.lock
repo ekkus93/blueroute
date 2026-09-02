@@ -183,7 +183,12 @@ dependencies = [
 name = "blueroute-daemon"
 version = "0.1.0"
 dependencies = [
+ "async-io",
+ "blueroute-core",
  "blueroute-linux",
+ "blueroute-protocol",
+ "futures-lite",
+ "zbus",
 ]
 
 [[package]]
