@@ -1,14 +1,20 @@
 #![doc = "BlueRoute daemon D-Bus service implementation."]
 
 mod authorization;
+mod single_star;
 
 use std::fmt;
+use std::sync::{Arc, Mutex};
 
 pub use authorization::{
     CommandAuthorization, INTERNET_SHARING_ACTION_ID, MODIFY_ACTION_ID, command_authorization,
     command_operation,
 };
-use blueroute_core::{HealthLevel, NodeCapabilities, NodeId};
+pub use single_star::{
+    LinuxStarHostRuntime, NetworkIdGenerator, NetworkOperationFuture, NetworkOperations,
+    SingleStarNetworkOperations, StarHostRuntime, SystemNetworkIdGenerator, current_network,
+};
+use blueroute_core::{CoreError, ErrorKind, HealthLevel, NodeCapabilities, NodeId};
 use blueroute_protocol::{
     ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, Event,
     ProtocolCodecError, Response, decode_command, encode_event, encode_response,
@@ -19,30 +25,48 @@ use zbus::object_server::SignalEmitter;
 use zbus::{Connection, interface};
 
 /// Versioned local D-Bus interface implementation.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct DaemonService {
-    status: DaemonStatus,
+    status: Arc<Mutex<DaemonStatus>>,
+    network_operations: Option<Arc<dyn NetworkOperations>>,
 }
 
 impl DaemonService {
     pub fn new(local_node: NodeId, health: HealthLevel, capabilities: NodeCapabilities) -> Self {
-        Self {
-            status: DaemonStatus {
-                api_version: ApiVersion::CURRENT,
-                local_node: Some(local_node),
-                current_network: None,
-                health,
-                capabilities,
-            },
-        }
+        Self::from_status(DaemonStatus {
+            api_version: ApiVersion::CURRENT,
+            local_node: Some(local_node),
+            current_network: None,
+            health,
+            capabilities,
+        })
     }
 
     pub fn from_status(status: DaemonStatus) -> Self {
-        Self { status }
+        Self {
+            status: Arc::new(Mutex::new(status)),
+            network_operations: None,
+        }
     }
 
-    pub fn status_snapshot(&self) -> &DaemonStatus {
-        &self.status
+    pub fn with_network_operations(
+        status: DaemonStatus,
+        network_operations: Arc<dyn NetworkOperations>,
+    ) -> Self {
+        Self {
+            status: Arc::new(Mutex::new(status)),
+            network_operations: Some(network_operations),
+        }
+    }
+
+    pub fn status_snapshot(&self) -> Result<DaemonStatus, CoreError> {
+        self.status.lock().map(|status| status.clone()).map_err(|error| {
+            CoreError::with_diagnostic(
+                ErrorKind::Internal,
+                "BlueRoute daemon status lock was poisoned",
+                error.to_string(),
+            )
+        })
     }
 
     fn encode_response(response: &Response) -> fdo::Result<String> {
@@ -50,7 +74,26 @@ impl DaemonService {
             fdo::Error::Failed("BlueRoute failed to encode its local API response".into())
         })
     }
+
+    fn network_operations(&self) -> fdo::Result<&Arc<dyn NetworkOperations>> {
+        self.network_operations.as_ref().ok_or_else(|| {
+            fdo::Error::NotSupported(
+                "network lifecycle operations are unavailable in this daemon instance".into(),
+            )
+        })
+    }
+
+    fn update_current_network(&self, network: NodeNetwork) -> fdo::Result<()> {
+        let mut status = self
+            .status
+            .lock()
+            .map_err(|_| fdo::Error::Failed("BlueRoute daemon status is unavailable".into()))?;
+        status.current_network = network.0;
+        Ok(())
+    }
 }
+
+struct NodeNetwork(Option<blueroute_core::NetworkId>);
 
 #[interface(name = "org.blueroute.Service1")]
 impl DaemonService {
@@ -59,11 +102,18 @@ impl DaemonService {
     }
 
     fn status(&self) -> fdo::Result<String> {
-        Self::encode_response(&Response::Status(self.status.clone()))
+        let status = self
+            .status_snapshot()
+            .map_err(core_error_to_dbus)?;
+        Self::encode_response(&Response::Status(status))
     }
 
     fn capabilities(&self) -> fdo::Result<String> {
-        Self::encode_response(&Response::Capabilities(self.status.capabilities.clone()))
+        let capabilities = self
+            .status_snapshot()
+            .map_err(core_error_to_dbus)?
+            .capabilities;
+        Self::encode_response(&Response::Capabilities(capabilities))
     }
 
     async fn request(
@@ -80,6 +130,22 @@ impl DaemonService {
         match command {
             Command::GetStatus => self.status(),
             Command::GetCapabilities => self.capabilities(),
+            Command::ListNetworks => {
+                let networks = self
+                    .network_operations()?
+                    .list_networks()
+                    .map_err(core_error_to_dbus)?;
+                Self::encode_response(&Response::Networks(networks))
+            }
+            Command::CreateNetwork { name } => {
+                let network = self
+                    .network_operations()?
+                    .create_network(name)
+                    .await
+                    .map_err(core_error_to_dbus)?;
+                self.update_current_network(NodeNetwork(Some(network)))?;
+                Self::encode_response(&Response::Ack)
+            }
             _ => Err(fdo::Error::NotSupported(
                 "command is not implemented by the current daemon".into(),
             )),
@@ -88,6 +154,23 @@ impl DaemonService {
 
     #[zbus(signal)]
     async fn event(emitter: &SignalEmitter<'_>, payload: &str) -> zbus::Result<()>;
+}
+
+fn core_error_to_dbus(error: CoreError) -> fdo::Error {
+    match error.kind() {
+        ErrorKind::InvalidInput => fdo::Error::InvalidArgs(error.message().to_owned()),
+        ErrorKind::CapabilityUnavailable
+        | ErrorKind::MissingAdapter
+        | ErrorKind::AdapterDisabled
+        | ErrorKind::UnsupportedRuntime => fdo::Error::NotSupported(error.message().to_owned()),
+        _ => {
+            let message = match error.diagnostic() {
+                Some(diagnostic) => format!("{} ({diagnostic})", error.message()),
+                None => error.message().to_owned(),
+            };
+            fdo::Error::Failed(message)
+        }
+    }
 }
 
 /// Emit one already-typed protocol event through the daemon's D-Bus signal.
