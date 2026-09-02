@@ -1,25 +1,26 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::future::Future;
 use std::io::Read;
-use std::net::{IpAddr, Ipv4Addr};
 use std::pin::Pin;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use blueroute_core::{
-    CoreError, DaemonConfig, DisplayName, ErrorKind, IpPrefix, MembershipRegistry, MembershipState,
-    NetworkId, NetworkMembership, NodeCapabilities,
+    CoreError, DaemonConfig, DisplayName, ErrorKind, Ipv4StarAddressPlan, MembershipRegistry,
+    MembershipState, NetworkId, NetworkMembership, NodeCapabilities, ensure_ipv4_segment_available,
 };
 use blueroute_linux::{
-    BluetoothBackend, BluezBackend, InterfaceAddress, IpNetworkBackend, NetworkAdvertisement,
-    NetworkInterfaceHandle, NetworkManagerBackend, NetworkMembershipStore, NetworkStateBackend,
-    PanBackend,
+    BluetoothBackend, BluezBackend, InterfaceAddress, IpNetworkBackend,
+    IpNetworkObservationBackend, NetworkAdvertisement, NetworkInterfaceHandle,
+    NetworkManagerBackend, NetworkMembershipStore, NetworkStateBackend, PanBackend,
 };
 use blueroute_protocol::NetworkSummary;
 
 pub type NetworkOperationFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, CoreError>> + Send + 'a>>;
+
+const MAX_ADDRESS_CONFLICT_RETRIES: usize = 16;
 
 pub trait NetworkOperations: Send + Sync {
     fn create_network(&self, name: DisplayName) -> NetworkOperationFuture<'_, NetworkId>;
@@ -114,6 +115,8 @@ impl StarHostRuntime for LinuxStarHostRuntime {
 
             let bluez = BluezBackend::connect_system().await?;
             let network_backend = NetworkManagerBackend::connect_system().await?;
+            let active_prefixes = network_backend.active_ipv4_prefixes().await?;
+            ensure_ipv4_segment_available(address.prefix, active_prefixes)?;
             let adapter = select_powered_adapter(&bluez).await?;
 
             network_backend
@@ -318,13 +321,40 @@ where
                 ));
             }
 
-            let network = unique_network_id(&registry, &self.generator)?;
-            let bridge = bridge_name(network)?;
-            let address = local_star_address(network, &self.config)?;
+            let mut attempted = BTreeSet::new();
+            let mut last_conflict = None;
+            let (network, bridge, address) = loop {
+                if attempted.len() >= MAX_ADDRESS_CONFLICT_RETRIES {
+                    let diagnostic = last_conflict
+                        .as_ref()
+                        .map(|error: &CoreError| error.to_string())
+                        .unwrap_or_else(|| "no conflict diagnostic was recorded".to_owned());
+                    return Err(CoreError::with_diagnostic(
+                        ErrorKind::AddressConflict,
+                        "failed to select a conflict-free BlueRoute IPv4 segment",
+                        format!(
+                            "attempted {} network identities; last conflict: {diagnostic}",
+                            attempted.len()
+                        ),
+                    ));
+                }
 
-            self.runtime
-                .start_host(network, bridge.clone(), address.clone())
-                .await?;
+                let network = unique_network_id(&registry, &attempted, &self.generator)?;
+                attempted.insert(network);
+                let bridge = bridge_name(network)?;
+                let address = local_star_address(network, &self.config)?;
+                match self
+                    .runtime
+                    .start_host(network, bridge.clone(), address.clone())
+                    .await
+                {
+                    Ok(()) => break (network, bridge, address),
+                    Err(error) if error.kind() == ErrorKind::AddressConflict => {
+                        last_conflict = Some(error);
+                    }
+                    Err(error) => return Err(error),
+                }
+            };
 
             let mut membership = NetworkMembership::new(network, name);
             membership.state = membership
@@ -513,11 +543,12 @@ fn ensure_nap_capability(capabilities: &NodeCapabilities) -> Result<(), CoreErro
 
 fn unique_network_id(
     registry: &MembershipRegistry,
+    attempted: &BTreeSet<NetworkId>,
     generator: &impl NetworkIdGenerator,
 ) -> Result<NetworkId, CoreError> {
     for _ in 0..16 {
         let candidate = generator.generate()?;
-        if registry.network(&candidate).is_none() {
+        if registry.network(&candidate).is_none() && !attempted.contains(&candidate) {
             return Ok(candidate);
         }
     }
@@ -537,26 +568,10 @@ fn local_star_address(
     config: &DaemonConfig,
 ) -> Result<InterfaceAddress, CoreError> {
     config.validate()?;
-    let pool = config.ipv4_address_pool;
-    let segment_bits = pool.segment_prefix_len - pool.pool_prefix_len;
-    let segment_count = 1_u32 << u32::from(segment_bits);
-    let bytes = network.as_bytes();
-    let selector = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) % segment_count;
-    let segment_host_bits = 32_u32 - u32::from(pool.segment_prefix_len);
-    let segment_offset = selector << segment_host_bits;
-    let network_address = u32::from(pool.network)
-        .checked_add(segment_offset)
-        .ok_or_else(|| CoreError::new(ErrorKind::InvalidInput, "IPv4 pool overflow"))?;
-    let local_address = network_address
-        .checked_add(1)
-        .ok_or_else(|| CoreError::new(ErrorKind::InvalidInput, "IPv4 host address overflow"))?;
-    let bridge = bridge_name(network)?;
+    let plan = Ipv4StarAddressPlan::for_network(network, config.ipv4_address_pool)?;
     Ok(InterfaceAddress {
-        interface: bridge,
-        prefix: IpPrefix::new(
-            IpAddr::V4(Ipv4Addr::from(local_address)),
-            pool.segment_prefix_len,
-        )?,
+        interface: bridge_name(network)?,
+        prefix: plan.host,
         owner: network,
     })
 }
@@ -718,6 +733,7 @@ impl Drop for TransitionGuard<'_> {
 mod tests {
     use std::collections::VecDeque;
     use std::fs;
+    use std::net::IpAddr;
     use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
 
@@ -730,6 +746,7 @@ mod tests {
         starts: AtomicUsize,
         stops: AtomicUsize,
         fail_start: AtomicBool,
+        address_conflicts_remaining: AtomicUsize,
     }
 
     #[derive(Clone, Default)]
@@ -752,6 +769,19 @@ mod tests {
         ) -> NetworkOperationFuture<'_, ()> {
             Box::pin(async move {
                 self.state.starts.fetch_add(1, Ordering::SeqCst);
+                if self
+                    .state
+                    .address_conflicts_remaining
+                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                        remaining.checked_sub(1)
+                    })
+                    .is_ok()
+                {
+                    return Err(CoreError::new(
+                        ErrorKind::AddressConflict,
+                        "fake active-route conflict",
+                    ));
+                }
                 if self.state.fail_start.load(Ordering::SeqCst) {
                     Err(CoreError::new(ErrorKind::PanFailure, "fake NAP failure"))
                 } else {
@@ -940,6 +970,41 @@ mod tests {
                 .unwrap_err();
             assert_eq!(error.kind(), ErrorKind::InvalidState);
             assert_eq!(runtime.starts(), 1);
+            fs::remove_dir_all(root).unwrap();
+        });
+    }
+
+    #[test]
+    fn address_conflict_retries_with_a_fresh_network_identity_before_commit() {
+        futures_lite::future::block_on(async {
+            let (root, store) = temp_store("address-retry");
+            let runtime = FakeRuntime::default();
+            runtime
+                .state
+                .address_conflicts_remaining
+                .store(1, Ordering::SeqCst);
+            let first = NetworkId::from_bytes([0x21; 16]);
+            let second = NetworkId::from_bytes([0x22; 16]);
+            let operations = SingleStarNetworkOperations::with_runtime_and_generator(
+                store,
+                DaemonConfig::default(),
+                nap_capabilities(Some(true)),
+                runtime.clone(),
+                SequenceGenerator::new([first, second]),
+            );
+
+            let created = operations
+                .create_network(DisplayName::new("Retry").unwrap())
+                .await
+                .unwrap();
+            assert_eq!(created, second);
+            assert_eq!(runtime.starts(), 2);
+            let registry = operations.store.load().unwrap();
+            assert!(registry.network(&first).is_none());
+            assert_eq!(
+                registry.network(&second).unwrap().state,
+                MembershipState::Member
+            );
             fs::remove_dir_all(root).unwrap();
         });
     }

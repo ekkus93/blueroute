@@ -13,10 +13,10 @@ This document records an ordering conflict found while implementing P6-004 and t
 
 ## Dependency conflict discovered during implementation
 
-The repository roadmap currently places two required P6-004 mechanisms after P6-004 itself:
+The repository roadmap originally placed two required P6-004 mechanisms after P6-004 itself:
 
-- **P6-005** defines the one-star IPv4 allocation policy, conflict detection, and address assignment.
-- **P7-001/P7-004** select and implement the authenticated inter-node control transport/session lifecycle.
+- **P6-005** defines the one-star IPv4 allocation policy, conflict detection, and address assignment. P6-005 now supplies that prerequisite through deterministic `NetworkId`-derived addressing and NetworkManager conflict observation/application.
+- **P7-001/P7-004** still need to select and implement the authenticated inter-node control transport/session lifecycle.
 
 The main specification is explicit that source IP, Bluetooth display metadata, and similar transport observations are not proof of BlueRoute identity. P6-003 additionally established that Bluetooth pairing/trust and BlueRoute `NodeId` approval are independent facts.
 
@@ -75,16 +75,13 @@ Until P6-009 is implemented, durable `Member` state is also not treated as proof
 
 ## Production fail-closed behavior while blocked
 
-`LinuxJoinRuntime::preflight` currently returns `CapabilityUnavailable` before Bluetooth or durable-state mutation. The error explicitly states that production activation requires:
+`LinuxJoinRuntime::preflight` currently returns `CapabilityUnavailable` before Bluetooth or durable-state mutation because **P7 authenticated control-session support** is still unavailable.
 
-- P6-005 conflict-aware PANU address allocation; and
-- P7 authenticated control-session support.
-
-This is intentional. Returning a typed error before mutation is safer than performing a partial PAN join that cannot authenticate the remote BlueRoute identity or configure conflict-safe IP state.
+P6-005 now implements the client-side IP stage behind that gate: once PANU exists, `LinuxJoinRuntime::configure_ip` derives the first-client address from `NetworkId`, checks active local prefixes, and applies/removes the BlueRoute-owned NetworkManager address/profile. Returning a typed preflight error remains intentional until the remote BlueRoute identity can be authenticated.
 
 The remaining production runtime methods also fail explicitly rather than using placeholder `Ok(())` cleanup implementations. This prevents a future preflight change from accidentally turning an unwired rollback path into a silent success.
 
-The PANU transport primitive itself is already implemented and physically proven by P4-005. P6-004 does not duplicate that adapter. Once P6-005 and the required P7 control-session contracts exist, `LinuxJoinRuntime` can compose those proven adapters under this coordinator.
+The PANU transport primitive itself is already implemented and physically proven by P4-005. P6-004 does not duplicate that adapter. With P6-005 now supplying conflict-safe address planning/application, the remaining production activation dependency is the authenticated P7 control-session contract.
 
 ## Deterministic coverage
 
@@ -101,6 +98,6 @@ Tests cover:
 
 ## Completion status
 
-P6-004 is **blocked, not complete**. The orchestration/state/rollback boundary is implemented, but production acceptance cannot be claimed until the address-allocation and authenticated-control prerequisites exist and a real compatible node joins without manual Bluetooth/network shell commands.
+P6-004 is **blocked, not complete**. The orchestration/state/rollback boundary and P6-005 address prerequisite are implemented, but production acceptance cannot be claimed until authenticated P7 control bootstrap exists and a real compatible node joins without manual Bluetooth/network shell commands.
 
-The correct next implementation dependency is P6-005, followed by the minimum P7 control-plane work required for authenticated join; P6-004 should then be resumed for production wiring and physical acceptance.
+The remaining implementation dependency is the minimum P7 control-plane work required for authenticated join; P6-004 should then be resumed for production wiring and physical acceptance.

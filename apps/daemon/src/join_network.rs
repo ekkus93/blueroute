@@ -2,11 +2,13 @@ use std::future::Future;
 use std::pin::Pin;
 
 use blueroute_core::{
-    CoreError, DisplayName, ErrorKind, MembershipRegistry, MembershipState, NetworkId,
-    NetworkMembership,
+    CoreError, DisplayName, ErrorKind, Ipv4AddressPool, Ipv4StarAddressPlan, MembershipRegistry,
+    MembershipState, NetworkId, NetworkMembership, ensure_ipv4_segment_available,
 };
 use blueroute_linux::{
-    NetworkInterfaceHandle, NetworkMembershipStore, PanAttachment, PanRole, PeerHandle,
+    InterfaceAddress, IpNetworkBackend, IpNetworkObservationBackend, NetworkInterfaceHandle,
+    NetworkManagerBackend, NetworkMembershipStore, NetworkStateBackend, PanAttachment, PanRole,
+    PeerHandle,
 };
 
 use crate::current_network;
@@ -45,16 +47,20 @@ impl JoinPanLink {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct JoinIpLease {
-    interface: NetworkInterfaceHandle,
+    address: InterfaceAddress,
 }
 
 impl JoinIpLease {
-    pub fn new(interface: NetworkInterfaceHandle) -> Self {
-        Self { interface }
+    pub fn new(address: InterfaceAddress) -> Self {
+        Self { address }
     }
 
     pub fn interface(&self) -> &NetworkInterfaceHandle {
-        &self.interface
+        &self.address.interface
+    }
+
+    pub fn address(&self) -> &InterfaceAddress {
+        &self.address
     }
 }
 
@@ -99,7 +105,14 @@ pub struct TransactionalJoinNetworkOperations<R = LinuxJoinRuntime> {
 
 impl TransactionalJoinNetworkOperations<LinuxJoinRuntime> {
     pub fn new(store: NetworkMembershipStore) -> Self {
-        Self::with_runtime(store, LinuxJoinRuntime)
+        Self::with_runtime(store, LinuxJoinRuntime::default())
+    }
+
+    pub fn with_ipv4_pool(
+        store: NetworkMembershipStore,
+        pool: Ipv4AddressPool,
+    ) -> Result<Self, CoreError> {
+        Ok(Self::with_runtime(store, LinuxJoinRuntime::new(pool)?))
     }
 }
 
@@ -219,15 +232,24 @@ where
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct LinuxJoinRuntime;
+pub struct LinuxJoinRuntime {
+    pool: Ipv4AddressPool,
+}
+
+impl LinuxJoinRuntime {
+    pub fn new(pool: Ipv4AddressPool) -> Result<Self, CoreError> {
+        pool.validate()?;
+        Ok(Self { pool })
+    }
+}
 
 impl JoinRuntime for LinuxJoinRuntime {
     fn preflight(&self, _network: NetworkId) -> JoinNetworkFuture<'_, ()> {
         Box::pin(async {
             Err(CoreError::with_diagnostic(
                 ErrorKind::CapabilityUnavailable,
-                "BlueRoute join requires P6-005 address allocation and P7 authenticated control-session support",
-                "production JoinNetwork is refusing to mutate Bluetooth or durable membership state until both prerequisites are implemented",
+                "BlueRoute join requires P7 authenticated control-session support",
+                "P6-005 IPv4 planning and NetworkManager address application are available, but production JoinNetwork still refuses Bluetooth mutation until authenticated control bootstrap is implemented",
             ))
         })
     }
@@ -236,7 +258,7 @@ impl JoinRuntime for LinuxJoinRuntime {
         Box::pin(async {
             Err(CoreError::new(
                 ErrorKind::CapabilityUnavailable,
-                "production PANU join activation is blocked until join prerequisites are complete",
+                "production PANU join activation is blocked until authenticated control bootstrap is complete",
             ))
         })
     }
@@ -252,23 +274,47 @@ impl JoinRuntime for LinuxJoinRuntime {
 
     fn configure_ip<'a>(
         &'a self,
-        _network: NetworkId,
-        _link: &'a JoinPanLink,
+        network: NetworkId,
+        link: &'a JoinPanLink,
     ) -> JoinNetworkFuture<'a, JoinIpLease> {
-        Box::pin(async {
-            Err(CoreError::new(
-                ErrorKind::CapabilityUnavailable,
-                "P6-005 address allocation is required before PANU join can configure IP",
-            ))
+        Box::pin(async move {
+            let plan = Ipv4StarAddressPlan::for_network(network, self.pool)?;
+            let backend = NetworkManagerBackend::connect_system().await?;
+            let active = backend.active_ipv4_prefixes().await?;
+            ensure_ipv4_segment_available(plan.segment, active)?;
+            let address = InterfaceAddress {
+                interface: link.interface().clone(),
+                prefix: plan.first_client,
+                owner: network,
+            };
+            backend.ensure_address(address.clone()).await?;
+            Ok(JoinIpLease::new(address))
         })
     }
 
-    fn remove_ip(&self, _lease: JoinIpLease) -> JoinNetworkFuture<'_, ()> {
-        Box::pin(async {
-            Err(CoreError::new(
-                ErrorKind::CapabilityUnavailable,
-                "production PANU address cleanup is not implemented for JoinNetwork yet",
-            ))
+    fn remove_ip(&self, lease: JoinIpLease) -> JoinNetworkFuture<'_, ()> {
+        Box::pin(async move {
+            let backend = NetworkManagerBackend::connect_system().await?;
+            let address = lease.address;
+            let remove_address = backend.remove_address(address.clone()).await;
+            let remove_profile = backend
+                .remove_owned_interface(address.owner, address.interface.clone())
+                .await;
+            match (remove_address, remove_profile) {
+                (Ok(()), Ok(())) => Ok(()),
+                (Err(address_error), Ok(())) => Err(address_error),
+                (Ok(()), Err(profile_error)) => Err(profile_error),
+                (Err(address_error), Err(profile_error)) => Err(CoreError::with_diagnostic(
+                    address_error.kind(),
+                    address_error.message(),
+                    format!(
+                        "{}; removing the BlueRoute-owned NetworkManager profile also failed: {profile_error}",
+                        address_error
+                            .diagnostic()
+                            .unwrap_or("no address cleanup diagnostic")
+                    ),
+                )),
+            }
         })
     }
 
@@ -444,7 +490,14 @@ mod tests {
                         "injected address failure",
                     ))
                 } else {
-                    Ok(JoinIpLease::new(link.interface().clone()))
+                    let plan =
+                        Ipv4StarAddressPlan::for_network(_network, Ipv4AddressPool::default())
+                            .unwrap();
+                    Ok(JoinIpLease::new(InterfaceAddress {
+                        interface: link.interface().clone(),
+                        prefix: plan.first_client,
+                        owner: _network,
+                    }))
                 }
             })
         }
@@ -596,7 +649,7 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
-        assert!(error.message().contains("requires P6-005"));
+        assert!(error.message().contains("requires P7"));
         assert!(operations.store.load().unwrap().is_empty());
         fs::remove_dir_all(root).unwrap();
     }

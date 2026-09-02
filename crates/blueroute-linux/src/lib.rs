@@ -4,6 +4,7 @@ mod bluez;
 mod capability_report;
 mod forwarding;
 mod identity;
+mod ipv4_observation;
 mod membership_store;
 mod network_discovery;
 mod networkmanager;
@@ -257,6 +258,14 @@ pub struct LinuxRoute {
     pub interface: NetworkInterfaceHandle,
     pub metric: u32,
     pub owner: NetworkId,
+}
+
+/// Read-only observation of active local IPv4 networks used for collision detection.
+///
+/// This is deliberately separate from `IpNetworkBackend::addresses`/`routes`, which enumerate
+/// only BlueRoute-owned state for safe reconciliation and cleanup.
+pub trait IpNetworkObservationBackend: Send + Sync {
+    fn active_ipv4_prefixes(&self) -> BackendFuture<'_, Vec<IpPrefix>>;
 }
 
 /// Linux IP/network configuration boundary. It is intentionally not NetworkManager-specific.

@@ -55,9 +55,10 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let peer_trust_operations = Arc::new(DurablePeerTrustOperations::new(
         NetworkMembershipStore::new(membership_path.clone()),
     ));
-    let join_network_operations = Arc::new(TransactionalJoinNetworkOperations::new(
+    let join_network_operations = Arc::new(TransactionalJoinNetworkOperations::with_ipv4_pool(
         NetworkMembershipStore::new(membership_path.clone()),
-    ));
+        config.ipv4_address_pool,
+    )?);
     let network_operations = Arc::new(SingleStarNetworkOperations::new(
         NetworkMembershipStore::new(membership_path),
         config,
