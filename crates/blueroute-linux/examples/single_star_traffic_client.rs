@@ -1,5 +1,5 @@
 use std::env;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_io::Timer;
 use blueroute_core::{
@@ -8,8 +8,12 @@ use blueroute_core::{
 };
 use blueroute_linux::{
     BluetoothBackend, BluezBackend, InterfaceAddress, IpNetworkBackend,
-    IpNetworkObservationBackend, NetworkManagerBackend, NetworkStateBackend, PanBackend,
+    IpNetworkObservationBackend, NetworkInterfaceHandle, NetworkManagerBackend, NetworkStateBackend,
+    PanBackend,
 };
+
+const NETWORKMANAGER_DEVICE_WAIT: Duration = Duration::from_secs(8);
+const NETWORKMANAGER_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 fn main() {
     if let Err(error) = futures_lite::future::block_on(run()) {
@@ -71,6 +75,12 @@ async fn run() -> Result<(), CoreError> {
         })?;
 
     let attachment = bluez.connect_panu(peer.handle.clone()).await?;
+    if let Err(error) =
+        wait_for_networkmanager_device(&network_backend, &attachment.interface).await
+    {
+        let disconnect = bluez.disconnect_panu(peer.handle.clone()).await;
+        return Err(with_cleanup(error, [Ok(()), disconnect]));
+    }
     let address = InterfaceAddress {
         interface: attachment.interface.clone(),
         prefix: plan.first_client,
@@ -132,6 +142,31 @@ fn parse_hold_seconds(value: &str) -> Result<u64, CoreError> {
             error.to_string(),
         )
     })
+}
+
+async fn wait_for_networkmanager_device(
+    backend: &NetworkManagerBackend,
+    interface: &NetworkInterfaceHandle,
+) -> Result<(), CoreError> {
+    let deadline = Instant::now() + NETWORKMANAGER_DEVICE_WAIT;
+    loop {
+        if backend
+            .network_devices()
+            .await?
+            .iter()
+            .any(|device| device.interface == *interface)
+        {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(CoreError::with_diagnostic(
+                ErrorKind::NetworkBackendUnavailable,
+                "NetworkManager did not observe the PANU interface before the timeout",
+                format!("interface={}", interface.as_str()),
+            ));
+        }
+        Timer::after(NETWORKMANAGER_POLL_INTERVAL).await;
+    }
 }
 
 async fn cleanup_network(
