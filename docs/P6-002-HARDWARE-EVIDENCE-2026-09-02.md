@@ -10,10 +10,15 @@ The acceptance objective was to prove that a second compatible Linux node can di
 
 - Hosted BlueRoute network / NAP: `debiancb1`.
 - Discovery client: `arisu`.
+- Both nodes use the existing BlueRoute hardware path through BlueZ adapter `/org/bluez/hci0`.
+- `debiancb1` controller path uses Linux driver `btusb`; its P6-001 baseline immediately preceding this test was Debian GNU/Linux 13, kernel `6.12.86+deb13-amd64`, BlueZ `5.82`, NetworkManager `1.52.1`, and systemd `257`.
+- `arisu` is the same physical discovery/PANU client used in the accepted P4-003 through P4-006 and P6-001 hardware runs; its previously recorded controller identity is `E8:FB:1C:25:E4:C2`.
 - Candidate branch: `P6-002_discoverable_network_identity`.
-- Candidate head: `1aea3a1310114da5a7490ce6fe024706eb0867ff`.
+- Hardware-tested candidate head before evidence-only closeout commits: `1aea3a1310114da5a7490ce6fe024706eb0867ff`.
 - PR: #37.
 - CI run `33609623352` passed the full pinned Rust gate before hardware acceptance.
+
+The focused P6-002 run did not re-collect a complete distribution/kernel/BlueZ/NetworkManager version inventory from `arisu`; the broader per-host inventory remains owned by P1-001. This record does not infer or fabricate unobserved client version values.
 
 ## Fresh hosted network
 
