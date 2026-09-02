@@ -8,6 +8,7 @@ The packaged layout is:
 
 - daemon executable: `/usr/libexec/blueroute/blueroute-daemon`
 - unit: `/usr/lib/systemd/system/blueroute.service`
+- D-Bus ownership policy: `/usr/share/dbus-1/system.d/org.blueroute.Service1.conf`
 - durable state: `/var/lib/blueroute`
 - boot-local runtime state: `/run/blueroute`
 
@@ -27,6 +28,20 @@ This is stronger than declaring the process ready immediately after `execve`: sy
 The service runs as root. That is deliberate for the privileged networking daemon: the Linux adapters ultimately need controlled access to BlueZ, NetworkManager, route/forwarding state, and `/run/blueroute`. This does **not** authorize front ends to perform arbitrary privileged operations. P5-007 owns D-Bus/Polkit caller authorization, and the UI/CLI are not run as root.
 
 `NoNewPrivileges=yes` prevents the daemon or a child process from gaining additional privileges through a later exec transition. `PrivateTmp=yes` isolates its temporary files without isolating the host network namespace.
+
+## System D-Bus name ownership
+
+The system bus denies arbitrary well-known-name ownership by default. P5-006 therefore ships `packaging/dbus/org.blueroute.Service1.conf` with the narrow policy required for the root-run daemon to own exactly `org.blueroute.Service1`:
+
+```xml
+<policy user="root">
+  <allow own="org.blueroute.Service1"/>
+</policy>
+```
+
+This policy is intentionally limited to **service-name ownership**. It contains no wildcard ownership, no broad send/receive grant, and no method-level authorization rule. P5-007 remains responsible for distinguishing read-only from mutating operations and enforcing caller authorization/Polkit policy.
+
+Live P5-006 testing exposed this packaging requirement directly: without the ownership policy, the daemon failed closed with `org.freedesktop.DBus.Error.AccessDenied` rather than silently falling back to a session bus or a different service name. That failure mode is correct; the missing packaging policy was the defect.
 
 ## Startup ordering
 
@@ -89,16 +104,22 @@ sudo install -Dm0755 \
 sudo install -Dm0644 \
   packaging/systemd/blueroute.service \
   /usr/lib/systemd/system/blueroute.service
+sudo install -Dm0644 \
+  packaging/dbus/org.blueroute.Service1.conf \
+  /usr/share/dbus-1/system.d/org.blueroute.Service1.conf
 
 sudo systemctl daemon-reload
+sudo systemctl reload dbus.service
+# A previous failed acceptance run may have exhausted StartLimitBurst.
+sudo systemctl reset-failed blueroute.service
 sudo systemctl enable --now blueroute.service
 ```
 
-The unit file must be installed unchanged for acceptance; substituting a different `ExecStart`, target, or restart policy would not validate the shipped artifact.
+The unit and D-Bus policy files must be installed unchanged for acceptance; substituting a different `ExecStart`, target, restart policy, service name, or broader bus policy would not validate the shipped artifacts.
 
 ## Acceptance procedure
 
-Static/CI acceptance verifies the unit syntax and critical policy settings. Live Debian acceptance must additionally prove all of the following on the supported baseline:
+Static/CI acceptance verifies the unit syntax, critical systemd policy settings, and that the D-Bus policy grants only root ownership of `org.blueroute.Service1`. Live Debian acceptance must additionally prove all of the following on the supported baseline:
 
 1. `blueroute.service` becomes `active` and owns `org.blueroute.Service1`.
 2. `/var/lib/blueroute` and `/run/blueroute` are systemd-managed with restrictive permissions.
