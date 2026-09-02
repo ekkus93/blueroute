@@ -86,21 +86,18 @@ impl Ipv4AddressPool {
     }
 }
 
-
 fn pool_is_rfc1918(network: Ipv4Addr, prefix_len: u8) -> bool {
-    const PRIVATE_RANGES: [(u32, u8); 3] = [
-        (0x0a00_0000, 8),
-        (0xac10_0000, 12),
-        (0xc0a8_0000, 16),
-    ];
+    const PRIVATE_RANGES: [(u32, u8); 3] = [(0x0a00_0000, 8), (0xac10_0000, 12), (0xc0a8_0000, 16)];
     let network = u32::from(network);
-    PRIVATE_RANGES.into_iter().any(|(private_network, private_prefix)| {
-        if prefix_len < private_prefix {
-            return false;
-        }
-        let mask = u32::MAX << (32 - u32::from(private_prefix));
-        network & mask == private_network
-    })
+    PRIVATE_RANGES
+        .into_iter()
+        .any(|(private_network, private_prefix)| {
+            if prefix_len < private_prefix {
+                return false;
+            }
+            let mask = u32::MAX << (32 - u32::from(private_prefix));
+            network & mask == private_network
+        })
 }
 
 impl Default for Ipv4AddressPool {
