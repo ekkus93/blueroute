@@ -1,11 +1,10 @@
-use std::collections::VecDeque;
 use std::fs::File;
 use std::future::Future;
 use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use blueroute_core::{
     CoreError, DaemonConfig, DisplayName, ErrorKind, IpPrefix, MembershipRegistry, MembershipState,
@@ -75,6 +74,7 @@ pub struct LinuxStarHostRuntime {
     transition: AtomicBool,
 }
 
+#[derive(Clone)]
 struct ActiveLinuxStarHost {
     network: NetworkId,
     bridge: NetworkInterfaceHandle,
@@ -117,7 +117,7 @@ impl StarHostRuntime for LinuxStarHostRuntime {
 
             if let Err(error) = network_backend.ensure_address(address.clone()).await {
                 return Err(
-                    rollback_start_failure(
+                    rollback_setup(
                         error,
                         &bluez,
                         &network_backend,
@@ -126,6 +126,7 @@ impl StarHostRuntime for LinuxStarHostRuntime {
                         &bridge,
                         &address,
                         false,
+                        false,
                     )
                     .await,
                 );
@@ -133,7 +134,7 @@ impl StarHostRuntime for LinuxStarHostRuntime {
 
             if let Err(error) = bluez.start_nap(adapter.clone(), bridge.clone()).await {
                 return Err(
-                    rollback_start_failure(
+                    rollback_setup(
                         error,
                         &bluez,
                         &network_backend,
@@ -142,27 +143,37 @@ impl StarHostRuntime for LinuxStarHostRuntime {
                         &bridge,
                         &address,
                         true,
+                        true,
                     )
                     .await,
                 );
             }
 
-            let mut active = self.active.lock().map_err(lock_error)?;
-            if active.is_some() {
-                return Err(CoreError::new(
-                    ErrorKind::InvalidState,
-                    "BlueRoute host runtime changed unexpectedly while creating a network",
-                ));
-            }
-            *active = Some(ActiveLinuxStarHost {
+            let active_host = ActiveLinuxStarHost {
                 network,
                 bridge,
                 address,
                 adapter,
                 bluez,
                 network_backend,
-            });
-            Ok(())
+            };
+            match self.active.lock() {
+                Ok(mut active) if active.is_none() => {
+                    *active = Some(active_host);
+                    Ok(())
+                }
+                Ok(_) => {
+                    let error = CoreError::new(
+                        ErrorKind::InvalidState,
+                        "BlueRoute host runtime changed unexpectedly while creating a network",
+                    );
+                    Err(rollback_active_host(error, &active_host).await)
+                }
+                Err(lock) => {
+                    let error = lock_error(lock);
+                    Err(rollback_active_host(error, &active_host).await)
+                }
+            }
         })
     }
 
@@ -175,7 +186,7 @@ impl StarHostRuntime for LinuxStarHostRuntime {
         Box::pin(async move {
             let _transition = TransitionGuard::claim(&self.transition)?;
             let active = {
-                let mut slot = self.active.lock().map_err(lock_error)?;
+                let slot = self.active.lock().map_err(lock_error)?;
                 match slot.as_ref() {
                     None => return Ok(()),
                     Some(active) if active.network != network => {
@@ -184,45 +195,29 @@ impl StarHostRuntime for LinuxStarHostRuntime {
                             "refusing to stop a BlueRoute star owned by another network",
                         ));
                     }
-                    Some(_) => slot.take().expect("active host was checked above"),
+                    Some(active) if active.bridge != bridge || active.address != address => {
+                        return Err(CoreError::new(
+                            ErrorKind::InvalidState,
+                            "refusing to stop a BlueRoute star with mismatched owned runtime state",
+                        ));
+                    }
+                    Some(active) => active.clone(),
                 }
             };
 
-            if active.bridge != bridge || active.address != address {
-                let mut slot = self.active.lock().map_err(lock_error)?;
-                *slot = Some(active);
-                return Err(CoreError::new(
-                    ErrorKind::InvalidState,
-                    "refusing to stop a BlueRoute star with mismatched owned runtime state",
-                ));
-            }
+            cleanup_active_host(&active).await?;
 
-            let mut failures = Vec::new();
-            if let Err(error) = active.bluez.stop_nap(active.adapter).await {
-                failures.push(format!("stop NAP: {error}"));
-            }
-            if let Err(error) = active
-                .network_backend
-                .remove_address(active.address.clone())
-                .await
+            let mut slot = self.active.lock().map_err(lock_error)?;
+            if slot
+                .as_ref()
+                .is_some_and(|current| current.network == network)
             {
-                failures.push(format!("remove address: {error}"));
-            }
-            if let Err(error) = active
-                .network_backend
-                .remove_owned_interface(network, active.bridge)
-                .await
-            {
-                failures.push(format!("remove bridge: {error}"));
-            }
-
-            if failures.is_empty() {
+                *slot = None;
                 Ok(())
             } else {
-                Err(CoreError::with_diagnostic(
-                    ErrorKind::Internal,
-                    "failed to fully clean up BlueRoute host runtime state",
-                    failures.join("; "),
+                Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "BlueRoute host runtime changed unexpectedly during cleanup",
                 ))
             }
         })
@@ -305,11 +300,7 @@ where
             registry.remember_network(membership);
 
             if let Err(persist_error) = self.store.save(&registry) {
-                return match self
-                    .runtime
-                    .stop_host(network, bridge, address)
-                    .await
-                {
+                return match self.runtime.stop_host(network, bridge, address).await {
                     Ok(()) => Err(persist_error),
                     Err(cleanup_error) => Err(CoreError::with_diagnostic(
                         ErrorKind::PersistenceError,
@@ -340,14 +331,18 @@ where
         let registry = self.store.load()?;
         Ok(registry
             .networks()
-            .map(|membership| NetworkSummary {
-                id: membership.network_id,
-                name: membership.network_name.clone(),
-                member_count: u32::from(membership.state == MembershipState::Member)
-                    + membership
-                        .peers()
-                        .filter(|peer| peer.is_member())
-                        .count() as u32,
+            .map(|membership| {
+                let local_member = if membership.state == MembershipState::Member {
+                    1
+                } else {
+                    0
+                };
+                NetworkSummary {
+                    id: membership.network_id,
+                    name: membership.network_name.clone(),
+                    member_count: local_member
+                        + membership.peers().filter(|peer| peer.is_member()).count() as u32,
+                }
             })
             .collect())
     }
@@ -403,7 +398,10 @@ fn bridge_name(network: NetworkId) -> Result<NetworkInterfaceHandle, CoreError> 
     NetworkInterfaceHandle::new(format!("brb-{}", &id[..8]))
 }
 
-fn local_star_address(network: NetworkId, config: &DaemonConfig) -> Result<InterfaceAddress, CoreError> {
+fn local_star_address(
+    network: NetworkId,
+    config: &DaemonConfig,
+) -> Result<InterfaceAddress, CoreError> {
     config.validate()?;
     let pool = config.ipv4_address_pool;
     let segment_bits = pool.segment_prefix_len - pool.pool_prefix_len;
@@ -429,7 +427,9 @@ fn local_star_address(network: NetworkId, config: &DaemonConfig) -> Result<Inter
     })
 }
 
-async fn select_powered_adapter(bluez: &BluezBackend) -> Result<blueroute_linux::AdapterHandle, CoreError> {
+async fn select_powered_adapter(
+    bluez: &BluezBackend,
+) -> Result<blueroute_linux::AdapterHandle, CoreError> {
     let adapters = bluez.adapters().await?;
     if let Some(adapter) = adapters.into_iter().find(|adapter| adapter.powered) {
         return Ok(adapter.handle);
@@ -440,7 +440,8 @@ async fn select_powered_adapter(bluez: &BluezBackend) -> Result<blueroute_linux:
     ))
 }
 
-async fn rollback_start_failure(
+#[allow(clippy::too_many_arguments)]
+async fn rollback_setup(
     original: CoreError,
     bluez: &BluezBackend,
     network_backend: &NetworkManagerBackend,
@@ -448,15 +449,14 @@ async fn rollback_start_failure(
     adapter: &blueroute_linux::AdapterHandle,
     bridge: &NetworkInterfaceHandle,
     address: &InterfaceAddress,
-    address_was_applied: bool,
+    cleanup_nap: bool,
+    cleanup_address: bool,
 ) -> CoreError {
     let mut failures = Vec::new();
-    if let Err(error) = bluez.stop_nap(adapter.clone()).await {
+    if cleanup_nap && let Err(error) = bluez.stop_nap(adapter.clone()).await {
         failures.push(format!("stop NAP: {error}"));
     }
-    if address_was_applied
-        && let Err(error) = network_backend.remove_address(address.clone()).await
-    {
+    if cleanup_address && let Err(error) = network_backend.remove_address(address.clone()).await {
         failures.push(format!("remove address: {error}"));
     }
     if let Err(error) = network_backend
@@ -465,20 +465,71 @@ async fn rollback_start_failure(
     {
         failures.push(format!("remove bridge: {error}"));
     }
+    attach_cleanup_failures(original, failures)
+}
 
-    if failures.is_empty() {
-        original
-    } else {
-        CoreError::with_diagnostic(
+async fn rollback_active_host(
+    original: CoreError,
+    active: &ActiveLinuxStarHost,
+) -> CoreError {
+    match cleanup_active_host(active).await {
+        Ok(()) => original,
+        Err(cleanup) => CoreError::with_diagnostic(
             original.kind(),
             original.message(),
             format!(
-                "{}; runtime rollback failures: {}",
+                "{}; runtime rollback also failed: {cleanup}; cleanup diagnostic={:?}",
                 original.diagnostic().unwrap_or("no original diagnostic"),
-                failures.join("; ")
+                cleanup.diagnostic()
             ),
-        )
+        ),
     }
+}
+
+async fn cleanup_active_host(active: &ActiveLinuxStarHost) -> Result<(), CoreError> {
+    let mut failures = Vec::new();
+    if let Err(error) = active.bluez.stop_nap(active.adapter.clone()).await {
+        failures.push(format!("stop NAP: {error}"));
+    }
+    if let Err(error) = active
+        .network_backend
+        .remove_address(active.address.clone())
+        .await
+    {
+        failures.push(format!("remove address: {error}"));
+    }
+    if let Err(error) = active
+        .network_backend
+        .remove_owned_interface(active.network, active.bridge.clone())
+        .await
+    {
+        failures.push(format!("remove bridge: {error}"));
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(CoreError::with_diagnostic(
+            ErrorKind::Internal,
+            "failed to fully clean up BlueRoute host runtime state",
+            failures.join("; "),
+        ))
+    }
+}
+
+fn attach_cleanup_failures(original: CoreError, failures: Vec<String>) -> CoreError {
+    if failures.is_empty() {
+        return original;
+    }
+    CoreError::with_diagnostic(
+        original.kind(),
+        original.message(),
+        format!(
+            "{}; runtime rollback failures: {}",
+            original.diagnostic().unwrap_or("no original diagnostic"),
+            failures.join("; ")
+        ),
+    )
 }
 
 fn lock_error<T>(error: std::sync::PoisonError<T>) -> CoreError {
@@ -514,7 +565,9 @@ impl Drop for TransitionGuard<'_> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::fs;
+    use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
 
     use blueroute_core::{CapabilitySource, Sourced};
@@ -522,10 +575,21 @@ mod tests {
     use super::*;
 
     #[derive(Default)]
-    struct FakeRuntime {
+    struct FakeRuntimeState {
         starts: AtomicUsize,
         stops: AtomicUsize,
         fail_start: AtomicBool,
+    }
+
+    #[derive(Clone, Default)]
+    struct FakeRuntime {
+        state: Arc<FakeRuntimeState>,
+    }
+
+    impl FakeRuntime {
+        fn starts(&self) -> usize {
+            self.state.starts.load(Ordering::SeqCst)
+        }
     }
 
     impl StarHostRuntime for FakeRuntime {
@@ -536,8 +600,8 @@ mod tests {
             _address: InterfaceAddress,
         ) -> NetworkOperationFuture<'_, ()> {
             Box::pin(async move {
-                self.starts.fetch_add(1, Ordering::SeqCst);
-                if self.fail_start.load(Ordering::SeqCst) {
+                self.state.starts.fetch_add(1, Ordering::SeqCst);
+                if self.state.fail_start.load(Ordering::SeqCst) {
                     Err(CoreError::new(ErrorKind::PanFailure, "fake NAP failure"))
                 } else {
                     Ok(())
@@ -552,7 +616,7 @@ mod tests {
             _address: InterfaceAddress,
         ) -> NetworkOperationFuture<'_, ()> {
             Box::pin(async move {
-                self.stops.fetch_add(1, Ordering::SeqCst);
+                self.state.stops.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             })
         }
@@ -605,11 +669,12 @@ mod tests {
         futures_lite::future::block_on(async {
             let (root, store) = temp_store("commit");
             let network = NetworkId::from_bytes([7; 16]);
+            let runtime = FakeRuntime::default();
             let operations = SingleStarNetworkOperations::with_runtime_and_generator(
                 store,
                 DaemonConfig::default(),
                 nap_capabilities(Some(true)),
-                FakeRuntime::default(),
+                runtime.clone(),
                 SequenceGenerator::new([network]),
             );
 
@@ -618,6 +683,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(created, network);
+            assert_eq!(runtime.starts(), 1);
             let networks = operations.list_networks().unwrap();
             assert_eq!(networks.len(), 1);
             assert_eq!(networks[0].id, network);
@@ -632,12 +698,12 @@ mod tests {
     fn unavailable_nap_fails_before_runtime_mutation() {
         futures_lite::future::block_on(async {
             let (root, store) = temp_store("no-nap");
-            let runtime = Arc::new(FakeRuntime::default());
+            let runtime = FakeRuntime::default();
             let operations = SingleStarNetworkOperations::with_runtime_and_generator(
                 store,
                 DaemonConfig::default(),
                 nap_capabilities(Some(false)),
-                SharedRuntime(runtime.clone()),
+                runtime.clone(),
                 SequenceGenerator::new([NetworkId::from_bytes([8; 16])]),
             );
 
@@ -646,7 +712,7 @@ mod tests {
                 .await
                 .unwrap_err();
             assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
-            assert_eq!(runtime.starts.load(Ordering::SeqCst), 0);
+            assert_eq!(runtime.starts(), 0);
             fs::remove_dir_all(root).unwrap();
         });
     }
@@ -656,12 +722,12 @@ mod tests {
         futures_lite::future::block_on(async {
             let (root, store) = temp_store("runtime-fail");
             let runtime = FakeRuntime::default();
-            runtime.fail_start.store(true, Ordering::SeqCst);
+            runtime.state.fail_start.store(true, Ordering::SeqCst);
             let operations = SingleStarNetworkOperations::with_runtime_and_generator(
                 store,
                 DaemonConfig::default(),
                 nap_capabilities(Some(true)),
-                runtime,
+                runtime.clone(),
                 SequenceGenerator::new([NetworkId::from_bytes([9; 16])]),
             );
 
@@ -670,16 +736,46 @@ mod tests {
                 .await
                 .unwrap_err();
             assert_eq!(error.kind(), ErrorKind::PanFailure);
+            assert_eq!(runtime.starts(), 1);
             assert!(operations.list_networks().unwrap().is_empty());
             fs::remove_dir_all(root).unwrap();
         });
     }
 
     #[test]
+    fn second_create_is_rejected_without_a_second_runtime_start() {
+        futures_lite::future::block_on(async {
+            let (root, store) = temp_store("duplicate");
+            let runtime = FakeRuntime::default();
+            let operations = SingleStarNetworkOperations::with_runtime_and_generator(
+                store,
+                DaemonConfig::default(),
+                nap_capabilities(Some(true)),
+                runtime.clone(),
+                SequenceGenerator::new([
+                    NetworkId::from_bytes([10; 16]),
+                    NetworkId::from_bytes([11; 16]),
+                ]),
+            );
+
+            operations
+                .create_network(DisplayName::new("First").unwrap())
+                .await
+                .unwrap();
+            let error = operations
+                .create_network(DisplayName::new("Second").unwrap())
+                .await
+                .unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::InvalidState);
+            assert_eq!(runtime.starts(), 1);
+            fs::remove_dir_all(root).unwrap();
+        });
+    }
+
+    #[test]
     fn network_identity_drives_stable_bridge_and_subnet() {
-        let network = NetworkId::from_bytes([
-            0x12, 0x34, 0x56, 0x78, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        ]);
+        let network =
+            NetworkId::from_bytes([0x12, 0x34, 0x56, 0x78, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         let bridge = bridge_name(network).unwrap();
         assert_eq!(bridge.as_str(), "brb-12345678");
         assert!(bridge.as_str().len() <= 15);
@@ -693,28 +789,5 @@ mod tests {
         };
         assert_eq!(ipv4.octets()[0..2], [10, 201]);
         assert_eq!(ipv4.octets()[3], 1);
-    }
-
-    #[derive(Clone)]
-    struct SharedRuntime(Arc<FakeRuntime>);
-
-    impl StarHostRuntime for SharedRuntime {
-        fn start_host(
-            &self,
-            network: NetworkId,
-            bridge: NetworkInterfaceHandle,
-            address: InterfaceAddress,
-        ) -> NetworkOperationFuture<'_, ()> {
-            self.0.start_host(network, bridge, address)
-        }
-
-        fn stop_host(
-            &self,
-            network: NetworkId,
-            bridge: NetworkInterfaceHandle,
-            address: InterfaceAddress,
-        ) -> NetworkOperationFuture<'_, ()> {
-            self.0.stop_host(network, bridge, address)
-        }
     }
 }
