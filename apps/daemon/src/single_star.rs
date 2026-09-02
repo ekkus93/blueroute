@@ -3,8 +3,8 @@ use std::future::Future;
 use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use blueroute_core::{
     CoreError, DaemonConfig, DisplayName, ErrorKind, IpPrefix, MembershipRegistry, MembershipState,
@@ -116,37 +116,33 @@ impl StarHostRuntime for LinuxStarHostRuntime {
                 .await?;
 
             if let Err(error) = network_backend.ensure_address(address.clone()).await {
-                return Err(
-                    rollback_setup(
-                        error,
-                        &bluez,
-                        &network_backend,
-                        network,
-                        &adapter,
-                        &bridge,
-                        &address,
-                        false,
-                        false,
-                    )
-                    .await,
-                );
+                return Err(rollback_setup(
+                    error,
+                    &bluez,
+                    &network_backend,
+                    network,
+                    &adapter,
+                    &bridge,
+                    &address,
+                    false,
+                    false,
+                )
+                .await);
             }
 
             if let Err(error) = bluez.start_nap(adapter.clone(), bridge.clone()).await {
-                return Err(
-                    rollback_setup(
-                        error,
-                        &bluez,
-                        &network_backend,
-                        network,
-                        &adapter,
-                        &bridge,
-                        &address,
-                        true,
-                        true,
-                    )
-                    .await,
-                );
+                return Err(rollback_setup(
+                    error,
+                    &bluez,
+                    &network_backend,
+                    network,
+                    &adapter,
+                    &bridge,
+                    &address,
+                    true,
+                    true,
+                )
+                .await);
             }
 
             let active_host = ActiveLinuxStarHost {
@@ -468,10 +464,7 @@ async fn rollback_setup(
     attach_cleanup_failures(original, failures)
 }
 
-async fn rollback_active_host(
-    original: CoreError,
-    active: &ActiveLinuxStarHost,
-) -> CoreError {
+async fn rollback_active_host(original: CoreError, active: &ActiveLinuxStarHost) -> CoreError {
     match cleanup_active_host(active).await {
         Ok(()) => original,
         Err(cleanup) => CoreError::with_diagnostic(
