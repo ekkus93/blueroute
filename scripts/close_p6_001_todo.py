@@ -1,4 +1,5 @@
 # Temporary one-shot helper; removed before merge.
+# This follow-up commit intentionally triggers the PR workflow after branch checkout was pinned.
 from pathlib import Path
 
 path = Path("docs/TODO.md")
