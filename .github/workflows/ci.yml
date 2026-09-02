@@ -51,3 +51,6 @@ jobs:
 
       - name: Run daemon D-Bus integration test
         run: dbus-run-session -- cargo test -p blueroute-daemon --test dbus_service --locked dbus_service_round_trip_and_event -- --ignored --exact
+
+      - name: Run client D-Bus integration test
+        run: dbus-run-session -- cargo test -p blueroute-client --test dbus_client --locked client_queries_events_reconnects_and_fails_closed_on_incompatibility -- --ignored --exact

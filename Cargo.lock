@@ -171,6 +171,14 @@ version = "0.1.0"
 [[package]]
 name = "blueroute-client"
 version = "0.1.0"
+dependencies = [
+ "async-io",
+ "blueroute-core",
+ "blueroute-daemon",
+ "blueroute-protocol",
+ "futures-lite",
+ "zbus",
+]
 
 [[package]]
 name = "blueroute-core"
