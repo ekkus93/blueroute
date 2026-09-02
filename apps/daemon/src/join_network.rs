@@ -11,8 +11,7 @@ use blueroute_linux::{
 
 use crate::current_network;
 
-pub type JoinNetworkFuture<'a, T> =
-    Pin<Box<dyn Future<Output = Result<T, CoreError>> + Send + 'a>>;
+pub type JoinNetworkFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, CoreError>> + Send + 'a>>;
 
 pub trait JoinNetworkOperations: Send + Sync {
     fn join_network(&self, network: NetworkId) -> JoinNetworkFuture<'_, ()>;
@@ -329,8 +328,12 @@ fn combine_rollback(
     panu: Result<(), CoreError>,
 ) -> CoreError {
     let failures: Vec<String> = [
-        control.err().map(|error| format!("control rollback: {error}")),
-        address.err().map(|error| format!("address rollback: {error}")),
+        control
+            .err()
+            .map(|error| format!("control rollback: {error}")),
+        address
+            .err()
+            .map(|error| format!("address rollback: {error}")),
         panu.err().map(|error| format!("PANU rollback: {error}")),
     ]
     .into_iter()
@@ -590,10 +593,8 @@ mod tests {
         futures_lite::future::block_on(async {
             let (root, store) = temp_store("invalid-durable-state");
             let network = NetworkId::from_bytes([0x49; 16]);
-            let mut membership = NetworkMembership::new(
-                network,
-                DisplayName::new("Interrupted leave").unwrap(),
-            );
+            let mut membership =
+                NetworkMembership::new(network, DisplayName::new("Interrupted leave").unwrap());
             membership.state = MembershipState::Leaving;
             let mut registry = MembershipRegistry::default();
             registry.remember_network(membership);
@@ -633,10 +634,7 @@ mod tests {
                 "control cleanup failed",
             )),
             Ok(()),
-            Err(CoreError::new(
-                ErrorKind::PanFailure,
-                "PANU cleanup failed",
-            )),
+            Err(CoreError::new(ErrorKind::PanFailure, "PANU cleanup failed")),
         );
         assert_eq!(error.kind(), ErrorKind::AuthenticationFailed);
         assert_eq!(error.message(), "primary failure");
@@ -650,10 +648,8 @@ mod tests {
         futures_lite::future::block_on(async {
             let (root, store) = temp_store("idempotent");
             let network = NetworkId::from_bytes([0x48; 16]);
-            let mut membership = NetworkMembership::new(
-                network,
-                DisplayName::new("Already joined").unwrap(),
-            );
+            let mut membership =
+                NetworkMembership::new(network, DisplayName::new("Already joined").unwrap());
             membership.state = MembershipState::Member;
             let mut registry = MembershipRegistry::default();
             registry.remember_network(membership);
