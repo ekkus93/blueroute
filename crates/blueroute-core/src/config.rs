@@ -76,8 +76,31 @@ impl Ipv4AddressPool {
                 "IPv4 pool address must be aligned to its prefix",
             ));
         }
+        if !pool_is_rfc1918(self.network, self.pool_prefix_len) {
+            return Err(CoreError::new(
+                ErrorKind::InvalidInput,
+                "BlueRoute IPv4 address pool must be fully contained in RFC1918 private space",
+            ));
+        }
         Ok(())
     }
+}
+
+
+fn pool_is_rfc1918(network: Ipv4Addr, prefix_len: u8) -> bool {
+    const PRIVATE_RANGES: [(u32, u8); 3] = [
+        (0x0a00_0000, 8),
+        (0xac10_0000, 12),
+        (0xc0a8_0000, 16),
+    ];
+    let network = u32::from(network);
+    PRIVATE_RANGES.into_iter().any(|(private_network, private_prefix)| {
+        if prefix_len < private_prefix {
+            return false;
+        }
+        let mask = u32::MAX << (32 - u32::from(private_prefix));
+        network & mask == private_network
+    })
 }
 
 impl Default for Ipv4AddressPool {
@@ -211,6 +234,14 @@ mod tests {
     #[test]
     fn address_pool_requires_segment_prefix_inside_pool() {
         assert!(Ipv4AddressPool::new(Ipv4Addr::new(10, 201, 0, 0), 24, 16).is_err());
+    }
+
+    #[test]
+    fn address_pool_requires_rfc1918_private_space() {
+        assert!(Ipv4AddressPool::new(Ipv4Addr::new(192, 0, 2, 0), 24, 24).is_err());
+        assert!(Ipv4AddressPool::new(Ipv4Addr::new(100, 64, 0, 0), 10, 24).is_err());
+        assert!(Ipv4AddressPool::new(Ipv4Addr::new(172, 16, 0, 0), 12, 24).is_ok());
+        assert!(Ipv4AddressPool::new(Ipv4Addr::new(192, 168, 0, 0), 16, 24).is_ok());
     }
 
     #[test]

@@ -1,5 +1,6 @@
 #![doc = "Hardware-independent BlueRoute domain logic."]
 
+mod addressing;
 mod capability;
 mod config;
 mod error;
@@ -10,6 +11,7 @@ mod route;
 mod secret;
 mod topology;
 
+pub use addressing::{Ipv4StarAddressPlan, ensure_ipv4_segment_available, normalized_ipv4_prefix};
 pub use capability::{
     CapabilitySource, LinkQuality, NetworkBackend, NodeCapabilities, PowerState, Sourced,
 };
