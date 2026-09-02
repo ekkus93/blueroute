@@ -2,8 +2,8 @@ name: P4-010 wiring helper
 
 on:
   push:
-    branches: [P4-010_system_capability_report]
-    paths: [.github/workflows/p4-010-wire.yml]
+    branches:
+      - P4-010_system_capability_report
 
 permissions:
   contents: write
@@ -23,58 +23,56 @@ jobs:
 
           lib = Path('crates/blueroute-linux/src/lib.rs')
           text = lib.read_text()
-          old = 'mod bluez;\nmod forwarding;'
-          new = 'mod bluez;\nmod capability_report;\nmod forwarding;'
-          if old not in text:
-              raise SystemExit('lib module insertion point missing')
-          text = text.replace(old, new, 1)
-          old = 'pub use bluez::BluezBackend;\npub use identity::{NodeIdentityGenerator, NodeIdentityStore, SystemNodeIdentityGenerator};'
-          new = '''pub use bluez::BluezBackend;
-pub use capability_report::{
+          if 'mod capability_report;' not in text:
+              text = text.replace('mod bluez;\nmod forwarding;', 'mod bluez;\nmod capability_report;\nmod forwarding;', 1)
+          export = '''pub use capability_report::{
     BluetoothControllerReport, CapabilityDiagnostic, CapabilityDiagnosticLevel, RuntimePrerequisite,
     SystemCapabilityProbe, SystemCapabilityReport, SystemSupportLevel,
 };
-pub use identity::{NodeIdentityGenerator, NodeIdentityStore, SystemNodeIdentityGenerator};'''
-          if old not in text:
-              raise SystemExit('lib export insertion point missing')
-          lib.write_text(text.replace(old, new, 1))
+'''
+          if 'pub use capability_report::' not in text:
+              text = text.replace('pub use bluez::BluezBackend;\n', 'pub use bluez::BluezBackend;\n' + export, 1)
+          lib.write_text(text)
 
           capability = Path('crates/blueroute-linux/src/capability_report.rs')
-          text = capability.read_text().replace(
+          capability.write_text(capability.read_text().replace(
               'use std::path::{Path, PathBuf};', 'use std::path::Path;'
-          )
-          capability.write_text(text)
+          ))
 
           todo = Path('docs/TODO.md')
           text = todo.read_text()
           row = '| P4-009 | `[x]` | Node-global IPv4 forwarding control, boot-local ownership lease, fresh-backend reconciliation, idempotent release, foreign forwarding preservation, NAT/firewall separation, and live kernel hardware acceptance are complete. |\n'
-          insertion = row + '| P4-010 | `[-]` | Read-only system capability reporting, support classification, runtime diagnostics, and a live probe are implemented; hardware acceptance is pending. |\n'
-          if row not in text:
-              raise SystemExit('P4-009 status row missing')
-          text = text.replace(row, insertion, 1)
-          replacements = {
-              '- [ ] BlueZ availability/version.': '- [x] BlueZ availability/version.',
-              '- [ ] network backend/version.': '- [x] network backend/version.',
-              '- [ ] Bluetooth adapters/controllers/drivers.': '- [x] Bluetooth adapters/controllers/drivers.',
-              '- [ ] PANU/NAP capability observations where determinable.': '- [x] PANU/NAP capability observations where determinable.',
-              '- [ ] forwarding capability.': '- [x] forwarding capability.',
-              '- [ ] practical/configured peer ceiling.': '- [x] practical/configured peer ceiling.',
-              '- [ ] kernel/runtime prerequisites.': '- [x] kernel/runtime prerequisites.',
-          }
-          for old, new in replacements.items():
-              if old not in text:
-                  raise SystemExit(f'missing TODO item: {old}')
-              text = text.replace(old, new, 1)
+          p4010 = '| P4-010 | `[-]` | Read-only system capability reporting, support classification, runtime diagnostics, and a live probe are implemented; hardware acceptance is pending. |\n'
+          if p4010 not in text:
+              if row not in text:
+                  raise SystemExit('P4-009 status row missing')
+              text = text.replace(row, row + p4010, 1)
+          for old in [
+              'BlueZ availability/version.',
+              'network backend/version.',
+              'Bluetooth adapters/controllers/drivers.',
+              'PANU/NAP capability observations where determinable.',
+              'forwarding capability.',
+              'practical/configured peer ceiling.',
+              'kernel/runtime prerequisites.',
+          ]:
+              text = text.replace(f'- [ ] {old}', f'- [x] {old}', 1)
           acceptance = '- Diagnostics explain why a system is fully supported, client-only, degraded, or unsupported.\n'
-          replacement = acceptance + '- Implementation/design notes and the read-only probe are documented in `docs/P4-010-CAPABILITIES.md`; physical acceptance remains pending before task closeout.\n'
-          if acceptance not in text:
-              raise SystemExit('P4-010 acceptance line missing')
-          todo.write_text(text.replace(acceptance, replacement, 1))
+          note = '- Implementation/design notes and the read-only probe are documented in `docs/P4-010-CAPABILITIES.md`; physical acceptance remains pending before task closeout.\n'
+          if note not in text:
+              if acceptance not in text:
+                  raise SystemExit('P4-010 acceptance line missing')
+              text = text.replace(acceptance, acceptance + note, 1)
+          todo.write_text(text)
           PY
           cargo fmt --all
           git diff --check
           git config user.name "Phillip Chin"
           git config user.email "ekkus93@gmail.com"
           git add crates/blueroute-linux/src/lib.rs crates/blueroute-linux/src/capability_report.rs docs/TODO.md
+          if git diff --cached --quiet; then
+            echo "No wiring changes needed"
+            exit 0
+          fi
           git commit -m "feat: wire P4-010 capability reporting"
           git push origin HEAD:P4-010_system_capability_report
