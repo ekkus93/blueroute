@@ -56,6 +56,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P5-003 | `[x]` | Event model and deterministic structural tests are implemented and green in CI. |
 | P5-004 | `[x]` | Versioned daemon D-Bus service ownership, status/capability queries, fail-closed request decoding, typed event signaling, and real broker-level CI acceptance are complete. |
 | P5-005 | `[x]` | Shared system-D-Bus client, mandatory version gating, typed requests/events, bounded reconnect, and real-broker restart/incompatibility acceptance are complete. |
+| P5-006 | `[x]` | System-level systemd service packaging, D-Bus name ownership, bounded restart policy, journald integration, boot activation, and GUI-logout independence are proven on Debian 13 hardware. |
 | All other tasks | `[ ]` | Not started. |
 
 ## Platform rule
@@ -636,14 +637,15 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P5-006 — Add systemd service
 
-- [ ] unit file.
-- [ ] restart policy.
-- [ ] startup ordering.
-- [ ] journald logging.
+- [x] unit file.
+- [x] restart policy.
+- [x] startup ordering.
+- [x] journald logging.
 
 **Acceptance**
 
 - Daemon starts at boot on supported Debian baseline and survives GUI logout.
+- Hardware acceptance is recorded in `docs/P5-006-HARDWARE-EVIDENCE-2026-09-01.md`; the enabled system service started automatically after reboot, survived GUI logout/login with the same PID and InvocationID, restarted after forced `SIGKILL`, and retained restrictive systemd-managed state/runtime directories.
 
 ## P5-007 — Define D-Bus/Polkit authorization policy
 
