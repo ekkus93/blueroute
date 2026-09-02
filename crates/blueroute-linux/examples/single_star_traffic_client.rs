@@ -2,8 +2,6 @@ use std::env;
 use std::time::{Duration, Instant};
 
 use async_io::Timer;
-use zbus::zvariant::OwnedObjectPath;
-use zbus::{Connection, Proxy};
 use blueroute_core::{
     CoreError, ErrorKind, Ipv4AddressPool, Ipv4StarAddressPlan, NetworkId,
     ensure_ipv4_segment_available,
@@ -13,6 +11,8 @@ use blueroute_linux::{
     IpNetworkObservationBackend, NetworkInterfaceHandle, NetworkManagerBackend,
     NetworkStateBackend, PanBackend,
 };
+use zbus::zvariant::OwnedObjectPath;
+use zbus::{Connection, Proxy};
 
 const NETWORKMANAGER_DEVICE_WAIT: Duration = Duration::from_secs(8);
 const NETWORKMANAGER_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -229,8 +229,8 @@ impl NetworkManagerDeviceObservation {
     }
 }
 
-async fn networkmanager_device_observations(
-) -> Result<Vec<NetworkManagerDeviceObservation>, CoreError> {
+async fn networkmanager_device_observations()
+-> Result<Vec<NetworkManagerDeviceObservation>, CoreError> {
     const NM_SERVICE: &str = "org.freedesktop.NetworkManager";
     const NM_PATH: &str = "/org/freedesktop/NetworkManager";
     const NM_INTERFACE: &str = "org.freedesktop.NetworkManager";
@@ -262,35 +262,35 @@ async fn networkmanager_device_observations(
 
     let mut observations = Vec::with_capacity(paths.len());
     for path in paths {
-        let proxy = Proxy::new(
-            &connection,
-            NM_SERVICE,
-            path.as_str(),
-            NM_DEVICE_INTERFACE,
-        )
-        .await
-        .map_err(|error| {
-            CoreError::with_diagnostic(
-                ErrorKind::NetworkBackendUnavailable,
-                "failed to inspect a NetworkManager device",
-                error.to_string(),
-            )
-        })?;
-        let control_interface: String = proxy.get_property("Interface").await.map_err(|error| {
-            diagnostic_property_error("Interface", error)
-        })?;
-        let ip_interface: String = proxy.get_property("IpInterface").await.map_err(|error| {
-            diagnostic_property_error("IpInterface", error)
-        })?;
-        let managed: bool = proxy.get_property("Managed").await.map_err(|error| {
-            diagnostic_property_error("Managed", error)
-        })?;
-        let device_type: u32 = proxy.get_property("DeviceType").await.map_err(|error| {
-            diagnostic_property_error("DeviceType", error)
-        })?;
-        let state: u32 = proxy.get_property("State").await.map_err(|error| {
-            diagnostic_property_error("State", error)
-        })?;
+        let proxy = Proxy::new(&connection, NM_SERVICE, path.as_str(), NM_DEVICE_INTERFACE)
+            .await
+            .map_err(|error| {
+                CoreError::with_diagnostic(
+                    ErrorKind::NetworkBackendUnavailable,
+                    "failed to inspect a NetworkManager device",
+                    error.to_string(),
+                )
+            })?;
+        let control_interface: String = proxy
+            .get_property("Interface")
+            .await
+            .map_err(|error| diagnostic_property_error("Interface", error))?;
+        let ip_interface: String = proxy
+            .get_property("IpInterface")
+            .await
+            .map_err(|error| diagnostic_property_error("IpInterface", error))?;
+        let managed: bool = proxy
+            .get_property("Managed")
+            .await
+            .map_err(|error| diagnostic_property_error("Managed", error))?;
+        let device_type: u32 = proxy
+            .get_property("DeviceType")
+            .await
+            .map_err(|error| diagnostic_property_error("DeviceType", error))?;
+        let state: u32 = proxy
+            .get_property("State")
+            .await
+            .map_err(|error| diagnostic_property_error("State", error))?;
         observations.push(NetworkManagerDeviceObservation {
             control_interface,
             ip_interface: (!ip_interface.is_empty()).then_some(ip_interface),
