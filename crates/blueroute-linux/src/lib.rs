@@ -11,8 +11,8 @@ mod secret_store;
 
 pub use bluez::BluezBackend;
 pub use capability_report::{
-    BluetoothControllerReport, CapabilityDiagnostic, CapabilityDiagnosticLevel, RuntimePrerequisite,
-    SystemCapabilityProbe, SystemCapabilityReport, SystemSupportLevel,
+    BluetoothControllerReport, CapabilityDiagnostic, CapabilityDiagnosticLevel,
+    RuntimePrerequisite, SystemCapabilityProbe, SystemCapabilityReport, SystemSupportLevel,
 };
 pub use identity::{NodeIdentityGenerator, NodeIdentityStore, SystemNodeIdentityGenerator};
 pub use membership_store::NetworkMembershipStore;
