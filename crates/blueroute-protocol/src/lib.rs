@@ -484,9 +484,7 @@ mod tests {
     fn malformed_payloads_and_invalid_domain_values_fail_closed() {
         assert!(decode_command("not-json").is_err());
         assert!(decode_command(r#"{"type":"unknown"}"#).is_err());
-        assert!(
-            decode_command(r#"{"type":"create_network","data":{"name":"   "}}"#).is_err()
-        );
+        assert!(decode_command(r#"{"type":"create_network","data":{"name":"   "}}"#).is_err());
         assert!(decode_event(r#"{"type":"network_lost","data":"not-an-id"}"#).is_err());
     }
 
