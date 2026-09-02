@@ -64,17 +64,17 @@ impl BlueRouteAdvertisement {
 impl BlueRouteAdvertisement {
     fn release(&self) {}
 
-    #[zbus(property, name = "Type", emits_changed_signal = "const")]
+    #[zbus(property, name = "Type")]
     fn advertisement_type(&self) -> &str {
         "peripheral"
     }
 
-    #[zbus(property, name = "Discoverable", emits_changed_signal = "const")]
+    #[zbus(property, name = "Discoverable")]
     fn discoverable(&self) -> bool {
         true
     }
 
-    #[zbus(property, name = "ManufacturerData", emits_changed_signal = "const")]
+    #[zbus(property, name = "ManufacturerData")]
     fn manufacturer_data(&self) -> HashMap<u16, OwnedValue> {
         self.manufacturer_data.clone()
     }
