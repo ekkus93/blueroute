@@ -10,14 +10,14 @@ pub use authorization::{
     CommandAuthorization, INTERNET_SHARING_ACTION_ID, MODIFY_ACTION_ID, command_authorization,
     command_operation,
 };
-pub use single_star::{
-    LinuxStarHostRuntime, NetworkIdGenerator, NetworkOperationFuture, NetworkOperations,
-    SingleStarNetworkOperations, StarHostRuntime, SystemNetworkIdGenerator, current_network,
-};
-use blueroute_core::{CoreError, ErrorKind, HealthLevel, NodeCapabilities, NodeId};
+use blueroute_core::{CoreError, ErrorKind, HealthLevel, NetworkId, NodeCapabilities, NodeId};
 use blueroute_protocol::{
     ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, Event,
     ProtocolCodecError, Response, decode_command, encode_event, encode_response,
+};
+pub use single_star::{
+    LinuxStarHostRuntime, NetworkIdGenerator, NetworkOperationFuture, NetworkOperations,
+    SingleStarNetworkOperations, StarHostRuntime, SystemNetworkIdGenerator, current_network,
 };
 use zbus::fdo;
 use zbus::message::Header;
@@ -60,13 +60,16 @@ impl DaemonService {
     }
 
     pub fn status_snapshot(&self) -> Result<DaemonStatus, CoreError> {
-        self.status.lock().map(|status| status.clone()).map_err(|error| {
-            CoreError::with_diagnostic(
-                ErrorKind::Internal,
-                "BlueRoute daemon status lock was poisoned",
-                error.to_string(),
-            )
-        })
+        self.status
+            .lock()
+            .map(|status| status.clone())
+            .map_err(|error| {
+                CoreError::with_diagnostic(
+                    ErrorKind::Internal,
+                    "BlueRoute daemon status lock was poisoned",
+                    error.to_string(),
+                )
+            })
     }
 
     fn encode_response(response: &Response) -> fdo::Result<String> {
@@ -83,17 +86,15 @@ impl DaemonService {
         })
     }
 
-    fn update_current_network(&self, network: NodeNetwork) -> fdo::Result<()> {
+    fn update_current_network(&self, network: Option<NetworkId>) -> fdo::Result<()> {
         let mut status = self
             .status
             .lock()
             .map_err(|_| fdo::Error::Failed("BlueRoute daemon status is unavailable".into()))?;
-        status.current_network = network.0;
+        status.current_network = network;
         Ok(())
     }
 }
-
-struct NodeNetwork(Option<blueroute_core::NetworkId>);
 
 #[interface(name = "org.blueroute.Service1")]
 impl DaemonService {
@@ -102,9 +103,7 @@ impl DaemonService {
     }
 
     fn status(&self) -> fdo::Result<String> {
-        let status = self
-            .status_snapshot()
-            .map_err(core_error_to_dbus)?;
+        let status = self.status_snapshot().map_err(core_error_to_dbus)?;
         Self::encode_response(&Response::Status(status))
     }
 
@@ -143,7 +142,7 @@ impl DaemonService {
                     .create_network(name)
                     .await
                     .map_err(core_error_to_dbus)?;
-                self.update_current_network(NodeNetwork(Some(network)))?;
+                self.update_current_network(Some(network))?;
                 Self::encode_response(&Response::Ack)
             }
             _ => Err(fdo::Error::NotSupported(
