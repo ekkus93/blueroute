@@ -71,3 +71,22 @@ jobs:
           grep -Fxq 'StandardOutput=journal' packaging/systemd/blueroute.service
           grep -Fxq 'StandardError=journal' packaging/systemd/blueroute.service
           grep -Fxq 'WantedBy=multi-user.target' packaging/systemd/blueroute.service
+
+      - name: Validate D-Bus service ownership policy
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          path = Path("packaging/dbus/org.blueroute.Service1.conf")
+          root = ET.parse(path).getroot()
+          policies = root.findall("policy")
+          assert len(policies) == 1, "P5-006 policy must contain exactly one policy block"
+          policy = policies[0]
+          assert policy.attrib == {"user": "root"}, "ownership must be restricted to root"
+          children = list(policy)
+          assert len(children) == 1, "P5-006 must not add method/caller authorization rules"
+          allow = children[0]
+          assert allow.tag == "allow"
+          assert allow.attrib == {"own": "org.blueroute.Service1"}
+          PY
