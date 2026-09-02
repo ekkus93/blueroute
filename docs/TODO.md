@@ -49,6 +49,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P4-007 | `[x]` | Direct NetworkManager system-D-Bus backend, bounded state observation, explicit ownership, BlueRoute-owned bridge/address lifecycle, fail-closed cross-owner handling, and real Debian 13 hardware acceptance are complete. |
 | P4-008 | `[x]` | NetworkManager route inspection/add-update-remove, ownership enforcement, fresh-backend reconciliation, idempotent cleanup, foreign/default-route preservation, and live Debian 13 kernel-route hardware acceptance are complete. |
 | P4-009 | `[x]` | Node-global IPv4 forwarding control, boot-local ownership lease, fresh-backend reconciliation, idempotent release, foreign forwarding preservation, NAT/firewall separation, and live kernel hardware acceptance are complete. |
+| P4-010 | `[x]` | Read-only system capability reporting, support classification, runtime diagnostics, and live Debian hardware acceptance are complete. |
 | P5-001 | `[-]` | API version contract and compatibility rules are implemented/tested; client-side incompatibility enforcement remains pending P5-005. |
 | P5-002 | `[-]` | Semantic command/response model implemented; serialization round-trip tests remain. |
 | P5-003 | `[x]` | Event model and deterministic structural tests are implemented and green in CI. |
@@ -535,17 +536,19 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P4-010 — Implement system capability report
 
-- [ ] BlueZ availability/version.
-- [ ] network backend/version.
-- [ ] Bluetooth adapters/controllers/drivers.
-- [ ] PANU/NAP capability observations where determinable.
-- [ ] forwarding capability.
-- [ ] practical/configured peer ceiling.
-- [ ] kernel/runtime prerequisites.
+- [x] BlueZ availability/version.
+- [x] network backend/version.
+- [x] Bluetooth adapters/controllers/drivers.
+- [x] PANU/NAP capability observations where determinable.
+- [x] forwarding capability.
+- [x] practical/configured peer ceiling.
+- [x] kernel/runtime prerequisites.
 
 **Acceptance**
 
 - Diagnostics explain why a system is fully supported, client-only, degraded, or unsupported.
+- Hardware acceptance is recorded in `docs/P4-010-HARDWARE-EVIDENCE-2026-09-01.md`; `debiancb1` was correctly classified as fully supported from live BlueZ, NetworkManager, controller/driver, PANU/NAP, BNEP, forwarding, peer-ceiling, kernel, and runtime-prerequisite observations.
+- Implementation/design notes and the read-only probe are documented in `docs/P4-010-CAPABILITIES.md`.
 
 ## P4-011 — Define network-backend abstraction tests
 

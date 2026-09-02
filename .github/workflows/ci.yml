@@ -6,7 +6,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -48,54 +48,3 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace --locked
-
-      - name: Close P4-010 acceptance and restore workflow
-        if: github.event_name == 'pull_request' && github.head_ref == 'P4-010_system_capability_report'
-        shell: bash
-        run: |
-          git fetch origin "$GITHUB_HEAD_REF" master --depth=1
-          git switch -C "$GITHUB_HEAD_REF" "origin/$GITHUB_HEAD_REF"
-          python3 <<'PY'
-          from pathlib import Path
-
-          path = Path('docs/TODO.md')
-          text = path.read_text()
-
-          p4_009 = '| P4-009 | `[x]` | Node-global IPv4 forwarding control, boot-local ownership lease, fresh-backend reconciliation, idempotent release, foreign forwarding preservation, NAT/firewall separation, and live kernel hardware acceptance are complete. |\n'
-          p4_010 = '| P4-010 | `[x]` | Read-only system capability reporting, support classification, runtime diagnostics, and live Debian hardware acceptance are complete. |\n'
-          if p4_010 not in text:
-              if p4_009 not in text:
-                  raise SystemExit('P4-009 status row missing')
-              text = text.replace(p4_009, p4_009 + p4_010, 1)
-
-          replacements = {
-              '- [ ] BlueZ availability/version.': '- [x] BlueZ availability/version.',
-              '- [ ] network backend/version.': '- [x] network backend/version.',
-              '- [ ] Bluetooth adapters/controllers/drivers.': '- [x] Bluetooth adapters/controllers/drivers.',
-              '- [ ] PANU/NAP capability observations where determinable.': '- [x] PANU/NAP capability observations where determinable.',
-              '- [ ] forwarding capability.': '- [x] forwarding capability.',
-              '- [ ] practical/configured peer ceiling.': '- [x] practical/configured peer ceiling.',
-              '- [ ] kernel/runtime prerequisites.': '- [x] kernel/runtime prerequisites.',
-          }
-          for old, new in replacements.items():
-              if old in text:
-                  text = text.replace(old, new, 1)
-              elif new not in text:
-                  raise SystemExit(f'P4-010 TODO item missing: {old}')
-
-          acceptance = '- Diagnostics explain why a system is fully supported, client-only, degraded, or unsupported.\n'
-          evidence = '- Hardware acceptance is recorded in `docs/P4-010-HARDWARE-EVIDENCE-2026-09-01.md`; `debiancb1` was correctly classified as fully supported from live BlueZ, NetworkManager, controller/driver, PANU/NAP, BNEP, forwarding, peer-ceiling, kernel, and runtime-prerequisite observations.\n- Implementation/design notes and the read-only probe are documented in `docs/P4-010-CAPABILITIES.md`.\n'
-          if evidence not in text:
-              if acceptance not in text:
-                  raise SystemExit('P4-010 acceptance line missing')
-              text = text.replace(acceptance, acceptance + evidence, 1)
-
-          path.write_text(text)
-          PY
-          git show origin/master:.github/workflows/ci.yml > .github/workflows/ci.yml
-          git diff --check
-          git config user.name "Phillip Chin"
-          git config user.email "ekkus93@gmail.com"
-          git add docs/TODO.md .github/workflows/ci.yml
-          git commit -m "docs: close P4-010 acceptance"
-          git push origin HEAD:"$GITHUB_HEAD_REF"
