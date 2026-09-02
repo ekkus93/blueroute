@@ -379,6 +379,7 @@ mod tests {
         steps: Mutex<Vec<Step>>,
         fail_address: bool,
         fail_control: bool,
+        concurrent_member: Option<(std::path::PathBuf, NetworkId)>,
     }
 
     impl FakeRuntime {
@@ -387,6 +388,7 @@ mod tests {
                 steps: Mutex::new(Vec::new()),
                 fail_address: false,
                 fail_control: false,
+                concurrent_member: None,
             }
         }
 
@@ -463,13 +465,22 @@ mod tests {
             Box::pin(async move {
                 self.push(Step::Control);
                 if self.fail_control {
-                    Err(CoreError::new(
+                    return Err(CoreError::new(
                         ErrorKind::AuthenticationFailed,
                         "injected control authentication failure",
-                    ))
-                } else {
-                    Ok(JoinControlSession::new(network))
+                    ));
                 }
+                if let Some((path, concurrent_network)) = &self.concurrent_member {
+                    let mut membership = NetworkMembership::new(
+                        *concurrent_network,
+                        DisplayName::new("Concurrent network").unwrap(),
+                    );
+                    membership.state = MembershipState::Member;
+                    let mut registry = MembershipRegistry::default();
+                    registry.remember_network(membership);
+                    NetworkMembershipStore::new(path.clone()).save(&registry)?;
+                }
+                Ok(JoinControlSession::new(network))
             })
         }
 
@@ -525,6 +536,7 @@ mod tests {
                 steps: Mutex::new(Vec::new()),
                 fail_address: true,
                 fail_control: false,
+                concurrent_member: None,
             };
             let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime);
 
@@ -553,6 +565,7 @@ mod tests {
                 steps: Mutex::new(Vec::new()),
                 fail_address: false,
                 fail_control: true,
+                concurrent_member: None,
             };
             let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime);
 
@@ -589,17 +602,17 @@ mod tests {
     }
 
     #[test]
-    fn invalid_durable_state_after_runtime_setup_rolls_everything_back() {
+    fn concurrent_durable_membership_change_rolls_everything_back() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("invalid-durable-state");
+            let (root, store) = temp_store("concurrent-membership");
             let network = NetworkId::from_bytes([0x49; 16]);
-            let mut membership =
-                NetworkMembership::new(network, DisplayName::new("Interrupted leave").unwrap());
-            membership.state = MembershipState::Leaving;
-            let mut registry = MembershipRegistry::default();
-            registry.remember_network(membership);
-            store.save(&registry).unwrap();
-            let runtime = FakeRuntime::successful();
+            let concurrent_network = NetworkId::from_bytes([0x59; 16]);
+            let runtime = FakeRuntime {
+                steps: Mutex::new(Vec::new()),
+                fail_address: false,
+                fail_control: false,
+                concurrent_member: Some((store.path().to_owned(), concurrent_network)),
+            };
             let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime);
 
             let error = operations.join_network(network).await.unwrap_err();
@@ -617,9 +630,10 @@ mod tests {
                 ]
             );
             let registry = operations.store.load().unwrap();
+            assert!(registry.network(&network).is_none());
             assert_eq!(
-                registry.network(&network).unwrap().state,
-                MembershipState::Leaving
+                registry.network(&concurrent_network).unwrap().state,
+                MembershipState::Member
             );
             fs::remove_dir_all(root).unwrap();
         });
