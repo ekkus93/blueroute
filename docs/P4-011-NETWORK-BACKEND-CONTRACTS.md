@@ -34,6 +34,10 @@ The contract integration test also checks the architectural boundary directly:
 
 The core capability/configuration model may still contain backend-neutral enum values such as `NetworkBackend::NetworkManager`; those values describe capability/configuration and are not Linux adapter implementation types.
 
+## CI acceptance
+
+GitHub Actions run `33578415335` passed the reusable contract suite together with formatting, locked workspace check, Clippy with `-D warnings`, and the complete workspace test suite. The closeout step then updated `docs/TODO.md` and restored the normal read-only CI workflow; it made no production-code changes.
+
 ## Acceptance
 
-P4-011 is complete when the reusable fake-backend contract suite, NetworkManager trait conformance assertion, architecture guard, formatting, workspace check, Clippy, and full locked workspace tests all pass in CI.
+P4-011 is complete when the reusable fake-backend contract suite, NetworkManager trait conformance assertion, architecture guard, formatting, workspace check, Clippy, and full locked workspace tests all pass in CI. Those conditions are satisfied.
