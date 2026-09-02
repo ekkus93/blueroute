@@ -54,6 +54,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P5-001 | `[-]` | API version contract and compatibility rules are implemented/tested; client-side incompatibility enforcement remains pending P5-005. |
 | P5-002 | `[x]` | Shared command/response types now have deterministic validated JSON serialization, comprehensive round-trip tests, and fail-closed malformed-payload coverage. |
 | P5-003 | `[x]` | Event model and deterministic structural tests are implemented and green in CI. |
+| P5-004 | `[x]` | Versioned daemon D-Bus service ownership, status/capability queries, fail-closed request decoding, typed event signaling, and real broker-level CI acceptance are complete. |
 | All other tasks | `[ ]` | Not started. |
 
 ## Platform rule
@@ -608,14 +609,15 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 ## P5-004 — Implement daemon D-Bus service skeleton
 
-- [ ] own service name.
-- [ ] expose version/status/capabilities.
-- [ ] emit test event.
-- [ ] reject malformed requests safely.
+- [x] own service name.
+- [x] expose version/status/capabilities.
+- [x] emit test event.
+- [x] reject malformed requests safely.
 
 **Acceptance**
 
 - Test client queries daemon and receives events.
+- Service design, fail-closed behavior, and real-broker acceptance are documented in `docs/P5-004-DBUS-SERVICE.md`.
 
 ## P5-005 — Implement `blueroute-client`
 
