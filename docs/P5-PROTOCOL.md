@@ -37,6 +37,10 @@ The protocol crate tests that every command variant round-trips, representative 
 
 This JSON layer is the payload contract carried by the P5 D-Bus service. D-Bus remains responsible for local transport, service ownership, signals, and authorization; the JSON codec keeps the semantic protocol deterministic and testable independently of that transport.
 
+## CI acceptance
+
+GitHub Actions run `33579043013` passed the normal repository gates with the serialization implementation in place: formatting, locked workspace check, Clippy with `-D warnings`, and the complete locked workspace test suite all succeeded. The subsequent TODO closeout restored the normal read-only CI workflow before the final merge candidate was validated again.
+
 ## Reserved gateway behavior
 
 `SetInternetSharing` and gateway-related events remain represented in the protocol for forward compatibility, but the current daemon must reject Internet-sharing mutations until the gateway phase implements them. Presence in the wire schema is not an authorization or feature-enablement signal.
