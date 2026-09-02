@@ -229,7 +229,7 @@ fn ipv4_addresses(
     let request = address_dump_request();
     send_exact(socket, &request)?;
 
-    let mut addresses = Vec::new();
+    let mut addresses: Vec<Ipv4InterfacePrefix> = Vec::new();
     let mut buffer = vec![0_u8; 65_536];
     loop {
         let (_, received) = recv(socket, &mut buffer[..], RecvFlags::empty()).map_err(|error| {
