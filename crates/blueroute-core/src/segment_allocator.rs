@@ -66,6 +66,7 @@ impl SegmentIpv4Allocator {
         self.ensure_prefix_in_pool(prefix)?;
         if let Some(existing) = self.get(segment) {
             return if existing == prefix {
+                ensure_ipv4_segment_available(existing, foreign_host_prefixes)?;
                 Ok(existing)
             } else {
                 Err(CoreError::new(
@@ -90,6 +91,7 @@ impl SegmentIpv4Allocator {
         foreign_host_prefixes: impl IntoIterator<Item = IpPrefix>,
     ) -> Result<IpPrefix, CoreError> {
         if let Some(prefix) = self.get(segment) {
+            ensure_ipv4_segment_available(prefix, foreign_host_prefixes)?;
             return Ok(prefix);
         }
         self.ensure_room()?;
@@ -238,6 +240,26 @@ mod tests {
         assert_eq!(alloc.release(segment(1)), None);
         assert_eq!(alloc.get(segment(2)), Some(two));
         assert_eq!(alloc.allocate(segment(1), []).unwrap(), one);
+    }
+
+    #[test]
+    fn reused_reservations_fail_closed_on_new_host_conflicts() {
+        let mut allocator = SegmentIpv4Allocator::new(Ipv4AddressPool::default()).unwrap();
+        let id = segment(7);
+        let prefix = allocator.allocate(id, []).unwrap();
+        assert_eq!(
+            allocator.allocate(id, [prefix]).unwrap_err().kind(),
+            ErrorKind::AddressConflict
+        );
+        assert_eq!(
+            allocator
+                .reserve_exact(id, prefix, [prefix])
+                .unwrap_err()
+                .kind(),
+            ErrorKind::AddressConflict
+        );
+        assert_eq!(allocator.get(id), Some(prefix));
+        assert_eq!(allocator.allocate(id, []).unwrap(), prefix);
     }
 
     #[test]
