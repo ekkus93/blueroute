@@ -66,6 +66,10 @@ impl SegmentIpv4Allocator {
         self.ensure_prefix_in_pool(prefix)?;
         if let Some(existing) = self.get(segment) {
             return if existing == prefix {
+                // Reusing a reservation must still respect freshly observed
+                // foreign host routes. Never silently reuse a now-conflicting
+                // prefix or mutate a previously installed address.
+                ensure_ipv4_segment_available(existing, foreign_host_prefixes)?;
                 Ok(existing)
             } else {
                 Err(CoreError::new(
@@ -90,6 +94,9 @@ impl SegmentIpv4Allocator {
         foreign_host_prefixes: impl IntoIterator<Item = IpPrefix>,
     ) -> Result<IpPrefix, CoreError> {
         if let Some(prefix) = self.get(segment) {
+            // Live host routes may have changed since initial allocation.
+            // Fail closed rather than returning a stale conflicting lease.
+            ensure_ipv4_segment_available(prefix, foreign_host_prefixes)?;
             return Ok(prefix);
         }
         self.ensure_room()?;
@@ -263,4 +270,39 @@ mod tests {
                 .is_err()
         );
     }
+    #[test]
+    fn existing_reservations_reject_new_foreign_host_conflicts() {
+        let mut alloc = SegmentIpv4Allocator::new(Ipv4AddressPool::default()).unwrap();
+        let id = segment(9);
+        let reserved = alloc.allocate(id, []).unwrap();
+        assert_eq!(alloc.allocate(id, []).unwrap(), reserved);
+        assert_eq!(
+            alloc.allocate(id, [reserved]).unwrap_err().kind(),
+            ErrorKind::AddressConflict
+        );
+        assert_eq!(
+            alloc.reserve_exact(id, reserved, [reserved]).unwrap_err().kind(),
+            ErrorKind::AddressConflict
+        );
+        // Failed revalidation never releases or replaces the owned lease.
+        assert_eq!(alloc.get(id), Some(reserved));
+        assert_eq!(alloc.len(), 1);
+        assert_eq!(alloc.reserve_exact(id, reserved, []).unwrap(), reserved);
+        assert_eq!(alloc.allocate(id, []).unwrap(), reserved);
+    }
+
+    #[test]
+    fn conflict_revalidation_does_not_disturb_other_segments() {
+        let mut alloc = SegmentIpv4Allocator::new(Ipv4AddressPool::default()).unwrap();
+        let first = alloc.allocate(segment(10), []).unwrap();
+        let second = alloc.allocate(segment(11), []).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(
+            alloc.allocate(segment(10), [first]).unwrap_err().kind(),
+            ErrorKind::AddressConflict
+        );
+        assert_eq!(alloc.get(segment(11)), Some(second));
+        assert_eq!(alloc.allocate(segment(11), [first]).unwrap(), second);
+    }
+
 }
