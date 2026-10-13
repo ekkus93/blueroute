@@ -33,8 +33,10 @@ pub fn validate_hello_transcript(
             return Err("wrong network");
         }
     }
-    if local_hello.sender != local || local_ack.sender != local
-        || remote_hello.sender != remote || remote_ack.sender != remote
+    if local_hello.sender != local
+        || local_ack.sender != local
+        || remote_hello.sender != remote
+        || remote_ack.sender != remote
     {
         return Err("wrong sender");
     }
@@ -42,47 +44,66 @@ pub fn validate_hello_transcript(
     if frames.iter().any(|frame| frame.session_id != session) {
         return Err("wrong session");
     }
-    if local_hello.sequence != 1 || remote_hello.sequence != 1
-        || local_ack.sequence != 2 || remote_ack.sequence != 2
+    if local_hello.sequence != 1
+        || remote_hello.sequence != 1
+        || local_ack.sequence != 2
+        || remote_ack.sequence != 2
     {
         return Err("unexpected handshake sequence");
     }
-    let ControlMessage::Hello { challenge: local_challenge, facts: local_facts } =
-        &local_hello.message else {
+    let ControlMessage::Hello {
+        challenge: local_challenge,
+        facts: local_facts,
+    } = &local_hello.message
+    else {
         return Err("missing local hello");
     };
-    let ControlMessage::Hello { challenge: remote_challenge, facts: remote_facts } =
-        &remote_hello.message else {
+    let ControlMessage::Hello {
+        challenge: remote_challenge,
+        facts: remote_facts,
+    } = &remote_hello.message
+    else {
         return Err("missing remote hello");
     };
-    let ControlMessage::HelloAck { challenge: local_echo, facts: local_ack_facts } =
-        &local_ack.message else {
+    let ControlMessage::HelloAck {
+        challenge: local_echo,
+        facts: local_ack_facts,
+    } = &local_ack.message
+    else {
         return Err("missing local acknowledgement");
     };
-    let ControlMessage::HelloAck { challenge: remote_echo, facts: remote_ack_facts } =
-        &remote_ack.message else {
+    let ControlMessage::HelloAck {
+        challenge: remote_echo,
+        facts: remote_ack_facts,
+    } = &remote_ack.message
+    else {
         return Err("missing remote acknowledgement");
     };
     if local_challenge == remote_challenge
-        || local_echo != remote_challenge || remote_echo != local_challenge
+        || local_echo != remote_challenge
+        || remote_echo != local_challenge
     {
         return Err("challenge reflection or mismatch");
     }
     if local_facts != local_ack_facts || remote_facts != remote_ack_facts {
         return Err("peer changed capability claims during handshake");
     }
-    let mut inbound = VerifiedSessionSequence::new(network, remote, session)
-        .map_err(|_| "invalid session")?;
-    inbound.accept(remote_hello).map_err(|_| "invalid hello replay")?;
-    inbound.accept(remote_ack).map_err(|_| "invalid acknowledgement replay")?;
+    let mut inbound =
+        VerifiedSessionSequence::new(network, remote, session).map_err(|_| "invalid session")?;
+    inbound
+        .accept(remote_hello)
+        .map_err(|_| "invalid hello replay")?;
+    inbound
+        .accept(remote_ack)
+        .map_err(|_| "invalid acknowledgement replay")?;
     Ok(remote_facts.clone())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blueroute_core::NodeCapabilities;
     use crate::control::CONTROL_VERSION;
+    use blueroute_core::NodeCapabilities;
 
     fn frame(sender: u8, sequence: u64, message: ControlMessage) -> ControlEnvelope {
         ControlEnvelope {
@@ -104,10 +125,38 @@ mod tests {
     }
     fn exchange() -> [ControlEnvelope; 4] {
         [
-            frame(4, 1, ControlMessage::Hello { challenge: [10; 16], facts: facts() }),
-            frame(5, 1, ControlMessage::Hello { challenge: [11; 16], facts: facts() }),
-            frame(4, 2, ControlMessage::HelloAck { challenge: [11; 16], facts: facts() }),
-            frame(5, 2, ControlMessage::HelloAck { challenge: [10; 16], facts: facts() }),
+            frame(
+                4,
+                1,
+                ControlMessage::Hello {
+                    challenge: [10; 16],
+                    facts: facts(),
+                },
+            ),
+            frame(
+                5,
+                1,
+                ControlMessage::Hello {
+                    challenge: [11; 16],
+                    facts: facts(),
+                },
+            ),
+            frame(
+                4,
+                2,
+                ControlMessage::HelloAck {
+                    challenge: [11; 16],
+                    facts: facts(),
+                },
+            ),
+            frame(
+                5,
+                2,
+                ControlMessage::HelloAck {
+                    challenge: [10; 16],
+                    facts: facts(),
+                },
+            ),
         ]
     }
     fn verify(frames: &[ControlEnvelope; 4]) -> Result<HelloFacts, &'static str> {
@@ -115,7 +164,10 @@ mod tests {
             NetworkId::from_bytes([1; 16]),
             NodeId::from_bytes([4; 16]),
             NodeId::from_bytes([5; 16]),
-            &frames[0], &frames[1], &frames[2], &frames[3],
+            &frames[0],
+            &frames[1],
+            &frames[2],
+            &frames[3],
         )
     }
     #[test]
@@ -140,15 +192,24 @@ mod tests {
     #[test]
     fn reflection_wrong_ack_and_changed_claims_are_rejected() {
         let mut frames = exchange();
-        frames[1].message = ControlMessage::Hello { challenge: [10; 16], facts: facts() };
+        frames[1].message = ControlMessage::Hello {
+            challenge: [10; 16],
+            facts: facts(),
+        };
         assert!(verify(&frames).is_err());
         frames = exchange();
-        frames[3].message = ControlMessage::HelloAck { challenge: [8; 16], facts: facts() };
+        frames[3].message = ControlMessage::HelloAck {
+            challenge: [8; 16],
+            facts: facts(),
+        };
         assert!(verify(&frames).is_err());
         frames = exchange();
         let mut altered = facts();
         altered.software_version = "2.0".into();
-        frames[3].message = ControlMessage::HelloAck { challenge: [10; 16], facts: altered };
+        frames[3].message = ControlMessage::HelloAck {
+            challenge: [10; 16],
+            facts: altered,
+        };
         assert!(verify(&frames).is_err());
     }
     #[test]
