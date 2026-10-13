@@ -1,5 +1,7 @@
 #![doc = "Shared BlueRoute protocol and API types."]
 
+pub mod control;
+
 use std::fmt;
 
 use blueroute_core::{
