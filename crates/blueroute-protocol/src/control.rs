@@ -441,7 +441,13 @@ mod tests {
     fn known_frames_with_mutated_prefixes_and_versions_fail_closed() {
         let valid = encode_control_frame(&sample()).unwrap();
         let length = valid.len() - 4;
-        for declared in [0_usize, 1, length - 1, length + 1, MAX_CONTROL_FRAME_BYTES + 1] {
+        for declared in [
+            0_usize,
+            1,
+            length - 1,
+            length + 1,
+            MAX_CONTROL_FRAME_BYTES + 1,
+        ] {
             let mut wrong = valid.clone();
             wrong[..4].copy_from_slice(&(declared as u32).to_be_bytes());
             assert!(decode_control_frame(&wrong).is_err());
