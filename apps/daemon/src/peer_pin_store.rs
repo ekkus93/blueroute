@@ -37,7 +37,9 @@ impl PeerPinStore {
             .map_err(|_| invalid("peer-key pin file is not valid UTF-8"))?;
         let mut lines = document.lines();
         if lines.next() != Some(HEADER) {
-            return Err(invalid("missing or unsupported peer-key pin format version"));
+            return Err(invalid(
+                "missing or unsupported peer-key pin format version",
+            ));
         }
         let mut pins = PeerKeyPins::new();
         for line in lines {
@@ -93,7 +95,8 @@ impl PeerPinStore {
         if text.len() > MAX_BYTES {
             return Err(invalid("peer-key pin file exceeds size limit"));
         }
-        self.secrets.save(FILE_NAME, &Secret::new(text.into_bytes()))
+        self.secrets
+            .save(FILE_NAME, &Secret::new(text.into_bytes()))
     }
 }
 
@@ -108,7 +111,9 @@ fn hex_nibble(nibble: u8) -> char {
 
 fn decode_digest(text: &str) -> Result<SpkiSha256, CoreError> {
     if text.len() != 64 {
-        return Err(invalid("peer key fingerprint must contain exactly 64 hex characters"));
+        return Err(invalid(
+            "peer key fingerprint must contain exactly 64 hex characters",
+        ));
     }
     let bytes = text.as_bytes();
     let mut digest = [0_u8; 32];
@@ -232,7 +237,10 @@ mod tests {
         ];
         for input in inputs {
             fs::write(&path, input.as_bytes()).unwrap();
-            assert_eq!(store.load().unwrap_err().kind(), ErrorKind::PersistenceError);
+            assert_eq!(
+                store.load().unwrap_err().kind(),
+                ErrorKind::PersistenceError
+            );
         }
     }
 
@@ -244,7 +252,10 @@ mod tests {
         let destination = tmp.0.join("outside");
         fs::write(&destination, b"do-not-touch").unwrap();
         symlink(&destination, tmp.pins_file()).unwrap();
-        assert_eq!(store.load().unwrap_err().kind(), ErrorKind::PersistenceError);
+        assert_eq!(
+            store.load().unwrap_err().kind(),
+            ErrorKind::PersistenceError
+        );
         assert_eq!(
             store.save(&PeerKeyPins::new()).unwrap_err().kind(),
             ErrorKind::PersistenceError
