@@ -94,7 +94,7 @@ impl ControlStreamDecoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::control::{ControlMessage, CONTROL_VERSION, encode_control_frame};
+    use crate::control::{CONTROL_VERSION, ControlMessage, encode_control_frame};
     use blueroute_core::{NetworkId, NodeId};
 
     fn example(sequence: u64) -> ControlEnvelope {
@@ -116,7 +116,10 @@ mod tests {
         for byte in &bytes[..bytes.len() - 1] {
             assert!(decoder.feed(&[*byte]).unwrap().is_empty());
         }
-        assert_eq!(decoder.feed(&bytes[bytes.len() - 1..]).unwrap(), vec![envelope]);
+        assert_eq!(
+            decoder.feed(&bytes[bytes.len() - 1..]).unwrap(),
+            vec![envelope]
+        );
         assert_eq!(decoder.pending_bytes(), 0);
     }
 
@@ -138,13 +141,18 @@ mod tests {
     fn invalid_length_and_payload_poison_connection() {
         for bytes in [
             vec![0, 0, 0, 0],
-            ((MAX_CONTROL_FRAME_BYTES as u32) + 1).to_be_bytes().to_vec(),
+            ((MAX_CONTROL_FRAME_BYTES as u32) + 1)
+                .to_be_bytes()
+                .to_vec(),
             vec![0, 0, 0, 1, 0xff],
         ] {
             let mut decoder = ControlStreamDecoder::new();
             assert_eq!(decoder.feed(&bytes), Err(StreamDecodeError::MalformedFrame));
             assert!(decoder.is_poisoned());
-            assert_eq!(decoder.feed(&encode_control_frame(&example(1)).unwrap()), Err(StreamDecodeError::Poisoned));
+            assert_eq!(
+                decoder.feed(&encode_control_frame(&example(1)).unwrap()),
+                Err(StreamDecodeError::Poisoned)
+            );
             assert_eq!(decoder.pending_bytes(), 0);
         }
     }
@@ -152,7 +160,10 @@ mod tests {
     #[test]
     fn oversized_feed_and_frame_flood_fail_closed() {
         let mut decoder = ControlStreamDecoder::new();
-        assert_eq!(decoder.feed(&vec![0; MAX_STREAM_FEED_BYTES + 1]), Err(StreamDecodeError::ChunkTooLarge));
+        assert_eq!(
+            decoder.feed(&vec![0; MAX_STREAM_FEED_BYTES + 1]),
+            Err(StreamDecodeError::ChunkTooLarge)
+        );
         let mut flood = Vec::new();
         for sequence in 1..=(MAX_FRAMES_PER_FEED + 1) {
             flood.extend(encode_control_frame(&example(sequence as u64)).unwrap());
