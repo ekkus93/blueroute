@@ -868,9 +868,10 @@ This is the first complete product slice.
 - [x] model logical session loss and stale event isolation (software model).
 - [x] model reconnect/replacement and session capacity (software model).
 - [x] reject duplicate concurrently active logical-peer sessions (software model).
+- [x] reject reused session IDs across retained peers and after loss/reconnect; enforce ordered TCP/TLS/hello/active stages and deterministic 5s/10s/30s deadline budgets (software-only; [CI 38458952233](https://github.com/ekkus93/blueroute/actions/runs/38458952233) at `f4bb6906`).
 - [ ] implement real TLS peer-key binding, runtime transport and bounded loss/reconnect cleanup.
 
-**Not fully accepted:** `crates/blueroute-protocol/src/session.rs` includes a bounded retry budget, deterministic 250ms–30s exponential delay and stale-session isolation at `c688f799` (exact-head CI `38444858686` passed); this is a software-only model with no TLS-backed transport, and production join remains fail-closed.
+**Not fully accepted:** `crates/blueroute-protocol/src/session.rs` includes a bounded retry budget, deterministic 250ms–30s exponential delay, stale-session isolation, retained-peer nonce uniqueness and ordered timeout budgets. Exact-head [CI 38458952233](https://github.com/ekkus93/blueroute/actions/runs/38458952233) passed at `f4bb6906`. `control_io.rs` has bounded plain TCP stream fixtures but **not authenticated TLS**; the deadline model still requires cancellable real I/O integration, verified certificate/channel binding, and production join remains fail-closed.
 
 **Acceptance**
 
