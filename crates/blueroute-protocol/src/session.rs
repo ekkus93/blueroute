@@ -100,6 +100,21 @@ impl ConnectionDeadline {
         Ok(())
     }
 
+    /// Begin bounded cleanup even when an earlier deadline expired.
+    /// A repeated abort never extends an existing cleanup deadline.
+    pub fn abort(&mut self, now_ms: u64) -> Result<(), DeadlineError> {
+        if now_ms < self.last_ms {
+            return Err(DeadlineError::ClockRegression);
+        }
+        if self.stage == ConnectionStage::Closing {
+            return Ok(());
+        }
+        self.stage = ConnectionStage::Closing;
+        self.last_ms = now_ms;
+        self.expires_ms = now_ms.saturating_add(ConnectionStage::Closing.timeout_ms());
+        Ok(())
+    }
+
     /// Call only after a complete, authenticated and replay-checked message.
     /// Raw bytes and unverified heartbeat claims cannot refresh idle time.
     pub fn authenticated_activity(&mut self, now_ms: u64) -> Result<(), DeadlineError> {
@@ -420,6 +435,25 @@ mod tests {
         assert_eq!(clock.stage(), ConnectionStage::TlsHandshake);
         let clock = ConnectionDeadline::new(u64::MAX - 1);
         assert_eq!(clock.check(u64::MAX), Err(DeadlineError::Expired));
+    }
+
+    #[test]
+    fn timed_out_handshake_can_abort_without_reopening_or_extending_cleanup() {
+        let mut deadline = ConnectionDeadline::new(100);
+        assert_eq!(deadline.check(5_100), Err(DeadlineError::Expired));
+        deadline.abort(5_100).unwrap();
+        assert_eq!(deadline.stage(), ConnectionStage::Closing);
+        assert_eq!(deadline.expires_ms(), 10_100);
+        deadline.abort(6_000).unwrap();
+        assert_eq!(deadline.expires_ms(), 10_100);
+        assert_eq!(
+            deadline.advance(ConnectionStage::Active, 6_001),
+            Err(DeadlineError::InvalidTransition)
+        );
+        assert_eq!(
+            deadline.abort(5_000),
+            Err(DeadlineError::ClockRegression)
+        );
     }
 
     #[test]
