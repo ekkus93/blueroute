@@ -2,10 +2,10 @@
 //! client. The clap option layer and mutation subcommands are still pending.
 
 use blueroute_client::BlueRouteClient;
-use blueroute_core::NodeCapabilities;
+use blueroute_core::{NodeCapabilities, NodeId};
 use blueroute_protocol::{Command, DaemonStatus, NetworkSummary, Response};
 
-const HELP: &str = "Usage: blueroute [--json] status\n       blueroute [--json] capability show\n       blueroute [--json] network list\n       blueroute --version\n       blueroute --help";
+const HELP: &str = "Usage: blueroute [--json] status\n       blueroute [--json] capability show\n       blueroute [--json] network list\n       blueroute [--json] peer trust <node-id>\n       blueroute [--json] peer forget <node-id>\n       blueroute --version\n       blueroute --help";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Operation {
@@ -14,6 +14,8 @@ enum Operation {
     Status { json: bool },
     Capabilities { json: bool },
     NetworkList { json: bool },
+    TrustPeer { node: NodeId, json: bool },
+    ForgetPeer { node: NodeId, json: bool },
 }
 
 fn parse(args: &[String]) -> Result<Operation, &'static str> {
@@ -36,6 +38,14 @@ fn parse(args: &[String]) -> Result<Operation, &'static str> {
         ["status"] => Ok(Operation::Status { json }),
         ["capability", "show"] => Ok(Operation::Capabilities { json }),
         ["network", "list"] => Ok(Operation::NetworkList { json }),
+        ["peer", "trust", node] => Ok(Operation::TrustPeer {
+            node: node.parse().map_err(|_| "invalid full peer NodeId")?,
+            json,
+        }),
+        ["peer", "forget", node] => Ok(Operation::ForgetPeer {
+            node: node.parse().map_err(|_| "invalid full peer NodeId")?,
+            json,
+        }),
         _ => Err("unknown command or option"),
     }
 }
@@ -75,6 +85,16 @@ fn format_networks(networks: &[NetworkSummary], json: bool) -> Result<String, se
             })
             .collect::<Vec<_>>()
             .join("\n"))
+    }
+}
+
+/// Trust operations are PolicyKit-gated by the daemon; CLI success is not
+/// equivalent to TLS key enrollment or admission as a network member.
+fn mutation_ack(json: bool, success: &'static str) -> String {
+    if json {
+        r#"{"ok":true}"#.to_owned()
+    } else {
+        success.to_owned()
     }
 }
 
@@ -121,6 +141,22 @@ fn run(args: &[String]) -> i32 {
                         format_networks(&networks, json).map_err(|error| error.to_string())
                     }
                     _ => Err("daemon returned an unexpected network-list response".to_owned()),
+                })
+        }
+        Operation::TrustPeer { node, json } => {
+            futures_lite::future::block_on(client.request(&Command::TrustPeer { node }))
+                .map_err(|error| error.to_string())
+                .and_then(|response| match response {
+                    Response::Ack => Ok(mutation_ack(json, "Peer trust approved")),
+                    _ => Err("daemon returned an unexpected trust response".to_owned()),
+                })
+        }
+        Operation::ForgetPeer { node, json } => {
+            futures_lite::future::block_on(client.request(&Command::ForgetPeer { node }))
+                .map_err(|error| error.to_string())
+                .and_then(|response| match response {
+                    Response::Ack => Ok(mutation_ack(json, "Peer trust revoked")),
+                    _ => Err("daemon returned an unexpected forget response".to_owned()),
                 })
         }
         Operation::Help | Operation::Version => unreachable!(),
@@ -170,6 +206,19 @@ mod tests {
             Ok(Operation::NetworkList { json: true })
         );
         assert!(parse(&args(&["network", "join"])).is_err());
+        let node = NodeId::from_bytes([3; 16]);
+        let id = node.to_string();
+        assert_eq!(
+            parse(&args(&["peer", "trust", &id])),
+            Ok(Operation::TrustPeer { node, json: false })
+        );
+        assert_eq!(
+            parse(&args(&["--json", "peer", "forget", &id])),
+            Ok(Operation::ForgetPeer { node, json: true })
+        );
+        assert!(parse(&args(&["peer", "trust"])).is_err());
+        assert!(parse(&args(&["peer", "trust", "unknown-peer"])).is_err());
+        assert!(parse(&args(&["peer", "forget", &id, "extra"])).is_err());
     }
 
     #[test]
@@ -190,6 +239,13 @@ mod tests {
         let caps_json = format_capabilities(&caps, true).unwrap();
         let parsed: NodeCapabilities = serde_json::from_str(&caps_json).unwrap();
         assert_eq!(parsed, caps);
+    }
+
+    #[test]
+    fn explicit_mutation_commands_never_claim_membership_or_key_enrollment() {
+        assert_eq!(mutation_ack(false, "Peer trust approved"), "Peer trust approved");
+        assert_eq!(mutation_ack(true, "Peer trust revoked"), r#"{"ok":true}"#);
+        assert!(parse(&args(&["join"])).is_err());
     }
 
     #[test]
