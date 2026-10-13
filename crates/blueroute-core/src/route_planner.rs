@@ -7,8 +7,8 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap};
 
 use crate::{
-    CoreError, ErrorKind, LinkHealth, NetworkId, NodeId, Route, RouteDestination,
-    RouteOwner, TopologyGraph,
+    CoreError, ErrorKind, LinkHealth, NetworkId, NodeId, Route, RouteDestination, RouteOwner,
+    TopologyGraph,
 };
 
 /// Degraded links are less preferred without discarding them entirely.
@@ -27,7 +27,10 @@ pub fn desired_node_routes(
     network: NetworkId,
 ) -> Result<Vec<Route>, CoreError> {
     if graph.node(&source).is_none() {
-        return Err(CoreError::new(ErrorKind::InvalidInput, "source is not in the topology"));
+        return Err(CoreError::new(
+            ErrorKind::InvalidInput,
+            "source is not in the topology",
+        ));
     }
     // Each node's tuple is (total cost, hop count, first hop).
     let mut best = BTreeMap::<NodeId, (u64, usize, NodeId)>::new();
@@ -38,8 +41,7 @@ pub fn desired_node_routes(
         if best.get(&current) != Some(&(cost, hops, first_hop)) {
             continue;
         }
-        if current != source
-            && graph.node(&current).and_then(|caps| caps.can_route()) != Some(true)
+        if current != source && graph.node(&current).and_then(|caps| caps.can_route()) != Some(true)
         {
             continue;
         }
@@ -56,9 +58,9 @@ pub fn desired_node_routes(
                 } else {
                     0
                 };
-            let next_cost = cost.checked_add(edge).ok_or_else(|| {
-                CoreError::new(ErrorKind::TopologyFailure, "route cost overflow")
-            })?;
+            let next_cost = cost
+                .checked_add(edge)
+                .ok_or_else(|| CoreError::new(ErrorKind::TopologyFailure, "route cost overflow"))?;
             let next_hops = hops + 1;
             let next_first_hop = if current == source { next } else { first_hop };
             let candidate = (next_cost, next_hops, next_first_hop);
@@ -88,8 +90,8 @@ pub fn desired_node_routes(
 mod tests {
     use super::*;
     use crate::{
-        CapabilitySource, LinkHealth, LinkId, LinkState, NodeCapabilities,
-        PanLink, PanSegment, SegmentId, Sourced,
+        CapabilitySource, LinkHealth, LinkId, LinkState, NodeCapabilities, PanLink, PanSegment,
+        SegmentId, Sourced,
     };
 
     fn node(id: u8) -> NodeId {
@@ -108,7 +110,9 @@ mod tests {
                 ..NodeCapabilities::default()
             },
         );
-        graph.add_segment(PanSegment::new(SegmentId::from_bytes([id; 16]), node(id))).unwrap();
+        graph
+            .add_segment(PanSegment::new(SegmentId::from_bytes([id; 16]), node(id)))
+            .unwrap();
     }
 
     fn link(
@@ -120,15 +124,17 @@ mod tests {
         health: LinkHealth,
         state: LinkState,
     ) {
-        graph.add_link(PanLink {
-            id: LinkId::from_bytes([id; 16]),
-            segment_id: SegmentId::from_bytes([nap; 16]),
-            nap: node(nap),
-            panu: node(panu),
-            state,
-            health,
-            cost,
-        }).unwrap();
+        graph
+            .add_link(PanLink {
+                id: LinkId::from_bytes([id; 16]),
+                segment_id: SegmentId::from_bytes([nap; 16]),
+                nap: node(nap),
+                panu: node(panu),
+                state,
+                health,
+                cost,
+            })
+            .unwrap();
     }
 
     fn next_hop_to(routes: &[Route], target: NodeId) -> Option<NodeId> {
@@ -144,20 +150,60 @@ mod tests {
         add_node(&mut graph, 1, None);
         add_node(&mut graph, 2, Some(true));
         add_node(&mut graph, 3, Some(false));
-        link(&mut graph, 1, 1, 2, 1, LinkHealth::Healthy, LinkState::Active);
-        link(&mut graph, 2, 2, 3, 1, LinkHealth::Healthy, LinkState::Active);
+        link(
+            &mut graph,
+            1,
+            1,
+            2,
+            1,
+            LinkHealth::Healthy,
+            LinkState::Active,
+        );
+        link(
+            &mut graph,
+            2,
+            2,
+            3,
+            1,
+            LinkHealth::Healthy,
+            LinkState::Active,
+        );
         let routes = desired_node_routes(&graph, node(1), network()).unwrap();
         assert_eq!(next_hop_to(&routes, node(2)), Some(node(2)));
         assert_eq!(next_hop_to(&routes, node(3)), Some(node(2)));
-        assert!(routes.iter().all(|r| r.owner == RouteOwner::BlueRouteNetwork(network())));
-        assert!(!routes.iter().any(|r| r.destination == RouteDestination::Internet));
+        assert!(
+            routes
+                .iter()
+                .all(|r| r.owner == RouteOwner::BlueRouteNetwork(network()))
+        );
+        assert!(
+            !routes
+                .iter()
+                .any(|r| r.destination == RouteDestination::Internet)
+        );
 
         let mut blocked = TopologyGraph::default();
         add_node(&mut blocked, 1, None);
         add_node(&mut blocked, 2, None);
         add_node(&mut blocked, 3, Some(false));
-        link(&mut blocked, 1, 1, 2, 1, LinkHealth::Healthy, LinkState::Active);
-        link(&mut blocked, 2, 2, 3, 1, LinkHealth::Healthy, LinkState::Active);
+        link(
+            &mut blocked,
+            1,
+            1,
+            2,
+            1,
+            LinkHealth::Healthy,
+            LinkState::Active,
+        );
+        link(
+            &mut blocked,
+            2,
+            2,
+            3,
+            1,
+            LinkHealth::Healthy,
+            LinkState::Active,
+        );
         let routes = desired_node_routes(&blocked, node(1), network()).unwrap();
         assert_eq!(next_hop_to(&routes, node(2)), Some(node(2)));
         assert_eq!(next_hop_to(&routes, node(3)), None);
@@ -169,22 +215,83 @@ mod tests {
         for id in 1..=4 {
             add_node(&mut graph, id, Some(true));
         }
-        link(&mut graph, 1, 1, 2, 1, LinkHealth::Degraded, LinkState::Active);
-        link(&mut graph, 2, 2, 4, 1, LinkHealth::Healthy, LinkState::Active);
-        link(&mut graph, 3, 1, 3, 2, LinkHealth::Healthy, LinkState::Active);
-        link(&mut graph, 4, 3, 4, 2, LinkHealth::Healthy, LinkState::Active);
+        link(
+            &mut graph,
+            1,
+            1,
+            2,
+            1,
+            LinkHealth::Degraded,
+            LinkState::Active,
+        );
+        link(
+            &mut graph,
+            2,
+            2,
+            4,
+            1,
+            LinkHealth::Healthy,
+            LinkState::Active,
+        );
+        link(
+            &mut graph,
+            3,
+            1,
+            3,
+            2,
+            LinkHealth::Healthy,
+            LinkState::Active,
+        );
+        link(
+            &mut graph,
+            4,
+            3,
+            4,
+            2,
+            LinkHealth::Healthy,
+            LinkState::Active,
+        );
         let routes = desired_node_routes(&graph, node(1), network()).unwrap();
         assert_eq!(next_hop_to(&routes, node(4)), Some(node(3)));
-        assert_eq!(routes.iter().find(|r| r.destination == RouteDestination::Node(node(4))).unwrap().cost, 4);
+        assert_eq!(
+            routes
+                .iter()
+                .find(|r| r.destination == RouteDestination::Node(node(4)))
+                .unwrap()
+                .cost,
+            4
+        );
     }
 
     #[test]
     fn failed_and_disconnected_links_never_supply_routes() {
         let mut graph = TopologyGraph::default();
-        for id in 1..=3 { add_node(&mut graph, id, Some(true)); }
-        link(&mut graph, 1, 1, 2, 1, LinkHealth::Failed, LinkState::Active);
-        link(&mut graph, 2, 1, 3, 1, LinkHealth::Healthy, LinkState::Disconnected);
-        assert!(desired_node_routes(&graph, node(1), network()).unwrap().is_empty());
+        for id in 1..=3 {
+            add_node(&mut graph, id, Some(true));
+        }
+        link(
+            &mut graph,
+            1,
+            1,
+            2,
+            1,
+            LinkHealth::Failed,
+            LinkState::Active,
+        );
+        link(
+            &mut graph,
+            2,
+            1,
+            3,
+            1,
+            LinkHealth::Healthy,
+            LinkState::Disconnected,
+        );
+        assert!(
+            desired_node_routes(&graph, node(1), network())
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -194,8 +301,20 @@ mod tests {
         add_node(&mut graph, 2, Some(false));
         add_node(&mut graph, 3, None);
         assert!(desired_node_routes(&graph, node(9), network()).is_err());
-        assert!(desired_node_routes(&graph, node(1), network()).unwrap().is_empty());
-        link(&mut graph, 1, 1, 2, 1, LinkHealth::Healthy, LinkState::Active);
+        assert!(
+            desired_node_routes(&graph, node(1), network())
+                .unwrap()
+                .is_empty()
+        );
+        link(
+            &mut graph,
+            1,
+            1,
+            2,
+            1,
+            LinkHealth::Healthy,
+            LinkState::Active,
+        );
         let routes = desired_node_routes(&graph, node(1), network()).unwrap();
         assert_eq!(routes.len(), 1);
         assert_eq!(next_hop_to(&routes, node(3)), None);
@@ -204,11 +323,45 @@ mod tests {
     #[test]
     fn equivalent_route_ties_are_deterministic() {
         let mut graph = TopologyGraph::default();
-        for id in 1..=4 { add_node(&mut graph, id, Some(true)); }
-        link(&mut graph, 4, 1, 3, 1, LinkHealth::Healthy, LinkState::Active);
-        link(&mut graph, 3, 3, 4, 1, LinkHealth::Healthy, LinkState::Active);
-        link(&mut graph, 2, 1, 2, 1, LinkHealth::Healthy, LinkState::Active);
-        link(&mut graph, 1, 2, 4, 1, LinkHealth::Healthy, LinkState::Active);
+        for id in 1..=4 {
+            add_node(&mut graph, id, Some(true));
+        }
+        link(
+            &mut graph,
+            4,
+            1,
+            3,
+            1,
+            LinkHealth::Healthy,
+            LinkState::Active,
+        );
+        link(
+            &mut graph,
+            3,
+            3,
+            4,
+            1,
+            LinkHealth::Healthy,
+            LinkState::Active,
+        );
+        link(
+            &mut graph,
+            2,
+            1,
+            2,
+            1,
+            LinkHealth::Healthy,
+            LinkState::Active,
+        );
+        link(
+            &mut graph,
+            1,
+            2,
+            4,
+            1,
+            LinkHealth::Healthy,
+            LinkState::Active,
+        );
         let routes = desired_node_routes(&graph, node(1), network()).unwrap();
         assert_eq!(next_hop_to(&routes, node(4)), Some(node(2)));
     }
