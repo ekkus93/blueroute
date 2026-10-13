@@ -79,6 +79,14 @@ impl PeerKeyPins {
         node: NodeId,
         pin: SpkiSha256,
     ) -> Result<bool, PeerPinError> {
+        // One enrolled TLS key must not impersonate multiple logical NodeIds
+        // in the same network. This holds even if both NodeIds have legacy
+        // trust records. Cross-network key reuse is a separate policy choice.
+        if self.pins.iter().any(|(&(enrolled_network, enrolled_node), existing)| {
+            enrolled_network == network && enrolled_node != node && *existing == pin
+        }) {
+            return Err(PeerPinError::KeyConflict);
+        }
         match self.pins.get(&(network, node)) {
             Some(existing) if *existing == pin => Ok(false),
             Some(_) => Err(PeerPinError::KeyConflict),
@@ -204,6 +212,34 @@ mod tests {
         assert_eq!(
             pins.authorize(network(1), node(2), true, fingerprint(3)),
             Ok(())
+        );
+    }
+
+    #[test]
+    fn same_tls_key_cannot_authorize_two_node_ids_in_one_network() {
+        let mut pins = PeerKeyPins::new();
+        assert_eq!(
+            pins.enroll_verified(network(1), node(2), fingerprint(3)),
+            Ok(true)
+        );
+        assert_eq!(
+            pins.enroll_verified(network(1), node(4), fingerprint(3)),
+            Err(PeerPinError::KeyConflict)
+        );
+        assert_eq!(pins.len(), 1);
+        assert_eq!(
+            pins.authorize(network(1), node(4), true, fingerprint(3)),
+            Err(PeerPinError::UnknownEnrollment)
+        );
+        // The same physical node may be independently enrolled in a
+        // different BlueRoute network without conferring approval to peers.
+        assert_eq!(
+            pins.enroll_verified(network(9), node(2), fingerprint(3)),
+            Ok(true)
+        );
+        assert_eq!(
+            pins.enroll_verified(network(1), node(4), fingerprint(5)),
+            Ok(true)
         );
     }
 
