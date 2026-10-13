@@ -128,12 +128,14 @@ impl DurablePeerTrustOperations {
             )
         })?;
         let mut pins = store.load()?;
-        let changed = pins.enroll_verified(network, node, verified_tls_spki).map_err(|_| {
-            CoreError::new(
-                ErrorKind::AuthenticationFailed,
-                "peer identity or key conflicts with an existing enrollment",
-            )
-        })?;
+        let changed = pins
+            .enroll_verified(network, node, verified_tls_spki)
+            .map_err(|_| {
+                CoreError::new(
+                    ErrorKind::AuthenticationFailed,
+                    "peer identity or key conflicts with an existing enrollment",
+                )
+            })?;
         if changed {
             store.save(&pins)?;
         }
