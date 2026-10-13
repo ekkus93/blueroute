@@ -82,6 +82,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P6-004 | `[-]` | **IN PROGRESS**: transaction coordinator, rollback and PolicyKit authorization are merged. Production join preflight intentionally fails closed pending P7 authenticated control sessions, PANU/control wiring, and physical end-to-end acceptance. |
 | P6-005 | `[x]` | **COMPLETE** in `master` at `c2db781`. Deterministic RFC1918 subnet, live conflict detection, NAP/PANU addresses, cleanup and two real NetworkManager apply/remove cycles; see `docs/P6-005-HARDWARE-EVIDENCE-2026-09-02.md`. |
 | P6-006 | `[-]` | **IN PROGRESS**: existing open [PR #41](https://github.com/ekkus93/blueroute/pull/41) contains application-traffic acceptance tools/runbook; exact-head `8a63ff6` [CI passed](https://github.com/ekkus93/blueroute/actions/runs/33694773448). Review/merge qualified software; real ping/SSH/TCP/UDP and cleanup are **HARDWARE DEFERRED**. |
+| P7-001 | `[x]` | **SOFTWARE COMPLETE (design only)**: transport/authentication ADR chooses control TCP-over-PAN and explicitly pinned mutual TLS 1.3. P7-003/004 are required before any production join. |
 | All other tasks | `[ ]` | Not started unless explicitly documented in that task; remaining hardware acceptance is not a blocker for independent software work. |
 
 ## Platform rule
@@ -816,10 +817,12 @@ This is the first complete product slice.
 
 ## P7-001 — Choose control-plane transport
 
-- [ ] evaluate transport over established IP PAN.
-- [ ] port/address discovery.
-- [ ] authentication binding to BlueRoute identity.
-- [ ] ADR.
+- [x] evaluate transport over established IP PAN.
+- [x] port/address discovery.
+- [x] authentication binding to BlueRoute identity.
+- [x] ADR.
+
+**Design decision:** See `docs/P7-001-CONTROL-TRANSPORT.md`; TCP-over-PAN with mutually authenticated TLS 1.3 and explicit per-node key pinning. Production authentication/enrollment is **not implemented** (P7-003/004); `JoinNetwork` remains fail-closed.
 
 **Acceptance**
 
