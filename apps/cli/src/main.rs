@@ -48,10 +48,7 @@ fn format_status(status: &DaemonStatus, json: bool) -> Result<String, serde_json
     }
 }
 
-fn format_capabilities(
-    caps: &NodeCapabilities,
-    json: bool,
-) -> Result<String, serde_json::Error> {
+fn format_capabilities(caps: &NodeCapabilities, json: bool) -> Result<String, serde_json::Error> {
     if json {
         serde_json::to_string_pretty(caps)
     } else {
@@ -127,7 +124,10 @@ mod tests {
     fn parses_safe_read_only_commands_and_reports_bad_arguments() {
         assert_eq!(parse(&[]), Ok(Operation::Help));
         assert_eq!(parse(&args(&["--version"])), Ok(Operation::Version));
-        assert_eq!(parse(&args(&["status"])), Ok(Operation::Status { json: false }));
+        assert_eq!(
+            parse(&args(&["status"])),
+            Ok(Operation::Status { json: false })
+        );
         assert_eq!(
             parse(&args(&["--json", "capability", "show"])),
             Ok(Operation::Capabilities { json: true })
