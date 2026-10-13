@@ -8,8 +8,7 @@ use std::panic::catch_unwind;
 
 use blueroute_core::{NetworkId, NodeId};
 use blueroute_protocol::control::{
-    CONTROL_VERSION, ControlEnvelope, ControlMessage, MAX_CONTROL_FRAME_BYTES,
-    encode_control_frame,
+    CONTROL_VERSION, ControlEnvelope, ControlMessage, MAX_CONTROL_FRAME_BYTES, encode_control_frame,
 };
 use blueroute_protocol::control_io::{
     ControlIoError, read_one_control_frame, write_one_control_frame,
@@ -30,11 +29,12 @@ fn heartbeat() -> ControlEnvelope {
 fn every_truncation_of_a_valid_frame_fails_without_panic() {
     let encoded = encode_control_frame(&heartbeat()).unwrap();
     for length in 0..encoded.len() {
-        let result = catch_unwind(|| {
-            read_one_control_frame(&mut Cursor::new(&encoded[..length]))
-        });
+        let result = catch_unwind(|| read_one_control_frame(&mut Cursor::new(&encoded[..length])));
         assert!(result.is_ok(), "parser panicked at prefix length {length}");
-        assert!(result.unwrap().is_err(), "truncated frame accepted at {length}");
+        assert!(
+            result.unwrap().is_err(),
+            "truncated frame accepted at {length}"
+        );
     }
     assert_eq!(
         read_one_control_frame(&mut Cursor::new(encoded)).unwrap(),
@@ -56,22 +56,28 @@ fn deterministic_mutated_wire_data_never_panics() {
         if iteration % 7 == 0 {
             bytes.truncate((seed as usize) % bytes.len());
         }
-        let result = catch_unwind(|| {
-            read_one_control_frame(&mut Cursor::new(bytes))
-        });
+        let result = catch_unwind(|| read_one_control_frame(&mut Cursor::new(bytes)));
         assert!(result.is_ok(), "parser panicked on mutation {iteration}");
     }
 }
 
 #[test]
 fn adversarial_length_prefixes_are_bounded_before_body_reads() {
-    for size in [0_u32, 1, MAX_CONTROL_FRAME_BYTES as u32, (MAX_CONTROL_FRAME_BYTES + 1) as u32, u32::MAX] {
+    for size in [
+        0_u32,
+        1,
+        MAX_CONTROL_FRAME_BYTES as u32,
+        (MAX_CONTROL_FRAME_BYTES + 1) as u32,
+        u32::MAX,
+    ] {
         let prefix = size.to_be_bytes();
         let result = read_one_control_frame(&mut Cursor::new(prefix));
         if size == 0 || size as usize > MAX_CONTROL_FRAME_BYTES {
             assert!(matches!(result, Err(ControlIoError::Frame(_))));
         } else {
-            assert!(matches!(result, Err(ControlIoError::Io(ref e)) if e.kind() == ErrorKind::UnexpectedEof));
+            assert!(
+                matches!(result, Err(ControlIoError::Io(ref e)) if e.kind() == ErrorKind::UnexpectedEof)
+            );
         }
     }
 }
