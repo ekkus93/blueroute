@@ -5,11 +5,10 @@
 //! NetworkId/NodeId approval and fresh exporter-bound session IDs. Production
 //! JoinNetwork stays disabled until those requirements are implemented.
 
-use blueroute_core::{NetworkId, NodeId};
 use crate::control::{
-    ControlEnvelope, ControlMessage, HelloFacts, VerifiedSessionSequence,
-    encode_control_frame,
+    ControlEnvelope, ControlMessage, HelloFacts, VerifiedSessionSequence, encode_control_frame,
 };
+use blueroute_core::{NetworkId, NodeId};
 
 /// Validates both directions of a two-challenge handshake. Each side sends
 /// Hello(sequence=1) then HelloAck(sequence=2), echoing the other challenge.
