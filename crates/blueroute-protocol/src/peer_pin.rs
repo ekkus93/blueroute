@@ -31,6 +31,38 @@ impl SpkiSha256 {
     pub const fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
+
+    /// Strict canonical fingerprint syntax for a future *independently*
+    /// authenticated human comparison. Parsing is NOT verification or
+    /// enrollment and must never replace TLS proof of key possession.
+    pub fn parse_canonical_hex(text: &str) -> Result<Self, PeerPinError> {
+        if text.len() != 64 {
+            return Err(PeerPinError::InvalidFingerprint);
+        }
+        let mut digest = [0_u8; 32];
+        for (index, byte) in digest.iter_mut().enumerate() {
+            let bytes = text.as_bytes();
+            let hex = |value| match value {
+                b'0'..=b'9' => Some(value - b'0'),
+                b'a'..=b'f' => Some(value - b'a' + 10),
+                _ => None,
+            };
+            let high = hex(bytes[index * 2]).ok_or(PeerPinError::InvalidFingerprint)?;
+            let low = hex(bytes[index * 2 + 1]).ok_or(PeerPinError::InvalidFingerprint)?;
+            *byte = (high << 4) | low;
+        }
+        Self::from_verified_certificate_digest(digest)
+    }
+
+    pub fn to_canonical_hex(self) -> String {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut text = String::with_capacity(64);
+        for byte in self.0 {
+            text.push(char::from(HEX[usize::from(byte >> 4)]));
+            text.push(char::from(HEX[usize::from(byte & 15)]));
+        }
+        text
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -161,6 +193,27 @@ mod tests {
 
     fn fingerprint(value: u8) -> SpkiSha256 {
         SpkiSha256::from_verified_certificate_digest([value; 32]).unwrap()
+    }
+
+    #[test]
+    fn canonical_public_key_fingerprint_round_trip_and_invalid_input() {
+        let key = fingerprint(0xab);
+        let canonical = "ab".repeat(32);
+        assert_eq!(key.to_canonical_hex(), canonical);
+        assert_eq!(SpkiSha256::parse_canonical_hex(&canonical), Ok(key));
+        for wrong in [
+            "AB".repeat(32),
+            "ab".repeat(31),
+            "ab".repeat(33),
+            format!("{}!", "ab".repeat(31)),
+            "00".repeat(32),
+            " ab".repeat(21),
+        ] {
+            assert_eq!(
+                SpkiSha256::parse_canonical_hex(&wrong),
+                Err(PeerPinError::InvalidFingerprint)
+            );
+        }
     }
 
     #[test]

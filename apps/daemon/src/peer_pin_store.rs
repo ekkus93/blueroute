@@ -86,10 +86,7 @@ impl PeerPinStore {
             text.push('\t');
             text.push_str(&node.to_string());
             text.push('\t');
-            for byte in pin.as_bytes() {
-                text.push(hex_nibble(byte >> 4));
-                text.push(hex_nibble(byte & 15));
-            }
+            text.push_str(&pin.to_canonical_hex());
             text.push('\n');
         }
         if text.len() > MAX_BYTES {
@@ -104,34 +101,9 @@ fn invalid(message: &'static str) -> CoreError {
     CoreError::new(ErrorKind::PersistenceError, message)
 }
 
-fn hex_nibble(nibble: u8) -> char {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    char::from(HEX[usize::from(nibble)])
-}
-
 fn decode_digest(text: &str) -> Result<SpkiSha256, CoreError> {
-    if text.len() != 64 {
-        return Err(invalid(
-            "peer key fingerprint must contain exactly 64 hex characters",
-        ));
-    }
-    let bytes = text.as_bytes();
-    let mut digest = [0_u8; 32];
-    for (index, byte) in digest.iter_mut().enumerate() {
-        let high = hex_value(bytes[index * 2])?;
-        let low = hex_value(bytes[index * 2 + 1])?;
-        *byte = high << 4 | low;
-    }
-    SpkiSha256::from_verified_certificate_digest(digest)
-        .map_err(|_| invalid("zero key pin fingerprint is invalid"))
-}
-
-fn hex_value(byte: u8) -> Result<u8, CoreError> {
-    match byte {
-        b'0'..=b'9' => Ok(byte - b'0'),
-        b'a'..=b'f' => Ok(byte - b'a' + 10),
-        _ => Err(invalid("key fingerprint requires canonical lowercase hex")),
-    }
+    SpkiSha256::parse_canonical_hex(text)
+        .map_err(|_| invalid("peer key fingerprint must be canonical lowercase SHA-256 hex"))
 }
 
 #[cfg(test)]
