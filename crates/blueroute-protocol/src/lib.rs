@@ -2,6 +2,7 @@
 
 pub mod control;
 pub mod session;
+pub mod peer_pin;
 
 use std::fmt;
 
