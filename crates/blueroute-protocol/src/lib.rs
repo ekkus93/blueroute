@@ -1,8 +1,8 @@
 #![doc = "Shared BlueRoute protocol and API types."]
 
 pub mod control;
-pub mod session;
 pub mod peer_pin;
+pub mod session;
 
 use std::fmt;
 

@@ -49,7 +49,9 @@ impl fmt::Display for PeerPinError {
             Self::UnknownEnrollment => f.write_str("no verified peer key enrollment exists"),
             Self::KeyConflict => f.write_str("peer key changed; explicit re-enrollment required"),
             Self::NotApprovedForNetwork => f.write_str("peer lacks network membership approval"),
-            Self::FingerprintMismatch => f.write_str("authenticated peer public key differs from pin"),
+            Self::FingerprintMismatch => {
+                f.write_str("authenticated peer public key differs from pin")
+            }
         }
     }
 }
@@ -154,9 +156,18 @@ mod tests {
     #[test]
     fn exact_pinned_approved_peer_is_accepted_only_for_its_network_and_node() {
         let mut pins = PeerKeyPins::new();
-        assert_eq!(pins.enroll_verified(network(1), node(2), fingerprint(3)), Ok(true));
-        assert_eq!(pins.enroll_verified(network(1), node(2), fingerprint(3)), Ok(false));
-        assert_eq!(pins.authorize(network(1), node(2), true, fingerprint(3)), Ok(()));
+        assert_eq!(
+            pins.enroll_verified(network(1), node(2), fingerprint(3)),
+            Ok(true)
+        );
+        assert_eq!(
+            pins.enroll_verified(network(1), node(2), fingerprint(3)),
+            Ok(false)
+        );
+        assert_eq!(
+            pins.authorize(network(1), node(2), true, fingerprint(3)),
+            Ok(())
+        );
         assert_eq!(
             pins.authorize(network(1), node(2), false, fingerprint(3)),
             Err(PeerPinError::NotApprovedForNetwork)
@@ -172,7 +183,8 @@ mod tests {
     #[test]
     fn wrong_tls_key_and_silent_key_rotation_are_rejected() {
         let mut pins = PeerKeyPins::new();
-        pins.enroll_verified(network(1), node(2), fingerprint(3)).unwrap();
+        pins.enroll_verified(network(1), node(2), fingerprint(3))
+            .unwrap();
         assert_eq!(
             pins.enroll_verified(network(1), node(2), fingerprint(4)),
             Err(PeerPinError::KeyConflict)
@@ -181,21 +193,29 @@ mod tests {
             pins.authorize(network(1), node(2), true, fingerprint(4)),
             Err(PeerPinError::FingerprintMismatch)
         );
-        assert_eq!(pins.authorize(network(1), node(2), true, fingerprint(3)), Ok(()));
+        assert_eq!(
+            pins.authorize(network(1), node(2), true, fingerprint(3)),
+            Ok(())
+        );
     }
 
     #[test]
     fn revocation_is_network_scoped_and_idempotent() {
         let mut pins = PeerKeyPins::new();
-        pins.enroll_verified(network(1), node(2), fingerprint(3)).unwrap();
-        pins.enroll_verified(network(4), node(2), fingerprint(3)).unwrap();
+        pins.enroll_verified(network(1), node(2), fingerprint(3))
+            .unwrap();
+        pins.enroll_verified(network(4), node(2), fingerprint(3))
+            .unwrap();
         assert!(pins.revoke(network(1), node(2)));
         assert!(!pins.revoke(network(1), node(2)));
         assert_eq!(
             pins.authorize(network(1), node(2), true, fingerprint(3)),
             Err(PeerPinError::UnknownEnrollment)
         );
-        assert_eq!(pins.authorize(network(4), node(2), true, fingerprint(3)), Ok(()));
+        assert_eq!(
+            pins.authorize(network(4), node(2), true, fingerprint(3)),
+            Ok(())
+        );
         assert_eq!(pins.len(), 1);
     }
 }
