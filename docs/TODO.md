@@ -87,6 +87,8 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P7-003 | `[-]` | **IN PROGRESS**: typed validated hello/capability/topology claims plus fail-closed `(NetworkId,NodeId,SPKI-SHA256)` key pinning, secure owner-only durable enrollment records and daemon approval checks. Peer revocation erases persisted pin; reapproval does not restore it. [CI 38448995440](https://github.com/ekkus93/blueroute/actions/runs/38448995440) passed at `897d8cdb`. Real TLS identity verification, authenticated hello exchange and key enrollment UX still missing. |
 | P7-004 | `[-]` | **IN PROGRESS**: bounded peer registry/stale-event isolation and bounded exponential reconnect policy passed exact-head [CI 38444858686](https://github.com/ekkus93/blueroute/actions/runs/38444858686) at `c688f799`. Authenticated TLS, key-pinned peer verification, transport timeouts, reconnection driver, and daemon integration remain unimplemented. |
 | P7-005 | `[-]` | **IN PROGRESS**: parser fuzz-style deterministic mutation, frame truncation, version incompatibility and round-trip tests passed exact-head [CI 38399834487](https://github.com/ekkus93/blueroute/actions/runs/38399834487) at `964b7add`. Daemon wire integration/fuzz acceptance still depends on P7-004. |
+| P10-001 | `[-]` | **IN PROGRESS:** early read-only CLI uses the version-gated `blueroute-client` and has `--help`/`--version`, preliminary usage and daemon error exits; **clap**, complete exit taxonomy and further commands remain. Exact-head [CI 38461039721](https://github.com/ekkus93/blueroute/actions/runs/38461039721) passed at `51160db`. |
+| P10-002 | `[-]` | **IN PROGRESS:** `blueroute status` and `blueroute capability show` have tested human and JSON output against typed D-Bus client data ([CI 38461039721](https://github.com/ekkus93/blueroute/actions/runs/38461039721)); node/network list/show are unimplemented. |
 | All other tasks | `[ ]` | Not started unless explicitly documented in that task; remaining hardware acceptance is not a blocker for independent software work. |
 
 ## Platform rule
@@ -1081,10 +1083,12 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P10-001 — Create CLI skeleton with clap
 
-- [ ] global options.
-- [ ] daemon handling.
-- [ ] version.
-- [ ] consistent errors/exits.
+- [ ] complete clap-based global options/parser (temporary minimal parser currently supports `--json`, `--help`).
+- [x] daemon handling via version-gated shared system D-Bus client for read-only commands.
+- [x] version display.
+- [ ] consistent full error/exit taxonomy (currently preliminary usage, daemon-unavailable, operational errors).
+
+**Software partial:** Initial read-only CLI in `apps/cli/src/main.rs` passed exact-head [CI 38461039721](https://github.com/ekkus93/blueroute/actions/runs/38461039721) at `51160db`; keep P10-001 open until clap integration and full exit-code contract.
 
 **Acceptance**
 
@@ -1092,10 +1096,12 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P10-002 — Implement status commands
 
-- [ ] `blueroute status`.
-- [ ] `blueroute capability show`.
+- [x] `blueroute status` (typed D-Bus status; human/JSON).
+- [x] `blueroute capability show` (typed capability summary; human/JSON).
 - [ ] `blueroute node list/show`.
 - [ ] `blueroute network list`.
+
+**Software partial:** stable JSON serialization round-trips and no direct BlueZ/NetworkManager access; exact-head [CI 38461039721](https://github.com/ekkus93/blueroute/actions/runs/38461039721) passed.
 
 **Acceptance**
 
@@ -1135,12 +1141,14 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P10-006 — Define exit-code contract
 
-- [ ] success.
-- [ ] usage/config.
-- [ ] daemon unavailable.
-- [ ] unsupported capability.
-- [ ] authorization.
-- [ ] operational failure.
+- [x] success (0).
+- [x] usage/config (2; preliminary parser).
+- [x] daemon unavailable or incompatible (3).
+- [ ] unsupported capability (requires complete typed error mapping).
+- [ ] authorization (requires privileged CLI commands).
+- [x] general operational failure (1).
+
+**Software partial:** still needs clap parsing, daemon-error classification, and end-to-end representative exit tests before P10-006 is complete.
 
 **Acceptance**
 
