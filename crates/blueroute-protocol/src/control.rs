@@ -409,4 +409,65 @@ mod tests {
         frame.extend_from_slice(altered.as_bytes());
         assert!(decode_control_frame(&frame).is_err());
     }
+
+    #[test]
+    fn all_initial_message_variants_round_trip() {
+        let baseline = sample();
+        let facts = example_facts();
+        let messages = [
+            ControlMessage::Hello {
+                challenge: [5; 16],
+                facts: facts.clone(),
+            },
+            ControlMessage::HelloAck {
+                challenge: [7; 16],
+                facts,
+            },
+            ControlMessage::Heartbeat,
+            ControlMessage::Goodbye,
+        ];
+        for (index, message) in messages.into_iter().enumerate() {
+            let envelope = ControlEnvelope {
+                sequence: index as u64 + 1,
+                message,
+                ..baseline.clone()
+            };
+            let encoded = encode_control_frame(&envelope).unwrap();
+            assert_eq!(decode_control_frame(&encoded).unwrap(), envelope);
+        }
+    }
+
+    #[test]
+    fn known_frames_with_mutated_prefixes_and_versions_fail_closed() {
+        let valid = encode_control_frame(&sample()).unwrap();
+        let length = valid.len() - 4;
+        for declared in [0_usize, 1, length - 1, length + 1, MAX_CONTROL_FRAME_BYTES + 1] {
+            let mut wrong = valid.clone();
+            wrong[..4].copy_from_slice(&(declared as u32).to_be_bytes());
+            assert!(decode_control_frame(&wrong).is_err());
+        }
+        let raw = String::from_utf8(valid[4..].to_vec()).unwrap();
+        let downgraded = raw.replace("\"version\":1", "\"version\":0");
+        let future = raw.replace("\"version\":1", "\"version\":2");
+        for payload in [downgraded, future] {
+            let mut framed = (payload.len() as u32).to_be_bytes().to_vec();
+            framed.extend_from_slice(payload.as_bytes());
+            assert!(decode_control_frame(&framed).is_err());
+        }
+    }
+
+    #[test]
+    fn frame_mutations_and_all_truncated_valid_prefixes_never_panic() {
+        let valid = encode_control_frame(&sample()).unwrap();
+        for length in 0..valid.len() {
+            assert!(decode_control_frame(&valid[..length]).is_err());
+        }
+        for index in 0..valid.len() {
+            for alteration in [0_u8, 0xff] {
+                let mut altered = valid.clone();
+                altered[index] = alteration;
+                let _ = decode_control_frame(&altered);
+            }
+        }
+    }
 }

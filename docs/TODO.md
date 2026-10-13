@@ -84,7 +84,9 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P6-006 | `[-]` | **IN PROGRESS**: existing open [PR #41](https://github.com/ekkus93/blueroute/pull/41) contains application-traffic acceptance tools/runbook; exact-head `8a63ff6` [CI passed](https://github.com/ekkus93/blueroute/actions/runs/33694773448). Review/merge qualified software; real ping/SSH/TCP/UDP and cleanup are **HARDWARE DEFERRED**. |
 | P7-001 | `[x]` | **SOFTWARE COMPLETE (design only)**: transport/authentication ADR chooses control TCP-over-PAN and explicitly pinned mutual TLS 1.3. P7-003/004 are required before any production join. |
 | P7-002 | `[x]` | **SOFTWARE COMPLETE**: strict bounded frame codec/replay tracker; [CI 38397384422](https://github.com/ekkus93/blueroute/actions/runs/38397384422) passed at `63e8cf7`. It does not perform peer authentication. |
-| P7-003 | `[-]` | **IN PROGRESS**: typed validated hello/peer capability/topology facts, but no authenticated session exchange or trust binding yet. |
+| P7-003 | `[-]` | **IN PROGRESS**: typed validated hello/capability/topology facts and negative tests; exact-head [CI 38398780911](https://github.com/ekkus93/blueroute/actions/runs/38398780911) passed at `1bfac9c`. No authenticated hello exchange or trust binding yet. |
+| P7-004 | `[-]` | **IN PROGRESS**: bounded per-peer logical session registry, stale-event isolation and tests passed exact-head [CI 38399302611](https://github.com/ekkus93/blueroute/actions/runs/38399302611) at `218dc74`; real TLS identity verification, transport, timeout/reconnect, and daemon integration remain. |
+| P7-005 | `[-]` | **IN PROGRESS**: parser fuzz-style deterministic mutation, version incompatibility and round-trip tests in protocol crate; exact-head CI pending. Daemon wire integration acceptance depends on P7-004. |
 | All other tasks | `[ ]` | Not started unless explicitly documented in that task; remaining hardware acceptance is not a blocker for independent software work. |
 
 ## Platform rule
@@ -860,10 +862,13 @@ This is the first complete product slice.
 
 ## P7-004 — Implement control-session lifecycle
 
-- [ ] establish after data-plane availability.
-- [ ] detect loss.
-- [ ] reconnect.
-- [ ] avoid duplicate logical-peer sessions.
+- [ ] establish authenticated TLS after data-plane availability.
+- [x] model logical session loss and stale event isolation (software model).
+- [x] model reconnect/replacement and session capacity (software model).
+- [x] reject duplicate concurrently active logical-peer sessions (software model).
+- [ ] implement real TLS peer-key binding, runtime transport and bounded loss/reconnect cleanup.
+
+**Not fully accepted:** `crates/blueroute-protocol/src/session.rs` passes deterministic tests at `218dc74` (CI `38399302611`), but remains detached from production join and has no authenticating transport.
 
 **Acceptance**
 
@@ -871,9 +876,12 @@ This is the first complete product slice.
 
 ## P7-005 — Fuzz/property-test parser
 
-- [ ] malformed-input tests.
-- [ ] round-trip tests.
-- [ ] compatibility tests.
+- [x] deterministic malformed/truncated/oversized/unknown-field input tests for control parser.
+- [x] per-message round-trip and frame-mutation tests.
+- [x] control-version rejection/compatibility tests.
+- [ ] connect parser to authenticated daemon transport and show peer data cannot crash daemon; full acceptance remains pending P7-004.
+
+**Software qualification pending:** deterministic checks exercise the shared protocol parser without a physical Bluetooth device.
 
 **Acceptance**
 
