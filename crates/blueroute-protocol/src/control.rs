@@ -210,7 +210,9 @@ mod tests {
         frame.push(0);
         assert!(decode_control_frame(&frame).is_err());
         assert!(read_control_length(&[0, 0, 0, 0]).is_err());
-        assert!(read_control_length(&((MAX_CONTROL_FRAME_BYTES as u32) + 1).to_be_bytes()).is_err());
+        assert!(
+            read_control_length(&((MAX_CONTROL_FRAME_BYTES as u32) + 1).to_be_bytes()).is_err()
+        );
     }
 
     #[test]
