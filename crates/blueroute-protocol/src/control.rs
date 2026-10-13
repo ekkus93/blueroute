@@ -371,29 +371,31 @@ mod tests {
 
     #[test]
     fn rejects_forged_and_malformed_hello_facts() {
-        let mut message = sample();
-        let ControlMessage::Hello { facts, .. } = &mut message.message else {
-            panic!("expected hello");
-        };
-        facts.software_version = " ".into();
-        assert!(encode_control_frame(&message).is_err());
-        facts.software_version = "x".repeat(65);
-        assert!(encode_control_frame(&message).is_err());
-        facts.software_version = "0.1".into();
-        facts.direct_neighbors.push(NodeId::from_bytes([7; 16]));
-        assert!(encode_control_frame(&message).is_err());
-        facts.direct_neighbors.pop();
-        facts.direct_neighbors.push(NodeId::from_bytes([3; 16]));
-        assert!(encode_control_frame(&message).is_err());
-        facts.direct_neighbors.clear();
-        facts.segment = Some(IpPrefix::new("10.201.44.9".parse().unwrap(), 24).unwrap());
-        assert!(encode_control_frame(&message).is_err());
-        facts.segment = None;
-        facts.capabilities.link_quality = Some(blueroute_core::Sourced::new(
-            blueroute_core::LinkQuality::new(101),
-            blueroute_core::CapabilitySource::Discovered,
-        ));
-        assert!(encode_control_frame(&message).is_err());
+        for case in 0..6 {
+            let mut message = sample();
+            let ControlMessage::Hello { facts, .. } = &mut message.message else {
+                panic!("expected hello");
+            };
+            match case {
+                0 => facts.software_version = " ".into(),
+                1 => facts.software_version = "x".repeat(65),
+                2 => facts.direct_neighbors.push(NodeId::from_bytes([7; 16])),
+                3 => facts.direct_neighbors.push(NodeId::from_bytes([3; 16])),
+                4 => {
+                    facts.segment = Some(
+                        IpPrefix::new("10.201.44.9".parse().unwrap(), 24).unwrap(),
+                    );
+                }
+                5 => {
+                    facts.capabilities.link_quality = Some(blueroute_core::Sourced::new(
+                        blueroute_core::LinkQuality::new(101),
+                        blueroute_core::CapabilitySource::Discovered,
+                    ));
+                }
+                _ => unreachable!(),
+            }
+            assert!(encode_control_frame(&message).is_err());
+        }
     }
 
     #[test]
