@@ -6,7 +6,8 @@
 
 use std::fmt;
 
-use blueroute_core::{NetworkId, NodeId};
+use blueroute_core::{IpPrefix, NetworkId, NodeCapabilities, NodeId, normalized_ipv4_prefix};
+use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 /// Versioned independently from the local daemon API.
@@ -15,12 +16,60 @@ pub const CONTROL_VERSION: u16 = 1;
 pub const MAX_CONTROL_FRAME_BYTES: usize = 16 * 1024;
 const HEADER_LEN: usize = 4;
 
+/// Version, capabilities and topology facts advertised by an untrusted peer.
+///
+/// These are non-authoritative until TLS proves the peer key, its approved
+/// logical identity, the expected network, and the entire session context.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HelloFacts {
+    pub software_version: String,
+    pub capabilities: NodeCapabilities,
+    pub segment: Option<IpPrefix>,
+    pub direct_neighbors: Vec<NodeId>,
+}
+
+fn validate_facts(facts: &HelloFacts, sender: NodeId) -> Result<(), ControlFrameError> {
+    if facts.software_version.is_empty()
+        || facts.software_version.len() > 64
+        || !facts
+            .software_version
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'+' | b'_'))
+    {
+        return Err(invalid("invalid software version"));
+    }
+    if facts.direct_neighbors.len() > 32 {
+        return Err(invalid("too many direct neighbor claims"));
+    }
+    let mut ids = BTreeSet::new();
+    for node in &facts.direct_neighbors {
+        if *node == sender || !ids.insert(*node) {
+            return Err(invalid("duplicated or self-referential neighbor"));
+        }
+    }
+    if let Some(segment) = facts.segment {
+        if normalized_ipv4_prefix(segment).ok() != Some(segment) {
+            return Err(invalid("hello requires canonical IPv4 segment"));
+        }
+    }
+    if facts
+        .capabilities
+        .link_quality
+        .as_ref()
+        .is_some_and(|quality| quality.value.score > 100)
+    {
+        return Err(invalid("link quality exceeds valid range"));
+    }
+    Ok(())
+}
+
 /// Initial bootstrap and liveness types only; no unauthenticated route changes.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ControlMessage {
-    Hello { challenge: [u8; 16] },
-    HelloAck { challenge: [u8; 16] },
+    Hello { challenge: [u8; 16], facts: HelloFacts },
+    HelloAck { challenge: [u8; 16], facts: HelloFacts },
     Heartbeat,
     Goodbye,
 }
@@ -75,10 +124,12 @@ fn validate(envelope: &ControlEnvelope) -> Result<(), ControlFrameError> {
         return Err(invalid("zero control sequence"));
     }
     match &envelope.message {
-        ControlMessage::Hello { challenge } | ControlMessage::HelloAck { challenge }
-            if challenge.iter().all(|byte| *byte == 0) =>
-        {
-            return Err(invalid("zero hello challenge"));
+        ControlMessage::Hello { challenge, facts }
+        | ControlMessage::HelloAck { challenge, facts } => {
+            if challenge.iter().all(|byte| *byte == 0) {
+                return Err(invalid("zero hello challenge"));
+            }
+            validate_facts(facts, envelope.sender)?;
         }
         _ => {}
     }
@@ -182,6 +233,15 @@ impl VerifiedSessionSequence {
 mod tests {
     use super::*;
 
+    fn example_facts() -> HelloFacts {
+        HelloFacts {
+            software_version: "0.1.0".into(),
+            capabilities: NodeCapabilities::default(),
+            segment: None,
+            direct_neighbors: vec![NodeId::from_bytes([7; 16])],
+        }
+    }
+
     fn sample() -> ControlEnvelope {
         ControlEnvelope {
             version: CONTROL_VERSION,
@@ -189,7 +249,7 @@ mod tests {
             sender: NodeId::from_bytes([3; 16]),
             session_id: [4; 16],
             sequence: 1,
-            message: ControlMessage::Hello { challenge: [5; 16] },
+            message: ControlMessage::Hello { challenge: [5; 16], facts: example_facts() },
         }
     }
 
@@ -227,7 +287,7 @@ mod tests {
         envelope.session_id = [0; 16];
         assert!(encode_control_frame(&envelope).is_err());
         envelope.session_id = [4; 16];
-        envelope.message = ControlMessage::Hello { challenge: [0; 16] };
+        envelope.message = ControlMessage::Hello { challenge: [0; 16], facts: example_facts() };
         assert!(encode_control_frame(&envelope).is_err());
     }
 
@@ -280,5 +340,59 @@ mod tests {
             }
             let _ = decode_control_frame(&frame);
         }
+    }
+
+    #[test]
+    fn hello_carries_capabilities_segment_and_peer_facts() {
+        let mut message = sample();
+        let ControlMessage::Hello { facts, .. } = &mut message.message else {
+            panic!("expected hello");
+        };
+        facts.capabilities.panu = Some(blueroute_core::Sourced::new(
+            true,
+            blueroute_core::CapabilitySource::Measured,
+        ));
+        facts.segment = Some(IpPrefix::new("10.201.44.0".parse().unwrap(), 24).unwrap());
+        let encoded = encode_control_frame(&message).unwrap();
+        assert_eq!(decode_control_frame(&encoded).unwrap(), message);
+    }
+
+    #[test]
+    fn rejects_forged_and_malformed_hello_facts() {
+        let mut message = sample();
+        let ControlMessage::Hello { facts, .. } = &mut message.message else {
+            panic!("expected hello");
+        };
+        facts.software_version = " ".into();
+        assert!(encode_control_frame(&message).is_err());
+        facts.software_version = "x".repeat(65);
+        assert!(encode_control_frame(&message).is_err());
+        facts.software_version = "0.1".into();
+        facts.direct_neighbors.push(NodeId::from_bytes([7; 16]));
+        assert!(encode_control_frame(&message).is_err());
+        facts.direct_neighbors.pop();
+        facts.direct_neighbors.push(NodeId::from_bytes([3; 16]));
+        assert!(encode_control_frame(&message).is_err());
+        facts.direct_neighbors.clear();
+        facts.segment = Some(IpPrefix::new("10.201.44.9".parse().unwrap(), 24).unwrap());
+        assert!(encode_control_frame(&message).is_err());
+        facts.segment = None;
+        facts.capabilities.link_quality = Some(blueroute_core::Sourced::new(
+            blueroute_core::LinkQuality::new(101),
+            blueroute_core::CapabilitySource::Discovered,
+        ));
+        assert!(encode_control_frame(&message).is_err());
+    }
+
+    #[test]
+    fn rejects_unknown_hello_fields() {
+        let data = String::from_utf8(encode_control_frame(&sample()).unwrap()[4..].to_vec()).unwrap();
+        let altered = data.replace(
+            "\"direct_neighbors\":",
+            "\"unknown_required_feature\":true,\"direct_neighbors\":",
+        );
+        let mut frame = (altered.len() as u32).to_be_bytes().to_vec();
+        frame.extend_from_slice(altered.as_bytes());
+        assert!(decode_control_frame(&frame).is_err());
     }
 }

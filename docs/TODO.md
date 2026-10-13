@@ -83,6 +83,8 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P6-005 | `[x]` | **COMPLETE** in `master` at `c2db781`. Deterministic RFC1918 subnet, live conflict detection, NAP/PANU addresses, cleanup and two real NetworkManager apply/remove cycles; see `docs/P6-005-HARDWARE-EVIDENCE-2026-09-02.md`. |
 | P6-006 | `[-]` | **IN PROGRESS**: existing open [PR #41](https://github.com/ekkus93/blueroute/pull/41) contains application-traffic acceptance tools/runbook; exact-head `8a63ff6` [CI passed](https://github.com/ekkus93/blueroute/actions/runs/33694773448). Review/merge qualified software; real ping/SSH/TCP/UDP and cleanup are **HARDWARE DEFERRED**. |
 | P7-001 | `[x]` | **SOFTWARE COMPLETE (design only)**: transport/authentication ADR chooses control TCP-over-PAN and explicitly pinned mutual TLS 1.3. P7-003/004 are required before any production join. |
+| P7-002 | `[x]` | **SOFTWARE COMPLETE**: strict bounded frame codec/replay tracker; [CI 38397384422](https://github.com/ekkus93/blueroute/actions/runs/38397384422) passed at `63e8cf7`. It does not perform peer authentication. |
+| P7-003 | `[-]` | **IN PROGRESS**: typed validated hello/peer capability/topology facts, but no authenticated session exchange or trust binding yet. |
 | All other tasks | `[ ]` | Not started unless explicitly documented in that task; remaining hardware acceptance is not a blocker for independent software work. |
 
 ## Platform rule
@@ -830,11 +832,13 @@ This is the first complete product slice.
 
 ## P7-002 — Define control protocol envelope
 
-- [ ] version.
-- [ ] sender/network identity.
-- [ ] message type.
-- [ ] bounded payload.
-- [ ] freshness/replay approach.
+- [x] version.
+- [x] sender/network identity.
+- [x] message type.
+- [x] bounded payload.
+- [x] freshness/replay approach.
+
+**Software complete:** `crates/blueroute-protocol/src/control.rs`, exact-head CI `38397384422`; parser and replay guard do not authenticate untrusted identity.
 
 **Acceptance**
 
@@ -842,10 +846,13 @@ This is the first complete product slice.
 
 ## P7-003 — Implement peer hello/capability exchange
 
-- [ ] software/protocol version.
-- [ ] stable identity.
-- [ ] node capabilities.
-- [ ] current segment/topology facts.
+- [x] software/protocol version represented in envelope/hello.
+- [x] stable identity claimed by envelope sender (not authenticated yet).
+- [x] node capability facts are typed and validated.
+- [x] canonical IPv4 segment and direct-neighbor facts are represented and bounded.
+- [ ] authenticated runtime hello/ack exchange and key-pinned verification (depends on P7-004).
+
+**Incomplete:** software message schema alone does not authorize membership or prove hardware behavior.
 
 **Acceptance**
 
