@@ -1,6 +1,7 @@
 #![doc = "Shared BlueRoute protocol and API types."]
 
 pub mod control;
+pub mod handshake;
 pub mod peer_pin;
 pub mod session;
 
