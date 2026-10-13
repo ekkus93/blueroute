@@ -13,13 +13,10 @@ use crate::{CoreError, ErrorKind, NodeId, TopologyGraph};
 ///
 /// Unknown routing capability is a denial. Untrusted advertisements must
 /// never be promoted into this graph by the caller.
-pub fn desired_ipv4_forwarding(
-    graph: &TopologyGraph,
-    local: NodeId,
-) -> Result<bool, CoreError> {
-    let capabilities = graph.node(&local).ok_or_else(|| {
-        CoreError::new(ErrorKind::InvalidInput, "local node is not in topology")
-    })?;
+pub fn desired_ipv4_forwarding(graph: &TopologyGraph, local: NodeId) -> Result<bool, CoreError> {
+    let capabilities = graph
+        .node(&local)
+        .ok_or_else(|| CoreError::new(ErrorKind::InvalidInput, "local node is not in topology"))?;
     if capabilities.can_route() != Some(true) {
         return Ok(false);
     }
@@ -37,8 +34,8 @@ pub fn desired_ipv4_forwarding(
 mod tests {
     use super::*;
     use crate::{
-        CapabilitySource, LinkHealth, LinkId, LinkState, NodeCapabilities, PanLink,
-        PanSegment, SegmentId, Sourced,
+        CapabilitySource, LinkHealth, LinkId, LinkState, NodeCapabilities, PanLink, PanSegment,
+        SegmentId, Sourced,
     };
 
     fn node(value: u8) -> NodeId {
@@ -49,7 +46,7 @@ mod tests {
         SegmentId::from_bytes([value; 16])
     }
 
-    fn graph(router: Option<bool>) -> TopologyGraph {
+    fn build_graph(router: Option<bool>) -> TopologyGraph {
         let mut graph = TopologyGraph::default();
         for value in 1..=4 {
             graph.add_node(
@@ -64,8 +61,12 @@ mod tests {
                 },
             );
         }
-        graph.add_segment(PanSegment::new(segment(1), node(1))).unwrap();
-        graph.add_segment(PanSegment::new(segment(2), node(2))).unwrap();
+        graph
+            .add_segment(PanSegment::new(segment(1), node(1)))
+            .unwrap();
+        graph
+            .add_segment(PanSegment::new(segment(2), node(2)))
+            .unwrap();
         graph
     }
 
@@ -93,40 +94,120 @@ mod tests {
 
     #[test]
     fn single_star_never_enables_ip_forwarding() {
-        let mut graph = graph(Some(true));
-        attach(&mut graph, 1, 2, 2, 3, LinkState::Active, LinkHealth::Healthy);
-        attach(&mut graph, 2, 2, 2, 4, LinkState::Active, LinkHealth::Healthy);
+        let mut graph = build_graph(Some(true));
+        attach(
+            &mut graph,
+            1,
+            2,
+            2,
+            3,
+            LinkState::Active,
+            LinkHealth::Healthy,
+        );
+        attach(
+            &mut graph,
+            2,
+            2,
+            2,
+            4,
+            LinkState::Active,
+            LinkHealth::Healthy,
+        );
         assert!(!desired_ipv4_forwarding(&graph, node(2)).unwrap());
         assert!(!desired_ipv4_forwarding(&graph, node(3)).unwrap());
     }
 
     #[test]
     fn two_active_segments_require_explicit_router_capability() {
-        let mut graph = graph(Some(true));
-        attach(&mut graph, 1, 1, 1, 2, LinkState::Active, LinkHealth::Healthy);
-        attach(&mut graph, 2, 2, 2, 3, LinkState::Active, LinkHealth::Degraded);
+        let mut graph = build_graph(Some(true));
+        attach(
+            &mut graph,
+            1,
+            1,
+            1,
+            2,
+            LinkState::Active,
+            LinkHealth::Healthy,
+        );
+        attach(
+            &mut graph,
+            2,
+            2,
+            2,
+            3,
+            LinkState::Active,
+            LinkHealth::Degraded,
+        );
         assert!(desired_ipv4_forwarding(&graph, node(2)).unwrap());
         assert!(!desired_ipv4_forwarding(&graph, node(1)).unwrap());
 
         for router in [None, Some(false)] {
-            let mut denied = graph(router);
-            attach(&mut denied, 1, 1, 1, 2, LinkState::Active, LinkHealth::Healthy);
-            attach(&mut denied, 2, 2, 2, 3, LinkState::Active, LinkHealth::Healthy);
+            let mut denied = build_graph(router);
+            attach(
+                &mut denied,
+                1,
+                1,
+                1,
+                2,
+                LinkState::Active,
+                LinkHealth::Healthy,
+            );
+            attach(
+                &mut denied,
+                2,
+                2,
+                2,
+                3,
+                LinkState::Active,
+                LinkHealth::Healthy,
+            );
             assert!(!desired_ipv4_forwarding(&denied, node(2)).unwrap());
         }
     }
 
     #[test]
     fn failed_or_disconnected_links_release_desired_forwarding() {
-        let mut graph = graph(Some(true));
-        attach(&mut graph, 1, 1, 1, 2, LinkState::Active, LinkHealth::Healthy);
-        attach(&mut graph, 2, 2, 2, 3, LinkState::Disconnected, LinkHealth::Healthy);
+        let mut graph = build_graph(Some(true));
+        attach(
+            &mut graph,
+            1,
+            1,
+            1,
+            2,
+            LinkState::Active,
+            LinkHealth::Healthy,
+        );
+        attach(
+            &mut graph,
+            2,
+            2,
+            2,
+            3,
+            LinkState::Disconnected,
+            LinkHealth::Healthy,
+        );
         assert!(!desired_ipv4_forwarding(&graph, node(2)).unwrap());
         graph.remove_link(&LinkId::from_bytes([2; 16]));
-        attach(&mut graph, 2, 2, 2, 3, LinkState::Active, LinkHealth::Failed);
+        attach(
+            &mut graph,
+            2,
+            2,
+            2,
+            3,
+            LinkState::Active,
+            LinkHealth::Failed,
+        );
         assert!(!desired_ipv4_forwarding(&graph, node(2)).unwrap());
         graph.remove_link(&LinkId::from_bytes([2; 16]));
-        attach(&mut graph, 2, 2, 2, 3, LinkState::Active, LinkHealth::Healthy);
+        attach(
+            &mut graph,
+            2,
+            2,
+            2,
+            3,
+            LinkState::Active,
+            LinkHealth::Healthy,
+        );
         assert!(desired_ipv4_forwarding(&graph, node(2)).unwrap());
         assert!(desired_ipv4_forwarding(&graph, node(4)).is_ok());
         assert_eq!(
