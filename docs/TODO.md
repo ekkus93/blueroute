@@ -90,6 +90,8 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P10-001 | `[-]` | **IN PROGRESS:** early read-only CLI uses the version-gated `blueroute-client` and has `--help`/`--version`, preliminary usage and daemon error exits; **clap**, complete exit taxonomy and further commands remain. Exact-head [CI 38461039721](https://github.com/ekkus93/blueroute/actions/runs/38461039721) passed at `51160db`. |
 | P10-002 | `[-]` | **IN PROGRESS:** `blueroute status` and `blueroute capability show` have tested human and JSON output against typed D-Bus client data ([CI 38461039721](https://github.com/ekkus93/blueroute/actions/runs/38461039721)); node/network list/show are unimplemented. |
 | P14-001 | `[x]` | **COMPLETE (threat model only):** formal security model in `docs/P14-001-THREAT-MODEL.md`; lists attack surfaces, mitigations, residual risks and outstanding implementation gates. No claim that TLS is implemented or that P14-002..006/P16 passed. |
+| P10-003 | `[-]` | **IN PROGRESS:** network creation and discovery start/stop delegate to PolicyKit-protected typed daemon API; parsing/validation tests pass [CI 38466994092](https://github.com/ekkus93/blueroute/actions/runs/38466994092) at `c786f77`. Production join/leave and full end-to-end lifecycle remain. |
+| P10-004 | `[-]` | **IN PROGRESS:** explicit full-NodeId `peer trust`/`peer forget` invoke existing PolicyKit-protected D-Bus commands; tests and [CI 38466585585](https://github.com/ekkus93/blueroute/actions/runs/38466585585) at `8183225` passed. Pending requests/authenticated-join UX remain; trust is **not** TLS enrollment or membership. |
 | All other tasks | `[ ]` | Not started unless explicitly documented in that task; remaining hardware acceptance is not a blocker for independent software work. |
 
 ## Platform rule
@@ -1110,10 +1112,12 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P10-003 — Implement network lifecycle commands
 
-- [ ] create.
-- [ ] join.
-- [ ] leave.
-- [ ] discover.
+- [x] create (`blueroute network create <name>`; typed daemon/PolicyKit command, validated display name).
+- [ ] join (production `JoinNetwork` must remain fail-closed until P7 TLS authentication).
+- [ ] leave (daemon leave operation currently pending).
+- [x] discover start/stop (typed daemon/PolicyKit commands).
+
+**Software partial:** argument validation and delegation pass exact-head [CI 38466994092](https://github.com/ekkus93/blueroute/actions/runs/38466994092) at `c786f77`; this is not physical PAN or authenticated join acceptance.
 
 **Acceptance**
 
@@ -1121,9 +1125,11 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P10-004 — Implement trust commands
 
-- [ ] pending requests where applicable.
-- [ ] approve/trust.
-- [ ] forget/revoke.
+- [ ] pending requests where applicable (key enrollment/approval UX still incomplete).
+- [x] approve/trust (`blueroute peer trust <node-id>`, explicit full identifier; PolicyKit-gated by daemon).
+- [x] forget/revoke (`blueroute peer forget <node-id>`, PolicyKit-gated; daemon revokes durable cryptographic pin if configured).
+
+**Software partial:** [CI 38466585585](https://github.com/ekkus93/blueroute/actions/runs/38466585585) passed at `8183225`. These commands manage explicit P6-003 trust, **not** P7 peer-key enrollment or authenticated membership; do not mark P10-004 accepted until the final authorization/UX checks pass.
 
 **Acceptance**
 
