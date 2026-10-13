@@ -246,9 +246,8 @@ mod tests {
             let trust = DurablePeerTrustOperations::with_peer_pin_store(store, pin_store);
             trust.trust_peer(node).await.unwrap();
 
-            let check = |fingerprint| {
-                trust.require_approved_pinned_tls_peer(network, node, fingerprint)
-            };
+            let check =
+                |fingerprint| trust.require_approved_pinned_tls_peer(network, node, fingerprint);
             assert_eq!(
                 check(fingerprint).unwrap_err().kind(),
                 ErrorKind::AuthenticationFailed,
