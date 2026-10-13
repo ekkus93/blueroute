@@ -59,10 +59,7 @@ fn format_capabilities(caps: &NodeCapabilities, json: bool) -> Result<String, se
     }
 }
 
-fn format_networks(
-    networks: &[NetworkSummary],
-    json: bool,
-) -> Result<String, serde_json::Error> {
+fn format_networks(networks: &[NetworkSummary], json: bool) -> Result<String, serde_json::Error> {
     if json {
         serde_json::to_string_pretty(networks)
     } else if networks.is_empty() {
@@ -125,7 +122,7 @@ fn run(args: &[String]) -> i32 {
                     }
                     _ => Err("daemon returned an unexpected network-list response".to_owned()),
                 })
-        },
+        }
         Operation::Help | Operation::Version => unreachable!(),
     };
     match result {
