@@ -224,15 +224,15 @@ mod tests {
     #[test]
     fn untrusted_display_names_reject_terminal_and_bidi_control_sequences() {
         for bad in [
-            "Host\\nPeer",
-            "Device\\rSpoof",
-            "Term\\u{1b}[2J",
-            "Reverse\\u{202e}evil",
-            "Embed\\u{202a}evil",
-            "Isolate\\u{2066}peer",
-            "Directional\\u{061c}hint",
-            "Mark\\u{200f}spoof",
-            "Null\\u{0}name",
+            "Host\nPeer",
+            "Device\rSpoof",
+            "Term\u{1b}[2J",
+            "Reverse\u{202e}evil",
+            "Embed\u{202a}evil",
+            "Isolate\u{2066}peer",
+            "Directional\u{061c}hint",
+            "Mark\u{200f}spoof",
+            "Null\u{0}name",
         ] {
             assert!(DisplayName::new(bad).is_err(), "unexpected accepted name: {bad:?}");
         }
