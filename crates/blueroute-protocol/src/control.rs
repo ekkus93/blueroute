@@ -382,9 +382,8 @@ mod tests {
                 2 => facts.direct_neighbors.push(NodeId::from_bytes([7; 16])),
                 3 => facts.direct_neighbors.push(NodeId::from_bytes([3; 16])),
                 4 => {
-                    facts.segment = Some(
-                        IpPrefix::new("10.201.44.9".parse().unwrap(), 24).unwrap(),
-                    );
+                    facts.segment =
+                        Some(IpPrefix::new("10.201.44.9".parse().unwrap(), 24).unwrap());
                 }
                 5 => {
                     facts.capabilities.link_quality = Some(blueroute_core::Sourced::new(
