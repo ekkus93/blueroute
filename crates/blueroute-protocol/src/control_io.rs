@@ -162,15 +162,22 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-            stream.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
             assert_eq!(read_one_control_frame(&mut stream).unwrap(), message(1));
             write_one_control_frame(&mut stream, &message(2)).unwrap();
         });
-        let mut client =
-            TcpStream::connect_timeout(&address, Duration::from_secs(5)).unwrap();
-        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-        client.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut client = TcpStream::connect_timeout(&address, Duration::from_secs(5)).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        client
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
         write_one_control_frame(&mut client, &message(1)).unwrap();
         assert_eq!(read_one_control_frame(&mut client).unwrap(), message(2));
         server.join().unwrap();
