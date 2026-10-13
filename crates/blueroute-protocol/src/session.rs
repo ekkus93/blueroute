@@ -20,6 +20,99 @@ pub const MAX_RECONNECT_DELAY: std::time::Duration = std::time::Duration::from_s
 
 /// Deterministic exponential backoff. Each lost session gets its own state,
 /// preventing an unbounded reconnect spin loop after failures.
+/// Monotonic-clock deadline policy; not a TLS verifier. A real transport
+/// must enforce these budgets with cancellable network I/O.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConnectionStage {
+    Connecting,
+    TlsHandshake,
+    Hello,
+    Active,
+    Closing,
+}
+
+impl ConnectionStage {
+    pub const fn timeout_ms(self) -> u64 {
+        match self {
+            Self::Connecting | Self::Hello | Self::Closing => 5_000,
+            Self::TlsHandshake => 10_000,
+            Self::Active => 30_000,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeadlineError {
+    Expired,
+    ClockRegression,
+    InvalidTransition,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ConnectionDeadline {
+    stage: ConnectionStage,
+    last_ms: u64,
+    expires_ms: u64,
+}
+
+impl ConnectionDeadline {
+    pub fn new(now_ms: u64) -> Self {
+        Self {
+            stage: ConnectionStage::Connecting,
+            last_ms: now_ms,
+            expires_ms: now_ms.saturating_add(ConnectionStage::Connecting.timeout_ms()),
+        }
+    }
+
+    pub const fn stage(&self) -> ConnectionStage {
+        self.stage
+    }
+
+    pub const fn expires_ms(&self) -> u64 {
+        self.expires_ms
+    }
+
+    pub fn check(&self, now_ms: u64) -> Result<(), DeadlineError> {
+        if now_ms < self.last_ms {
+            return Err(DeadlineError::ClockRegression);
+        }
+        if now_ms >= self.expires_ms {
+            return Err(DeadlineError::Expired);
+        }
+        Ok(())
+    }
+
+    pub fn advance(&mut self, next: ConnectionStage, now_ms: u64) -> Result<(), DeadlineError> {
+        self.check(now_ms)?;
+        let allowed = matches!(
+            (self.stage, next),
+            (ConnectionStage::Connecting, ConnectionStage::TlsHandshake)
+                | (ConnectionStage::TlsHandshake, ConnectionStage::Hello)
+                | (ConnectionStage::Hello, ConnectionStage::Active)
+                | (ConnectionStage::Active, ConnectionStage::Closing)
+        );
+        if !allowed {
+            return Err(DeadlineError::InvalidTransition);
+        }
+        self.stage = next;
+        self.last_ms = now_ms;
+        self.expires_ms = now_ms.saturating_add(next.timeout_ms());
+        Ok(())
+    }
+
+    /// Call only after a complete, authenticated and replay-checked message.
+    /// Raw bytes and unverified heartbeat claims cannot refresh idle time.
+    pub fn authenticated_activity(&mut self, now_ms: u64) -> Result<(), DeadlineError> {
+        self.check(now_ms)?;
+        if self.stage != ConnectionStage::Active {
+            return Err(DeadlineError::InvalidTransition);
+        }
+        self.last_ms = now_ms;
+        self.expires_ms = now_ms.saturating_add(ConnectionStage::Active.timeout_ms());
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ReconnectBackoff {
     failed_attempts: u8,
@@ -290,6 +383,43 @@ mod tests {
             registry.activate_after_authentication(key(1), [8; 16]),
             Ok(SessionRegistration::Recovered)
         );
+    }
+
+    #[test]
+    fn deadline_enforces_verified_stage_order_and_idle_expiry() {
+        let mut clock = ConnectionDeadline::new(100);
+        assert_eq!(
+            clock.advance(ConnectionStage::Active, 101),
+            Err(DeadlineError::InvalidTransition)
+        );
+        clock.advance(ConnectionStage::TlsHandshake, 200).unwrap();
+        clock.advance(ConnectionStage::Hello, 300).unwrap();
+        assert_eq!(
+            clock.authenticated_activity(400),
+            Err(DeadlineError::InvalidTransition)
+        );
+        clock.advance(ConnectionStage::Active, 500).unwrap();
+        assert_eq!(clock.expires_ms(), 30_500);
+        clock.authenticated_activity(30_499).unwrap();
+        assert_eq!(clock.check(60_498), Ok(()));
+        assert_eq!(clock.check(60_499), Err(DeadlineError::Expired));
+    }
+
+    #[test]
+    fn deadline_rejects_clock_regression_and_exact_timeout() {
+        let mut clock = ConnectionDeadline::new(1_000);
+        assert_eq!(
+            clock.advance(ConnectionStage::TlsHandshake, 6_000),
+            Err(DeadlineError::Expired)
+        );
+        clock.advance(ConnectionStage::TlsHandshake, 5_999).unwrap();
+        assert_eq!(
+            clock.advance(ConnectionStage::Hello, 5_998),
+            Err(DeadlineError::ClockRegression)
+        );
+        assert_eq!(clock.stage(), ConnectionStage::TlsHandshake);
+        let clock = ConnectionDeadline::new(u64::MAX - 1);
+        assert_eq!(clock.check(u64::MAX), Err(DeadlineError::Expired));
     }
 
     #[test]
