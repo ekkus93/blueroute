@@ -7,7 +7,7 @@
 use std::fmt;
 
 use blueroute_core::{IpPrefix, NetworkId, NodeCapabilities, NodeId, normalized_ipv4_prefix};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeSet;
 
 /// Versioned independently from the local daemon API.
@@ -24,9 +24,63 @@ const HEADER_LEN: usize = 4;
 #[serde(deny_unknown_fields)]
 pub struct HelloFacts {
     pub software_version: String,
+    #[serde(deserialize_with = "deserialize_control_capabilities")]
     pub capabilities: NodeCapabilities,
     pub segment: Option<IpPrefix>,
     pub direct_neighbors: Vec<NodeId>,
+}
+
+
+// The local D-Bus API intentionally allows additive capability fields across
+// compatible minor versions. The *inter-node security protocol* does not:
+// unknown nested claims must be rejected, not silently interpreted as safe.
+// Keep this strict wire boundary separate from the shared domain model.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct StrictSourced<T> {
+    value: T,
+    source: blueroute_core::CapabilitySource,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct StrictLinkQuality {
+    score: u8,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+enum StrictPowerState {
+    AcPowered,
+    Battery { percent: u8 },
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct StrictControlCapabilities {
+    adapter_usable: Option<StrictSourced<bool>>,
+    panu: Option<StrictSourced<bool>>,
+    nap: Option<StrictSourced<bool>>,
+    routing: Option<StrictSourced<bool>>,
+    network_backend: Option<StrictSourced<blueroute_core::NetworkBackend>>,
+    connection_policy_ceiling: Option<StrictSourced<u16>>,
+    link_quality: Option<StrictSourced<StrictLinkQuality>>,
+    power_state: Option<StrictSourced<StrictPowerState>>,
+    has_internet: Option<StrictSourced<bool>>,
+    willing_to_share_internet: Option<StrictSourced<bool>>,
+}
+
+fn deserialize_control_capabilities<'de, D>(
+    deserializer: D,
+) -> Result<NodeCapabilities, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // Deserialize strictly *before* converting to the reusable domain type.
+    // This rejects unknown and duplicate fields even several levels deep.
+    let strict = StrictControlCapabilities::deserialize(deserializer)?;
+    let value = serde_json::to_value(strict).map_err(serde::de::Error::custom)?;
+    serde_json::from_value(value).map_err(serde::de::Error::custom)
 }
 
 fn validate_facts(facts: &HelloFacts, sender: NodeId) -> Result<(), ControlFrameError> {
@@ -60,6 +114,22 @@ fn validate_facts(facts: &HelloFacts, sender: NodeId) -> Result<(), ControlFrame
         .is_some_and(|quality| quality.value.score > 100)
     {
         return Err(invalid("link quality exceeds valid range"));
+    }
+    if facts
+        .capabilities
+        .connection_policy_ceiling
+        .as_ref()
+        .is_some_and(|ceiling| ceiling.value == 0)
+    {
+        return Err(invalid("zero peer connection policy ceiling"));
+    }
+    if facts
+        .capabilities
+        .power_state
+        .as_ref()
+        .is_some_and(|power| matches!(power.value, blueroute_core::PowerState::Battery { percent } if percent > 100))
+    {
+        return Err(invalid("battery percentage exceeds valid range"));
     }
     Ok(())
 }
@@ -324,6 +394,62 @@ mod tests {
             framed.extend_from_slice(payload.as_bytes());
             assert!(decode_control_frame(&framed).is_err());
         }
+    }
+
+    #[test]
+    fn unknown_nested_capability_fields_fail_closed_only_on_control_wire() {
+        let encoded = encode_control_frame(&sample()).unwrap();
+        let base: serde_json::Value = serde_json::from_slice(&encoded[4..]).unwrap();
+        for path in 0..4 {
+            let mut value = base.clone();
+            let capabilities = &mut value["message"]["data"]["facts"]["capabilities"];
+            match path {
+                0 => capabilities["unknown_critical"] = serde_json::json!(true),
+                1 => {
+                    capabilities["nap"] = serde_json::json!({
+                        "value": true, "source": "discovered", "unexpected": 1
+                    });
+                }
+                2 => {
+                    capabilities["link_quality"] = serde_json::json!({
+                        "value": { "score": 50, "override": true },
+                        "source": "measured"
+                    });
+                }
+                _ => {
+                    capabilities["power_state"] = serde_json::json!({
+                        "value": { "battery": { "percent": 50, "override": true } },
+                        "source": "discovered"
+                    });
+                }
+            }
+            let payload = serde_json::to_vec(&value).unwrap();
+            let mut frame = (payload.len() as u32).to_be_bytes().to_vec();
+            frame.extend(payload);
+            assert!(decode_control_frame(&frame).is_err(), "accepted case {path}");
+        }
+    }
+
+    #[test]
+    fn invalid_claimed_capacity_and_battery_percent_fail_closed() {
+        let mut envelope = sample();
+        let ControlMessage::Hello { facts, .. } = &mut envelope.message else {
+            unreachable!()
+        };
+        facts.capabilities.connection_policy_ceiling = Some(blueroute_core::Sourced::new(
+            0,
+            blueroute_core::CapabilitySource::Discovered,
+        ));
+        assert!(encode_control_frame(&envelope).is_err());
+        let ControlMessage::Hello { facts, .. } = &mut envelope.message else {
+            unreachable!()
+        };
+        facts.capabilities.connection_policy_ceiling = None;
+        facts.capabilities.power_state = Some(blueroute_core::Sourced::new(
+            blueroute_core::PowerState::Battery { percent: 101 },
+            blueroute_core::CapabilitySource::Discovered,
+        ));
+        assert!(encode_control_frame(&envelope).is_err());
     }
 
     #[test]
