@@ -335,7 +335,7 @@ mod tests {
                 peer: NodeId::from_bytes([(i + 1) as u8; 16]),
             };
             assert_eq!(
-                sessions.activate_after_authentication(peer, [8; 16]),
+                sessions.activate_after_authentication(peer, [(i + 1) as u8; 16]),
                 Ok(SessionRegistration::New)
             );
         }
@@ -346,7 +346,7 @@ mod tests {
                     network: NetworkId::from_bytes([9; 16]),
                     peer: NodeId::from_bytes([9; 16]),
                 },
-                [8; 16]
+                [0xFF; 16]
             ),
             Err(SessionRegistryError::SessionLimitReached)
         );
