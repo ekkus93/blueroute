@@ -84,7 +84,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P6-006 | `[-]` | **IN PROGRESS**: existing open [PR #41](https://github.com/ekkus93/blueroute/pull/41) contains qualified software probes at `8a63ff6` ([CI passed](https://github.com/ekkus93/blueroute/actions/runs/33694773448)). Ralph Bridge merge endpoint rejects both `merge` and `squash` with generic `INVALID_ARGUMENT` even after 2026-10-13 restart. Do not duplicate/bypass the PR; reconcile through authorized merge when available. Real ping/SSH/TCP/UDP/cleanup **HARDWARE DEFERRED**. |
 | P7-001 | `[x]` | **SOFTWARE COMPLETE (design only)**: transport/authentication ADR chooses control TCP-over-PAN and explicitly pinned mutual TLS 1.3. P7-003/004 are required before any production join. |
 | P7-002 | `[x]` | **SOFTWARE COMPLETE**: strict bounded frame codec/replay tracker; [CI 38397384422](https://github.com/ekkus93/blueroute/actions/runs/38397384422) passed at `63e8cf7`. It does not perform peer authentication. |
-| P7-003 | `[-]` | **IN PROGRESS**: typed validated hello/capability/topology facts and negative tests; exact-head [CI 38398780911](https://github.com/ekkus93/blueroute/actions/runs/38398780911) passed at `1bfac9c`. No authenticated hello exchange or trust binding yet. |
+| P7-003 | `[-]` | **IN PROGRESS**: typed validated hello/capability/topology claims plus fail-closed `(NetworkId,NodeId,SPKI-SHA256)` key pinning, secure owner-only durable enrollment records and daemon approval checks. Peer revocation erases persisted pin; reapproval does not restore it. [CI 38448995440](https://github.com/ekkus93/blueroute/actions/runs/38448995440) passed at `897d8cdb`. Real TLS identity verification, authenticated hello exchange and key enrollment UX still missing. |
 | P7-004 | `[-]` | **IN PROGRESS**: bounded peer registry/stale-event isolation and bounded exponential reconnect policy passed exact-head [CI 38444858686](https://github.com/ekkus93/blueroute/actions/runs/38444858686) at `c688f799`. Authenticated TLS, key-pinned peer verification, transport timeouts, reconnection driver, and daemon integration remain unimplemented. |
 | P7-005 | `[-]` | **IN PROGRESS**: parser fuzz-style deterministic mutation, frame truncation, version incompatibility and round-trip tests passed exact-head [CI 38399834487](https://github.com/ekkus93/blueroute/actions/runs/38399834487) at `964b7add`. Daemon wire integration/fuzz acceptance still depends on P7-004. |
 | All other tasks | `[ ]` | Not started unless explicitly documented in that task; remaining hardware acceptance is not a blocker for independent software work. |
@@ -852,9 +852,10 @@ This is the first complete product slice.
 - [x] stable identity claimed by envelope sender (not authenticated yet).
 - [x] node capability facts are typed and validated.
 - [x] canonical IPv4 segment and direct-neighbor facts are represented and bounded.
-- [ ] authenticated runtime hello/ack exchange and key-pinned verification (depends on P7-004).
+- [x] implement software key-pin matching against durable network/NodeId approval, with revocation and persistence tests.
+- [ ] implement user-verified key enrollment, TLS peer certificate proof, authenticated hello/ack exchange and channel binding (depends on P7-004).
 
-**Incomplete:** software message schema alone does not authorize membership or prove hardware behavior.
+**Qualified P7-003 groundwork:** `crates/blueroute-protocol/src/peer_pin.rs` requires matching approved network, logical NodeId, and verified TLS SPKI fingerprint. `apps/daemon/src/peer_pin_store.rs` persists key pins with `SecretFileStore` (owner-only directory/file, atomic update, fail-closed malformed/future/duplicate/symlink rejection). `apps/daemon/src/peer_trust.rs` checks persisted pins in addition to P6-003 trust, removes pins on revocation, and refuses trust-only runtime for crypto authorization. Exact-head [CI 38448995440](https://github.com/ekkus93/blueroute/actions/runs/38448995440) passed. **Not yet an actual TLS verified peer**: key generation, user-verified enrollment ceremony, rustls mutual certificate checking, session channel binding and live hello exchange remain unchecked. Old NodeId-only records do not automatically become key pins; hardware tests remain deferred.
 
 **Acceptance**
 
