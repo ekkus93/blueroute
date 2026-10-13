@@ -234,7 +234,10 @@ mod tests {
             "Mark\u{200f}spoof",
             "Null\u{0}name",
         ] {
-            assert!(DisplayName::new(bad).is_err(), "unexpected accepted name: {bad:?}");
+            assert!(
+                DisplayName::new(bad).is_err(),
+                "unexpected accepted name: {bad:?}"
+            );
         }
         assert_eq!(
             DisplayName::new("Café café 日本語 😊").unwrap().as_str(),
