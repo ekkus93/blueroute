@@ -9,6 +9,7 @@ mod id;
 mod membership;
 mod neighbor;
 mod route;
+mod segment_allocator;
 mod secret;
 mod topology;
 
@@ -28,6 +29,7 @@ pub use neighbor::{
     NeighborObservations,
 };
 pub use route::{IpPrefix, Route, RouteDestination, RouteOwner};
+pub use segment_allocator::{MAX_PREFIX_PROBES, MAX_RESERVED_PAN_SEGMENTS, SegmentIpv4Allocator};
 pub use secret::Secret;
 pub use topology::{LinkHealth, LinkState, PanLink, PanSegment, Reachability, TopologyGraph};
 
