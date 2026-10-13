@@ -485,3 +485,32 @@ mod tests {
         assert_eq!(first.failed_attempts(), 2);
         assert_eq!(second.failed_attempts(), 1);
         assert_eq!(MAX_RECONNECT_DELAY, std::time::Duration::from_secs(30));
+    }
+
+    #[test]
+    fn simultaneous_distinct_peers_and_capacity_are_bounded() {
+        let mut sessions = ControlSessionRegistry::new();
+        for i in 0..MAX_CONTROL_SESSIONS {
+            let peer = PeerSessionKey {
+                network: NetworkId::from_bytes([(i >> 8) as u8; 16]),
+                peer: NodeId::from_bytes([(i + 1) as u8; 16]),
+            };
+            assert_eq!(
+                sessions.activate_after_authentication(peer, [(i + 1) as u8; 16]),
+                Ok(SessionRegistration::New)
+            );
+        }
+        assert_eq!(sessions.len(), MAX_CONTROL_SESSIONS);
+        assert_eq!(
+            sessions.activate_after_authentication(
+                PeerSessionKey {
+                    network: NetworkId::from_bytes([9; 16]),
+                    peer: NodeId::from_bytes([9; 16]),
+                },
+                [0xFF; 16]
+            ),
+            Err(SessionRegistryError::SessionLimitReached)
+        );
+        assert_eq!(sessions.len(), MAX_CONTROL_SESSIONS);
+    }
+}
