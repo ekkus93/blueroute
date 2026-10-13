@@ -2,6 +2,7 @@
 
 mod authorization;
 mod join_network;
+mod peer_pin_store;
 mod peer_trust;
 mod single_star;
 
@@ -22,6 +23,7 @@ pub use join_network::{
     JoinControlSession, JoinIpLease, JoinNetworkFuture, JoinNetworkOperations, JoinPanLink,
     JoinRuntime, LinuxJoinRuntime, TransactionalJoinNetworkOperations,
 };
+pub use peer_pin_store::PeerPinStore;
 pub use peer_trust::{
     DurablePeerTrustOperations, PeerTrustFuture, PeerTrustOperations, pair_and_trust_bluetooth_peer,
 };

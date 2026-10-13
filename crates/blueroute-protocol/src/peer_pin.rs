@@ -118,6 +118,12 @@ impl PeerKeyPins {
         Ok(())
     }
 
+    /// Stable iteration for versioned owner-only persisted key pin records.
+    /// Loading an entry is NOT the same as approving a peer for membership.
+    pub fn entries(&self) -> impl Iterator<Item = (NetworkId, NodeId, SpkiSha256)> + '_ {
+        self.pins.iter().map(|(&(network, node), &pin)| (network, node, pin))
+    }
+
     pub fn len(&self) -> usize {
         self.pins.len()
     }
