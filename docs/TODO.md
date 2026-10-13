@@ -40,7 +40,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 
 ## Current task status
 
-**Status date:** 2026-10-13 (reconciled against master `c2db78108ba27c82e961bd0d0092d6a0ad459b42`; PR #41 assessed separately)
+**Status date:** 2026-10-13 (reconciled against `master` at `c688f7993727a4f920ca3a15f04d4c83b5f959a5`; PR #41 inspected separately)
 
 | Task | Status | Current state |
 | --- | --- | --- |
@@ -81,12 +81,12 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P6-003 | `[x]` | Explicit BlueRoute peer approval/revocation is PolicyKit-gated and durable; live acceptance persisted `arisu` as trusted but non-member, proved idempotent reapproval, and removed the approval without disturbing network state. |
 | P6-004 | `[-]` | **IN PROGRESS**: transaction coordinator, rollback and PolicyKit authorization are merged. Production join preflight intentionally fails closed pending P7 authenticated control sessions, PANU/control wiring, and physical end-to-end acceptance. |
 | P6-005 | `[x]` | **COMPLETE** in `master` at `c2db781`. Deterministic RFC1918 subnet, live conflict detection, NAP/PANU addresses, cleanup and two real NetworkManager apply/remove cycles; see `docs/P6-005-HARDWARE-EVIDENCE-2026-09-02.md`. |
-| P6-006 | `[-]` | **IN PROGRESS**: existing open [PR #41](https://github.com/ekkus93/blueroute/pull/41) contains application-traffic acceptance tools/runbook; exact-head `8a63ff6` [CI passed](https://github.com/ekkus93/blueroute/actions/runs/33694773448). Review/merge qualified software; real ping/SSH/TCP/UDP and cleanup are **HARDWARE DEFERRED**. |
+| P6-006 | `[-]` | **IN PROGRESS**: existing open [PR #41](https://github.com/ekkus93/blueroute/pull/41) contains qualified software probes at `8a63ff6` ([CI passed](https://github.com/ekkus93/blueroute/actions/runs/33694773448)). Ralph Bridge merge endpoint rejects both `merge` and `squash` with generic `INVALID_ARGUMENT` even after 2026-10-13 restart. Do not duplicate/bypass the PR; reconcile through authorized merge when available. Real ping/SSH/TCP/UDP/cleanup **HARDWARE DEFERRED**. |
 | P7-001 | `[x]` | **SOFTWARE COMPLETE (design only)**: transport/authentication ADR chooses control TCP-over-PAN and explicitly pinned mutual TLS 1.3. P7-003/004 are required before any production join. |
 | P7-002 | `[x]` | **SOFTWARE COMPLETE**: strict bounded frame codec/replay tracker; [CI 38397384422](https://github.com/ekkus93/blueroute/actions/runs/38397384422) passed at `63e8cf7`. It does not perform peer authentication. |
 | P7-003 | `[-]` | **IN PROGRESS**: typed validated hello/capability/topology facts and negative tests; exact-head [CI 38398780911](https://github.com/ekkus93/blueroute/actions/runs/38398780911) passed at `1bfac9c`. No authenticated hello exchange or trust binding yet. |
-| P7-004 | `[-]` | **IN PROGRESS**: bounded per-peer logical session registry, stale-event isolation and tests passed exact-head [CI 38399302611](https://github.com/ekkus93/blueroute/actions/runs/38399302611) at `218dc74`; real TLS identity verification, transport, timeout/reconnect, and daemon integration remain. |
-| P7-005 | `[-]` | **IN PROGRESS**: parser fuzz-style deterministic mutation, version incompatibility and round-trip tests in protocol crate; exact-head CI pending. Daemon wire integration acceptance depends on P7-004. |
+| P7-004 | `[-]` | **IN PROGRESS**: bounded peer registry/stale-event isolation and bounded exponential reconnect policy passed exact-head [CI 38444858686](https://github.com/ekkus93/blueroute/actions/runs/38444858686) at `c688f799`. Authenticated TLS, key-pinned peer verification, transport timeouts, reconnection driver, and daemon integration remain unimplemented. |
+| P7-005 | `[-]` | **IN PROGRESS**: parser fuzz-style deterministic mutation, frame truncation, version incompatibility and round-trip tests passed exact-head [CI 38399834487](https://github.com/ekkus93/blueroute/actions/runs/38399834487) at `964b7add`. Daemon wire integration/fuzz acceptance still depends on P7-004. |
 | All other tasks | `[ ]` | Not started unless explicitly documented in that task; remaining hardware acceptance is not a blocker for independent software work. |
 
 ## Platform rule
@@ -868,7 +868,7 @@ This is the first complete product slice.
 - [x] reject duplicate concurrently active logical-peer sessions (software model).
 - [ ] implement real TLS peer-key binding, runtime transport and bounded loss/reconnect cleanup.
 
-**Not fully accepted:** `crates/blueroute-protocol/src/session.rs` passes deterministic tests at `218dc74` (CI `38399302611`), but remains detached from production join and has no authenticating transport.
+**Not fully accepted:** `crates/blueroute-protocol/src/session.rs` includes a bounded retry budget, deterministic 250ms–30s exponential delay and stale-session isolation at `c688f799` (exact-head CI `38444858686` passed); this is a software-only model with no TLS-backed transport, and production join remains fail-closed.
 
 **Acceptance**
 
@@ -881,7 +881,7 @@ This is the first complete product slice.
 - [x] control-version rejection/compatibility tests.
 - [ ] connect parser to authenticated daemon transport and show peer data cannot crash daemon; full acceptance remains pending P7-004.
 
-**Software qualification pending:** deterministic checks exercise the shared protocol parser without a physical Bluetooth device.
+**Parser software tests qualified** at `964b7add` (exact-head CI `38399834487` passed); deterministic checks exercise the shared protocol parser but not an authenticated daemon session or physical Bluetooth device.
 
 **Acceptance**
 
