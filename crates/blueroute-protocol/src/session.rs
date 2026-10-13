@@ -195,7 +195,9 @@ mod tests {
     #[test]
     fn stale_disconnect_never_closes_new_recovered_session() {
         let mut sessions = ControlSessionRegistry::new();
-        sessions.activate_after_authentication(key(2), [3; 16]).unwrap();
+        sessions
+            .activate_after_authentication(key(2), [3; 16])
+            .unwrap();
         assert!(sessions.mark_lost(key(2), [3; 16]));
         assert!(sessions.mark_reconnecting(key(2), [3; 16]));
         assert_eq!(
