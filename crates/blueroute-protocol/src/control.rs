@@ -48,10 +48,10 @@ fn validate_facts(facts: &HelloFacts, sender: NodeId) -> Result<(), ControlFrame
             return Err(invalid("duplicated or self-referential neighbor"));
         }
     }
-    if let Some(segment) = facts.segment {
-        if normalized_ipv4_prefix(segment).ok() != Some(segment) {
-            return Err(invalid("hello requires canonical IPv4 segment"));
-        }
+    if let Some(segment) = facts.segment
+        && normalized_ipv4_prefix(segment).ok() != Some(segment)
+    {
+        return Err(invalid("hello requires canonical IPv4 segment"));
     }
     if facts
         .capabilities
