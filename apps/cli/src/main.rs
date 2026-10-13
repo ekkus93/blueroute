@@ -3,9 +3,9 @@
 
 use blueroute_client::BlueRouteClient;
 use blueroute_core::NodeCapabilities;
-use blueroute_protocol::DaemonStatus;
+use blueroute_protocol::{Command, DaemonStatus, NetworkSummary, Response};
 
-const HELP: &str = "Usage: blueroute [--json] status\n       blueroute [--json] capability show\n       blueroute --version\n       blueroute --help";
+const HELP: &str = "Usage: blueroute [--json] status\n       blueroute [--json] capability show\n       blueroute [--json] network list\n       blueroute --version\n       blueroute --help";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Operation {
@@ -13,6 +13,7 @@ enum Operation {
     Version,
     Status { json: bool },
     Capabilities { json: bool },
+    NetworkList { json: bool },
 }
 
 fn parse(args: &[String]) -> Result<Operation, &'static str> {
@@ -34,6 +35,7 @@ fn parse(args: &[String]) -> Result<Operation, &'static str> {
     match tokens.as_slice() {
         ["status"] => Ok(Operation::Status { json }),
         ["capability", "show"] => Ok(Operation::Capabilities { json }),
+        ["network", "list"] => Ok(Operation::NetworkList { json }),
         _ => Err("unknown command or option"),
     }
 }
@@ -54,6 +56,28 @@ fn format_capabilities(caps: &NodeCapabilities, json: bool) -> Result<String, se
         serde_json::to_string_pretty(caps)
     } else {
         Ok(format!("BlueRoute capabilities:\n{caps:#?}"))
+    }
+}
+
+fn format_networks(
+    networks: &[NetworkSummary],
+    json: bool,
+) -> Result<String, serde_json::Error> {
+    if json {
+        serde_json::to_string_pretty(networks)
+    } else if networks.is_empty() {
+        Ok("No known BlueRoute networks".to_owned())
+    } else {
+        Ok(networks
+            .iter()
+            .map(|network| {
+                format!(
+                    "{}  {}  ({} members)",
+                    network.id, network.name, network.member_count
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n"))
     }
 }
 
@@ -92,6 +116,16 @@ fn run(args: &[String]) -> i32 {
         Operation::Capabilities { json } => futures_lite::future::block_on(client.capabilities())
             .map_err(|error| error.to_string())
             .and_then(|caps| format_capabilities(&caps, json).map_err(|error| error.to_string())),
+        Operation::NetworkList { json } => {
+            futures_lite::future::block_on(client.request(&Command::ListNetworks))
+                .map_err(|error| error.to_string())
+                .and_then(|response| match response {
+                    Response::Networks(networks) => {
+                        format_networks(&networks, json).map_err(|error| error.to_string())
+                    }
+                    _ => Err("daemon returned an unexpected network-list response".to_owned()),
+                })
+        },
         Operation::Help | Operation::Version => unreachable!(),
     };
     match result {
@@ -114,7 +148,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blueroute_core::{HealthLevel, NetworkId, NodeId};
+    use blueroute_core::{DisplayName, HealthLevel, NetworkId, NodeId};
     use blueroute_protocol::ApiVersion;
 
     fn args(items: &[&str]) -> Vec<String> {
@@ -134,6 +168,10 @@ mod tests {
             Ok(Operation::Capabilities { json: true })
         );
         assert!(parse(&args(&["--json", "--json", "status"])).is_err());
+        assert_eq!(
+            parse(&args(&["network", "list", "--json"])),
+            Ok(Operation::NetworkList { json: true })
+        );
         assert!(parse(&args(&["network", "join"])).is_err());
     }
 
@@ -155,5 +193,21 @@ mod tests {
         let caps_json = format_capabilities(&caps, true).unwrap();
         let parsed: NodeCapabilities = serde_json::from_str(&caps_json).unwrap();
         assert_eq!(parsed, caps);
+    }
+
+    #[test]
+    fn network_listing_is_stable_in_human_and_json_modes() {
+        let networks = vec![NetworkSummary {
+            id: NetworkId::from_bytes([7; 16]),
+            name: DisplayName::new("Workshop").unwrap(),
+            member_count: 2,
+        }];
+        let human = format_networks(&networks, false).unwrap();
+        assert!(human.contains("Workshop"));
+        assert!(human.contains("2 members"));
+        let json = format_networks(&networks, true).unwrap();
+        let restored: Vec<NetworkSummary> = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, networks);
+        assert!(format_networks(&[], false).unwrap().contains("No known"));
     }
 }
