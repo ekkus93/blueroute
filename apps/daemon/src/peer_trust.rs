@@ -208,8 +208,7 @@ mod tests {
             let (root, store) = temp_store("p7-key-enrollment");
             let network = NetworkId::from_bytes([0x11; 16]);
             let node = NodeId::from_bytes([0x22; 16]);
-            let fingerprint =
-                SpkiSha256::from_verified_certificate_digest([0x33; 32]).unwrap();
+            let fingerprint = SpkiSha256::from_verified_certificate_digest([0x33; 32]).unwrap();
             let wrong_fingerprint =
                 SpkiSha256::from_verified_certificate_digest([0x44; 32]).unwrap();
             seed_current_network(&store, network);
@@ -227,12 +226,7 @@ mod tests {
             pins.enroll_verified(network, node, fingerprint).unwrap();
             assert_eq!(
                 trust
-                    .require_approved_pinned_tls_peer(
-                        network,
-                        node,
-                        wrong_fingerprint,
-                        &pins,
-                    )
+                    .require_approved_pinned_tls_peer(network, node, wrong_fingerprint, &pins,)
                     .unwrap_err()
                     .kind(),
                 ErrorKind::AuthenticationFailed,
