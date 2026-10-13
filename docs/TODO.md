@@ -91,7 +91,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P10-002 | `[-]` | **IN PROGRESS:** `status`, `capability show` and `network list` support human/JSON output through the typed D-Bus client (exact-head [CI 38463280247](https://github.com/ekkus93/blueroute/actions/runs/38463280247)); node list/show remains unimplemented. |
 | P14-001 | `[x]` | **COMPLETE (threat model only):** `docs/P14-001-THREAT-MODEL.md`, [CI 38466101723](https://github.com/ekkus93/blueroute/actions/runs/38466101723); implementation safeguards and physical acceptance remain separate. |
 | P8-001 | `[x]` | **SOFTWARE COMPLETE (observation model):** `NeighborObservations` keeps expiring untrusted discovered candidate peers separate from active observed `TopologyGraph` PAN links, with bounded capacity, monotonic timestamp ordering and capability annotations; [CI 38469158021](https://github.com/ekkus93/blueroute/actions/runs/38469158021) passed at `56208e3`. Live BlueZ/P7 ingestion remains P8 integration, not evidence of RF behavior. |
-| P8-002 | `[-]` | **IN PROGRESS:** deterministic non-overlapping multi-segment private IPv4 allocation, host-prefix collision checks and owner-scoped *reservation* release passed [CI 38470193934](https://github.com/ekkus93/blueroute/actions/runs/38470193934) at `2c2c108`. Live kernel route/address ownership teardown and actual PAN segment integration remain; no physical hardware claim. |
+| P8-002 | `[-]` | **IN PROGRESS:** deterministic non-overlapping multi-segment private IPv4 allocation, host-prefix collision checks and owner-scoped *reservation* release passed [CI 38470193934](https://github.com/ekkus93/blueroute/actions/runs/38470193934) at `2c2c108`. A regression fix now revalidates newly observed foreign routes before reusing an existing reservation; exact-head CI 38477587852 passed at `ed628447`. Live kernel route/address ownership teardown and actual PAN segment integration remain; no physical hardware claim. |
 | P8-004 | `[x]` | **SOFTWARE COMPLETE (desired-route calculation):** deterministic weighted node routes over active PAN graph respect explicitly routing-capable transit nodes, stable healthy paths and partitions; [CI 38471055209](https://github.com/ekkus93/blueroute/actions/runs/38471055209) passed at `32d4954`. Applying/distributing privileged routes remains P8-005 and physical multi-hop tests remain deferred. |
 | P14-004 | `[-]` | **IN PROGRESS:** shared `DisplayName` rejects control/escape and Unicode bidirectional-override characters while preserving printable international names; unit tests pass [CI 38467939586](https://github.com/ekkus93/blueroute/actions/runs/38467939586) at `939935e`. Full peer-field limits, unsupported messages and fuzz/domain conversion review still outstanding. |
 | P10-003 | `[-]` | **IN PROGRESS:** network creation and discovery start/stop delegate to PolicyKit-protected typed daemon API; parsing/validation tests pass [CI 38466994092](https://github.com/ekkus93/blueroute/actions/runs/38466994092) at `c786f77`. Production join/leave and full end-to-end lifecycle remain. |
@@ -925,7 +925,7 @@ This is the first complete product slice.
 - [x] idempotent owner-scoped *reservation* reclamation with independent segment allocations preserved.
 - [ ] wire reservations to the privileged Linux backend and prove ownership-safe address/route teardown across restart/reconciliation.
 
-**Software model qualified:** `crates/blueroute-core/src/segment_allocator.rs` with exact-head [CI 38470193934](https://github.com/ekkus93/blueroute/actions/runs/38470193934) at `2c2c108`. The allocator does not install or remove kernel routes; real multi-hop Bluetooth acceptance under P8-006..007 stays **HARDWARE DEFERRED**.
+**Software model qualified:** `crates/blueroute-core/src/segment_allocator.rs` with exact-head [CI 38470193934](https://github.com/ekkus93/blueroute/actions/runs/38470193934) at `2c2c108`. A subsequent regression test at `ed628447` ([CI 38477587852](https://github.com/ekkus93/blueroute/actions/runs/38477587852)) ensures an existing reservation fails closed if new foreign host routes overlap it, without mutating the owned lease. The allocator does not install or remove kernel routes; real multi-hop Bluetooth acceptance under P8-006..007 stays **HARDWARE DEFERRED**.
 
 **Acceptance**
 
@@ -1098,6 +1098,7 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 ## P10-001 — Create CLI skeleton with clap
 
 - [ ] complete clap-based global options/parser (temporary minimal parser currently supports `--json`, `--help`).
+
 - [x] daemon handling via version-gated shared system D-Bus client for read-only commands.
 - [x] version display.
 - [ ] consistent full error/exit taxonomy (currently preliminary usage, daemon-unavailable, operational errors).
