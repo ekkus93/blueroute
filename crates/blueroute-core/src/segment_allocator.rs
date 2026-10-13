@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr};
 
 use crate::{
-    CoreError, ErrorKind, IpPrefix, Ipv4AddressPool, Ipv4StarAddressPlan, NetworkId,
-    SegmentId, ensure_ipv4_segment_available, normalized_ipv4_prefix,
+    CoreError, ErrorKind, IpPrefix, Ipv4AddressPool, Ipv4StarAddressPlan, NetworkId, SegmentId,
+    ensure_ipv4_segment_available, normalized_ipv4_prefix,
 };
 
 pub const MAX_RESERVED_PAN_SEGMENTS: usize = 256;
@@ -95,15 +95,15 @@ impl SegmentIpv4Allocator {
         self.ensure_room()?;
         let foreign: Vec<_> = foreign_host_prefixes.into_iter().collect();
         let choices = self.segment_count();
-        let first = u32::from_be_bytes(
-            segment.as_bytes()[..4].try_into().map_err(|_| {
+        let first =
+            u32::from_be_bytes(segment.as_bytes()[..4].try_into().map_err(|_| {
                 CoreError::new(ErrorKind::InvalidInput, "invalid segment selector")
-            })?,
-        ) % choices;
+            })?) % choices;
         for offset in 0..choices.min(MAX_PREFIX_PROBES) {
             let slot = (first + offset) % choices;
             let candidate = self.prefix_at(slot)?;
-            if ensure_ipv4_segment_available(candidate, self.reservations.values().copied()).is_err()
+            if ensure_ipv4_segment_available(candidate, self.reservations.values().copied())
+                .is_err()
                 || ensure_ipv4_segment_available(candidate, foreign.iter().copied()).is_err()
             {
                 continue;
@@ -140,31 +140,44 @@ impl SegmentIpv4Allocator {
 
     fn prefix_at(&self, slot: u32) -> Result<IpPrefix, CoreError> {
         let host_bits = 32 - u32::from(self.pool.segment_prefix_len);
-        let offset = slot
-            .checked_shl(host_bits)
-            .ok_or_else(|| CoreError::new(ErrorKind::InvalidInput, "IPv4 segment shift overflow"))?;
+        let offset = slot.checked_shl(host_bits).ok_or_else(|| {
+            CoreError::new(ErrorKind::InvalidInput, "IPv4 segment shift overflow")
+        })?;
         let number = u32::from(self.pool.network)
             .checked_add(offset)
             .ok_or_else(|| CoreError::new(ErrorKind::InvalidInput, "IPv4 segment pool overflow"))?;
-        IpPrefix::new(IpAddr::V4(Ipv4Addr::from(number)), self.pool.segment_prefix_len)
+        IpPrefix::new(
+            IpAddr::V4(Ipv4Addr::from(number)),
+            self.pool.segment_prefix_len,
+        )
     }
 
     fn ensure_prefix_in_pool(&self, prefix: IpPrefix) -> Result<(), CoreError> {
         if prefix.prefix_len != self.pool.segment_prefix_len
             || normalized_ipv4_prefix(prefix)? != prefix
         {
-            return Err(CoreError::new(ErrorKind::InvalidInput, "not a canonical PAN segment prefix"));
+            return Err(CoreError::new(
+                ErrorKind::InvalidInput,
+                "not a canonical PAN segment prefix",
+            ));
         }
         let IpAddr::V4(address) = prefix.address else {
-            return Err(CoreError::new(ErrorKind::InvalidInput, "PAN segment must be IPv4"));
+            return Err(CoreError::new(
+                ErrorKind::InvalidInput,
+                "PAN segment must be IPv4",
+            ));
         };
         let address = u32::from(address);
         let base = u32::from(self.pool.network);
         let size = 1_u32 << (32 - u32::from(self.pool.segment_prefix_len));
-        if address < base || (address - base) % size != 0
+        if address < base
+            || (address - base) % size != 0
             || (address - base) / size >= self.segment_count()
         {
-            return Err(CoreError::new(ErrorKind::InvalidInput, "prefix outside BlueRoute address pool"));
+            return Err(CoreError::new(
+                ErrorKind::InvalidInput,
+                "prefix outside BlueRoute address pool",
+            ));
         }
         Ok(())
     }
@@ -188,7 +201,12 @@ mod tests {
         let network = NetworkId::from_bytes([1; 16]);
         let mut alloc = SegmentIpv4Allocator::new(pool).unwrap();
         let original = alloc.reserve_bootstrap(network, segment(1), []).unwrap();
-        assert_eq!(original, Ipv4StarAddressPlan::for_network(network, pool).unwrap().segment);
+        assert_eq!(
+            original,
+            Ipv4StarAddressPlan::for_network(network, pool)
+                .unwrap()
+                .segment
+        );
         let second = alloc.allocate(segment(2), []).unwrap();
         let third = alloc.allocate(segment(3), []).unwrap();
         assert_ne!(original, second);
@@ -203,7 +221,9 @@ mod tests {
         let mut alloc = SegmentIpv4Allocator::new(Ipv4AddressPool::default()).unwrap();
         let collision = v4([10, 201, 5, 99], 24);
         let segment_id = SegmentId::from_bytes([5; 16]);
-        let reserved = alloc.allocate(segment_id, [collision, v4([0, 0, 0, 0], 0)]).unwrap();
+        let reserved = alloc
+            .allocate(segment_id, [collision, v4([0, 0, 0, 0], 0)])
+            .unwrap();
         assert_ne!(reserved, v4([10, 201, 5, 0], 24));
         assert!(ensure_ipv4_segment_available(reserved, [collision]).is_ok());
         assert_eq!(collision, v4([10, 201, 5, 99], 24));
@@ -222,12 +242,25 @@ mod tests {
 
     #[test]
     fn unavailable_pool_and_noncanonical_prefixes_fail_closed() {
-        let mut alloc =
-            SegmentIpv4Allocator::new(Ipv4AddressPool::new(Ipv4Addr::new(10, 201, 8, 0), 30, 30).unwrap()).unwrap();
+        let mut alloc = SegmentIpv4Allocator::new(
+            Ipv4AddressPool::new(Ipv4Addr::new(10, 201, 8, 0), 30, 30).unwrap(),
+        )
+        .unwrap();
         let first = alloc.allocate(segment(1), []).unwrap();
         assert_eq!(first, v4([10, 201, 8, 0], 30));
-        assert_eq!(alloc.allocate(segment(2), []).unwrap_err().kind(), ErrorKind::AddressConflict);
-        assert!(alloc.reserve_exact(segment(3), v4([10, 201, 8, 1], 30), []).is_err());
-        assert!(alloc.reserve_exact(segment(3), v4([10, 201, 9, 0], 30), []).is_err());
+        assert_eq!(
+            alloc.allocate(segment(2), []).unwrap_err().kind(),
+            ErrorKind::AddressConflict
+        );
+        assert!(
+            alloc
+                .reserve_exact(segment(3), v4([10, 201, 8, 1], 30), [])
+                .is_err()
+        );
+        assert!(
+            alloc
+                .reserve_exact(segment(3), v4([10, 201, 9, 0], 30), [])
+                .is_err()
+        );
     }
 }
