@@ -143,6 +143,22 @@ impl DisplayName {
                 format!("display name cannot exceed {} characters", Self::MAX_CHARS),
             ));
         }
+        if trimmed.chars().any(|ch| {
+            ch.is_control()
+                || matches!(
+                    ch,
+                    '\u{061c}'
+                        | '\u{200e}'
+                        | '\u{200f}'
+                        | '\u{202a}'..='\u{202e}'
+                        | '\u{2066}'..='\u{2069}'
+                )
+        }) {
+            return Err(CoreError::new(
+                ErrorKind::InvalidInput,
+                "display name contains control or bidirectional formatting characters",
+            ));
+        }
         Ok(Self(trimmed.to_owned()))
     }
 
@@ -202,6 +218,27 @@ mod tests {
             "zz112233445566778899aabbccddeeff"
                 .parse::<NodeId>()
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn untrusted_display_names_reject_terminal_and_bidi_control_sequences() {
+        for bad in [
+            "Host\\nPeer",
+            "Device\\rSpoof",
+            "Term\\u{1b}[2J",
+            "Reverse\\u{202e}evil",
+            "Embed\\u{202a}evil",
+            "Isolate\\u{2066}peer",
+            "Directional\\u{061c}hint",
+            "Mark\\u{200f}spoof",
+            "Null\\u{0}name",
+        ] {
+            assert!(DisplayName::new(bad).is_err(), "unexpected accepted name: {bad:?}");
+        }
+        assert_eq!(
+            DisplayName::new("Café café 日本語 😊").unwrap().as_str(),
+            "Café café 日本語 😊"
         );
     }
 
