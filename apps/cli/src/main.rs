@@ -2,12 +2,12 @@
 //! client. The clap option layer and mutation subcommands are still pending.
 
 use blueroute_client::BlueRouteClient;
-use blueroute_core::{NodeCapabilities, NodeId};
+use blueroute_core::{DisplayName, NodeCapabilities, NodeId};
 use blueroute_protocol::{Command, DaemonStatus, NetworkSummary, Response};
 
-const HELP: &str = "Usage: blueroute [--json] status\n       blueroute [--json] capability show\n       blueroute [--json] network list\n       blueroute [--json] peer trust <node-id>\n       blueroute [--json] peer forget <node-id>\n       blueroute --version\n       blueroute --help";
+const HELP: &str = "Usage: blueroute [--json] status\n       blueroute [--json] capability show\n       blueroute [--json] network list\n       blueroute [--json] peer trust <node-id>\n       blueroute [--json] peer forget <node-id>\n       blueroute [--json] network create <name>\n       blueroute [--json] discover start|stop\n       blueroute --version\n       blueroute --help";
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum Operation {
     Help,
     Version,
@@ -16,6 +16,9 @@ enum Operation {
     NetworkList { json: bool },
     TrustPeer { node: NodeId, json: bool },
     ForgetPeer { node: NodeId, json: bool },
+    CreateNetwork { name: DisplayName, json: bool },
+    StartDiscovery { json: bool },
+    StopDiscovery { json: bool },
 }
 
 fn parse(args: &[String]) -> Result<Operation, &'static str> {
@@ -38,6 +41,17 @@ fn parse(args: &[String]) -> Result<Operation, &'static str> {
         ["status"] => Ok(Operation::Status { json }),
         ["capability", "show"] => Ok(Operation::Capabilities { json }),
         ["network", "list"] => Ok(Operation::NetworkList { json }),
+        ["network", "create", name] => {
+            if name.chars().any(char::is_control) {
+                return Err("network name cannot contain control characters");
+            }
+            Ok(Operation::CreateNetwork {
+                name: DisplayName::new(*name).map_err(|_| "invalid network name")?,
+                json,
+            })
+        }
+        ["discover", "start"] => Ok(Operation::StartDiscovery { json }),
+        ["discover", "stop"] => Ok(Operation::StopDiscovery { json }),
         ["peer", "trust", node] => Ok(Operation::TrustPeer {
             node: node.parse().map_err(|_| "invalid full peer NodeId")?,
             json,
@@ -106,7 +120,7 @@ fn run(args: &[String]) -> i32 {
             return 2;
         }
     };
-    match operation {
+    match &operation {
         Operation::Help => {
             println!("{HELP}");
             return 0;
@@ -157,6 +171,30 @@ fn run(args: &[String]) -> i32 {
                 .and_then(|response| match response {
                     Response::Ack => Ok(mutation_ack(json, "Peer trust revoked")),
                     _ => Err("daemon returned an unexpected forget response".to_owned()),
+                })
+        }
+        Operation::CreateNetwork { name, json } => {
+            futures_lite::future::block_on(client.request(&Command::CreateNetwork { name }))
+                .map_err(|error| error.to_string())
+                .and_then(|response| match response {
+                    Response::Ack => Ok(mutation_ack(json, "Network created")),
+                    _ => Err("daemon returned an unexpected network-create response".to_owned()),
+                })
+        }
+        Operation::StartDiscovery { json } => {
+            futures_lite::future::block_on(client.request(&Command::StartDiscovery))
+                .map_err(|error| error.to_string())
+                .and_then(|response| match response {
+                    Response::Ack => Ok(mutation_ack(json, "Discovery started")),
+                    _ => Err("daemon returned an unexpected discovery response".to_owned()),
+                })
+        }
+        Operation::StopDiscovery { json } => {
+            futures_lite::future::block_on(client.request(&Command::StopDiscovery))
+                .map_err(|error| error.to_string())
+                .and_then(|response| match response {
+                    Response::Ack => Ok(mutation_ack(json, "Discovery stopped")),
+                    _ => Err("daemon returned an unexpected discovery response".to_owned()),
                 })
         }
         Operation::Help | Operation::Version => unreachable!(),
@@ -219,6 +257,24 @@ mod tests {
         assert!(parse(&args(&["peer", "trust"])).is_err());
         assert!(parse(&args(&["peer", "trust", "unknown-peer"])).is_err());
         assert!(parse(&args(&["peer", "forget", &id, "extra"])).is_err());
+        assert_eq!(
+            parse(&args(&["network", "create", "Workshop"])),
+            Ok(Operation::CreateNetwork {
+                name: DisplayName::new("Workshop").unwrap(),
+                json: false
+            })
+        );
+        assert_eq!(
+            parse(&args(&["--json", "discover", "start"])),
+            Ok(Operation::StartDiscovery { json: true })
+        );
+        assert_eq!(
+            parse(&args(&["discover", "stop"])),
+            Ok(Operation::StopDiscovery { json: false })
+        );
+        assert!(parse(&args(&["network", "create", ""])).is_err());
+        assert!(parse(&args(&["network", "create", "bad\nname"])).is_err());
+        assert!(parse(&args(&["discover"])).is_err());
     }
 
     #[test]
