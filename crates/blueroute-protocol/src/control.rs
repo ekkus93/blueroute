@@ -30,7 +30,6 @@ pub struct HelloFacts {
     pub direct_neighbors: Vec<NodeId>,
 }
 
-
 // The local D-Bus API intentionally allows additive capability fields across
 // compatible minor versions. The *inter-node security protocol* does not:
 // unknown nested claims must be rejected, not silently interpreted as safe.
@@ -70,9 +69,7 @@ struct StrictControlCapabilities {
     willing_to_share_internet: Option<StrictSourced<bool>>,
 }
 
-fn deserialize_control_capabilities<'de, D>(
-    deserializer: D,
-) -> Result<NodeCapabilities, D::Error>
+fn deserialize_control_capabilities<'de, D>(deserializer: D) -> Result<NodeCapabilities, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -426,7 +423,10 @@ mod tests {
             let payload = serde_json::to_vec(&value).unwrap();
             let mut frame = (payload.len() as u32).to_be_bytes().to_vec();
             frame.extend(payload);
-            assert!(decode_control_frame(&frame).is_err(), "accepted case {path}");
+            assert!(
+                decode_control_frame(&frame).is_err(),
+                "accepted case {path}"
+            );
         }
     }
 
