@@ -66,7 +66,12 @@ fn validate_facts(facts: &HelloFacts, sender: NodeId) -> Result<(), ControlFrame
 
 /// Initial bootstrap and liveness types only; no unauthenticated route changes.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+#[serde(
+    tag = "type",
+    content = "data",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum ControlMessage {
     Hello {
         challenge: [u8; 16],
@@ -309,7 +314,12 @@ mod tests {
         let json = String::from_utf8(encoded[4..].to_vec()).unwrap();
         let bad_type = json.replace("\"hello\"", "\"unauthorized_route\"");
         let bad_field = json.replace("\"sequence\":1,", "\"sequence\":1,\"superuser\":true,");
-        for payload in [bad_type, bad_field] {
+        let bad_hello_field = json.replace(
+            "\"challenge\":",
+            "\"critical_session_override\":true,\"challenge\":",
+        );
+        assert_ne!(bad_hello_field, json);
+        for payload in [bad_type, bad_field, bad_hello_field] {
             let mut framed = (payload.len() as u32).to_be_bytes().to_vec();
             framed.extend_from_slice(payload.as_bytes());
             assert!(decode_control_frame(&framed).is_err());
