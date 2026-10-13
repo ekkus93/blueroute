@@ -14,15 +14,33 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 - `[!]` blocked
 - The **Current task status** table is authoritative for task-level state.
 - Subtask checkboxes record implementation progress. A task can remain `[-]` after all implementation subtasks are `[x]` when acceptance criteria are still outstanding.
-- A task is complete only when its acceptance criteria are satisfied.
+- A task is complete only when its acceptance criteria are satisfied. Software tests do not prove physical Bluetooth behavior.
+- Status notes use **NOT STARTED**, **IN PROGRESS**, **SOFTWARE COMPLETE**, **HARDWARE DEFERRED**, **COMPLETE**, or **BLOCKED** in addition to the existing checkbox syntax. Tasks with required physical acceptance cannot be `[x]` based only on CI.
 - Hardware-dependent tasks must record the computer/adapter, Linux distribution, kernel, BlueZ, network-backend versions, and evidence collected.
 - Do not claim physical Bluetooth behavior from CI-only tests.
 - Do not generalize one adapter's limitations into a global BlueRoute limit.
 - Keep architectural invariants in `docs/SPEC.md` intact unless the specification is deliberately revised first.
 
+## Software-first development policy (2026-10-13)
+
+**User decision:** Defer all *new* physical/multi-computer Bluetooth qualification. Continue software implementation, static checks, tests and simulated networking without waiting for equipment. Preserve existing hardware evidence exactly as recorded; don't reclassify prior results or extrapolate them to later features. Physical acceptance remains required before the first useful end-to-end milestone, hardware support claims, or v1 release.
+
+**Execution authority:** Follow [Current dependency-first execution order](#current-dependency-first-execution-order) below rather than strictly increasing task numbers. Preserve task IDs, acceptance conditions and security invariants in `docs/SPEC.md`. **P7-001..P7-004 must precede production P6-004 completion**; never bypass authenticated NodeId/NetworkId verification to make simulated join succeed.
+
+**Ralph Loop procedure — at startup and after every successful merge:**
+
+1. Read the current `master` TODO, `docs/HARDWARE_ACCEPTANCE_BACKLOG.md`, exact head, relevant active branches/PRs and CI through **Ralph Bridge**, and reconcile already-written work before implementing more.
+2. Prioritize reviewing and qualifying existing [PR #41](https://github.com/ekkus93/blueroute/pull/41). Avoid per-task branches/PRs; use small, cohesive direct-to-`master` commits via Ralph Bridge where authorized. Never bypass configured write permissions or branch protection.
+3. Validate against the exact commit: format, Clippy, unit/protocol tests, fake BlueZ/NetworkManager, real-broker daemon tests, negative-authentication tests and simulated Linux network namespaces/veth when runner privileges permit. Offer unprivileged deterministic substitutes in CI. Use fault injection for restart/loss/rollback; virtual Ethernet cannot prove Bluetooth radio operation.
+4. Diagnose ordinary CI failures and continue useful tasks during bounded CI waits; a timeout, lint failure or transient error does not itself require user help.
+5. When code and software tests pass but the task's actual physical criteria remain, record **SOFTWARE COMPLETE / HARDWARE DEFERRED** with commit, CI, test plan and evidence needs in the backlog. Leave the original hardware-dependent acceptance checklist unchecked and continue to the next software task. Do not call the task fully COMPLETE or claim that physical PAN/throughput/multi-hop worked.
+6. Stop only for a real decision, authorization, credential, hardware-dependent *final acceptance*, or exhaustion of implementable software tasks. The deliberate physical deferral alone must never block independent development.
+
+**Separate acceptance tracker:** [HARDWARE_ACCEPTANCE_BACKLOG.md](HARDWARE_ACCEPTANCE_BACKLOG.md).
+
 ## Current task status
 
-**Status date:** 2026-09-02
+**Status date:** 2026-10-13 (reconciled against master `c2db78108ba27c82e961bd0d0092d6a0ad459b42`; PR #41 assessed separately)
 
 | Task | Status | Current state |
 | --- | --- | --- |
@@ -31,9 +49,9 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P0-003 | `[x]` | Rust formatting/lint policy is configured; `cargo fmt --all -- --check` and locked Clippy with `-D warnings` are green on `master`. |
 | P0-004 | `[-]` | CI runs on pull requests and `master`; green master execution and formatting-failure detection are proven, while an intentional test-failure probe is still pending. |
 | P0-005 | `[x]` | Development documentation complete. |
-| P1-001..P1-007 | `[!]` | Blocked pending physical Linux/Bluetooth test-system evidence. |
+| P1-001..P1-007 | `[ ]` | **HARDWARE DEFERRED** for remaining characterization; preserve relevant prior hardware evidence, but do not claim these specific P1 criteria satisfied without linked results. Software can proceed. |
 | P1-008 | `[x]` | Capability-matrix format complete. |
-| P1-009 | `[!]` | Blocked pending a materially different second hardware class. |
+| P1-009 | `[ ]` | **HARDWARE DEFERRED** pending a materially different Bluetooth controller/system class. |
 | P2-001..P2-008 | `[x]` | Domain implementation and tests are complete; the full locked workspace test suite is green on `master`. |
 | P3-001 | `[x]` | Versioned hardware-agnostic configuration schema and validation are implemented and green in CI. |
 | P3-002 | `[x]` | Stable node identity generation/persistence is wired into daemon startup; owner-only storage and restart recovery tests are green in CI. |
@@ -61,7 +79,10 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P6-001 | `[x]` | CreateNetwork establishes durable member state, a deterministic BlueRoute-owned NetworkManager bridge/address, a live BlueZ NAP, and real PANU attachment on physical hardware. |
 | P6-002 | `[x]` | Hosted networks advertise the full logical `NetworkId` through BlueZ LE manufacturer data; `arisu` discovered the exact `debiancb1` network without manual MAC entry, with discovery metadata explicitly non-authoritative for security. |
 | P6-003 | `[x]` | Explicit BlueRoute peer approval/revocation is PolicyKit-gated and durable; live acceptance persisted `arisu` as trusted but non-member, proved idempotent reapproval, and removed the approval without disturbing network state. |
-| All other tasks | `[ ]` | Not started. |
+| P6-004 | `[-]` | **IN PROGRESS**: transaction coordinator, rollback and PolicyKit authorization are merged. Production join preflight intentionally fails closed pending P7 authenticated control sessions, PANU/control wiring, and physical end-to-end acceptance. |
+| P6-005 | `[x]` | **COMPLETE** in `master` at `c2db781`. Deterministic RFC1918 subnet, live conflict detection, NAP/PANU addresses, cleanup and two real NetworkManager apply/remove cycles; see `docs/P6-005-HARDWARE-EVIDENCE-2026-09-02.md`. |
+| P6-006 | `[-]` | **IN PROGRESS**: existing open [PR #41](https://github.com/ekkus93/blueroute/pull/41) contains application-traffic acceptance tools/runbook; exact-head `8a63ff6` [CI passed](https://github.com/ekkus93/blueroute/actions/runs/33694773448). Review/merge qualified software; real ping/SSH/TCP/UDP and cleanup are **HARDWARE DEFERRED**. |
+| All other tasks | `[ ]` | Not started unless explicitly documented in that task; remaining hardware acceptance is not a blocker for independent software work. |
 
 ## Platform rule
 
@@ -706,6 +727,9 @@ This is the first complete product slice.
 
 ## P6-004 — Implement join-network operation
 
+**Dependency:** The existing transactional coordinator, fail-closed state handling, rollback tests and authorization are implemented (see `docs/P6-004-JOIN-ORCHESTRATION.md`). The production `JoinNetwork` preflight *intentionally* returns `CapabilityUnavailable` until authenticated P7-001..P7-004 control sessions are available. Address assignment groundwork from P6-005 is complete but production join is not. Do not equate an acceptance-probe PANU connection with an authenticated member.
+
+- [x] implement transaction/rollback and authorization orchestration groundwork.
 - [ ] establish PANU link.
 - [ ] obtain/assign IP.
 - [ ] start control session.
@@ -717,17 +741,21 @@ This is the first complete product slice.
 
 ## P6-005 — Implement IPv4 allocation for one star
 
-- [ ] select private subnet policy.
-- [ ] detect route conflicts.
-- [ ] assign addresses.
-- [ ] avoid unnecessary durable transient state.
+- [x] select private subnet policy.
+- [x] detect route conflicts.
+- [x] assign addresses.
+- [x] avoid unnecessary durable transient state.
 
 **Acceptance**
 
 - Repeated create/join cycles do not accumulate conflicts.
+- **COMPLETE (scope: IP allocation, not P6-004 authenticated join):** merged at `c2db78108ba27c82e961bd0d0092d6a0ad459b42`, exact-head CI passed, two live NetworkManager apply/remove cycles recorded in `docs/P6-005-HARDWARE-EVIDENCE-2026-09-02.md`. See `docs/P6-005-IPV4-ALLOCATION.md`.
 
 ## P6-006 — Prove ordinary application traffic
 
+**Two distinct gates:** Existing [PR #41](https://github.com/ekkus93/blueroute/pull/41) adds standalone host/client acceptance programs, TCP/UDP helper and runbook, but remains unmerged. Review and merge software-qualified tooling (at exact head, preserving security) without asserting production JoinNetwork is functional or raw-IP hardware checks passed. Keep original physical criteria pending in the hardware backlog.
+
+- [ ] qualify and reconcile/merge existing PR #41 software acceptance tooling into `master` (not a duplicate PR).
 - [ ] ping.
 - [ ] SSH.
 - [ ] TCP bulk transfer.
@@ -783,6 +811,8 @@ This is the first complete product slice.
 ---
 
 # P7 — Inter-node control plane
+
+**Critical prerequisite for P6-004:** Implement P7-001..P7-004 ahead of completing production join. Authenticated control sessions must bind approved NodeId and the intended NetworkId; MAC address, source IP, BlueZ `Trusted`, advertised identity and unverified hello messages are not authority. Test replay/malformed/duplicate-session cases without hardware. Follow immediately with P7-005 parser hardening and early P14 threat modeling; defer physical session acceptance, not security checks.
 
 ## P7-001 — Choose control-plane transport
 
@@ -842,6 +872,8 @@ This is the first complete product slice.
 ---
 
 # P8 — Routed interconnected-star networking
+
+**Software-first:** Use deterministic topology graphs, simulated peers and Linux namespaces/veth with kernel IP forwarding/routing where feasible; exercise loss/convergence/cleanup. Physical two-hop and interconnected-star Bluetooth traffic under P8-006/P8-007 stays **HARDWARE DEFERRED**, not completed by virtual networking.
 
 ## P8-001 — Build neighbor observation model
 
@@ -951,6 +983,8 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 # P9 — Automatic topology management
 
+**Software-first:** Test capability-aware placement, minimal plan changes, safe rollback, anti-flapping and simulated hub loss. Keep real Bluetooth hub-loss reformation (P9-005) **HARDWARE DEFERRED**.
+
 ## P9-001 — Define topology policy inputs
 
 - [ ] connection capacity/capabilities.
@@ -1021,6 +1055,8 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 ---
 
 # P10 — CLI
+
+**Execution priority raised:** Implement status/diagnostics/trust CLI soon after core P6/P7 dependencies, before multi-hop and GUI work. Read-only commands may start even earlier. Use `blueroute-client`/D-Bus; no direct privileged networking logic in the CLI.
 
 ## P10-001 — Create CLI skeleton with clap
 
@@ -1539,7 +1575,7 @@ Cover:
 
 # P16 — Platform and hardware acceptance
 
-This phase validates product claims across compatible Linux systems. Dell Chromebook 3100 is one test family, not the support definition.
+**HARDWARE DEFERRED (2026-10-13):** This phase validates product claims across compatible Linux systems. Dell Chromebook 3100 is one test family, not the support definition. Keep required physical checkboxes open until versioned evidence is collected. P16-007 simulated policy checks may be software-qualified independently but do not substitute for device evidence. Track every physical gate in `docs/HARDWARE_ACCEPTANCE_BACKLOG.md`.
 
 ## P16-001 — Two-node clean-install acceptance
 
@@ -1697,6 +1733,8 @@ Cover:
 - Support is described by Linux/runtime/capability requirements, with model names used only as test evidence.
 
 ## P17-006 — v1 release gate
+
+**Final physical gate is not waived:** Prepare software release candidates, docs, package automation and draft support matrix now, but do not mark v1 ready or advertise real multi-hop/heterogeneous support until required P16 testing is complete.
 
 - [ ] CI green.
 - [ ] physical acceptance green.
@@ -1913,22 +1951,32 @@ For every networking feature:
 - [ ] Does the change preserve future Internet-gateway separation?
 - [ ] Does the default GUI avoid unnecessary networking jargon?
 
-# Initial recommended execution order
+# Current dependency-first execution order
 
-1. `P0-*` — project baseline.
-2. `P1-001` through `P1-004` — prove PAN and Linux ownership boundaries on available hardware.
-3. `P2-*` and `P3-*` — hardware-independent domain/persistence model.
-4. `P4-*` — production BlueZ/NetworkManager adapters and capability reporting.
-5. `P5-*` — daemon/API.
-6. `P6-*` — managed single-star LAN.
-7. `P7-*` and `P8-*` — authenticated control and routed stars.
-8. `P9-*` — automatic capability-aware topology.
-9. `P10-*`, `P11-*`, `P12-*` — CLI/TUI/Tauri.
-10. `P13-*` through `P17-*` — hardening, security, packaging, heterogeneous platform acceptance, v1.
-11. `P18-*` — Internet gateway.
-12. `P19-*` — optional extensions/backends/distributions.
+**Effective October 13, 2026.** Keep P0–P19 identifiers stable; completed tasks stay completed, and hardware acceptance remains open. Before each task, reconcile exact current `master`, existing PRs/branches and software evidence via Ralph Bridge. Do not create a branch/PR per task.
+
+1. **Reconcile TODO and evidence:** P6-004 partial, P6-005 complete, PR #41 in progress, P1 and later hardware requirements deferred. Do not redo completed P4/P5/P6 hardware work.
+2. **P6-006 software portion:** Review, test, fix and merge existing PR #41 if qualified. Record its physical ping/SSH/TCP/UDP/DNS/cleanup checks as deferred, not passed.
+3. **P7-001 → P7-002 → P7-003 → P7-004:** Choose authenticated control transport, frame/freshness scheme, verified peer/capability handshake and session lifecycle. Unit, integration, malicious-peer and lifecycle tests are mandatory.
+4. **P7-005 and early P14-001/P14-003:** Fuzz/property-test control parser; establish the inter-node threat/authorization model before accepting remote route/topology changes.
+5. **P6-004:** Complete production PANU, IPv4, authenticated session, durable membership and reverse-order rollback. Mocked and simulated software acceptance now; real two-node join deferred.
+6. **P6-008 → P6-009 → P6-010:** Leave, daemon restart reconciliation and link-loss recovery with deterministic fault injection. Defer physical range/adapter restart tests.
+7. **P10-001/002/004/005/006, then P10-003:** Build daemon-backed CLI status, diagnostics, trust and stable exits early; finish lifecycle commands when daemon capabilities exist.
+8. **P6-007:** Multi-client IP/capacity policy and concurrent simulated peers; physical controller client ceiling deferred.
+9. **P8-001..P8-005, P8-008/009, software portions of P8-006/007:** Routed topologies, distribution/reconciliation and two-hop namespace/veth IP traffic; physical Bluetooth multi-hop traffic deferred.
+10. **P9-001..P9-006:** Automatic topology planning and simulated failover; real radio hub-loss acceptance deferred.
+11. **P11 → P12:** Ratatui TUI and Tauri 2 desktop using common daemon API; add frontend lint/type/e2e tests (also reconcile P0-003/P0-004).
+12. **P13 → P14 → P15:** Reliability, security review, package build/install/upgrade/uninstall automation; capture remaining cross-machine hardware needs in backlog.
+13. **P17-001..P17-005:** Documentation and provisional support matrix separating historical physical evidence, simulations and untested claims.
+14. **Later, when hardware is available:** Revisit P1 characterization, remaining P6/P7/P8/P9/P13/P15 physical acceptance, and **P16-001..P16-007**. Test exact builds on representative systems; fix regressions and requalify.
+15. **P17-006:** Release gate *after* the required physical and security evidence passes; no premature v1/general-availability claim.
+16. **P18/P19:** Optional enhancements after v1 unless explicitly reprioritized.
+
+**Policy:** After passing relevant software gates, mark the work **SOFTWARE COMPLETE / HARDWARE DEFERRED** when applicable and continue. Never close a task whose stated physical acceptance has not actually been demonstrated.
 
 # Definition of first useful milestone
+
+**Important:** A *software-ready candidate* (all implementation, mocks, network namespaces, CI green) is not the first useful physical milestone. The following still requires actual two-device Bluetooth PAN behavior and remains open until the hardware backlog is qualified.
 
 The first useful milestone is a reliable daemon-managed two-node PAN in which:
 
