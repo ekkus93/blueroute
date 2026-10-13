@@ -7,8 +7,8 @@
 use std::fmt;
 
 use blueroute_core::{IpPrefix, NetworkId, NodeCapabilities, NodeId, normalized_ipv4_prefix};
-use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 /// Versioned independently from the local daemon API.
 pub const CONTROL_VERSION: u16 = 1;
@@ -68,8 +68,14 @@ fn validate_facts(facts: &HelloFacts, sender: NodeId) -> Result<(), ControlFrame
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ControlMessage {
-    Hello { challenge: [u8; 16], facts: HelloFacts },
-    HelloAck { challenge: [u8; 16], facts: HelloFacts },
+    Hello {
+        challenge: [u8; 16],
+        facts: HelloFacts,
+    },
+    HelloAck {
+        challenge: [u8; 16],
+        facts: HelloFacts,
+    },
     Heartbeat,
     Goodbye,
 }
@@ -249,7 +255,10 @@ mod tests {
             sender: NodeId::from_bytes([3; 16]),
             session_id: [4; 16],
             sequence: 1,
-            message: ControlMessage::Hello { challenge: [5; 16], facts: example_facts() },
+            message: ControlMessage::Hello {
+                challenge: [5; 16],
+                facts: example_facts(),
+            },
         }
     }
 
@@ -287,7 +296,10 @@ mod tests {
         envelope.session_id = [0; 16];
         assert!(encode_control_frame(&envelope).is_err());
         envelope.session_id = [4; 16];
-        envelope.message = ControlMessage::Hello { challenge: [0; 16], facts: example_facts() };
+        envelope.message = ControlMessage::Hello {
+            challenge: [0; 16],
+            facts: example_facts(),
+        };
         assert!(encode_control_frame(&envelope).is_err());
     }
 
@@ -386,7 +398,8 @@ mod tests {
 
     #[test]
     fn rejects_unknown_hello_fields() {
-        let data = String::from_utf8(encode_control_frame(&sample()).unwrap()[4..].to_vec()).unwrap();
+        let data =
+            String::from_utf8(encode_control_frame(&sample()).unwrap()[4..].to_vec()).unwrap();
         let altered = data.replace(
             "\"direct_neighbors\":",
             "\"unknown_required_feature\":true,\"direct_neighbors\":",
