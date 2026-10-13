@@ -11,6 +11,48 @@ use blueroute_core::{NetworkId, NodeId};
 
 pub const MAX_CONTROL_SESSIONS: usize = 128;
 
+/// Software-only retry policy for a future authenticated control transport.
+/// The transport must also impose connect/handshake timeouts and cancellation.
+/// Retrying never grants authorization and must not bypass the TLS trust gate.
+pub const MAX_RECONNECT_ATTEMPTS: u8 = 8;
+pub const INITIAL_RECONNECT_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
+pub const MAX_RECONNECT_DELAY: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Deterministic exponential backoff. Each lost session gets its own state,
+/// preventing an unbounded reconnect spin loop after failures.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ReconnectBackoff {
+    failed_attempts: u8,
+}
+
+impl ReconnectBackoff {
+    pub const fn new() -> Self {
+        Self { failed_attempts: 0 }
+    }
+
+    pub const fn failed_attempts(&self) -> u8 {
+        self.failed_attempts
+    }
+
+    /// Return the delay before another attempt, or None when the budget is
+    /// exhausted. Exponents are bounded by MAX_RECONNECT_ATTEMPTS.
+    pub fn after_failure(&mut self) -> Option<std::time::Duration> {
+        if self.failed_attempts >= MAX_RECONNECT_ATTEMPTS {
+            return None;
+        }
+        let multiplier = 1_u64 << u32::from(self.failed_attempts);
+        let milliseconds = (250_u64 * multiplier).min(30_000);
+        self.failed_attempts += 1;
+        Some(std::time::Duration::from_millis(milliseconds))
+    }
+
+    /// Reset only after an authenticated session is established successfully
+    /// (or when the caller explicitly cancels its entire retry lifecycle).
+    pub fn reset(&mut self) {
+        self.failed_attempts = 0;
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct PeerSessionKey {
     pub network: NetworkId,
@@ -217,6 +259,37 @@ mod tests {
         assert!(sessions.remove_if_current(key(2), [4; 16]));
         assert!(!sessions.remove_if_current(key(2), [4; 16]));
         assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn reconnect_backoff_is_bounded_and_requires_explicit_reset() {
+        let mut retry = ReconnectBackoff::new();
+        let expected_ms = [250, 500, 1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
+        for (number, millis) in expected_ms.iter().enumerate() {
+            assert_eq!(
+                retry.after_failure(),
+                Some(std::time::Duration::from_millis(*millis))
+            );
+            assert_eq!(usize::from(retry.failed_attempts()), number + 1);
+        }
+        for _ in 0..16 {
+            assert_eq!(retry.after_failure(), None);
+        }
+        assert_eq!(retry.failed_attempts(), MAX_RECONNECT_ATTEMPTS);
+        retry.reset();
+        assert_eq!(retry.after_failure(), Some(INITIAL_RECONNECT_DELAY));
+    }
+
+    #[test]
+    fn reconnect_backoff_state_is_independent_between_peers() {
+        let mut first = ReconnectBackoff::new();
+        let mut second = ReconnectBackoff::new();
+        assert_eq!(first.after_failure(), Some(INITIAL_RECONNECT_DELAY));
+        assert_eq!(first.after_failure(), Some(std::time::Duration::from_millis(500)));
+        assert_eq!(second.after_failure(), Some(INITIAL_RECONNECT_DELAY));
+        assert_eq!(first.failed_attempts(), 2);
+        assert_eq!(second.failed_attempts(), 1);
+        assert_eq!(MAX_RECONNECT_DELAY, std::time::Duration::from_secs(30));
     }
 
     #[test]
