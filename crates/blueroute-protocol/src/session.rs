@@ -135,7 +135,15 @@ impl ControlSessionRegistry {
         if session_id.iter().all(|byte| *byte == 0) {
             return Err(SessionRegistryError::ZeroSessionId);
         }
+        if self.sessions.iter().any(|(other, existing)| {
+            *other != key && existing.session_id == session_id
+        }) {
+            return Err(SessionRegistryError::DuplicateActiveSession);
+        }
         if let Some(existing) = self.sessions.get_mut(&key) {
+            if existing.phase != SessionPhase::Active && existing.session_id == session_id {
+                return Err(SessionRegistryError::DuplicateActiveSession);
+            }
             if existing.phase == SessionPhase::Active {
                 return if existing.session_id == session_id {
                     Ok(SessionRegistration::AlreadyActive)
@@ -259,6 +267,25 @@ mod tests {
         assert!(sessions.remove_if_current(key(2), [4; 16]));
         assert!(!sessions.remove_if_current(key(2), [4; 16]));
         assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn session_ids_are_not_reused_across_peers_or_reconnections() {
+        let mut registry = ControlSessionRegistry::new();
+        registry.activate_after_authentication(key(1), [7; 16]).unwrap();
+        assert_eq!(
+            registry.activate_after_authentication(key(2), [7; 16]),
+            Err(SessionRegistryError::DuplicateActiveSession)
+        );
+        assert!(registry.mark_lost(key(1), [7; 16]));
+        assert_eq!(
+            registry.activate_after_authentication(key(1), [7; 16]),
+            Err(SessionRegistryError::DuplicateActiveSession)
+        );
+        assert_eq!(
+            registry.activate_after_authentication(key(1), [8; 16]),
+            Ok(SessionRegistration::Recovered)
+        );
     }
 
     #[test]
