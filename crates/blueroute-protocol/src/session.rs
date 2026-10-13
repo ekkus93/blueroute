@@ -285,7 +285,10 @@ impl ControlSessionRegistry {
         let Some(existing) = self.sessions.get_mut(&key) else {
             return false;
         };
-        if existing.session_id != session_id {
+        // A duplicate disconnect must not schedule another retry for an
+        // already-lost session. A genuinely failed reconnect may transition
+        // Reconnecting -> Lost to schedule its next bounded attempt.
+        if existing.session_id != session_id || existing.phase == SessionPhase::Lost {
             return false;
         }
         existing.phase = SessionPhase::Lost;
@@ -297,7 +300,9 @@ impl ControlSessionRegistry {
         let Some(existing) = self.sessions.get_mut(&key) else {
             return false;
         };
-        if existing.session_id != session_id || existing.phase == SessionPhase::Active {
+        // Admit precisely one reconnect attempt for each Lost transition.
+        // Repeated wakeups must not fan out concurrent attempts.
+        if existing.session_id != session_id || existing.phase != SessionPhase::Lost {
             return false;
         }
         existing.phase = SessionPhase::Reconnecting;
@@ -377,6 +382,33 @@ mod tests {
         assert!(sessions.remove_if_current(key(2), [4; 16]));
         assert!(!sessions.remove_if_current(key(2), [4; 16]));
         assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn duplicate_loss_and_reconnect_notifications_are_idempotent() {
+        let mut registry = ControlSessionRegistry::new();
+        let key = key(2);
+        registry
+            .activate_after_authentication(key, [9; 16])
+            .unwrap();
+        assert!(registry.mark_lost(key, [9; 16]));
+        assert!(!registry.mark_lost(key, [9; 16]));
+        assert!(registry.mark_reconnecting(key, [9; 16]));
+        assert!(!registry.mark_reconnecting(key, [9; 16]));
+        // A failed attempt can return to Lost exactly once.
+        assert!(registry.mark_lost(key, [9; 16]));
+        assert!(!registry.mark_lost(key, [9; 16]));
+        assert!(registry.mark_reconnecting(key, [9; 16]));
+        assert!(!registry.mark_reconnecting(key, [8; 16]));
+        assert!(!registry.mark_lost(key, [8; 16]));
+        // A verified replacement invalidates all stale loss notifications.
+        assert_eq!(
+            registry.activate_after_authentication(key, [10; 16]),
+            Ok(SessionRegistration::Recovered)
+        );
+        assert!(!registry.mark_lost(key, [9; 16]));
+        assert!(!registry.mark_reconnecting(key, [9; 16]));
+        assert_eq!(registry.get(key).unwrap().phase, SessionPhase::Active);
     }
 
     #[test]
