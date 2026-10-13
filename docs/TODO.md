@@ -88,8 +88,9 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P7-004 | `[-]` | **IN PROGRESS**: bounded peer registry/stale-event isolation and bounded exponential reconnect policy passed exact-head [CI 38444858686](https://github.com/ekkus93/blueroute/actions/runs/38444858686) at `c688f799`. Authenticated TLS, key-pinned peer verification, transport timeouts, reconnection driver, and daemon integration remain unimplemented. |
 | P7-005 | `[-]` | **IN PROGRESS**: parser fuzz-style deterministic mutation, frame truncation, version incompatibility and round-trip tests passed exact-head [CI 38399834487](https://github.com/ekkus93/blueroute/actions/runs/38399834487) at `964b7add`. Daemon wire integration/fuzz acceptance still depends on P7-004. |
 | P10-001 | `[-]` | **IN PROGRESS:** early read-only CLI uses the version-gated `blueroute-client` and has `--help`/`--version`, preliminary usage and daemon error exits; **clap**, complete exit taxonomy and further commands remain. Exact-head [CI 38461039721](https://github.com/ekkus93/blueroute/actions/runs/38461039721) passed at `51160db`. |
-| P10-002 | `[-]` | **IN PROGRESS:** `blueroute status` and `blueroute capability show` have tested human and JSON output against typed D-Bus client data ([CI 38461039721](https://github.com/ekkus93/blueroute/actions/runs/38461039721)); node/network list/show are unimplemented. |
-| P14-001 | `[x]` | **COMPLETE (threat model only):** formal security model in `docs/P14-001-THREAT-MODEL.md`; lists attack surfaces, mitigations, residual risks and outstanding implementation gates. No claim that TLS is implemented or that P14-002..006/P16 passed. |
+| P10-002 | `[-]` | **IN PROGRESS:** `status`, `capability show` and `network list` support human/JSON output through the typed D-Bus client (exact-head [CI 38463280247](https://github.com/ekkus93/blueroute/actions/runs/38463280247)); node list/show remains unimplemented. |
+| P14-001 | `[x]` | **COMPLETE (threat model only):** `docs/P14-001-THREAT-MODEL.md`, [CI 38466101723](https://github.com/ekkus93/blueroute/actions/runs/38466101723); implementation safeguards and physical acceptance remain separate. |
+| P14-004 | `[-]` | **IN PROGRESS:** shared `DisplayName` rejects control/escape and Unicode bidirectional-override characters while preserving printable international names; unit tests pass [CI 38467939586](https://github.com/ekkus93/blueroute/actions/runs/38467939586) at `939935e`. Full peer-field limits, unsupported messages and fuzz/domain conversion review still outstanding. |
 | P10-003 | `[-]` | **IN PROGRESS:** network creation and discovery start/stop delegate to PolicyKit-protected typed daemon API; parsing/validation tests pass [CI 38466994092](https://github.com/ekkus93/blueroute/actions/runs/38466994092) at `c786f77`. Production join/leave and full end-to-end lifecycle remain. |
 | P10-004 | `[-]` | **IN PROGRESS:** explicit full-NodeId `peer trust`/`peer forget` invoke existing PolicyKit-protected D-Bus commands; tests and [CI 38466585585](https://github.com/ekkus93/blueroute/actions/runs/38466585585) at `8183225` passed. Pending requests/authenticated-join UX remain; trust is **not** TLS enrollment or membership. |
 | All other tasks | `[ ]` | Not started unless explicitly documented in that task; remaining hardware acceptance is not a blocker for independent software work. |
@@ -1514,8 +1515,11 @@ Cover:
 
 ## P14-004 — Validate peer-controlled fields
 
-- [ ] lengths/characters/ranges/bounds.
-- [ ] unsupported-message behavior.
+- [ ] complete lengths/characters/ranges/bounds review for *all* remote metadata and route/topology fields.
+- [x] prevent C0/C1 control sequences, terminal ESC and common Unicode bidirectional-override/isolate characters in shared `DisplayName` (including deserialized peer labels); preserve printable multilingual names.
+- [ ] unsupported-message behavior across fully integrated authenticated daemon transport.
+
+**Software partial:** `crates/blueroute-core/src/id.rs` input checks and negative tests passed exact-head [CI 38467939586](https://github.com/ekkus93/blueroute/actions/runs/38467939586) at `939935e`. Broader peer-field fuzzing and TLS daemon integration remain open.
 
 **Acceptance**
 
