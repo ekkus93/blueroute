@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use blueroute_core::{DaemonConfig, HealthLevel};
 use blueroute_daemon::{
-    DaemonService, DurablePeerTrustOperations, SingleStarNetworkOperations,
+    DaemonService, DurablePeerTrustOperations, PeerPinStore, SingleStarNetworkOperations,
     TransactionalJoinNetworkOperations, current_network,
 };
 use blueroute_linux::{
@@ -52,8 +52,16 @@ async fn run() -> Result<(), Box<dyn Error>> {
         health,
         capabilities: capabilities.clone(),
     };
-    let peer_trust_operations = Arc::new(DurablePeerTrustOperations::new(
+    // Load and validate durable cryptographic peer pins before serving requests.
+    // Legacy NodeId trust alone cannot authorize a control connection, and a
+    // corrupt, unsupported or insecure pin store must prevent daemon startup.
+    // This does not enroll peers: the out-of-band user-verification ceremony
+    // and mutual TLS transport are separate mandatory P7 prerequisites.
+    let peer_pin_store = PeerPinStore::new(peer_pin_directory(&state_directory));
+    peer_pin_store.load()?;
+    let peer_trust_operations = Arc::new(DurablePeerTrustOperations::with_peer_pin_store(
         NetworkMembershipStore::new(membership_path.clone()),
+        peer_pin_store,
     ));
     let join_network_operations = Arc::new(TransactionalJoinNetworkOperations::with_ipv4_pool(
         NetworkMembershipStore::new(membership_path.clone()),
@@ -85,6 +93,10 @@ fn network_membership_path(state_directory: &Path) -> PathBuf {
     state_directory.join("memberships-v1")
 }
 
+fn peer_pin_directory(state_directory: &Path) -> PathBuf {
+    state_directory.join("peer-keys")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,6 +111,10 @@ mod tests {
         assert_eq!(
             network_membership_path(state_directory),
             PathBuf::from("/tmp/blueroute-state/memberships-v1")
+        );
+        assert_eq!(
+            peer_pin_directory(state_directory),
+            PathBuf::from("/tmp/blueroute-state/peer-keys")
         );
     }
 }
