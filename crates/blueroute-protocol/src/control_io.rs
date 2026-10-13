@@ -90,7 +90,8 @@ mod tests {
 
     impl<T: Read> Read for ByteWise<T> {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            self.0.read(&mut buf[..buf.len().min(1)])
+            let bytes = buf.len().min(1);
+            self.0.read(&mut buf[..bytes])
         }
     }
 
