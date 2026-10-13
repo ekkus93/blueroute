@@ -5,7 +5,7 @@ use blueroute_core::{CoreError, ErrorKind, NetworkId, NodeId};
 use blueroute_linux::{BluetoothBackend, BluezBackend, NetworkMembershipStore, PeerHandle};
 use blueroute_protocol::peer_pin::{PeerKeyPins, SpkiSha256};
 
-use crate::current_network;
+use crate::{PeerPinStore, current_network};
 
 pub type PeerTrustFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, CoreError>> + Send + 'a>>;
 
@@ -16,11 +16,24 @@ pub trait PeerTrustOperations: Send + Sync {
 
 pub struct DurablePeerTrustOperations {
     store: NetworkMembershipStore,
+    pin_store: Option<PeerPinStore>,
 }
 
 impl DurablePeerTrustOperations {
     pub fn new(store: NetworkMembershipStore) -> Self {
-        Self { store }
+        Self {
+            store,
+            pin_store: None,
+        }
+    }
+
+    /// Enable durable key enrollment lookups. Legacy trust-only construction
+    /// remains valid for P6-003, but cannot grant cryptographic P7 access.
+    pub fn with_peer_pin_store(store: NetworkMembershipStore, pins: PeerPinStore) -> Self {
+        Self {
+            store,
+            pin_store: Some(pins),
+        }
     }
 
     pub fn require_peer_approved(&self, network: NetworkId, node: NodeId) -> Result<(), CoreError> {
@@ -55,16 +68,24 @@ impl DurablePeerTrustOperations {
     /// NodeId-only trust entry is insufficient: a separate explicit key pin
     /// must also exist for precisely this (NetworkId, NodeId).
     ///
-    /// This is a policy integration only: there is no TLS handshake, durable
-    /// key-enrollment store, or production JoinNetwork activation yet.
+    /// The verified pin is reloaded from protected storage on each decision;
+    /// an old in-memory key cache must not resurrect revoked enrollment.
+    /// This is a policy integration only: there is no TLS handshake or
+    /// production JoinNetwork activation yet.
     pub fn require_approved_pinned_tls_peer(
         &self,
         network: NetworkId,
         node: NodeId,
         verified_spki_sha256: SpkiSha256,
-        pins: &PeerKeyPins,
     ) -> Result<(), CoreError> {
         self.require_peer_approved(network, node)?;
+        let store = self.pin_store.as_ref().ok_or_else(|| {
+            CoreError::new(
+                ErrorKind::AuthenticationFailed,
+                "no durable peer key pin store is configured for authenticated control",
+            )
+        })?;
+        let pins = store.load()?;
         pins.authorize(network, node, true, verified_spki_sha256)
             .map_err(|error| {
                 CoreError::with_diagnostic(
@@ -104,6 +125,15 @@ impl PeerTrustOperations for DurablePeerTrustOperations {
                     "current BlueRoute network is missing from durable membership state",
                 )
             })?;
+            // Remove the durable cryptographic pin FIRST, so a failure or
+            // crash during the following membership write cannot leave a
+            // trusted old key after a completed revocation attempt.
+            if let Some(pin_store) = &self.pin_store {
+                let mut pins = pin_store.load()?;
+                if pins.revoke(network, node) {
+                    pin_store.save(&pins)?;
+                }
+            }
             if membership.forget_peer(&node) {
                 self.store.save(&registry)?;
             }
@@ -212,38 +242,61 @@ mod tests {
             let wrong_fingerprint =
                 SpkiSha256::from_verified_certificate_digest([0x44; 32]).unwrap();
             seed_current_network(&store, network);
-            let trust = DurablePeerTrustOperations::new(store);
+            let pin_store = PeerPinStore::new(root.join("peer-keys"));
+            let trust = DurablePeerTrustOperations::with_peer_pin_store(store, pin_store);
             trust.trust_peer(node).await.unwrap();
 
+            let check = |fingerprint| {
+                trust.require_approved_pinned_tls_peer(network, node, fingerprint)
+            };
+            assert_eq!(
+                check(fingerprint).unwrap_err().kind(),
+                ErrorKind::AuthenticationFailed,
+            );
             let mut pins = PeerKeyPins::new();
-            assert_eq!(
-                trust
-                    .require_approved_pinned_tls_peer(network, node, fingerprint, &pins)
-                    .unwrap_err()
-                    .kind(),
-                ErrorKind::AuthenticationFailed,
-            );
             pins.enroll_verified(network, node, fingerprint).unwrap();
+            trust.pin_store.as_ref().unwrap().save(&pins).unwrap();
             assert_eq!(
-                trust
-                    .require_approved_pinned_tls_peer(network, node, wrong_fingerprint, &pins,)
-                    .unwrap_err()
-                    .kind(),
+                check(wrong_fingerprint).unwrap_err().kind(),
                 ErrorKind::AuthenticationFailed,
             );
-            trust
-                .require_approved_pinned_tls_peer(network, node, fingerprint, &pins)
-                .unwrap();
+            check(fingerprint).unwrap();
+
+            // Revoke clears the persistent pin before durable NodeId approval.
             trust.forget_peer(node).await.unwrap();
+            assert!(trust.pin_store.as_ref().unwrap().load().unwrap().is_empty());
             assert_eq!(
-                trust
-                    .require_approved_pinned_tls_peer(network, node, fingerprint, &pins)
-                    .unwrap_err()
-                    .kind(),
+                check(fingerprint).unwrap_err().kind(),
+                ErrorKind::AuthenticationFailed,
+            );
+
+            // Reapproving the old logical ID alone MUST NOT resurrect its key.
+            trust.trust_peer(node).await.unwrap();
+            assert_eq!(
+                check(fingerprint).unwrap_err().kind(),
                 ErrorKind::AuthenticationFailed,
             );
             fs::remove_dir_all(root).unwrap();
         });
+    }
+
+    #[test]
+    fn legacy_trust_only_runtime_cannot_accept_cryptographic_membership() {
+        let (root, store) = temp_store("p7-no-store");
+        let network = NetworkId::from_bytes([0x51; 16]);
+        let node = NodeId::from_bytes([0x61; 16]);
+        let digest = SpkiSha256::from_verified_certificate_digest([0x71; 32]).unwrap();
+        seed_current_network(&store, network);
+        let trust = DurablePeerTrustOperations::new(store);
+        futures_lite::future::block_on(trust.trust_peer(node)).unwrap();
+        assert_eq!(
+            trust
+                .require_approved_pinned_tls_peer(network, node, digest)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::AuthenticationFailed,
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -254,12 +307,14 @@ mod tests {
         let node = NodeId::from_bytes([0x72; 16]);
         let fingerprint = SpkiSha256::from_verified_certificate_digest([0x73; 32]).unwrap();
         seed_current_network(&store, network);
-        let trust = DurablePeerTrustOperations::new(store);
+        let pin_store = PeerPinStore::new(root.join("peer-keys"));
+        let trust = DurablePeerTrustOperations::with_peer_pin_store(store, pin_store);
         let mut pins = PeerKeyPins::new();
         pins.enroll_verified(other, node, fingerprint).unwrap();
+        trust.pin_store.as_ref().unwrap().save(&pins).unwrap();
         assert_eq!(
             trust
-                .require_approved_pinned_tls_peer(other, node, fingerprint, &pins)
+                .require_approved_pinned_tls_peer(other, node, fingerprint)
                 .unwrap_err()
                 .kind(),
             ErrorKind::InvalidState
