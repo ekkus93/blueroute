@@ -3,7 +3,7 @@ use std::pin::Pin;
 
 use blueroute_core::{CoreError, ErrorKind, NetworkId, NodeId};
 use blueroute_linux::{BluetoothBackend, BluezBackend, NetworkMembershipStore, PeerHandle};
-use blueroute_protocol::peer_pin::{PeerKeyPins, SpkiSha256};
+use blueroute_protocol::peer_pin::SpkiSha256;
 
 use crate::{PeerPinStore, current_network};
 
@@ -165,6 +165,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use blueroute_core::{DisplayName, MembershipRegistry, MembershipState, NetworkMembership};
+    use blueroute_protocol::peer_pin::PeerKeyPins;
 
     use super::*;
 
