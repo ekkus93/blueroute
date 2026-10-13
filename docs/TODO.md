@@ -90,6 +90,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P10-001 | `[-]` | **IN PROGRESS:** early read-only CLI uses the version-gated `blueroute-client` and has `--help`/`--version`, preliminary usage and daemon error exits; **clap**, complete exit taxonomy and further commands remain. Exact-head [CI 38461039721](https://github.com/ekkus93/blueroute/actions/runs/38461039721) passed at `51160db`. |
 | P10-002 | `[-]` | **IN PROGRESS:** `status`, `capability show` and `network list` support human/JSON output through the typed D-Bus client (exact-head [CI 38463280247](https://github.com/ekkus93/blueroute/actions/runs/38463280247)); node list/show remains unimplemented. |
 | P14-001 | `[x]` | **COMPLETE (threat model only):** `docs/P14-001-THREAT-MODEL.md`, [CI 38466101723](https://github.com/ekkus93/blueroute/actions/runs/38466101723); implementation safeguards and physical acceptance remain separate. |
+| P8-001 | `[x]` | **SOFTWARE COMPLETE (observation model):** `NeighborObservations` keeps expiring untrusted discovered candidate peers separate from active observed `TopologyGraph` PAN links, with bounded capacity, monotonic timestamp ordering and capability annotations; [CI 38469158021](https://github.com/ekkus93/blueroute/actions/runs/38469158021) passed at `56208e3`. Live BlueZ/P7 ingestion remains P8 integration, not evidence of RF behavior. |
 | P14-004 | `[-]` | **IN PROGRESS:** shared `DisplayName` rejects control/escape and Unicode bidirectional-override characters while preserving printable international names; unit tests pass [CI 38467939586](https://github.com/ekkus93/blueroute/actions/runs/38467939586) at `939935e`. Full peer-field limits, unsupported messages and fuzz/domain conversion review still outstanding. |
 | P10-003 | `[-]` | **IN PROGRESS:** network creation and discovery start/stop delegate to PolicyKit-protected typed daemon API; parsing/validation tests pass [CI 38466994092](https://github.com/ekkus93/blueroute/actions/runs/38466994092) at `c786f77`. Production join/leave and full end-to-end lifecycle remain. |
 | P10-004 | `[-]` | **IN PROGRESS:** explicit full-NodeId `peer trust`/`peer forget` invoke existing PolicyKit-protected D-Bus commands; tests and [CI 38466585585](https://github.com/ekkus93/blueroute/actions/runs/38466585585) at `8183225` passed. Pending requests/authenticated-join UX remain; trust is **not** TLS enrollment or membership. |
@@ -904,10 +905,12 @@ This is the first complete product slice.
 
 ## P8-001 — Build neighbor observation model
 
-- [ ] direct PAN links.
-- [ ] candidate reachability separate from active links.
-- [ ] timestamps/expiry.
-- [ ] capability annotations.
+- [x] direct PAN links derived from verified active topology graph, not peer advertisements.
+- [x] candidate discovery observations represented separately from active links.
+- [x] locally measured monotonic timestamps, 120s expiry and older-observation suppression.
+- [x] bounded per-candidate capability annotations (256 candidates; untrusted until verified).
+
+**Software model complete:** `crates/blueroute-core/src/neighbor.rs` separates discovery and active PAN states; exact-head [CI 38469158021](https://github.com/ekkus93/blueroute/actions/runs/38469158021) passed at `56208e3`. This module does not authenticate peers, ingest production BlueZ events, or establish physical routing; actual integration belongs to P7/P8-005 and radio acceptance remains deferred.
 
 **Acceptance**
 
