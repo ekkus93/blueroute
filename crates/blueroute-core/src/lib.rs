@@ -23,7 +23,10 @@ pub use error::{CoreError, ErrorKind};
 pub use health::{HealthComponent, HealthLevel, NodeHealth};
 pub use id::{DisplayName, LinkId, NetworkId, NodeId, SegmentId};
 pub use membership::{MembershipRegistry, MembershipState, NetworkMembership, PeerMembership};
-pub use neighbor::{CandidateObservation, CandidateSource, NeighborObservations, CANDIDATE_LIFETIME_MS, MAX_CANDIDATES};
+pub use neighbor::{
+    CANDIDATE_LIFETIME_MS, CandidateObservation, CandidateSource, MAX_CANDIDATES,
+    NeighborObservations,
+};
 pub use route::{IpPrefix, Route, RouteDestination, RouteOwner};
 pub use secret::Secret;
 pub use topology::{LinkHealth, LinkState, PanLink, PanSegment, Reachability, TopologyGraph};
