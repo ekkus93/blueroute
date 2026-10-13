@@ -91,6 +91,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P10-002 | `[-]` | **IN PROGRESS:** `status`, `capability show` and `network list` support human/JSON output through the typed D-Bus client (exact-head [CI 38463280247](https://github.com/ekkus93/blueroute/actions/runs/38463280247)); node list/show remains unimplemented. |
 | P14-001 | `[x]` | **COMPLETE (threat model only):** `docs/P14-001-THREAT-MODEL.md`, [CI 38466101723](https://github.com/ekkus93/blueroute/actions/runs/38466101723); implementation safeguards and physical acceptance remain separate. |
 | P8-001 | `[x]` | **SOFTWARE COMPLETE (observation model):** `NeighborObservations` keeps expiring untrusted discovered candidate peers separate from active observed `TopologyGraph` PAN links, with bounded capacity, monotonic timestamp ordering and capability annotations; [CI 38469158021](https://github.com/ekkus93/blueroute/actions/runs/38469158021) passed at `56208e3`. Live BlueZ/P7 ingestion remains P8 integration, not evidence of RF behavior. |
+| P8-002 | `[-]` | **IN PROGRESS:** deterministic non-overlapping multi-segment private IPv4 allocation, host-prefix collision checks and owner-scoped *reservation* release passed [CI 38470193934](https://github.com/ekkus93/blueroute/actions/runs/38470193934) at `2c2c108`. Live kernel route/address ownership teardown and actual PAN segment integration remain; no physical hardware claim. |
 | P14-004 | `[-]` | **IN PROGRESS:** shared `DisplayName` rejects control/escape and Unicode bidirectional-override characters while preserving printable international names; unit tests pass [CI 38467939586](https://github.com/ekkus93/blueroute/actions/runs/38467939586) at `939935e`. Full peer-field limits, unsupported messages and fuzz/domain conversion review still outstanding. |
 | P10-003 | `[-]` | **IN PROGRESS:** network creation and discovery start/stop delegate to PolicyKit-protected typed daemon API; parsing/validation tests pass [CI 38466994092](https://github.com/ekkus93/blueroute/actions/runs/38466994092) at `c786f77`. Production join/leave and full end-to-end lifecycle remain. |
 | P10-004 | `[-]` | **IN PROGRESS:** explicit full-NodeId `peer trust`/`peer forget` invoke existing PolicyKit-protected D-Bus commands; tests and [CI 38466585585](https://github.com/ekkus93/blueroute/actions/runs/38466585585) at `8183225` passed. Pending requests/authenticated-join UX remain; trust is **not** TLS enrollment or membership. |
@@ -918,9 +919,12 @@ This is the first complete product slice.
 
 ## P8-002 — Implement distinct subnet allocation per PAN segment
 
-- [ ] non-overlapping prefixes.
-- [ ] host-route conflict detection.
-- [ ] safe prefix reclamation.
+- [x] deterministic non-overlapping prefix reservations per SegmentId, preserving P6-005 bootstrap subnet.
+- [x] detect configured RFC1918 pool and local active host-route/address conflicts; bound candidate probing.
+- [x] idempotent owner-scoped *reservation* reclamation with independent segment allocations preserved.
+- [ ] wire reservations to the privileged Linux backend and prove ownership-safe address/route teardown across restart/reconciliation.
+
+**Software model qualified:** `crates/blueroute-core/src/segment_allocator.rs` with exact-head [CI 38470193934](https://github.com/ekkus93/blueroute/actions/runs/38470193934) at `2c2c108`. The allocator does not install or remove kernel routes; real multi-hop Bluetooth acceptance under P8-006..007 stays **HARDWARE DEFERRED**.
 
 **Acceptance**
 
