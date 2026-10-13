@@ -82,9 +82,13 @@ impl PeerKeyPins {
         // One enrolled TLS key must not impersonate multiple logical NodeIds
         // in the same network. This holds even if both NodeIds have legacy
         // trust records. Cross-network key reuse is a separate policy choice.
-        if self.pins.iter().any(|(&(enrolled_network, enrolled_node), existing)| {
-            enrolled_network == network && enrolled_node != node && *existing == pin
-        }) {
+        if self
+            .pins
+            .iter()
+            .any(|(&(enrolled_network, enrolled_node), existing)| {
+                enrolled_network == network && enrolled_node != node && *existing == pin
+            })
+        {
             return Err(PeerPinError::KeyConflict);
         }
         match self.pins.get(&(network, node)) {
