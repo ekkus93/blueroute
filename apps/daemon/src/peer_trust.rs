@@ -95,6 +95,50 @@ impl DurablePeerTrustOperations {
                 )
             })
     }
+
+    /// Persist a key enrollment ONLY after an independently authenticated
+    /// human has compared the remote peer's key fingerprint out of band.
+    ///
+    /// `verified_tls_spki` MUST come from completed certificate validation
+    /// and TLS proof-of-possession, not the peer's untrusted Hello or Bluetooth
+    /// discovery. `confirmed_spki` MUST be independently verified by the
+    /// operator. A future PolicyKit-protected enrollment UI must collect that
+    /// confirmation; no D-Bus enrollment operation is exposed yet.
+    ///
+    /// This policy helper is NOT itself an enrollment ceremony or a TLS
+    /// verifier. It cannot be used to activate production JoinNetwork.
+    pub fn enroll_key_after_independent_confirmation(
+        &self,
+        network: NetworkId,
+        node: NodeId,
+        verified_tls_spki: SpkiSha256,
+        confirmed_spki: SpkiSha256,
+    ) -> Result<bool, CoreError> {
+        self.require_peer_approved(network, node)?;
+        if verified_tls_spki != confirmed_spki {
+            return Err(CoreError::new(
+                ErrorKind::AuthenticationFailed,
+                "independently confirmed peer key does not match verified TLS identity",
+            ));
+        }
+        let store = self.pin_store.as_ref().ok_or_else(|| {
+            CoreError::new(
+                ErrorKind::AuthenticationFailed,
+                "no durable peer key pin store is configured for enrollment",
+            )
+        })?;
+        let mut pins = store.load()?;
+        let changed = pins.enroll_verified(network, node, verified_tls_spki).map_err(|_| {
+            CoreError::new(
+                ErrorKind::AuthenticationFailed,
+                "peer identity or key conflicts with an existing enrollment",
+            )
+        })?;
+        if changed {
+            store.save(&pins)?;
+        }
+        Ok(changed)
+    }
 }
 
 impl PeerTrustOperations for DurablePeerTrustOperations {
@@ -297,6 +341,55 @@ mod tests {
             ErrorKind::AuthenticationFailed,
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn enrollment_requires_durable_approval_and_independent_matching_key() {
+        futures_lite::future::block_on(async {
+            let (root, store) = temp_store("p7-manual-confirmation");
+            let network = NetworkId::from_bytes([0x31; 16]);
+            let node = NodeId::from_bytes([0x32; 16]);
+            let other = NodeId::from_bytes([0x33; 16]);
+            let key = SpkiSha256::from_verified_certificate_digest([0x41; 32]).unwrap();
+            let mismatch = SpkiSha256::from_verified_certificate_digest([0x42; 32]).unwrap();
+            seed_current_network(&store, network);
+            let trust = DurablePeerTrustOperations::with_peer_pin_store(
+                store,
+                PeerPinStore::new(root.join("enrollment-pins")),
+            );
+            let enroll = |node, verified, confirmed| {
+                trust.enroll_key_after_independent_confirmation(network, node, verified, confirmed)
+            };
+            assert_eq!(
+                enroll(node, key, key).unwrap_err().kind(),
+                ErrorKind::AuthenticationFailed
+            );
+            trust.trust_peer(node).await.unwrap();
+            assert_eq!(
+                enroll(node, key, mismatch).unwrap_err().kind(),
+                ErrorKind::AuthenticationFailed
+            );
+            assert!(trust.pin_store.as_ref().unwrap().load().unwrap().is_empty());
+            assert_eq!(enroll(node, key, key), Ok(true));
+            assert_eq!(enroll(node, key, key), Ok(false));
+            assert_eq!(
+                enroll(other, key, key).unwrap_err().kind(),
+                ErrorKind::AuthenticationFailed
+            );
+            trust.trust_peer(other).await.unwrap();
+            assert_eq!(
+                enroll(other, key, key).unwrap_err().kind(),
+                ErrorKind::AuthenticationFailed
+            );
+            assert_eq!(
+                enroll(node, mismatch, mismatch).unwrap_err().kind(),
+                ErrorKind::AuthenticationFailed
+            );
+            assert_eq!(trust.pin_store.as_ref().unwrap().load().unwrap().len(), 1);
+            trust.forget_peer(node).await.unwrap();
+            assert!(trust.pin_store.as_ref().unwrap().load().unwrap().is_empty());
+            fs::remove_dir_all(root).unwrap();
+        });
     }
 
     #[test]
