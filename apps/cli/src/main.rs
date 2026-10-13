@@ -2,7 +2,8 @@
 //! client. The clap option layer and mutation subcommands are still pending.
 
 use blueroute_client::BlueRouteClient;
-use blueroute_protocol::{DaemonStatus, NodeCapabilities};
+use blueroute_core::NodeCapabilities;
+use blueroute_protocol::DaemonStatus;
 
 const HELP: &str = "Usage: blueroute [--json] status\n       blueroute [--json] capability show\n       blueroute --version\n       blueroute --help";
 
