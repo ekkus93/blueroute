@@ -243,7 +243,10 @@ mod tests {
 
     #[test]
     fn explicit_mutation_commands_never_claim_membership_or_key_enrollment() {
-        assert_eq!(mutation_ack(false, "Peer trust approved"), "Peer trust approved");
+        assert_eq!(
+            mutation_ack(false, "Peer trust approved"),
+            "Peer trust approved"
+        );
         assert_eq!(mutation_ack(true, "Peer trust revoked"), r#"{"ok":true}"#);
         assert!(parse(&args(&["join"])).is_err());
     }
