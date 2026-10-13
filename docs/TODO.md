@@ -89,6 +89,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P7-005 | `[-]` | **IN PROGRESS**: parser fuzz-style deterministic mutation, frame truncation, version incompatibility and round-trip tests passed exact-head [CI 38399834487](https://github.com/ekkus93/blueroute/actions/runs/38399834487) at `964b7add`. Daemon wire integration/fuzz acceptance still depends on P7-004. |
 | P10-001 | `[-]` | **IN PROGRESS:** early read-only CLI uses the version-gated `blueroute-client` and has `--help`/`--version`, preliminary usage and daemon error exits; **clap**, complete exit taxonomy and further commands remain. Exact-head [CI 38461039721](https://github.com/ekkus93/blueroute/actions/runs/38461039721) passed at `51160db`. |
 | P10-002 | `[-]` | **IN PROGRESS:** `blueroute status` and `blueroute capability show` have tested human and JSON output against typed D-Bus client data ([CI 38461039721](https://github.com/ekkus93/blueroute/actions/runs/38461039721)); node/network list/show are unimplemented. |
+| P14-001 | `[x]` | **COMPLETE (threat model only):** formal security model in `docs/P14-001-THREAT-MODEL.md`; lists attack surfaces, mitigations, residual risks and outstanding implementation gates. No claim that TLS is implemented or that P14-002..006/P16 passed. |
 | All other tasks | `[ ]` | Not started unless explicitly documented in that task; remaining hardware acceptance is not a blocker for independent software work. |
 
 ## Platform rule
@@ -1099,7 +1100,7 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 - [x] `blueroute status` (typed D-Bus status; human/JSON).
 - [x] `blueroute capability show` (typed capability summary; human/JSON).
 - [ ] `blueroute node list/show`.
-- [ ] `blueroute network list`.
+- [x] `blueroute network list` (read-only typed D-Bus, human/JSON; software-qualified under CI #38463280247 on `1471551`).
 
 **Software partial:** stable JSON serialization round-trips and no direct BlueZ/NetworkManager access; exact-head [CI 38461039721](https://github.com/ekkus93/blueroute/actions/runs/38461039721) passed.
 
@@ -1466,6 +1467,8 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 # P14 — Security and threat model
 
 ## P14-001 — Write formal threat model
+
+**COMPLETE — document only:** [P14-001-THREAT-MODEL.md](P14-001-THREAT-MODEL.md) inventories attacker classes, protected assets, trust boundaries, T01–T15 concrete threats, existing versus pending mitigations, residual risk, authenticated-session authorization order and negative-test/release criteria. P14-002..006 and P7 TLS remain open.
 
 Cover:
 
