@@ -167,6 +167,13 @@ dependencies = [
 [[package]]
 name = "blueroute"
 version = "0.1.0"
+dependencies = [
+ "blueroute-client",
+ "blueroute-core",
+ "blueroute-protocol",
+ "futures-lite",
+ "serde_json",
+]
 
 [[package]]
 name = "blueroute-client"
