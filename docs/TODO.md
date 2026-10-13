@@ -92,6 +92,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P14-001 | `[x]` | **COMPLETE (threat model only):** `docs/P14-001-THREAT-MODEL.md`, [CI 38466101723](https://github.com/ekkus93/blueroute/actions/runs/38466101723); implementation safeguards and physical acceptance remain separate. |
 | P8-001 | `[x]` | **SOFTWARE COMPLETE (observation model):** `NeighborObservations` keeps expiring untrusted discovered candidate peers separate from active observed `TopologyGraph` PAN links, with bounded capacity, monotonic timestamp ordering and capability annotations; [CI 38469158021](https://github.com/ekkus93/blueroute/actions/runs/38469158021) passed at `56208e3`. Live BlueZ/P7 ingestion remains P8 integration, not evidence of RF behavior. |
 | P8-002 | `[-]` | **IN PROGRESS:** deterministic non-overlapping multi-segment private IPv4 allocation, host-prefix collision checks and owner-scoped *reservation* release passed [CI 38470193934](https://github.com/ekkus93/blueroute/actions/runs/38470193934) at `2c2c108`. Live kernel route/address ownership teardown and actual PAN segment integration remain; no physical hardware claim. |
+| P8-004 | `[x]` | **SOFTWARE COMPLETE (desired-route calculation):** deterministic weighted node routes over active PAN graph respect explicitly routing-capable transit nodes, stable healthy paths and partitions; [CI 38471055209](https://github.com/ekkus93/blueroute/actions/runs/38471055209) passed at `32d4954`. Applying/distributing privileged routes remains P8-005 and physical multi-hop tests remain deferred. |
 | P14-004 | `[-]` | **IN PROGRESS:** shared `DisplayName` rejects control/escape and Unicode bidirectional-override characters while preserving printable international names; unit tests pass [CI 38467939586](https://github.com/ekkus93/blueroute/actions/runs/38467939586) at `939935e`. Full peer-field limits, unsupported messages and fuzz/domain conversion review still outstanding. |
 | P10-003 | `[-]` | **IN PROGRESS:** network creation and discovery start/stop delegate to PolicyKit-protected typed daemon API; parsing/validation tests pass [CI 38466994092](https://github.com/ekkus93/blueroute/actions/runs/38466994092) at `c786f77`. Production join/leave and full end-to-end lifecycle remain. |
 | P10-004 | `[-]` | **IN PROGRESS:** explicit full-NodeId `peer trust`/`peer forget` invoke existing PolicyKit-protected D-Bus commands; tests and [CI 38466585585](https://github.com/ekkus93/blueroute/actions/runs/38466585585) at `8183225` passed. Pending requests/authenticated-join UX remain; trust is **not** TLS enrollment or membership. |
@@ -942,11 +943,13 @@ This is the first complete product slice.
 
 ## P8-004 — Implement route computation v1
 
-- [ ] compute paths.
-- [ ] deterministic desired route set.
-- [ ] stable-path preference.
-- [ ] unreachable detection.
-- [ ] respect node capability restrictions.
+- [x] compute paths over observed active PAN link graph with nonzero link metrics.
+- [x] deterministic desired node-route set owned by the explicit BlueRoute NetworkId.
+- [x] stable-path preference using degraded-link penalty, hop-count and first-hop tie-break.
+- [x] unreachable/failed/disconnected detection without inventing default Internet routes.
+- [x] require affirmative routing capability on transit nodes (unknown is not approval).
+
+**Software route planner qualified:** `crates/blueroute-core/src/route_planner.rs`, exact-head [CI 38471055209](https://github.com/ekkus93/blueroute/actions/runs/38471055209) passed at `32d4954`. This module does **not** authenticate remote topology claims, distribute route updates, modify Linux routes or prove Bluetooth traffic. P7 and P8-005/006/007 remain separate gates.
 
 **Acceptance**
 
