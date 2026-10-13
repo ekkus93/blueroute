@@ -10,6 +10,7 @@ mod membership;
 mod neighbor;
 mod route;
 mod route_planner;
+mod forwarding_policy;
 mod secret;
 mod segment_allocator;
 mod topology;
@@ -31,6 +32,7 @@ pub use neighbor::{
 };
 pub use route::{IpPrefix, Route, RouteDestination, RouteOwner};
 pub use route_planner::{DEGRADED_LINK_COST_PENALTY, desired_node_routes};
+pub use forwarding_policy::desired_ipv4_forwarding;
 pub use secret::Secret;
 pub use segment_allocator::{MAX_PREFIX_PROBES, MAX_RESERVED_PAN_SEGMENTS, SegmentIpv4Allocator};
 pub use topology::{LinkHealth, LinkState, PanLink, PanSegment, Reachability, TopologyGraph};
