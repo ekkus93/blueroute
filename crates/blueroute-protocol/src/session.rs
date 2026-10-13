@@ -285,7 +285,10 @@ mod tests {
         let mut first = ReconnectBackoff::new();
         let mut second = ReconnectBackoff::new();
         assert_eq!(first.after_failure(), Some(INITIAL_RECONNECT_DELAY));
-        assert_eq!(first.after_failure(), Some(std::time::Duration::from_millis(500)));
+        assert_eq!(
+            first.after_failure(),
+            Some(std::time::Duration::from_millis(500))
+        );
         assert_eq!(second.after_failure(), Some(INITIAL_RECONNECT_DELAY));
         assert_eq!(first.failed_attempts(), 2);
         assert_eq!(second.failed_attempts(), 1);
