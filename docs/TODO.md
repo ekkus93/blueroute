@@ -900,6 +900,8 @@ This is the first complete product slice.
 - [x] control-version rejection/compatibility tests.
 - [ ] connect parser to authenticated daemon transport and show peer data cannot crash daemon; full acceptance remains pending P7-004.
 
+**Additional P7-005 deterministic session-stream qualification (2026-10-14):** `crates/blueroute-protocol/tests/control_session_fuzz.rs` tests every selected fragmentation width across ordered Heartbeat/Goodbye transcripts and 2,048 reproducible hostile wire mutations, asserting no panics and irrecoverable poisoning on frame rejection. These tests run only against a simulated already-verified context (no TLS verification, enrollment, daemon transport, or Bluetooth hardware). Exact-head [CI 38649890223](https://github.com/ekkus93/blueroute/actions/runs/38649890223) passed at `1f92c50e6c5708f5a55b00d3c641b0856287aaab`. Authenticated daemon parser integration and malicious peer crash acceptance remain open until P7-003/P7-004 are implemented.
+
 **Parser software tests qualified** at `964b7add` (exact-head CI `38399834487` passed), with strict nested Hello variant field rejection added at `51960025` ([CI 38480899801](https://github.com/ekkus93/blueroute/actions/runs/38480899801)); incremental EOF/truncation detection added at `0322101b` ([CI 38490454756](https://github.com/ekkus93/blueroute/actions/runs/38490454756)); clean EOF now terminally closes the decoder, rejecting subsequent bytes or parser reuse at `0743af18` ([CI 38607313157](https://github.com/ekkus93/blueroute/actions/runs/38607313157) passed); deterministic checks exercise the shared protocol parser but not an authenticated daemon session or physical Bluetooth device.
 
 **Acceptance**
