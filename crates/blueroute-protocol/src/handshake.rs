@@ -204,19 +204,36 @@ impl std::error::Error for HelloExchangeError {}
 /// exporter session ID from that very TLS channel. This helper cannot prove
 /// those external preconditions or activate production JoinNetwork. Any error
 /// requires discarding the transport; no plaintext fallback is permitted.
+/// Caller-supplied preconditions and local hello fields. Construct this only
+/// after verifying TLS peer identity and obtaining a fresh exporter and
+/// cryptographically random challenge from a trusted source.
+#[derive(Clone, Debug)]
+pub struct HelloExchangeRequest {
+    pub network: NetworkId,
+    pub local: NodeId,
+    pub remote: NodeId,
+    pub exported_session_id: [u8; TLS_CONTROL_EXPORTER_BYTES],
+    pub local_challenge: [u8; 16],
+    pub local_facts: HelloFacts,
+    pub deadline: Instant,
+}
+
 pub fn exchange_hello_claims_with_deadline<Stream>(
     stream: &mut Stream,
-    network: NetworkId,
-    local: NodeId,
-    remote: NodeId,
-    exported_session_id: [u8; TLS_CONTROL_EXPORTER_BYTES],
-    local_challenge: [u8; 16],
-    local_facts: HelloFacts,
-    deadline: Instant,
+    request: HelloExchangeRequest,
 ) -> Result<HelloFacts, HelloExchangeError>
 where
     Stream: DeadlineControlRead + DeadlineControlWrite,
 {
+    let HelloExchangeRequest {
+        network,
+        local,
+        remote,
+        exported_session_id,
+        local_challenge,
+        local_facts,
+        deadline,
+    } = request;
     if local == remote {
         return Err(HelloExchangeError::InvalidTranscript(
             "local and remote node must differ",
@@ -491,13 +508,15 @@ mod tests {
     fn exchange_claims(stream: &mut ScriptedTransport) -> Result<HelloFacts, HelloExchangeError> {
         exchange_hello_claims_with_deadline(
             stream,
-            NetworkId::from_bytes([1; 16]),
-            NodeId::from_bytes([4; 16]),
-            NodeId::from_bytes([5; 16]),
-            [3; 16],
-            [10; 16],
-            facts(),
-            Instant::now() + std::time::Duration::from_secs(2),
+            HelloExchangeRequest {
+                network: NetworkId::from_bytes([1; 16]),
+                local: NodeId::from_bytes([4; 16]),
+                remote: NodeId::from_bytes([5; 16]),
+                exported_session_id: [3; 16],
+                local_challenge: [10; 16],
+                local_facts: facts(),
+                deadline: Instant::now() + std::time::Duration::from_secs(2),
+            },
         )
     }
 
@@ -582,13 +601,15 @@ mod tests {
         let mut stream = scripted_transcript(frames[1].clone(), frames[3].clone());
         let result = exchange_hello_claims_with_deadline(
             &mut stream,
-            NetworkId::from_bytes([1; 16]),
-            NodeId::from_bytes([4; 16]),
-            NodeId::from_bytes([5; 16]),
-            [3; 16],
-            [10; 16],
-            facts(),
-            Instant::now() - std::time::Duration::from_secs(1),
+            HelloExchangeRequest {
+                network: NetworkId::from_bytes([1; 16]),
+                local: NodeId::from_bytes([4; 16]),
+                remote: NodeId::from_bytes([5; 16]),
+                exported_session_id: [3; 16],
+                local_challenge: [10; 16],
+                local_facts: facts(),
+                deadline: Instant::now() - std::time::Duration::from_secs(1),
+            },
         );
         assert!(matches!(result, Err(HelloExchangeError::Transport(_))));
         assert!(stream.outbound.is_empty());
