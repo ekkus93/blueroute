@@ -10,6 +10,68 @@ use crate::control::{
 };
 use blueroute_core::{NetworkId, NodeId};
 
+/// The rustls TLS 1.3 exporter label for BlueRoute control sessions.
+/// Both endpoints MUST export 16 bytes with this label and the canonical
+/// network/node context below from the same fully verified TLS connection.
+/// These helpers do NOT perform TLS or verify the peer certificate.
+pub const TLS_CONTROL_EXPORTER_LABEL: &[u8] = b"EXPORTER-BlueRoute-Control-v1";
+pub const TLS_CONTROL_EXPORTER_BYTES: usize = 16;
+
+/// A direction-independent exporter context: NetworkId || smaller NodeId ||
+/// larger NodeId. This prevents accidentally binding a control transcript to
+/// another network or peer pair. The TLS exporter, not this context, provides
+/// cryptographic channel binding and fresh per-connection entropy.
+pub fn tls_control_exporter_context(
+    network: NetworkId,
+    first: NodeId,
+    second: NodeId,
+) -> Result<[u8; 48], &'static str> {
+    if first == second {
+        return Err("control exporter requires two distinct nodes");
+    }
+    let (low, high) = if first < second {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    let mut context = [0_u8; 48];
+    context[..16].copy_from_slice(network.as_bytes());
+    context[16..32].copy_from_slice(low.as_bytes());
+    context[32..].copy_from_slice(high.as_bytes());
+    Ok(context)
+}
+
+/// Verify that the claimed hello/ack session ID is exactly the exporter
+/// output of the verified TLS connection. Never obtain `exported_session_id`
+/// from a peer message, advertisement, local RNG or an unverified socket.
+/// The caller MUST still enforce the approved pinned TLS peer identity.
+pub fn validate_exporter_bound_hello_transcript(
+    network: NetworkId,
+    local: NodeId,
+    remote: NodeId,
+    exported_session_id: [u8; TLS_CONTROL_EXPORTER_BYTES],
+    local_hello: &ControlEnvelope,
+    remote_hello: &ControlEnvelope,
+    local_ack: &ControlEnvelope,
+    remote_ack: &ControlEnvelope,
+) -> Result<HelloFacts, &'static str> {
+    if exported_session_id.iter().all(|byte| *byte == 0) {
+        return Err("invalid zero TLS exporter session ID");
+    }
+    if local_hello.session_id != exported_session_id {
+        return Err("control session is not bound to TLS exporter");
+    }
+    validate_hello_transcript(
+        network,
+        local,
+        remote,
+        local_hello,
+        remote_hello,
+        local_ack,
+        remote_ack,
+    )
+}
+
 /// Validates both directions of a two-challenge handshake. Each side sends
 /// Hello(sequence=1) then HelloAck(sequence=2), echoing the other challenge.
 /// The remote's claims must be identical in Hello and HelloAck.
@@ -169,6 +231,41 @@ mod tests {
             &frames[3],
         )
     }
+    #[test]
+    fn tls_exporter_context_is_direction_independent_and_network_scoped() {
+        let network = NetworkId::from_bytes([1; 16]);
+        let a = NodeId::from_bytes([4; 16]);
+        let b = NodeId::from_bytes([5; 16]);
+        let ab = tls_control_exporter_context(network, a, b).unwrap();
+        assert_eq!(ab, tls_control_exporter_context(network, b, a).unwrap());
+        assert_eq!(&ab[..16], network.as_bytes());
+        assert_eq!(&ab[16..32], a.as_bytes());
+        assert_eq!(&ab[32..], b.as_bytes());
+        assert_ne!(
+            ab,
+            tls_control_exporter_context(NetworkId::from_bytes([2; 16]), a, b).unwrap()
+        );
+        assert!(tls_control_exporter_context(network, a, a).is_err());
+        assert_eq!(TLS_CONTROL_EXPORTER_BYTES, 16);
+    }
+
+    #[test]
+    fn hello_transcript_must_match_actual_tls_exporter_session_id() {
+        let frames = exchange();
+        let network = NetworkId::from_bytes([1; 16]);
+        let local = NodeId::from_bytes([4; 16]);
+        let remote = NodeId::from_bytes([5; 16]);
+        let verify_exporter = |exporter| {
+            validate_exporter_bound_hello_transcript(
+                network, local, remote, exporter,
+                &frames[0], &frames[1], &frames[2], &frames[3],
+            )
+        };
+        assert_eq!(verify_exporter([3; 16]), Ok(facts()));
+        assert!(verify_exporter([8; 16]).is_err());
+        assert!(verify_exporter([0; 16]).is_err());
+    }
+
     #[test]
     fn matching_bidirectional_hello_and_ack_are_accepted_as_claims_only() {
         assert_eq!(verify(&exchange()), Ok(facts()));
