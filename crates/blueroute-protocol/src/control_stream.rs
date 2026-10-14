@@ -83,6 +83,19 @@ impl ControlStreamDecoder {
         Ok(completed)
     }
 
+    /// Call when the underlying authenticated byte stream reaches EOF.
+    /// A partial header or payload must never be silently accepted as a
+    /// clean close; drop the connection after any framing error.
+    pub fn finish(&mut self) -> Result<(), StreamDecodeError> {
+        if self.poisoned {
+            return Err(StreamDecodeError::Poisoned);
+        }
+        if !self.partial.is_empty() || self.expected.is_some() {
+            return self.reject(StreamDecodeError::MalformedFrame);
+        }
+        Ok(())
+    }
+
     fn reject<T>(&mut self, error: StreamDecodeError) -> Result<T, StreamDecodeError> {
         self.partial.clear();
         self.expected = None;
@@ -155,6 +168,33 @@ mod tests {
             );
             assert_eq!(decoder.pending_bytes(), 0);
         }
+    }
+
+    #[test]
+    fn eof_rejects_truncated_headers_and_payloads() {
+        let complete = encode_control_frame(&example(1)).unwrap();
+        for end in 1..complete.len() {
+            let mut decoder = ControlStreamDecoder::new();
+            assert!(decoder.feed(&complete[..end]).unwrap().is_empty());
+            assert_eq!(decoder.finish(), Err(StreamDecodeError::MalformedFrame));
+            assert!(decoder.is_poisoned());
+            assert_eq!(decoder.pending_bytes(), 0);
+            assert_eq!(decoder.finish(), Err(StreamDecodeError::Poisoned));
+            assert_eq!(decoder.feed(&complete), Err(StreamDecodeError::Poisoned));
+        }
+    }
+
+    #[test]
+    fn eof_after_complete_frames_is_clean() {
+        let mut decoder = ControlStreamDecoder::new();
+        assert_eq!(decoder.finish(), Ok(()));
+        let first = example(1);
+        let second = example(2);
+        let mut bytes = encode_control_frame(&first).unwrap();
+        bytes.extend_from_slice(&encode_control_frame(&second).unwrap());
+        assert_eq!(decoder.feed(&bytes).unwrap(), vec![first, second]);
+        assert_eq!(decoder.finish(), Ok(()));
+        assert_eq!(decoder.pending_bytes(), 0);
     }
 
     #[test]
