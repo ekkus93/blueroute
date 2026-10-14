@@ -192,7 +192,7 @@ mod tests {
         assert_eq!(session.finish(), Err(SessionStreamError::Poisoned));
         assert_eq!(
             session.feed(&bytes(&heartbeat(5))),
-            Err(SessionStreamError::AfterGoodbye)
+            Err(SessionStreamError::Poisoned)
         );
         assert_eq!(session.feed(&[]), Err(SessionStreamError::Poisoned));
     }
