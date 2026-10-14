@@ -40,7 +40,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 
 ## Current task status
 
-**Status date:** 2026-10-13 (P7 security/software changes qualified through `06e5b38a`; PR #41 remains separately inspected and unmerged)
+**Status date:** 2026-10-14 (P7 claim-only Hello exchange and absolute-deadline I/O qualified through `6ef8ab84`; latest checklist evidence at `e53f355f`; PR #41 remains open and merge tooling returns `INVALID_ARGUMENT`. Real mutually authenticated TLS and enrollment are **NOT** complete.)
 
 | Task | Status | Current state |
 | --- | --- | --- |
