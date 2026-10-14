@@ -254,9 +254,7 @@ mod tests {
         let local = NodeId::from_bytes([4; 16]);
         let remote = NodeId::from_bytes([5; 16]);
         let verify_exporter = |exporter| {
-            validate_exporter_bound_hello_transcript(
-                network, local, remote, exporter, &frames,
-            )
+            validate_exporter_bound_hello_transcript(network, local, remote, exporter, &frames)
         };
         assert_eq!(verify_exporter([3; 16]), Ok(facts()));
         assert!(verify_exporter([8; 16]).is_err());
