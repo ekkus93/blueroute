@@ -40,7 +40,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 
 ## Current task status
 
-**Status date:** 2026-10-14 (P7 post-hello session-stream replay/scope tests qualified through `9878dca7`, [CI 38601668411](https://github.com/ekkus93/blueroute/actions/runs/38601668411) passed; PR #41 remains open with merge tooling returning `INVALID_ARGUMENT`. Real mutual TLS, independently approved key enrollment, and production join are **NOT** complete.)
+**Status date:** 2026-10-14 (P7 post-hello session-stream scope/replay and abrupt-EOF tests qualified through `5c57bc06`, [CI 38604630252](https://github.com/ekkus93/blueroute/actions/runs/38604630252) passed; PR #41 remains open with Ralph merge tooling returning `INVALID_ARGUMENT`. Real mutual TLS, independently approved key enrollment, and production join are **NOT** complete.)
 
 | Task | Status | Current state |
 | --- | --- | --- |
@@ -875,6 +875,8 @@ This is the first complete product slice.
 - Peers negotiate capability without knowing each other's computer model.
 
 ## P7-004 — Implement control-session lifecycle
+
+**Additional P7-004 EOF fault-injection qualification (2026-10-14):** `SessionControlStream::finish()` now treats graceful Goodbye+EOF as terminal, rejects abrupt EOF without Goodbye and refuses any transport reuse; deterministic tests pass exact-head [CI 38604630252](https://github.com/ekkus93/blueroute/actions/runs/38604630252) at `5c57bc069ef92e6bf559727ba950ebae71df3bdb`. This is parser lifecycle hardening, **not** authenticated TLS or physical network evidence.
 
 **Additional software-only P7-004 hardening (2026-10-14):** `crates/blueroute-protocol/src/session_stream.rs` bounds decoded post-hello frames to one expected (NetworkId, NodeId, TLS exporter session ID), rejects sequence replay/staleness after handshake messages 1/2, rejects extra Hello/HelloAck and post-Goodbye traffic, and poisons the entire session on malformed or mismatched frames. A partial batch is never returned after a later invalid frame. Exact-head [CI 38601668411](https://github.com/ekkus93/blueroute/actions/runs/38601668411) passed on `9878dca724f4d208ed007093869fd21a57a9ea8b`. **Critical:** this is parser/scope groundwork, not authentication: no real mutual TLS, cryptographic exporter derivation, approval UX, daemon socket integration or production JoinNetwork was added. Hardware acceptance remains deferred.
 

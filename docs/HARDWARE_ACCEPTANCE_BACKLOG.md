@@ -48,6 +48,8 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 - **P7-004:** Post-hello incremental frame parser with strict network, peer, TLS-exporter session-ID and increasing-sequence scope; rejects repeated Hello, replay, malformed frames and post-Goodbye traffic. Exact-head `9878dca724f4d208ed007093869fd21a57a9ea8b`; [CI 38601668411](https://github.com/ekkus93/blueroute/actions/runs/38601668411) passed. This is **not** a real TLS session, user-confirmed peer enrollment, authenticated daemon runtime or Bluetooth test.
 - **Still outstanding:** TLS 1.3 mutual certificate verification and private-key possession, independent SPKI enrollment/revocation UX, verified-channel exporter derivation, bounded runtime reconnect and teardown, authenticated production P6-004 join, and the already-deferred physical cross-machine PAN acceptance. No original hardware item is marked passed.
 
+- **P7-004 EOF hardening (software only):** Goodbye+EOF terminates the stream permanently; abrupt EOF is recognized as loss and parser reuse fails closed. Exact-head [CI 38604630252](https://github.com/ekkus93/blueroute/actions/runs/38604630252) passed at `5c57bc069ef92e6bf559727ba950ebae71df3bdb`. Live TLS, reconnection and hardware acceptance remain untested.
+
 ## When the computers are available
 
 1. Prepare two compatible Linux systems (NAP host and PANU client), plus further clients for capacity/multi-hop and materially different controller hardware for P1-009/P16-006. Record complete environment and capability inventories; do not assume one Chromebook type represents all Linux hardware.
