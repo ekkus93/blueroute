@@ -129,6 +129,25 @@ impl DisplayName {
 
     pub fn new(value: impl Into<String>) -> Result<Self, CoreError> {
         let value = value.into();
+        // Reject unsafe characters in the original untrusted input. Checking
+        // only the trimmed name would silently accept leading/trailing
+        // newlines, tabs and other whitespace control characters.
+        if value.chars().any(|ch| {
+            ch.is_control()
+                || matches!(
+                    ch,
+                    '\u{061c}'
+                        | '\u{200e}'
+                        | '\u{200f}'
+                        | '\u{2028}'..='\u{202e}'
+                        | '\u{2066}'..='\u{2069}'
+                )
+        }) {
+            return Err(CoreError::new(
+                ErrorKind::InvalidInput,
+                "display name contains control or bidirectional formatting characters",
+            ));
+        }
         let trimmed = value.trim();
         let char_count = trimmed.chars().count();
         if char_count == 0 {
@@ -141,22 +160,6 @@ impl DisplayName {
             return Err(CoreError::new(
                 ErrorKind::InvalidInput,
                 format!("display name cannot exceed {} characters", Self::MAX_CHARS),
-            ));
-        }
-        if trimmed.chars().any(|ch| {
-            ch.is_control()
-                || matches!(
-                    ch,
-                    '\u{061c}'
-                        | '\u{200e}'
-                        | '\u{200f}'
-                        | '\u{202a}'..='\u{202e}'
-                        | '\u{2066}'..='\u{2069}'
-                )
-        }) {
-            return Err(CoreError::new(
-                ErrorKind::InvalidInput,
-                "display name contains control or bidirectional formatting characters",
             ));
         }
         Ok(Self(trimmed.to_owned()))
@@ -233,6 +236,12 @@ mod tests {
             "Directional\u{061c}hint",
             "Mark\u{200f}spoof",
             "Null\u{0}name",
+            "\nHost",
+            "Host\r",
+            "\tHost",
+            "Host\t",
+            "Host\u{2028}spoof",
+            "Host\u{2029}spoof",
         ] {
             assert!(
                 DisplayName::new(bad).is_err(),
@@ -242,6 +251,17 @@ mod tests {
         assert_eq!(
             DisplayName::new("Café café 日本語 😊").unwrap().as_str(),
             "Café café 日本語 😊"
+        );
+    }
+
+    #[test]
+    fn deserialized_untrusted_names_reject_trimmed_control_characters() {
+        for payload in [r#""\\nHost""#, r#""Host\\t""#, r#""Host\\u2028spoof""#] {
+            assert!(serde_json::from_str::<DisplayName>(payload).is_err());
+        }
+        assert_eq!(
+            DisplayName::new("  Café  ").unwrap().as_str(),
+            "Café"
         );
     }
 
