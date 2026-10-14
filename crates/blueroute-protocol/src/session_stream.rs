@@ -99,6 +99,12 @@ impl SessionControlStream {
             }
             self.last_sequence = frame.sequence;
         }
+        // A Goodbye must be the final byte-level frame, not merely the
+        // final *complete* frame. Reject even a one-byte trailing header
+        // fragment immediately instead of waiting for a later EOF.
+        if self.closed && self.decoder.pending_bytes() != 0 {
+            return self.reject(SessionStreamError::AfterGoodbye);
+        }
         Ok(frames)
     }
 
@@ -258,6 +264,26 @@ mod tests {
             Err(SessionStreamError::AfterGoodbye)
         );
         assert_eq!(session.feed(&[]), Err(SessionStreamError::Poisoned));
+    }
+
+    #[test]
+    fn goodbye_with_trailing_incomplete_frame_fails_atomically() {
+        let goodbye = bytes(&message(3, ControlMessage::Goodbye));
+        let trailing = bytes(&heartbeat(4));
+        for tail_len in 1..trailing.len() {
+            let mut session = stream();
+            let mut combined = goodbye.clone();
+            combined.extend_from_slice(&trailing[..tail_len]);
+            assert_eq!(
+                session.feed(&combined),
+                Err(SessionStreamError::AfterGoodbye),
+                "accepted trailing {tail_len}-byte fragment"
+            );
+            assert_eq!(
+                session.feed(&bytes(&heartbeat(5))),
+                Err(SessionStreamError::Poisoned)
+            );
+        }
     }
 
     #[test]
