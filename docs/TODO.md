@@ -1543,7 +1543,7 @@ Cover:
 - [x] prevent C0/C1 control sequences, terminal ESC and common Unicode bidirectional-override/isolate characters in shared `DisplayName` (including deserialized peer labels); preserve printable multilingual names.
 - [ ] unsupported-message behavior across fully integrated authenticated daemon transport.
 
-**Software partial:** `crates/blueroute-core/src/id.rs` input checks and negative tests passed exact-head [CI 38467939586](https://github.com/ekkus93/blueroute/actions/runs/38467939586) at `939935e`. Broader peer-field fuzzing and TLS daemon integration remain open.
+**Software partial:** `crates/blueroute-core/src/id.rs` input checks and negative tests passed exact-head [CI 38467939586](https://github.com/ekkus93/blueroute/actions/runs/38467939586) at `939935e`. Further reject leading/trailing raw control characters *before* trimming and Unicode line/paragraph separators, preserving printable multilingual names; committed at `acc9686c`, corrected in `43b4f697`, and qualified by [CI 38606590270](https://github.com/ekkus93/blueroute/actions/runs/38606590270) at `19472acc`. Broader peer-field fuzzing and TLS daemon integration remain open.
 
 **Acceptance**
 
