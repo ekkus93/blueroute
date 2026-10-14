@@ -76,7 +76,6 @@ fn client_queries_events_reconnects_and_fails_closed_on_incompatibility()
         else {
             panic!("unknown node must not be fabricated");
         };
-
         let mut events = client.events().await?;
         let expected_event = Event::HealthChanged(HealthLevel::Degraded);
         emit_event(&first_server, &expected_event).await?;
@@ -119,7 +118,6 @@ fn client_queries_events_reconnects_and_fails_closed_on_incompatibility()
         else {
             panic!("stale local node must not survive daemon restart");
         };
-
         assert!(second_server.release_name(DBUS_SERVICE_NAME).await?);
         second_server.close().await?;
 
