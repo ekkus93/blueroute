@@ -900,7 +900,7 @@ This is the first complete product slice.
 - [x] control-version rejection/compatibility tests.
 - [ ] connect parser to authenticated daemon transport and show peer data cannot crash daemon; full acceptance remains pending P7-004.
 
-**Parser software tests qualified** at `964b7add` (exact-head CI `38399834487` passed), with strict nested Hello variant field rejection added at `51960025` ([CI 38480899801](https://github.com/ekkus93/blueroute/actions/runs/38480899801)); incremental EOF/truncation detection added at `0322101b` ([CI 38490454756](https://github.com/ekkus93/blueroute/actions/runs/38490454756)); deterministic checks exercise the shared protocol parser but not an authenticated daemon session or physical Bluetooth device.
+**Parser software tests qualified** at `964b7add` (exact-head CI `38399834487` passed), with strict nested Hello variant field rejection added at `51960025` ([CI 38480899801](https://github.com/ekkus93/blueroute/actions/runs/38480899801)); incremental EOF/truncation detection added at `0322101b` ([CI 38490454756](https://github.com/ekkus93/blueroute/actions/runs/38490454756)); clean EOF now terminally closes the decoder, rejecting subsequent bytes or parser reuse at `0743af18` ([CI 38607313157](https://github.com/ekkus93/blueroute/actions/runs/38607313157) passed); deterministic checks exercise the shared protocol parser but not an authenticated daemon session or physical Bluetooth device.
 
 **Acceptance**
 
