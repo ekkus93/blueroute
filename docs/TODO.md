@@ -40,7 +40,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 
 ## Current task status
 
-**Status date:** 2026-10-14 (P7 claim-only Hello exchange and absolute-deadline I/O qualified through `6ef8ab84`; latest checklist evidence at `e53f355f`; PR #41 remains open and merge tooling returns `INVALID_ARGUMENT`. Real mutually authenticated TLS and enrollment are **NOT** complete.)
+**Status date:** 2026-10-14 (P7 post-hello session-stream replay/scope tests qualified through `9878dca7`, [CI 38601668411](https://github.com/ekkus93/blueroute/actions/runs/38601668411) passed; PR #41 remains open with merge tooling returning `INVALID_ARGUMENT`. Real mutual TLS, independently approved key enrollment, and production join are **NOT** complete.)
 
 | Task | Status | Current state |
 | --- | --- | --- |
@@ -875,6 +875,8 @@ This is the first complete product slice.
 - Peers negotiate capability without knowing each other's computer model.
 
 ## P7-004 — Implement control-session lifecycle
+
+**Additional software-only P7-004 hardening (2026-10-14):** `crates/blueroute-protocol/src/session_stream.rs` bounds decoded post-hello frames to one expected (NetworkId, NodeId, TLS exporter session ID), rejects sequence replay/staleness after handshake messages 1/2, rejects extra Hello/HelloAck and post-Goodbye traffic, and poisons the entire session on malformed or mismatched frames. A partial batch is never returned after a later invalid frame. Exact-head [CI 38601668411](https://github.com/ekkus93/blueroute/actions/runs/38601668411) passed on `9878dca724f4d208ed007093869fd21a57a9ea8b`. **Critical:** this is parser/scope groundwork, not authentication: no real mutual TLS, cryptographic exporter derivation, approval UX, daemon socket integration or production JoinNetwork was added. Hardware acceptance remains deferred.
 
 - [ ] establish authenticated TLS after data-plane availability.
 - [x] model logical session loss and stale event isolation (software model).
