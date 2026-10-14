@@ -482,7 +482,10 @@ mod tests {
         assert_eq!(scheduler.take_due(peer, [4; 16], 1_250), Ok(false));
         assert_eq!(scheduler.take_due(peer, [3; 16], 1_250), Ok(true));
         assert_eq!(scheduler.take_due(peer, [3; 16], 1_250), Ok(false));
-        assert_eq!(scheduler.attempt_failed(peer, [3; 16], 1_260), Ok(Some(1_760)));
+        assert_eq!(
+            scheduler.attempt_failed(peer, [3; 16], 1_260),
+            Ok(Some(1_760))
+        );
         assert_eq!(scheduler.attempt_failed(peer, [3; 16], 1_260), Ok(None));
         assert_eq!(scheduler.take_due(peer, [3; 16], 1_759), Ok(false));
         assert_eq!(scheduler.take_due(peer, [3; 16], 1_760), Ok(true));
@@ -497,10 +500,7 @@ mod tests {
         let mut scheduler = ReconnectScheduler::new();
         let peer = key(2);
         assert_eq!(scheduler.schedule_loss(peer, [7; 16], 0), Ok(true));
-        assert_eq!(
-            scheduler.take_due(peer, [7; 16], 100),
-            Ok(false)
-        );
+        assert_eq!(scheduler.take_due(peer, [7; 16], 100), Ok(false));
         assert_eq!(
             scheduler.take_due(peer, [7; 16], 99),
             Err(ReconnectScheduleError::ClockRegression)
