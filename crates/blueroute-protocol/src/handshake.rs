@@ -445,7 +445,7 @@ mod tests {
 
     impl std::io::Read for ScriptedTransport {
         fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-            self.inbound.read(buffer)
+            std::io::Read::read(&mut self.inbound, buffer)
         }
     }
 
@@ -474,7 +474,10 @@ mod tests {
         }
     }
 
-    fn scripted_transcript(remote_hello: ControlEnvelope, remote_ack: ControlEnvelope) -> ScriptedTransport {
+    fn scripted_transcript(
+        remote_hello: ControlEnvelope,
+        remote_ack: ControlEnvelope,
+    ) -> ScriptedTransport {
         let mut inbound = encode_control_frame(&remote_hello).unwrap();
         inbound.extend(encode_control_frame(&remote_ack).unwrap());
         ScriptedTransport {
@@ -505,45 +508,21 @@ mod tests {
         assert_eq!(exchange_claims(&mut stream).unwrap(), facts());
         assert!(stream.read_timeouts > 0);
         assert!(stream.write_timeouts > 0);
-        let mut writes = std::io::Cursor::new(&stream.outbound);
+        let mut recorded = ScriptedTransport {
+            inbound: std::io::Cursor::new(stream.outbound),
+            outbound: Vec::new(),
+            read_timeouts: 0,
+            write_timeouts: 0,
+        };
+        let deadline = Instant::now() + std::time::Duration::from_secs(2);
         assert_eq!(
-            read_one_control_frame_with_deadline(
-                &mut MockDeadlineCursor::new(&mut writes),
-                Instant::now() + std::time::Duration::from_secs(2)
-            )
-            .unwrap(),
+            read_one_control_frame_with_deadline(&mut recorded, deadline).unwrap(),
             frames[0]
         );
         assert_eq!(
-            read_one_control_frame_with_deadline(
-                &mut MockDeadlineCursor::new(&mut writes),
-                Instant::now() + std::time::Duration::from_secs(2)
-            )
-            .unwrap(),
+            read_one_control_frame_with_deadline(&mut recorded, deadline).unwrap(),
             frames[2]
         );
-    }
-
-    struct MockDeadlineCursor<'a> {
-        inner: &'a mut std::io::Cursor<&'a Vec<u8>>,
-    }
-
-    impl<'a> MockDeadlineCursor<'a> {
-        fn new(inner: &'a mut std::io::Cursor<&'a Vec<u8>>) -> Self {
-            Self { inner }
-        }
-    }
-
-    impl std::io::Read for MockDeadlineCursor<'_> {
-        fn read(&mut self, data: &mut [u8]) -> std::io::Result<usize> {
-            self.inner.read(data)
-        }
-    }
-
-    impl DeadlineControlRead for MockDeadlineCursor<'_> {
-        fn set_control_read_timeout(&mut self, _: std::time::Duration) -> std::io::Result<()> {
-            Ok(())
-        }
     }
 
     #[test]
@@ -555,15 +534,23 @@ mod tests {
                 1 => frames[1].sender = NodeId::from_bytes([9; 16]),
                 2 => frames[1].session_id = [9; 16],
                 3 => frames[1].sequence = 3,
-                _ => frames[1].message = ControlMessage::Hello {
-                    challenge: [0; 16],
-                    facts: facts(),
-                },
+                _ => {
+                    frames[1].message = ControlMessage::Hello {
+                        challenge: [0; 16],
+                        facts: facts(),
+                    }
+                }
             }
             let mut stream = scripted_transcript(frames[1].clone(), frames[3].clone());
-            assert!(matches!(exchange_claims(&mut stream), Err(HelloExchangeError::InvalidTranscript(_))));
+            assert!(matches!(
+                exchange_claims(&mut stream),
+                Err(HelloExchangeError::InvalidTranscript(_))
+            ));
             let first_bytes = encode_control_frame(&exchange()[0]).unwrap();
-            assert_eq!(stream.outbound, first_bytes, "no ACK may be emitted for an invalid peer hello");
+            assert_eq!(
+                stream.outbound, first_bytes,
+                "no ACK may be emitted for an invalid peer hello"
+            );
         }
     }
 
@@ -571,12 +558,22 @@ mod tests {
     fn invalid_remote_ack_and_incomplete_transcript_are_rejected() {
         let frames = exchange();
         let mut bad_ack = frames[3].clone();
-        bad_ack.message = ControlMessage::HelloAck { challenge: [99; 16], facts: facts() };
+        bad_ack.message = ControlMessage::HelloAck {
+            challenge: [99; 16],
+            facts: facts(),
+        };
         let mut stream = scripted_transcript(frames[1].clone(), bad_ack);
-        assert!(matches!(exchange_claims(&mut stream), Err(HelloExchangeError::InvalidTranscript(_))));
+        assert!(matches!(
+            exchange_claims(&mut stream),
+            Err(HelloExchangeError::InvalidTranscript(_))
+        ));
         let mut stream = scripted_transcript(frames[1].clone(), frames[3].clone());
-        stream.inbound.get_mut().truncate(stream.inbound.get_ref().len() - 2);
-        assert!(matches!(exchange_claims(&mut stream), Err(HelloExchangeError::Transport(_))));
+        let truncated_len = stream.inbound.get_ref().len() - 2;
+        stream.inbound.get_mut().truncate(truncated_len);
+        assert!(matches!(
+            exchange_claims(&mut stream),
+            Err(HelloExchangeError::Transport(_))
+        ));
     }
 
     #[test]
@@ -600,10 +597,16 @@ mod tests {
     #[test]
     fn zero_challenges_are_rejected_without_authorizing_claims() {
         let mut frames = exchange();
-        frames[1].message = ControlMessage::Hello { challenge: [0; 16], facts: facts() };
+        frames[1].message = ControlMessage::Hello {
+            challenge: [0; 16],
+            facts: facts(),
+        };
         assert!(verify(&frames).is_err());
         frames = exchange();
-        frames[0].message = ControlMessage::Hello { challenge: [0; 16], facts: facts() };
+        frames[0].message = ControlMessage::Hello {
+            challenge: [0; 16],
+            facts: facts(),
+        };
         assert!(verify(&frames).is_err());
     }
 
