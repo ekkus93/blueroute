@@ -324,6 +324,142 @@ impl ControlSessionRegistry {
     }
 }
 
+/// A deterministic per-peer reconnect scheduler. This does NOT establish
+/// authentication or open a socket. The daemon must schedule loss only after
+/// matching the currently authenticated session, and must gate every new
+/// attempt through mutual TLS, pinning, enrollment and fresh hello validation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReconnectScheduleError {
+    CapacityReached,
+    ClockRegression,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RetrySlot {
+    session_id: [u8; 16],
+    backoff: ReconnectBackoff,
+    next_attempt_ms: Option<u64>,
+    in_flight: bool,
+    last_ms: u64,
+}
+
+#[derive(Debug, Default)]
+pub struct ReconnectScheduler {
+    slots: BTreeMap<PeerSessionKey, RetrySlot>,
+}
+
+impl ReconnectScheduler {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn len(&self) -> usize {
+        self.slots.len()
+    }
+
+    /// Schedule the first attempt exactly once after a verified loss event.
+    /// Duplicate and stale notifications cannot reset or shorten backoff.
+    pub fn schedule_loss(
+        &mut self,
+        key: PeerSessionKey,
+        session_id: [u8; 16],
+        now_ms: u64,
+    ) -> Result<bool, ReconnectScheduleError> {
+        if session_id.iter().all(|byte| *byte == 0) {
+            return Ok(false);
+        }
+        if let Some(existing) = self.slots.get(&key) {
+            if now_ms < existing.last_ms {
+                return Err(ReconnectScheduleError::ClockRegression);
+            }
+            return Ok(false);
+        }
+        if self.slots.len() >= MAX_CONTROL_SESSIONS {
+            return Err(ReconnectScheduleError::CapacityReached);
+        }
+        let mut backoff = ReconnectBackoff::new();
+        let delay = backoff.after_failure().expect("first retry is available");
+        self.slots.insert(
+            key,
+            RetrySlot {
+                session_id,
+                backoff,
+                next_attempt_ms: Some(now_ms.saturating_add(delay.as_millis() as u64)),
+                in_flight: false,
+                last_ms: now_ms,
+            },
+        );
+        Ok(true)
+    }
+
+    /// Claim a due attempt once. Repeated wakeups cannot create parallel
+    /// connection attempts for one logical peer.
+    pub fn take_due(
+        &mut self,
+        key: PeerSessionKey,
+        session_id: [u8; 16],
+        now_ms: u64,
+    ) -> Result<bool, ReconnectScheduleError> {
+        let Some(slot) = self.slots.get_mut(&key) else {
+            return Ok(false);
+        };
+        if now_ms < slot.last_ms {
+            return Err(ReconnectScheduleError::ClockRegression);
+        }
+        if slot.session_id != session_id {
+            return Ok(false);
+        }
+        slot.last_ms = now_ms;
+        if slot.in_flight || !slot.next_attempt_ms.is_some_and(|due| now_ms >= due) {
+            return Ok(false);
+        }
+        slot.in_flight = true;
+        slot.next_attempt_ms = None;
+        Ok(true)
+    }
+
+    /// Called once after a failed connection/handshake. Exhausting the retry
+    /// budget leaves the entry inert until explicit cancellation/recovery.
+    pub fn attempt_failed(
+        &mut self,
+        key: PeerSessionKey,
+        session_id: [u8; 16],
+        now_ms: u64,
+    ) -> Result<Option<u64>, ReconnectScheduleError> {
+        let Some(slot) = self.slots.get_mut(&key) else {
+            return Ok(None);
+        };
+        if now_ms < slot.last_ms {
+            return Err(ReconnectScheduleError::ClockRegression);
+        }
+        if slot.session_id != session_id || !slot.in_flight {
+            return Ok(None);
+        }
+        slot.last_ms = now_ms;
+        slot.in_flight = false;
+        slot.next_attempt_ms = slot
+            .backoff
+            .after_failure()
+            .map(|delay| now_ms.saturating_add(delay.as_millis() as u64));
+        Ok(slot.next_attempt_ms)
+    }
+
+    /// Cancel only the exact retained loss generation. A stale success,
+    /// disconnect or shutdown task cannot erase a newer peer's retry state.
+    pub fn cancel_if_current(&mut self, key: PeerSessionKey, session_id: [u8; 16]) -> bool {
+        if self
+            .slots
+            .get(&key)
+            .is_some_and(|slot| slot.session_id == session_id)
+        {
+            self.slots.remove(&key);
+            true
+        } else {
+            false
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,6 +469,65 @@ mod tests {
             network: NetworkId::from_bytes([1; 16]),
             peer: NodeId::from_bytes([value; 16]),
         }
+    }
+
+    #[test]
+    fn reconnect_scheduler_deduplicates_loss_and_wakeups() {
+        let mut scheduler = ReconnectScheduler::new();
+        let peer = key(2);
+        assert_eq!(scheduler.schedule_loss(peer, [3; 16], 1_000), Ok(true));
+        assert_eq!(scheduler.schedule_loss(peer, [3; 16], 1_200), Ok(false));
+        assert_eq!(scheduler.schedule_loss(peer, [4; 16], 1_200), Ok(false));
+        assert_eq!(scheduler.take_due(peer, [3; 16], 1_249), Ok(false));
+        assert_eq!(scheduler.take_due(peer, [4; 16], 1_250), Ok(false));
+        assert_eq!(scheduler.take_due(peer, [3; 16], 1_250), Ok(true));
+        assert_eq!(scheduler.take_due(peer, [3; 16], 1_250), Ok(false));
+        assert_eq!(scheduler.attempt_failed(peer, [3; 16], 1_260), Ok(Some(1_760)));
+        assert_eq!(scheduler.attempt_failed(peer, [3; 16], 1_260), Ok(None));
+        assert_eq!(scheduler.take_due(peer, [3; 16], 1_759), Ok(false));
+        assert_eq!(scheduler.take_due(peer, [3; 16], 1_760), Ok(true));
+        assert!(!scheduler.cancel_if_current(peer, [4; 16]));
+        assert!(scheduler.cancel_if_current(peer, [3; 16]));
+        assert!(!scheduler.cancel_if_current(peer, [3; 16]));
+        assert_eq!(scheduler.len(), 0);
+    }
+
+    #[test]
+    fn reconnect_scheduler_exhausts_budget_without_spin_or_clock_regression() {
+        let mut scheduler = ReconnectScheduler::new();
+        let peer = key(2);
+        assert_eq!(scheduler.schedule_loss(peer, [7; 16], 0), Ok(true));
+        assert_eq!(
+            scheduler.take_due(peer, [7; 16], 100),
+            Ok(false)
+        );
+        assert_eq!(
+            scheduler.take_due(peer, [7; 16], 99),
+            Err(ReconnectScheduleError::ClockRegression)
+        );
+        let mut now = 0_u64;
+        for _ in 0..usize::from(MAX_RECONNECT_ATTEMPTS) {
+            now += 30_000;
+            assert_eq!(scheduler.take_due(peer, [7; 16], now), Ok(true));
+            let _ = scheduler.attempt_failed(peer, [7; 16], now + 1).unwrap();
+            now += 1;
+        }
+        assert_eq!(scheduler.take_due(peer, [7; 16], u64::MAX), Ok(false));
+        assert_eq!(scheduler.attempt_failed(peer, [7; 16], u64::MAX), Ok(None));
+        assert_eq!(scheduler.len(), 1);
+    }
+
+    #[test]
+    fn reconnect_scheduler_keeps_peer_budgets_independent() {
+        let mut scheduler = ReconnectScheduler::new();
+        assert_eq!(scheduler.schedule_loss(key(2), [3; 16], 100), Ok(true));
+        assert_eq!(scheduler.schedule_loss(key(3), [4; 16], 200), Ok(true));
+        assert_eq!(scheduler.take_due(key(2), [3; 16], 350), Ok(true));
+        assert_eq!(scheduler.take_due(key(3), [4; 16], 350), Ok(false));
+        assert_eq!(scheduler.take_due(key(3), [4; 16], 450), Ok(true));
+        assert!(scheduler.cancel_if_current(key(2), [3; 16]));
+        assert_eq!(scheduler.len(), 1);
+        assert_eq!(scheduler.schedule_loss(key(3), [0; 16], 500), Ok(false));
     }
 
     #[test]
