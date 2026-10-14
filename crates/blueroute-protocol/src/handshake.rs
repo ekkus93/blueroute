@@ -554,8 +554,10 @@ mod tests {
                 2 => frames[1].session_id = [9; 16],
                 3 => frames[1].sequence = 3,
                 _ => {
+                    // A zero challenge is rejected by the frame encoder; use
+                    // a well-formed challenge reflection to test the handshake.
                     frames[1].message = ControlMessage::Hello {
-                        challenge: [0; 16],
+                        challenge: [10; 16],
                         facts: facts(),
                     }
                 }
