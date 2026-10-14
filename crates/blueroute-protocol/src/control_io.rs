@@ -143,6 +143,9 @@ fn read_exact_until<R: DeadlineControlRead>(
             Err(error) => return Err(error),
         }
     }
+    // A slow or misbehaving adapter can return its final bytes only after the
+    // budget expires. Success requires finishing inside the absolute deadline.
+    remaining_budget(deadline)?;
     Ok(())
 }
 
@@ -174,6 +177,7 @@ pub fn write_one_control_frame_with_deadline<W: DeadlineControlWrite>(
             Err(error) => return Err(error.into()),
         }
     }
+    remaining_budget(deadline)?;
     Ok(())
 }
 
@@ -391,6 +395,80 @@ mod tests {
         assert!(stream.outbound.is_empty());
         assert!(stream.read_timeouts.is_empty());
         assert!(stream.write_timeouts.is_empty());
+    }
+
+    /// A dishonest/slow I/O adapter can exceed the deadline on its final
+    /// operation despite accepting the previously supplied socket timeout.
+    /// Such a transport must not be accepted as a completed control frame.
+    struct LateCompletion {
+        input: Cursor<Vec<u8>>,
+        output: Vec<u8>,
+        pause: Duration,
+    }
+
+    impl Read for LateCompletion {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            let received = self.input.read(buffer)?;
+            if received > 0 {
+                std::thread::sleep(self.pause);
+            }
+            Ok(received)
+        }
+    }
+
+    impl Write for LateCompletion {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            self.output.extend_from_slice(buffer);
+            std::thread::sleep(self.pause);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl DeadlineControlRead for LateCompletion {
+        fn set_control_read_timeout(&mut self, _: Duration) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl DeadlineControlWrite for LateCompletion {
+        fn set_control_write_timeout(&mut self, _: Duration) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn final_read_or_write_finishing_after_deadline_is_not_success() {
+        let bytes = encode_control_frame(&message(1)).unwrap();
+        let mut read_late = LateCompletion {
+            input: Cursor::new(bytes),
+            output: Vec::new(),
+            pause: Duration::from_millis(60),
+        };
+        assert!(matches!(
+            read_one_control_frame_with_deadline(
+                &mut read_late,
+                Instant::now() + Duration::from_millis(15),
+            ),
+            Err(ControlIoError::Io(ref error)) if error.kind() == ErrorKind::TimedOut
+        ));
+
+        let mut write_late = LateCompletion {
+            input: Cursor::new(Vec::new()),
+            output: Vec::new(),
+            pause: Duration::from_millis(60),
+        };
+        assert!(matches!(
+            write_one_control_frame_with_deadline(
+                &mut write_late,
+                &message(1),
+                Instant::now() + Duration::from_millis(15),
+            ),
+            Err(ControlIoError::Io(ref error)) if error.kind() == ErrorKind::TimedOut
+        ));
     }
 
     #[test]
