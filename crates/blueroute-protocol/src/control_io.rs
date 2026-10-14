@@ -5,7 +5,7 @@
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::control::{
     ControlEnvelope, ControlFrameError, decode_control_frame, encode_control_frame,
@@ -41,6 +41,30 @@ impl From<ControlFrameError> for ControlIoError {
     }
 }
 
+/// A byte-stream adapter that can enforce a fresh blocking-read timeout for
+/// each I/O operation. Implementations for TLS MUST set the timeout on the
+/// underlying socket; this trait does not authenticate the connection.
+pub trait DeadlineControlRead: Read {
+    fn set_control_read_timeout(&mut self, timeout: Duration) -> io::Result<()>;
+}
+
+/// Write-side counterpart for a byte stream with per-operation deadlines.
+pub trait DeadlineControlWrite: Write {
+    fn set_control_write_timeout(&mut self, timeout: Duration) -> io::Result<()>;
+}
+
+impl DeadlineControlRead for TcpStream {
+    fn set_control_read_timeout(&mut self, timeout: Duration) -> io::Result<()> {
+        self.set_read_timeout(Some(timeout))
+    }
+}
+
+impl DeadlineControlWrite for TcpStream {
+    fn set_control_write_timeout(&mut self, timeout: Duration) -> io::Result<()> {
+        self.set_write_timeout(Some(timeout))
+    }
+}
+
 /// Read exactly one control frame, validating the four-byte prefix before
 /// allocating any body bytes. On error the stream MUST be closed; a caller
 /// must not try to resynchronize an untrusted peer's malformed TLS record.
@@ -54,28 +78,32 @@ pub fn read_one_control_frame<R: Read>(source: &mut R) -> Result<ControlEnvelope
     Ok(decode_control_frame(&bytes)?)
 }
 
-/// Read a complete frame from a TCP socket with an absolute deadline for
-/// the entire frame, including the length prefix. A peer that trickles one
-/// byte per socket timeout cannot extend the budget indefinitely.
-///
-/// This is transport groundwork ONLY. A raw TCP stream is not authenticated:
-/// production callers MUST use mutually authenticated TLS 1.3, verified
-/// network/NodeId key pins and channel binding before interpreting a frame.
-/// The same deadline must be carried across the entire TLS/hello stage.
+/// Read a complete frame with a whole-frame absolute deadline from a
+/// transport that supports bounded blocking reads. This also supports a
+/// future verified TLS adapter, but does not verify TLS or authorize frames.
+/// On any failure the caller MUST discard the transport, not resynchronize.
+/// The caller owns restoration of any underlying socket timeout.
+pub fn read_one_control_frame_with_deadline<R: DeadlineControlRead>(
+    source: &mut R,
+    deadline: Instant,
+) -> Result<ControlEnvelope, ControlIoError> {
+    let mut prefix = [0_u8; 4];
+    read_exact_until(source, &mut prefix, deadline)?;
+    let length = read_control_length(&prefix)?;
+    let mut frame = vec![0_u8; length + 4];
+    frame[..4].copy_from_slice(&prefix);
+    read_exact_until(source, &mut frame[4..], deadline)?;
+    Ok(decode_control_frame(&frame)?)
+}
+
+/// TCP-specific wrapper that preserves the socket's previous read timeout.
+/// This is transport groundwork ONLY, not authenticated control traffic.
 pub fn read_one_control_frame_until(
     source: &mut TcpStream,
     deadline: Instant,
 ) -> Result<ControlEnvelope, ControlIoError> {
     let original_timeout = source.read_timeout()?;
-    let result = (|| {
-        let mut prefix = [0_u8; 4];
-        read_exact_tcp_until(source, &mut prefix, deadline)?;
-        let length = read_control_length(&prefix)?;
-        let mut frame = vec![0_u8; length + 4];
-        frame[..4].copy_from_slice(&prefix);
-        read_exact_tcp_until(source, &mut frame[4..], deadline)?;
-        Ok(decode_control_frame(&frame)?)
-    })();
+    let result = read_one_control_frame_with_deadline(source, deadline);
     source.set_read_timeout(original_timeout)?;
     result
 }
@@ -92,14 +120,14 @@ fn remaining_budget(deadline: Instant) -> io::Result<std::time::Duration> {
     }
 }
 
-fn read_exact_tcp_until(
-    source: &mut TcpStream,
+fn read_exact_until<R: DeadlineControlRead>(
+    source: &mut R,
     target: &mut [u8],
     deadline: Instant,
 ) -> io::Result<()> {
     let mut received = 0;
     while received < target.len() {
-        source.set_read_timeout(Some(remaining_budget(deadline)?))?;
+        source.set_control_read_timeout(remaining_budget(deadline)?)?;
         match source.read(&mut target[received..]) {
             Ok(0) => return Err(io::Error::from(io::ErrorKind::UnexpectedEof)),
             Ok(count) => received += count,
@@ -118,39 +146,49 @@ fn read_exact_tcp_until(
     Ok(())
 }
 
-/// Write a validated control frame with an absolute whole-frame deadline.
-/// Partial writes cannot indefinitely extend the caller's budget. This is
-/// not a TLS handshake or an authenticated control channel.
+/// Write one validated frame with an absolute whole-frame deadline. The
+/// transport MUST enforce the timeout for each blocking write; a slow peer
+/// cannot extend the deadline by making incremental progress. On failure the
+/// caller MUST discard the transport. The caller restores socket timeouts.
+pub fn write_one_control_frame_with_deadline<W: DeadlineControlWrite>(
+    destination: &mut W,
+    frame: &ControlEnvelope,
+    deadline: Instant,
+) -> Result<(), ControlIoError> {
+    let bytes = encode_control_frame(frame)?;
+    let mut sent = 0;
+    while sent < bytes.len() {
+        destination.set_control_write_timeout(remaining_budget(deadline)?)?;
+        match destination.write(&bytes[sent..]) {
+            Ok(0) => return Err(io::Error::from(io::ErrorKind::WriteZero).into()),
+            Ok(count) => sent += count,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                ) =>
+            {
+                return Err(io::Error::from(io::ErrorKind::TimedOut).into());
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
+/// TCP-specific wrapper that preserves the socket's previous write timeout.
+/// A raw TCP socket is NOT authenticated: production callers must use verified
+/// mutually authenticated TLS 1.3 and pinned network/NodeId identities.
 pub fn write_one_control_frame_until(
     destination: &mut TcpStream,
     frame: &ControlEnvelope,
     deadline: Instant,
 ) -> Result<(), ControlIoError> {
-    let bytes = encode_control_frame(frame)?;
     let original_timeout = destination.write_timeout()?;
-    let result = (|| -> io::Result<()> {
-        let mut sent = 0;
-        while sent < bytes.len() {
-            destination.set_write_timeout(Some(remaining_budget(deadline)?))?;
-            match destination.write(&bytes[sent..]) {
-                Ok(0) => return Err(io::Error::from(io::ErrorKind::WriteZero)),
-                Ok(count) => sent += count,
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
-                    ) =>
-                {
-                    return Err(io::Error::from(io::ErrorKind::TimedOut));
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        Ok(())
-    })();
+    let result = write_one_control_frame_with_deadline(destination, frame, deadline);
     destination.set_write_timeout(original_timeout)?;
-    result.map_err(ControlIoError::Io)
+    result
 }
 
 /// Write one locally validated frame, handling partial writes. This must be
@@ -256,6 +294,89 @@ mod tests {
         invalid.sequence = 1;
         write_one_control_frame(&mut output, &invalid).unwrap();
         assert_eq!(output, bytes);
+    }
+
+    /// Deterministic stand-in for a verified TLS adapter: only exercises the
+    /// deadline interface and frame fragmentation, never authentication.
+    struct DeadlineMemory {
+        inbound: Cursor<Vec<u8>>,
+        outbound: Vec<u8>,
+        read_timeouts: Vec<Duration>,
+        write_timeouts: Vec<Duration>,
+    }
+
+    impl Read for DeadlineMemory {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.inbound.read(&mut buf[..buf.len().min(1)])
+        }
+    }
+
+    impl Write for DeadlineMemory {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let count = buf.len().min(1);
+            self.outbound.extend_from_slice(&buf[..count]);
+            Ok(count)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl DeadlineControlRead for DeadlineMemory {
+        fn set_control_read_timeout(&mut self, timeout: Duration) -> io::Result<()> {
+            self.read_timeouts.push(timeout);
+            Ok(())
+        }
+    }
+
+    impl DeadlineControlWrite for DeadlineMemory {
+        fn set_control_write_timeout(&mut self, timeout: Duration) -> io::Result<()> {
+            self.write_timeouts.push(timeout);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn deadline_transport_adapter_handles_fragmented_frames() {
+        let bytes = encode_control_frame(&message(1)).unwrap();
+        let mut stream = DeadlineMemory {
+            inbound: Cursor::new(bytes.clone()),
+            outbound: Vec::new(),
+            read_timeouts: Vec::new(),
+            write_timeouts: Vec::new(),
+        };
+        let deadline = Instant::now() + Duration::from_secs(2);
+        assert_eq!(read_one_control_frame_with_deadline(&mut stream, deadline).unwrap(), message(1));
+        write_one_control_frame_with_deadline(&mut stream, &message(1), deadline).unwrap();
+        assert_eq!(stream.outbound, bytes);
+        assert!(stream.read_timeouts.len() > 4);
+        assert!(stream.write_timeouts.len() > 4);
+        assert!(stream.read_timeouts.iter().all(|duration| !duration.is_zero()));
+        assert!(stream.write_timeouts.iter().all(|duration| !duration.is_zero()));
+    }
+
+    #[test]
+    fn deadline_transport_adapter_rejects_expired_budget_before_io() {
+        let mut stream = DeadlineMemory {
+            inbound: Cursor::new(encode_control_frame(&message(1)).unwrap()),
+            outbound: Vec::new(),
+            read_timeouts: Vec::new(),
+            write_timeouts: Vec::new(),
+        };
+        let expired = Instant::now() - Duration::from_secs(1);
+        assert!(matches!(
+            read_one_control_frame_with_deadline(&mut stream, expired),
+            Err(ControlIoError::Io(ref error)) if error.kind() == ErrorKind::TimedOut
+        ));
+        assert!(matches!(
+            write_one_control_frame_with_deadline(&mut stream, &message(1), expired),
+            Err(ControlIoError::Io(ref error)) if error.kind() == ErrorKind::TimedOut
+        ));
+        assert_eq!(stream.inbound.position(), 0);
+        assert!(stream.outbound.is_empty());
+        assert!(stream.read_timeouts.is_empty());
+        assert!(stream.write_timeouts.is_empty());
     }
 
     #[test]
