@@ -9,6 +9,13 @@ use crate::control::{
     ControlEnvelope, ControlMessage, HelloFacts, VerifiedSessionSequence, encode_control_frame,
 };
 use blueroute_core::{NetworkId, NodeId};
+use std::fmt;
+use std::time::Instant;
+
+use crate::control_io::{
+    ControlIoError, DeadlineControlRead, DeadlineControlWrite,
+    read_one_control_frame_with_deadline, write_one_control_frame_with_deadline,
+};
 
 /// The rustls TLS 1.3 exporter label for BlueRoute control sessions.
 /// Both endpoints MUST export 16 bytes with this label and the canonical
@@ -138,7 +145,9 @@ pub fn validate_hello_transcript(
     else {
         return Err("missing remote acknowledgement");
     };
-    if local_challenge == remote_challenge
+    if local_challenge.iter().all(|byte| *byte == 0)
+        || remote_challenge.iter().all(|byte| *byte == 0)
+        || local_challenge == remote_challenge
         || local_echo != remote_challenge
         || remote_echo != local_challenge
     {
@@ -156,6 +165,128 @@ pub fn validate_hello_transcript(
         .accept(remote_ack)
         .map_err(|_| "invalid acknowledgement replay")?;
     Ok(remote_facts.clone())
+}
+
+/// Result of a bounded claim-only exchange. This is not authorization:
+/// a caller must first establish mutually verified TLS 1.3, verify the pinned
+/// peer certificate and approved (NetworkId, NodeId), and export the session
+/// ID from that verified connection before using any returned peer facts.
+#[derive(Debug)]
+pub enum HelloExchangeError {
+    Transport(ControlIoError),
+    InvalidTranscript(&'static str),
+}
+
+impl From<ControlIoError> for HelloExchangeError {
+    fn from(error: ControlIoError) -> Self {
+        Self::Transport(error)
+    }
+}
+
+impl fmt::Display for HelloExchangeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Transport(error) => write!(f, "control hello I/O failed: {error}"),
+            Self::InvalidTranscript(error) => write!(f, "invalid control hello: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for HelloExchangeError {}
+
+/// Execute a complete symmetric Hello / HelloAck transcript on a caller-owned
+/// byte stream with one absolute deadline. Both peers write their Hello first,
+/// then read their counterpart's Hello, then exchange the challenge echoes.
+/// This function only returns *untrusted claims*, not an authenticated session.
+///
+/// The caller MUST have independently verified a mutual TLS peer certificate,
+/// an enrolled key pin, logical node and network approval, and MUST supply an
+/// exporter session ID from that very TLS channel. This helper cannot prove
+/// those external preconditions or activate production JoinNetwork. Any error
+/// requires discarding the transport; no plaintext fallback is permitted.
+pub fn exchange_hello_claims_with_deadline<Stream>(
+    stream: &mut Stream,
+    network: NetworkId,
+    local: NodeId,
+    remote: NodeId,
+    exported_session_id: [u8; TLS_CONTROL_EXPORTER_BYTES],
+    local_challenge: [u8; 16],
+    local_facts: HelloFacts,
+    deadline: Instant,
+) -> Result<HelloFacts, HelloExchangeError>
+where
+    Stream: DeadlineControlRead + DeadlineControlWrite,
+{
+    if local == remote {
+        return Err(HelloExchangeError::InvalidTranscript(
+            "local and remote node must differ",
+        ));
+    }
+    if exported_session_id.iter().all(|byte| *byte == 0) {
+        return Err(HelloExchangeError::InvalidTranscript(
+            "invalid zero TLS exporter session ID",
+        ));
+    }
+    if local_challenge.iter().all(|byte| *byte == 0) {
+        return Err(HelloExchangeError::InvalidTranscript(
+            "invalid zero local hello challenge",
+        ));
+    }
+
+    let local_hello = ControlEnvelope {
+        version: crate::control::CONTROL_VERSION,
+        network,
+        sender: local,
+        session_id: exported_session_id,
+        sequence: 1,
+        message: ControlMessage::Hello {
+            challenge: local_challenge,
+            facts: local_facts.clone(),
+        },
+    };
+    write_one_control_frame_with_deadline(stream, &local_hello, deadline)?;
+
+    let remote_hello = read_one_control_frame_with_deadline(stream, deadline)?;
+    let remote_challenge = match &remote_hello.message {
+        ControlMessage::Hello { challenge, .. }
+            if remote_hello.network == network
+                && remote_hello.sender == remote
+                && remote_hello.session_id == exported_session_id
+                && remote_hello.sequence == 1
+                && *challenge != [0; 16]
+                && *challenge != local_challenge =>
+        {
+            *challenge
+        }
+        _ => {
+            return Err(HelloExchangeError::InvalidTranscript(
+                "untrusted remote hello identity, session or challenge",
+            ));
+        }
+    };
+
+    let local_ack = ControlEnvelope {
+        version: crate::control::CONTROL_VERSION,
+        network,
+        sender: local,
+        session_id: exported_session_id,
+        sequence: 2,
+        message: ControlMessage::HelloAck {
+            challenge: remote_challenge,
+            facts: local_facts,
+        },
+    };
+    write_one_control_frame_with_deadline(stream, &local_ack, deadline)?;
+    let remote_ack = read_one_control_frame_with_deadline(stream, deadline)?;
+
+    validate_exporter_bound_hello_transcript(
+        network,
+        local,
+        remote,
+        exported_session_id,
+        &[local_hello, remote_hello, local_ack, remote_ack],
+    )
+    .map_err(HelloExchangeError::InvalidTranscript)
 }
 
 #[cfg(test)]
@@ -303,6 +434,179 @@ mod tests {
         };
         assert!(verify(&frames).is_err());
     }
+    /// The fixture is a byte transport, not TLS. It demonstrates only frame
+    /// ordering, deadline calls and claim validation. Never use as auth proof.
+    struct ScriptedTransport {
+        inbound: std::io::Cursor<Vec<u8>>,
+        outbound: Vec<u8>,
+        read_timeouts: usize,
+        write_timeouts: usize,
+    }
+
+    impl std::io::Read for ScriptedTransport {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            self.inbound.read(buffer)
+        }
+    }
+
+    impl std::io::Write for ScriptedTransport {
+        fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+            self.outbound.extend_from_slice(data);
+            Ok(data.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl DeadlineControlRead for ScriptedTransport {
+        fn set_control_read_timeout(&mut self, _: std::time::Duration) -> std::io::Result<()> {
+            self.read_timeouts += 1;
+            Ok(())
+        }
+    }
+
+    impl DeadlineControlWrite for ScriptedTransport {
+        fn set_control_write_timeout(&mut self, _: std::time::Duration) -> std::io::Result<()> {
+            self.write_timeouts += 1;
+            Ok(())
+        }
+    }
+
+    fn scripted_transcript(remote_hello: ControlEnvelope, remote_ack: ControlEnvelope) -> ScriptedTransport {
+        let mut inbound = encode_control_frame(&remote_hello).unwrap();
+        inbound.extend(encode_control_frame(&remote_ack).unwrap());
+        ScriptedTransport {
+            inbound: std::io::Cursor::new(inbound),
+            outbound: Vec::new(),
+            read_timeouts: 0,
+            write_timeouts: 0,
+        }
+    }
+
+    fn exchange_claims(stream: &mut ScriptedTransport) -> Result<HelloFacts, HelloExchangeError> {
+        exchange_hello_claims_with_deadline(
+            stream,
+            NetworkId::from_bytes([1; 16]),
+            NodeId::from_bytes([4; 16]),
+            NodeId::from_bytes([5; 16]),
+            [3; 16],
+            [10; 16],
+            facts(),
+            Instant::now() + std::time::Duration::from_secs(2),
+        )
+    }
+
+    #[test]
+    fn framed_claim_exchange_respects_deadlines_and_challenge_echo_order() {
+        let frames = exchange();
+        let mut stream = scripted_transcript(frames[1].clone(), frames[3].clone());
+        assert_eq!(exchange_claims(&mut stream).unwrap(), facts());
+        assert!(stream.read_timeouts > 0);
+        assert!(stream.write_timeouts > 0);
+        let mut writes = std::io::Cursor::new(&stream.outbound);
+        assert_eq!(
+            read_one_control_frame_with_deadline(
+                &mut MockDeadlineCursor::new(&mut writes),
+                Instant::now() + std::time::Duration::from_secs(2)
+            )
+            .unwrap(),
+            frames[0]
+        );
+        assert_eq!(
+            read_one_control_frame_with_deadline(
+                &mut MockDeadlineCursor::new(&mut writes),
+                Instant::now() + std::time::Duration::from_secs(2)
+            )
+            .unwrap(),
+            frames[2]
+        );
+    }
+
+    struct MockDeadlineCursor<'a> {
+        inner: &'a mut std::io::Cursor<&'a Vec<u8>>,
+    }
+
+    impl<'a> MockDeadlineCursor<'a> {
+        fn new(inner: &'a mut std::io::Cursor<&'a Vec<u8>>) -> Self {
+            Self { inner }
+        }
+    }
+
+    impl std::io::Read for MockDeadlineCursor<'_> {
+        fn read(&mut self, data: &mut [u8]) -> std::io::Result<usize> {
+            self.inner.read(data)
+        }
+    }
+
+    impl DeadlineControlRead for MockDeadlineCursor<'_> {
+        fn set_control_read_timeout(&mut self, _: std::time::Duration) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn malformed_remote_identity_is_rejected_before_echoing_peer_challenge() {
+        for mutate in 0..5 {
+            let mut frames = exchange();
+            match mutate {
+                0 => frames[1].network = NetworkId::from_bytes([9; 16]),
+                1 => frames[1].sender = NodeId::from_bytes([9; 16]),
+                2 => frames[1].session_id = [9; 16],
+                3 => frames[1].sequence = 3,
+                _ => frames[1].message = ControlMessage::Hello {
+                    challenge: [0; 16],
+                    facts: facts(),
+                },
+            }
+            let mut stream = scripted_transcript(frames[1].clone(), frames[3].clone());
+            assert!(matches!(exchange_claims(&mut stream), Err(HelloExchangeError::InvalidTranscript(_))));
+            let first_bytes = encode_control_frame(&exchange()[0]).unwrap();
+            assert_eq!(stream.outbound, first_bytes, "no ACK may be emitted for an invalid peer hello");
+        }
+    }
+
+    #[test]
+    fn invalid_remote_ack_and_incomplete_transcript_are_rejected() {
+        let frames = exchange();
+        let mut bad_ack = frames[3].clone();
+        bad_ack.message = ControlMessage::HelloAck { challenge: [99; 16], facts: facts() };
+        let mut stream = scripted_transcript(frames[1].clone(), bad_ack);
+        assert!(matches!(exchange_claims(&mut stream), Err(HelloExchangeError::InvalidTranscript(_))));
+        let mut stream = scripted_transcript(frames[1].clone(), frames[3].clone());
+        stream.inbound.get_mut().truncate(stream.inbound.get_ref().len() - 2);
+        assert!(matches!(exchange_claims(&mut stream), Err(HelloExchangeError::Transport(_))));
+    }
+
+    #[test]
+    fn expired_budget_rejects_transcript_before_emitting_bytes() {
+        let frames = exchange();
+        let mut stream = scripted_transcript(frames[1].clone(), frames[3].clone());
+        let result = exchange_hello_claims_with_deadline(
+            &mut stream,
+            NetworkId::from_bytes([1; 16]),
+            NodeId::from_bytes([4; 16]),
+            NodeId::from_bytes([5; 16]),
+            [3; 16],
+            [10; 16],
+            facts(),
+            Instant::now() - std::time::Duration::from_secs(1),
+        );
+        assert!(matches!(result, Err(HelloExchangeError::Transport(_))));
+        assert!(stream.outbound.is_empty());
+    }
+
+    #[test]
+    fn zero_challenges_are_rejected_without_authorizing_claims() {
+        let mut frames = exchange();
+        frames[1].message = ControlMessage::Hello { challenge: [0; 16], facts: facts() };
+        assert!(verify(&frames).is_err());
+        frames = exchange();
+        frames[0].message = ControlMessage::Hello { challenge: [0; 16], facts: facts() };
+        assert!(verify(&frames).is_err());
+    }
+
     #[test]
     fn unknown_version_and_non_hello_messages_fail_closed() {
         let mut frames = exchange();
