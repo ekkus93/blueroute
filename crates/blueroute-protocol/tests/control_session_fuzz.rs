@@ -109,6 +109,9 @@ fn deterministic_mutations_never_panic_or_recover_from_rejection() {
                 let _ = session.finish();
             }
         });
-        assert!(result.is_ok(), "control stream panicked at mutation {iteration}");
+        assert!(
+            result.is_ok(),
+            "control stream panicked at mutation {iteration}"
+        );
     }
 }
