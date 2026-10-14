@@ -357,6 +357,10 @@ impl ReconnectScheduler {
         self.slots.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.slots.is_empty()
+    }
+
     /// Schedule the first attempt exactly once after a verified loss event.
     /// Duplicate and stale notifications cannot reset or shorten backoff.
     pub fn schedule_loss(
@@ -410,7 +414,7 @@ impl ReconnectScheduler {
             return Ok(false);
         }
         slot.last_ms = now_ms;
-        if slot.in_flight || !slot.next_attempt_ms.is_some_and(|due| now_ms >= due) {
+        if slot.in_flight || slot.next_attempt_ms.is_none_or(|due| now_ms < due) {
             return Ok(false);
         }
         slot.in_flight = true;
