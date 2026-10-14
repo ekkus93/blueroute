@@ -50,11 +50,9 @@ pub fn validate_exporter_bound_hello_transcript(
     local: NodeId,
     remote: NodeId,
     exported_session_id: [u8; TLS_CONTROL_EXPORTER_BYTES],
-    local_hello: &ControlEnvelope,
-    remote_hello: &ControlEnvelope,
-    local_ack: &ControlEnvelope,
-    remote_ack: &ControlEnvelope,
+    frames: &[ControlEnvelope; 4],
 ) -> Result<HelloFacts, &'static str> {
+    let [local_hello, remote_hello, local_ack, remote_ack] = frames;
     if exported_session_id.iter().all(|byte| *byte == 0) {
         return Err("invalid zero TLS exporter session ID");
     }
@@ -257,7 +255,7 @@ mod tests {
         let remote = NodeId::from_bytes([5; 16]);
         let verify_exporter = |exporter| {
             validate_exporter_bound_hello_transcript(
-                network, local, remote, exporter, &frames[0], &frames[1], &frames[2], &frames[3],
+                network, local, remote, exporter, &frames,
             )
         };
         assert_eq!(verify_exporter([3; 16]), Ok(facts()));
