@@ -5,8 +5,8 @@ use async_io::Timer;
 use blueroute_core::{HealthLevel, NodeCapabilities, NodeId};
 use blueroute_daemon::{DaemonService, emit_event};
 use blueroute_protocol::{
-    ApiVersion, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, Event, Response,
-    decode_event, decode_response,
+    ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, Event,
+    Response, decode_event, decode_response, encode_command,
 };
 use futures_lite::{StreamExt, future};
 use zbus::connection::Builder;
@@ -55,6 +55,29 @@ fn dbus_service_round_trip_and_event() -> Result<(), Box<dyn Error>> {
             panic!("Capabilities D-Bus method returned the wrong protocol response variant");
         };
         assert_eq!(capabilities, NodeCapabilities::default());
+
+        // The production service must not fabricate remote identities or
+        // reachability from a Bluetooth address, discovery claim or trust.
+        let payload = encode_command(&Command::ListNodes)?;
+        let result: String = proxy.call("Request", &(payload.as_str(),)).await?;
+        let Response::Nodes(nodes) = decode_response(&result)? else {
+            panic!("ListNodes returned wrong response");
+        };
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].id, local_node);
+        assert_eq!(nodes[0].reachability, blueroute_core::Reachability::Local);
+
+        for (requested, expected_present) in [
+            (local_node, true),
+            (NodeId::from_bytes([8; 16]), false),
+        ] {
+            let payload = encode_command(&Command::GetNode { node: requested })?;
+            let result: String = proxy.call("Request", &(payload.as_str(),)).await?;
+            let Response::Node(node) = decode_response(&result)? else {
+                panic!("GetNode returned wrong response");
+            };
+            assert_eq!(node.is_some(), expected_present);
+        }
 
         let malformed: zbus::Result<String> = proxy.call("Request", &("{",)).await;
         assert!(malformed.is_err(), "malformed requests must fail closed");
