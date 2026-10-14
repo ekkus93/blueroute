@@ -206,7 +206,9 @@ fn run(args: &[String]) -> i32 {
                     Response::Node(Some(node)) => {
                         format_node(&node, json).map_err(|error| error.to_string())
                     }
-                    Response::Node(None) => Err("the daemon has no record for that NodeId".to_owned()),
+                    Response::Node(None) => {
+                        Err("the daemon has no record for that NodeId".to_owned())
+                    }
                     _ => Err("daemon returned an unexpected node-detail response".to_owned()),
                 })
         }
@@ -377,7 +379,11 @@ mod tests {
         let decoded: NodeSummary =
             serde_json::from_str(&format_node(&node, true).unwrap()).unwrap();
         assert_eq!(decoded, node);
-        assert!(format_nodes(&[], false).unwrap().contains("No BlueRoute nodes"));
+        assert!(
+            format_nodes(&[], false)
+                .unwrap()
+                .contains("No BlueRoute nodes")
+        );
         assert_eq!(format_nodes(&[], true).unwrap(), "[]");
     }
 
