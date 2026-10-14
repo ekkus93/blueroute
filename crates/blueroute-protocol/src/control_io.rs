@@ -4,6 +4,8 @@
 
 use std::fmt;
 use std::io::{self, Read, Write};
+use std::net::TcpStream;
+use std::time::Instant;
 
 use crate::control::{
     ControlEnvelope, ControlFrameError, decode_control_frame, encode_control_frame,
@@ -50,6 +52,105 @@ pub fn read_one_control_frame<R: Read>(source: &mut R) -> Result<ControlEnvelope
     bytes[..4].copy_from_slice(&prefix);
     source.read_exact(&mut bytes[4..])?;
     Ok(decode_control_frame(&bytes)?)
+}
+
+/// Read a complete frame from a TCP socket with an absolute deadline for
+/// the entire frame, including the length prefix. A peer that trickles one
+/// byte per socket timeout cannot extend the budget indefinitely.
+///
+/// This is transport groundwork ONLY. A raw TCP stream is not authenticated:
+/// production callers MUST use mutually authenticated TLS 1.3, verified
+/// network/NodeId key pins and channel binding before interpreting a frame.
+/// The same deadline must be carried across the entire TLS/hello stage.
+pub fn read_one_control_frame_until(
+    source: &mut TcpStream,
+    deadline: Instant,
+) -> Result<ControlEnvelope, ControlIoError> {
+    let original_timeout = source.read_timeout()?;
+    let result = (|| {
+        let mut prefix = [0_u8; 4];
+        read_exact_tcp_until(source, &mut prefix, deadline)?;
+        let length = read_control_length(&prefix)?;
+        let mut frame = vec![0_u8; length + 4];
+        frame[..4].copy_from_slice(&prefix);
+        read_exact_tcp_until(source, &mut frame[4..], deadline)?;
+        Ok(decode_control_frame(&frame)?)
+    })();
+    source.set_read_timeout(original_timeout)?;
+    result
+}
+
+fn remaining_budget(deadline: Instant) -> io::Result<std::time::Duration> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "control frame deadline expired",
+        ))
+    } else {
+        Ok(remaining)
+    }
+}
+
+fn read_exact_tcp_until(
+    source: &mut TcpStream,
+    target: &mut [u8],
+    deadline: Instant,
+) -> io::Result<()> {
+    let mut received = 0;
+    while received < target.len() {
+        source.set_read_timeout(Some(remaining_budget(deadline)?))?;
+        match source.read(&mut target[received..]) {
+            Ok(0) => return Err(io::Error::from(io::ErrorKind::UnexpectedEof)),
+            Ok(count) => received += count,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                ) =>
+            {
+                return Err(io::Error::from(io::ErrorKind::TimedOut));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+/// Write a validated control frame with an absolute whole-frame deadline.
+/// Partial writes cannot indefinitely extend the caller's budget. This is
+/// not a TLS handshake or an authenticated control channel.
+pub fn write_one_control_frame_until(
+    destination: &mut TcpStream,
+    frame: &ControlEnvelope,
+    deadline: Instant,
+) -> Result<(), ControlIoError> {
+    let bytes = encode_control_frame(frame)?;
+    let original_timeout = destination.write_timeout()?;
+    let result = (|| {
+        let mut sent = 0;
+        while sent < bytes.len() {
+            destination.set_write_timeout(Some(remaining_budget(deadline)?))?;
+            match destination.write(&bytes[sent..]) {
+                Ok(0) => return Err(io::Error::from(io::ErrorKind::WriteZero)),
+                Ok(count) => sent += count,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                    ) =>
+                {
+                    return Err(io::Error::from(io::ErrorKind::TimedOut));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    })();
+    destination.set_write_timeout(original_timeout)?;
+    result
 }
 
 /// Write one locally validated frame, handling partial writes. This must be
@@ -155,6 +256,97 @@ mod tests {
         invalid.sequence = 1;
         write_one_control_frame(&mut output, &invalid).unwrap();
         assert_eq!(output, bytes);
+    }
+
+    #[test]
+    fn absolute_deadline_tcp_round_trip_and_socket_timeout_restoration() {
+        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let expected = stream.read_timeout().unwrap();
+            let frame = read_one_control_frame_until(
+                &mut stream,
+                Instant::now() + Duration::from_secs(2),
+            )
+            .unwrap();
+            assert_eq!(frame, message(1));
+            assert_eq!(stream.read_timeout().unwrap(), expected);
+            write_one_control_frame_until(
+                &mut stream,
+                &message(2),
+                Instant::now() + Duration::from_secs(2),
+            )
+            .unwrap();
+        });
+        let mut client = TcpStream::connect(address).unwrap();
+        client.set_write_timeout(Some(Duration::from_secs(3))).unwrap();
+        let original = client.write_timeout().unwrap();
+        write_one_control_frame_until(
+            &mut client,
+            &message(1),
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap();
+        assert_eq!(client.write_timeout().unwrap(), original);
+        assert_eq!(
+            read_one_control_frame_until(
+                &mut client,
+                Instant::now() + Duration::from_secs(2),
+            )
+            .unwrap(),
+            message(2)
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn slow_or_idle_tcp_peer_cannot_extend_whole_frame_deadline() {
+        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let header = (100_u32).to_be_bytes();
+            stream.write_all(&header[..1]).unwrap();
+            thread::sleep(Duration::from_millis(180));
+        });
+        let mut client = TcpStream::connect(address).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let original = client.read_timeout().unwrap();
+        let start = Instant::now();
+        let result = read_one_control_frame_until(
+            &mut client,
+            start + Duration::from_millis(70),
+        );
+        assert!(matches!(
+            result,
+            Err(ControlIoError::Io(ref error))
+                if error.kind() == ErrorKind::TimedOut
+        ));
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert_eq!(client.read_timeout().unwrap(), original);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn expired_deadline_rejects_before_consuming_frame() {
+        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || listener.accept().unwrap());
+        let mut client = TcpStream::connect(address).unwrap();
+        let past = Instant::now() - Duration::from_secs(1);
+        assert!(matches!(
+            read_one_control_frame_until(&mut client, past),
+            Err(ControlIoError::Io(ref error))
+                if error.kind() == ErrorKind::TimedOut
+        ));
+        assert!(matches!(
+            write_one_control_frame_until(&mut client, &message(1), past),
+            Err(ControlIoError::Io(ref error))
+                if error.kind() == ErrorKind::TimedOut
+        ));
+        let _ = server.join().unwrap();
     }
 
     #[test]
