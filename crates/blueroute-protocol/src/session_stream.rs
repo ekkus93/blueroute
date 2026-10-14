@@ -62,10 +62,7 @@ impl SessionControlStream {
     /// Parse a bounded TLS plaintext chunk. No frames are returned if *any*
     /// frame in the chunk fails validation, including a late malformed frame
     /// after earlier valid ones. The entire session is then irrecoverable.
-    pub fn feed(
-        &mut self,
-        bytes: &[u8],
-    ) -> Result<Vec<ControlEnvelope>, SessionStreamError> {
+    pub fn feed(&mut self, bytes: &[u8]) -> Result<Vec<ControlEnvelope>, SessionStreamError> {
         if self.poisoned {
             return Err(SessionStreamError::Poisoned);
         }
@@ -176,13 +173,19 @@ mod tests {
             assert!(session.feed(part).unwrap().is_empty());
             assert_eq!(session.last_sequence(), 2);
         }
-        assert_eq!(session.feed(&encoded[encoded.len() - 1..]).unwrap(), vec![frame]);
+        assert_eq!(
+            session.feed(&encoded[encoded.len() - 1..]).unwrap(),
+            vec![frame]
+        );
         assert_eq!(session.last_sequence(), 3);
         let goodbye = message(4, ControlMessage::Goodbye);
         assert_eq!(session.feed(&bytes(&goodbye)).unwrap(), vec![goodbye]);
         assert!(session.is_closed());
         assert_eq!(session.finish(), Ok(()));
-        assert_eq!(session.feed(&bytes(&heartbeat(5))), Err(SessionStreamError::AfterGoodbye));
+        assert_eq!(
+            session.feed(&bytes(&heartbeat(5))),
+            Err(SessionStreamError::AfterGoodbye)
+        );
         assert_eq!(session.feed(&[]), Err(SessionStreamError::Poisoned));
     }
 
@@ -216,7 +219,10 @@ mod tests {
         ] {
             let mut session = stream();
             assert_eq!(session.feed(&bytes(&frame)), Err(expected));
-            assert_eq!(session.feed(&bytes(&heartbeat(3))), Err(SessionStreamError::Poisoned));
+            assert_eq!(
+                session.feed(&bytes(&heartbeat(3))),
+                Err(SessionStreamError::Poisoned)
+            );
         }
         assert!(matches!(
             SessionControlStream::after_verified_hello(network(), peer(), [0; 16]),
@@ -231,12 +237,18 @@ mod tests {
             let mut combined = bytes(&heartbeat(3));
             combined.extend(bytes(&invalid));
             assert!(session.feed(&combined).is_err());
-            assert_eq!(session.feed(&bytes(&heartbeat(4))), Err(SessionStreamError::Poisoned));
+            assert_eq!(
+                session.feed(&bytes(&heartbeat(4))),
+                Err(SessionStreamError::Poisoned)
+            );
         }
         let mut session = stream();
         let mut combined = bytes(&message(3, ControlMessage::Goodbye));
         combined.extend(bytes(&heartbeat(4)));
-        assert_eq!(session.feed(&combined), Err(SessionStreamError::AfterGoodbye));
+        assert_eq!(
+            session.feed(&combined),
+            Err(SessionStreamError::AfterGoodbye)
+        );
         assert_eq!(session.feed(&[]), Err(SessionStreamError::Poisoned));
     }
 
@@ -247,16 +259,23 @@ mod tests {
         combined.extend([0_u8; 4]);
         assert_eq!(
             session.feed(&combined),
-            Err(SessionStreamError::Decode(StreamDecodeError::MalformedFrame))
+            Err(SessionStreamError::Decode(
+                StreamDecodeError::MalformedFrame
+            ))
         );
-        assert_eq!(session.feed(&bytes(&heartbeat(4))), Err(SessionStreamError::Poisoned));
+        assert_eq!(
+            session.feed(&bytes(&heartbeat(4))),
+            Err(SessionStreamError::Poisoned)
+        );
 
         let mut partial = stream();
         let frame = bytes(&heartbeat(3));
         assert!(partial.feed(&frame[..5]).unwrap().is_empty());
         assert_eq!(
             partial.finish(),
-            Err(SessionStreamError::Decode(StreamDecodeError::MalformedFrame))
+            Err(SessionStreamError::Decode(
+                StreamDecodeError::MalformedFrame
+            ))
         );
         assert_eq!(partial.feed(&frame[5..]), Err(SessionStreamError::Poisoned));
     }
@@ -264,7 +283,13 @@ mod tests {
     #[test]
     fn strictly_increasing_sequences_may_skip_values_but_not_repeat() {
         let mut session = stream();
-        assert_eq!(session.feed(&bytes(&heartbeat(7))).unwrap(), vec![heartbeat(7)]);
-        assert_eq!(session.feed(&bytes(&heartbeat(4))), Err(SessionStreamError::Replay));
+        assert_eq!(
+            session.feed(&bytes(&heartbeat(7))).unwrap(),
+            vec![heartbeat(7)]
+        );
+        assert_eq!(
+            session.feed(&bytes(&heartbeat(4))),
+            Err(SessionStreamError::Replay)
+        );
     }
 }
