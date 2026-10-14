@@ -3,9 +3,9 @@
 
 use blueroute_client::BlueRouteClient;
 use blueroute_core::{DisplayName, NodeCapabilities, NodeId};
-use blueroute_protocol::{Command, DaemonStatus, NetworkSummary, Response};
+use blueroute_protocol::{Command, DaemonStatus, NetworkSummary, NodeSummary, Response};
 
-const HELP: &str = "Usage: blueroute [--json] status\n       blueroute [--json] capability show\n       blueroute [--json] network list\n       blueroute [--json] peer trust <node-id>\n       blueroute [--json] peer forget <node-id>\n       blueroute [--json] network create <name>\n       blueroute [--json] discover start|stop\n       blueroute --version\n       blueroute --help";
+const HELP: &str = "Usage: blueroute [--json] status\n       blueroute [--json] capability show\n       blueroute [--json] network list\n       blueroute [--json] node list\n       blueroute [--json] node show <node-id>\n       blueroute [--json] peer trust <node-id>\n       blueroute [--json] peer forget <node-id>\n       blueroute [--json] network create <name>\n       blueroute [--json] discover start|stop\n       blueroute --version\n       blueroute --help";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Operation {
@@ -14,6 +14,8 @@ enum Operation {
     Status { json: bool },
     Capabilities { json: bool },
     NetworkList { json: bool },
+    NodeList { json: bool },
+    NodeShow { node: NodeId, json: bool },
     TrustPeer { node: NodeId, json: bool },
     ForgetPeer { node: NodeId, json: bool },
     CreateNetwork { name: DisplayName, json: bool },
@@ -41,6 +43,11 @@ fn parse(args: &[String]) -> Result<Operation, &'static str> {
         ["status"] => Ok(Operation::Status { json }),
         ["capability", "show"] => Ok(Operation::Capabilities { json }),
         ["network", "list"] => Ok(Operation::NetworkList { json }),
+        ["node", "list"] => Ok(Operation::NodeList { json }),
+        ["node", "show", node] => Ok(Operation::NodeShow {
+            node: node.parse().map_err(|_| "invalid full node NodeId")?,
+            json,
+        }),
         ["network", "create", name] => {
             if name.chars().any(char::is_control) {
                 return Err("network name cannot contain control characters");
@@ -102,6 +109,31 @@ fn format_networks(networks: &[NetworkSummary], json: bool) -> Result<String, se
     }
 }
 
+fn format_nodes(nodes: &[NodeSummary], json: bool) -> Result<String, serde_json::Error> {
+    if json {
+        serde_json::to_string_pretty(nodes)
+    } else if nodes.is_empty() {
+        Ok("No BlueRoute nodes reported by the daemon".to_owned())
+    } else {
+        Ok(nodes
+            .iter()
+            .map(|node| format!("{}  {}  ({:?})", node.id, node.name, node.reachability))
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
+}
+
+fn format_node(node: &NodeSummary, json: bool) -> Result<String, serde_json::Error> {
+    if json {
+        serde_json::to_string_pretty(node)
+    } else {
+        Ok(format!(
+            "Node: {}\nName: {}\nReachability: {:?}",
+            node.id, node.name, node.reachability
+        ))
+    }
+}
+
 /// Trust operations are PolicyKit-gated by the daemon; CLI success is not
 /// equivalent to TLS key enrollment or admission as a network member.
 fn mutation_ack(json: bool, success: &'static str) -> String {
@@ -155,6 +187,27 @@ fn run(args: &[String]) -> i32 {
                         format_networks(&networks, json).map_err(|error| error.to_string())
                     }
                     _ => Err("daemon returned an unexpected network-list response".to_owned()),
+                })
+        }
+        Operation::NodeList { json } => {
+            futures_lite::future::block_on(client.request(&Command::ListNodes))
+                .map_err(|error| error.to_string())
+                .and_then(|response| match response {
+                    Response::Nodes(nodes) => {
+                        format_nodes(&nodes, json).map_err(|error| error.to_string())
+                    }
+                    _ => Err("daemon returned an unexpected node-list response".to_owned()),
+                })
+        }
+        Operation::NodeShow { node, json } => {
+            futures_lite::future::block_on(client.request(&Command::GetNode { node }))
+                .map_err(|error| error.to_string())
+                .and_then(|response| match response {
+                    Response::Node(Some(node)) => {
+                        format_node(&node, json).map_err(|error| error.to_string())
+                    }
+                    Response::Node(None) => Err("the daemon has no record for that NodeId".to_owned()),
+                    _ => Err("daemon returned an unexpected node-detail response".to_owned()),
                 })
         }
         Operation::TrustPeer { node, json } => {
@@ -244,8 +297,18 @@ mod tests {
             Ok(Operation::NetworkList { json: true })
         );
         assert!(parse(&args(&["network", "join"])).is_err());
+        assert_eq!(
+            parse(&args(&["node", "list", "--json"])),
+            Ok(Operation::NodeList { json: true })
+        );
+        assert!(parse(&args(&["node", "show"])).is_err());
+        assert!(parse(&args(&["node", "show", "bluetooth-address"])).is_err());
         let node = NodeId::from_bytes([3; 16]);
         let id = node.to_string();
+        assert_eq!(
+            parse(&args(&["node", "show", &id])),
+            Ok(Operation::NodeShow { node, json: false })
+        );
         assert_eq!(
             parse(&args(&["peer", "trust", &id])),
             Ok(Operation::TrustPeer { node, json: false })
@@ -295,6 +358,27 @@ mod tests {
         let caps_json = format_capabilities(&caps, true).unwrap();
         let parsed: NodeCapabilities = serde_json::from_str(&caps_json).unwrap();
         assert_eq!(parsed, caps);
+    }
+
+    #[test]
+    fn read_only_node_inspection_renders_exact_daemon_supplied_data() {
+        let node = NodeSummary {
+            id: NodeId::from_bytes([9; 16]),
+            name: DisplayName::new("Peer nine").unwrap(),
+            reachability: blueroute_core::Reachability::Unreachable,
+        };
+        let list = vec![node.clone()];
+        assert!(format_nodes(&list, false).unwrap().contains("Peer nine"));
+        let decoded: Vec<NodeSummary> =
+            serde_json::from_str(&format_nodes(&list, true).unwrap()).unwrap();
+        assert_eq!(decoded, list);
+        let human = format_node(&node, false).unwrap();
+        assert!(human.contains("Unreachable"));
+        let decoded: NodeSummary =
+            serde_json::from_str(&format_node(&node, true).unwrap()).unwrap();
+        assert_eq!(decoded, node);
+        assert!(format_nodes(&[], false).unwrap().contains("No BlueRoute nodes"));
+        assert_eq!(format_nodes(&[], true).unwrap(), "[]");
     }
 
     #[test]
