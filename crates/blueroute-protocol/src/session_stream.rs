@@ -33,6 +33,7 @@ pub enum SessionStreamError {
     Replay,
     UnexpectedHandshake,
     AfterGoodbye,
+    UnexpectedEof,
     Poisoned,
 }
 
@@ -101,14 +102,20 @@ impl SessionControlStream {
         Ok(frames)
     }
 
-    /// EOF is clean only at a frame boundary. An incomplete frame poisons the
-    /// session, and a later feed cannot resynchronize it.
+    /// EOF is graceful only after an authenticated Goodbye and at a frame
+    /// boundary. A missing Goodbye is loss, not normal close; even successful
+    /// EOF irrevocably consumes the parser so it cannot be reused for a
+    /// different transport or session.
     pub fn finish(&mut self) -> Result<(), SessionStreamError> {
         if self.poisoned {
             return Err(SessionStreamError::Poisoned);
         }
         match self.decoder.finish() {
-            Ok(()) => Ok(()),
+            Ok(()) if self.closed => {
+                self.poisoned = true;
+                Ok(())
+            }
+            Ok(()) => self.reject(SessionStreamError::UnexpectedEof),
             Err(error) => self.reject(SessionStreamError::Decode(error)),
         }
     }
@@ -182,6 +189,7 @@ mod tests {
         assert_eq!(session.feed(&bytes(&goodbye)).unwrap(), vec![goodbye]);
         assert!(session.is_closed());
         assert_eq!(session.finish(), Ok(()));
+        assert_eq!(session.finish(), Err(SessionStreamError::Poisoned));
         assert_eq!(
             session.feed(&bytes(&heartbeat(5))),
             Err(SessionStreamError::AfterGoodbye)
@@ -278,6 +286,24 @@ mod tests {
             ))
         );
         assert_eq!(partial.feed(&frame[5..]), Err(SessionStreamError::Poisoned));
+    }
+
+    #[test]
+    fn abrupt_eof_before_goodbye_is_loss_and_cannot_be_reused() {
+        let mut session = stream();
+        assert_eq!(
+            session.feed(&bytes(&heartbeat(3))).unwrap(),
+            vec![heartbeat(3)]
+        );
+        assert_eq!(session.finish(), Err(SessionStreamError::UnexpectedEof));
+        assert_eq!(
+            session.feed(&bytes(&heartbeat(4))),
+            Err(SessionStreamError::Poisoned)
+        );
+
+        let mut session = stream();
+        assert_eq!(session.finish(), Err(SessionStreamError::UnexpectedEof));
+        assert_eq!(session.finish(), Err(SessionStreamError::Poisoned));
     }
 
     #[test]
