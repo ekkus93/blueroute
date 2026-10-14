@@ -128,7 +128,7 @@ pub fn write_one_control_frame_until(
 ) -> Result<(), ControlIoError> {
     let bytes = encode_control_frame(frame)?;
     let original_timeout = destination.write_timeout()?;
-    let result = (|| {
+    let result = (|| -> Result<(), ControlIoError> {
         let mut sent = 0;
         while sent < bytes.len() {
             destination.set_write_timeout(Some(remaining_budget(deadline)?))?;
