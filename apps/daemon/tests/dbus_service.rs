@@ -5,8 +5,8 @@ use async_io::Timer;
 use blueroute_core::{HealthLevel, NodeCapabilities, NodeId};
 use blueroute_daemon::{DaemonService, emit_event};
 use blueroute_protocol::{
-    ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, Event,
-    Response, decode_event, decode_response, encode_command,
+    ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, Event, Response,
+    decode_event, decode_response, encode_command,
 };
 use futures_lite::{StreamExt, future};
 use zbus::connection::Builder;
@@ -67,10 +67,9 @@ fn dbus_service_round_trip_and_event() -> Result<(), Box<dyn Error>> {
         assert_eq!(nodes[0].id, local_node);
         assert_eq!(nodes[0].reachability, blueroute_core::Reachability::Local);
 
-        for (requested, expected_present) in [
-            (local_node, true),
-            (NodeId::from_bytes([8; 16]), false),
-        ] {
+        for (requested, expected_present) in
+            [(local_node, true), (NodeId::from_bytes([8; 16]), false)]
+        {
             let payload = encode_command(&Command::GetNode { node: requested })?;
             let result: String = proxy.call("Request", &(payload.as_str(),)).await?;
             let Response::Node(node) = decode_response(&result)? else {
