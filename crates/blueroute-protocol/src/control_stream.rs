@@ -17,6 +17,7 @@ pub enum StreamDecodeError {
     ChunkTooLarge,
     FrameLimit,
     MalformedFrame,
+    Finished,
     Poisoned,
 }
 
@@ -27,6 +28,7 @@ pub struct ControlStreamDecoder {
     partial: Vec<u8>,
     expected: Option<usize>,
     poisoned: bool,
+    finished: bool,
 }
 
 impl ControlStreamDecoder {
@@ -42,9 +44,16 @@ impl ControlStreamDecoder {
         self.poisoned
     }
 
+    pub fn is_finished(&self) -> bool {
+        self.finished
+    }
+
     pub fn feed(&mut self, chunk: &[u8]) -> Result<Vec<ControlEnvelope>, StreamDecodeError> {
         if self.poisoned {
             return Err(StreamDecodeError::Poisoned);
+        }
+        if self.finished {
+            return Err(StreamDecodeError::Finished);
         }
         if chunk.len() > MAX_STREAM_FEED_BYTES {
             return self.reject(StreamDecodeError::ChunkTooLarge);
@@ -90,9 +99,15 @@ impl ControlStreamDecoder {
         if self.poisoned {
             return Err(StreamDecodeError::Poisoned);
         }
+        if self.finished {
+            return Err(StreamDecodeError::Finished);
+        }
         if !self.partial.is_empty() || self.expected.is_some() {
             return self.reject(StreamDecodeError::MalformedFrame);
         }
+        // EOF is terminal even after a clean frame boundary: a subsequent
+        // transport cannot reuse this decoder or smuggle in more frames.
+        self.finished = true;
         Ok(())
     }
 
@@ -187,14 +202,22 @@ mod tests {
     #[test]
     fn eof_after_complete_frames_is_clean() {
         let mut decoder = ControlStreamDecoder::new();
-        assert_eq!(decoder.finish(), Ok(()));
         let first = example(1);
         let second = example(2);
         let mut bytes = encode_control_frame(&first).unwrap();
         bytes.extend_from_slice(&encode_control_frame(&second).unwrap());
         assert_eq!(decoder.feed(&bytes).unwrap(), vec![first, second]);
         assert_eq!(decoder.finish(), Ok(()));
+        assert!(decoder.is_finished());
+        assert!(!decoder.is_poisoned());
         assert_eq!(decoder.pending_bytes(), 0);
+        assert_eq!(decoder.feed(&[]), Err(StreamDecodeError::Finished));
+        assert_eq!(decoder.feed(&bytes), Err(StreamDecodeError::Finished));
+        assert_eq!(decoder.finish(), Err(StreamDecodeError::Finished));
+
+        let mut empty = ControlStreamDecoder::new();
+        assert_eq!(empty.finish(), Ok(()));
+        assert_eq!(empty.feed(&bytes), Err(StreamDecodeError::Finished));
     }
 
     #[test]
