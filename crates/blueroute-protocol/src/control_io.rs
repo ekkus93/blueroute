@@ -347,13 +347,26 @@ mod tests {
             write_timeouts: Vec::new(),
         };
         let deadline = Instant::now() + Duration::from_secs(2);
-        assert_eq!(read_one_control_frame_with_deadline(&mut stream, deadline).unwrap(), message(1));
+        assert_eq!(
+            read_one_control_frame_with_deadline(&mut stream, deadline).unwrap(),
+            message(1)
+        );
         write_one_control_frame_with_deadline(&mut stream, &message(1), deadline).unwrap();
         assert_eq!(stream.outbound, bytes);
         assert!(stream.read_timeouts.len() > 4);
         assert!(stream.write_timeouts.len() > 4);
-        assert!(stream.read_timeouts.iter().all(|duration| !duration.is_zero()));
-        assert!(stream.write_timeouts.iter().all(|duration| !duration.is_zero()));
+        assert!(
+            stream
+                .read_timeouts
+                .iter()
+                .all(|duration| !duration.is_zero())
+        );
+        assert!(
+            stream
+                .write_timeouts
+                .iter()
+                .all(|duration| !duration.is_zero())
+        );
     }
 
     #[test]
