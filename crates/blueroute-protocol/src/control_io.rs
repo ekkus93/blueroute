@@ -264,8 +264,9 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
             let expected = stream.read_timeout().unwrap();
             let frame =
                 read_one_control_frame_until(&mut stream, Instant::now() + Duration::from_secs(2))
@@ -280,7 +281,8 @@ mod tests {
             .unwrap();
         });
         let mut client = TcpStream::connect(address).unwrap();
-        client.set_write_timeout(Some(Duration::from_secs(3)))
+        client
+            .set_write_timeout(Some(Duration::from_secs(3)))
             .unwrap();
         let original = client.write_timeout().unwrap();
         write_one_control_frame_until(
@@ -309,7 +311,8 @@ mod tests {
             thread::sleep(Duration::from_millis(180));
         });
         let mut client = TcpStream::connect(address).unwrap();
-        client.set_read_timeout(Some(Duration::from_secs(3)))
+        client
+            .set_read_timeout(Some(Duration::from_secs(3)))
             .unwrap();
         let original = client.read_timeout().unwrap();
         let start = Instant::now();
