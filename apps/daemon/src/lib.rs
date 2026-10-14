@@ -19,8 +19,8 @@ use blueroute_core::{
     Reachability,
 };
 use blueroute_protocol::{
-    ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, Event,
-    NodeSummary, ProtocolCodecError, Response, decode_command, encode_event, encode_response,
+    ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, Event, NodeSummary,
+    ProtocolCodecError, Response, decode_command, encode_event, encode_response,
 };
 pub use join_network::{
     JoinControlSession, JoinIpLease, JoinNetworkFuture, JoinNetworkOperations, JoinPanLink,
@@ -169,7 +169,11 @@ impl DaemonService {
     /// or a durable trust record. The label is explicitly generic until P10
     /// device naming and verified P7 peer inventory are wired to this query.
     fn local_node_summary(&self) -> fdo::Result<Option<NodeSummary>> {
-        let Some(node) = self.status_snapshot().map_err(core_error_to_dbus)?.local_node else {
+        let Some(node) = self
+            .status_snapshot()
+            .map_err(core_error_to_dbus)?
+            .local_node
+        else {
             return Ok(None);
         };
         Ok(Some(NodeSummary {
@@ -384,7 +388,8 @@ mod local_node_tests {
     #[test]
     fn local_inventory_is_conservative_and_never_invents_remote_peers() {
         let local_id = NodeId::from_bytes([7; 16]);
-        let daemon = DaemonService::new(local_id, HealthLevel::Healthy, NodeCapabilities::default());
+        let daemon =
+            DaemonService::new(local_id, HealthLevel::Healthy, NodeCapabilities::default());
         let summary = daemon.local_node_summary().unwrap().unwrap();
         assert_eq!(summary.id, local_id);
         assert_eq!(summary.reachability, Reachability::Local);
