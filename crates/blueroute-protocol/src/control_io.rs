@@ -264,13 +264,12 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
-            let expected = stream.read_timeout().unwrap();
-            let frame = read_one_control_frame_until(
-                &mut stream,
-                Instant::now() + Duration::from_secs(2),
-            )
+            stream.set_read_timeout(Some(Duration::from_secs(3)))
             .unwrap();
+            let expected = stream.read_timeout().unwrap();
+            let frame =
+                read_one_control_frame_until(&mut stream, Instant::now() + Duration::from_secs(2))
+                    .unwrap();
             assert_eq!(frame, message(1));
             assert_eq!(stream.read_timeout().unwrap(), expected);
             write_one_control_frame_until(
@@ -281,7 +280,8 @@ mod tests {
             .unwrap();
         });
         let mut client = TcpStream::connect(address).unwrap();
-        client.set_write_timeout(Some(Duration::from_secs(3))).unwrap();
+        client.set_write_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
         let original = client.write_timeout().unwrap();
         write_one_control_frame_until(
             &mut client,
@@ -291,11 +291,8 @@ mod tests {
         .unwrap();
         assert_eq!(client.write_timeout().unwrap(), original);
         assert_eq!(
-            read_one_control_frame_until(
-                &mut client,
-                Instant::now() + Duration::from_secs(2),
-            )
-            .unwrap(),
+            read_one_control_frame_until(&mut client, Instant::now() + Duration::from_secs(2),)
+                .unwrap(),
             message(2)
         );
         server.join().unwrap();
@@ -312,13 +309,11 @@ mod tests {
             thread::sleep(Duration::from_millis(180));
         });
         let mut client = TcpStream::connect(address).unwrap();
-        client.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
         let original = client.read_timeout().unwrap();
         let start = Instant::now();
-        let result = read_one_control_frame_until(
-            &mut client,
-            start + Duration::from_millis(70),
-        );
+        let result = read_one_control_frame_until(&mut client, start + Duration::from_millis(70));
         assert!(matches!(
             result,
             Err(ControlIoError::Io(ref error))
