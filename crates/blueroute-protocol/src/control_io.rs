@@ -307,7 +307,8 @@ mod tests {
 
     impl Read for DeadlineMemory {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            self.inbound.read(&mut buf[..buf.len().min(1)])
+            let count = buf.len().min(1);
+            self.inbound.read(&mut buf[..count])
         }
     }
 
