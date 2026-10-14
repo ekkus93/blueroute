@@ -14,10 +14,13 @@ pub use authorization::{
     CommandAuthorization, INTERNET_SHARING_ACTION_ID, MODIFY_ACTION_ID, command_authorization,
     command_operation,
 };
-use blueroute_core::{CoreError, ErrorKind, HealthLevel, NetworkId, NodeCapabilities, NodeId};
+use blueroute_core::{
+    CoreError, DisplayName, ErrorKind, HealthLevel, NetworkId, NodeCapabilities, NodeId,
+    Reachability,
+};
 use blueroute_protocol::{
     ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, Event,
-    ProtocolCodecError, Response, decode_command, encode_event, encode_response,
+    NodeSummary, ProtocolCodecError, Response, decode_command, encode_event, encode_response,
 };
 pub use join_network::{
     JoinControlSession, JoinIpLease, JoinNetworkFuture, JoinNetworkOperations, JoinPanLink,
@@ -160,6 +163,22 @@ impl DaemonService {
         }
     }
 
+    /// The daemon currently has no authenticated remote-node observation
+    /// provider. Report only its own configured NodeId with Local reachability,
+    /// never infer remote identity or reachability from untrusted advertisements
+    /// or a durable trust record. The label is explicitly generic until P10
+    /// device naming and verified P7 peer inventory are wired to this query.
+    fn local_node_summary(&self) -> fdo::Result<Option<NodeSummary>> {
+        let Some(node) = self.status_snapshot().map_err(core_error_to_dbus)?.local_node else {
+            return Ok(None);
+        };
+        Ok(Some(NodeSummary {
+            id: node,
+            name: DisplayName::new("Local node").map_err(core_error_to_dbus)?,
+            reachability: Reachability::Local,
+        }))
+    }
+
     fn update_current_network(&self, network: Option<NetworkId>) -> fdo::Result<()> {
         let mut status = self
             .status
@@ -216,6 +235,15 @@ impl DaemonService {
                     .await
                     .map_err(core_error_to_dbus)?;
                 Self::encode_response(&Response::Networks(networks))
+            }
+            Command::ListNodes => {
+                let nodes: Vec<_> = self.local_node_summary()?.into_iter().collect();
+                Self::encode_response(&Response::Nodes(nodes))
+            }
+            Command::GetNode { node } => {
+                let local = self.local_node_summary()?;
+                let matching = local.filter(|entry| entry.id == node);
+                Self::encode_response(&Response::Node(matching))
             }
             Command::CreateNetwork { name } => {
                 let network = self
@@ -347,4 +375,33 @@ impl std::error::Error for DaemonServiceError {}
 /// Compile-time guard that keeps the implementation interface synchronized with protocol constants.
 pub fn dbus_interface_name() -> &'static str {
     DBUS_INTERFACE_NAME
+}
+
+#[cfg(test)]
+mod local_node_tests {
+    use super::*;
+
+    #[test]
+    fn local_inventory_is_conservative_and_never_invents_remote_peers() {
+        let local_id = NodeId::from_bytes([7; 16]);
+        let daemon = DaemonService::new(local_id, HealthLevel::Healthy, NodeCapabilities::default());
+        let summary = daemon.local_node_summary().unwrap().unwrap();
+        assert_eq!(summary.id, local_id);
+        assert_eq!(summary.reachability, Reachability::Local);
+        assert_eq!(summary.name.as_str(), "Local node");
+        let remote = NodeId::from_bytes([8; 16]);
+        assert_ne!(summary.id, remote);
+    }
+
+    #[test]
+    fn daemon_without_local_identity_provides_no_synthetic_nodes() {
+        let service = DaemonService::from_status(DaemonStatus {
+            api_version: ApiVersion::CURRENT,
+            local_node: None,
+            current_network: None,
+            health: HealthLevel::Healthy,
+            capabilities: NodeCapabilities::default(),
+        });
+        assert_eq!(service.local_node_summary().unwrap(), None);
+    }
 }
