@@ -5,9 +5,11 @@ use std::time::Duration;
 
 use async_io::Timer;
 use blueroute_client::{BlueRouteClient, ClientError};
-use blueroute_core::{HealthLevel, NodeCapabilities, NodeId};
+use blueroute_core::{HealthLevel, NodeCapabilities, NodeId, Reachability};
 use blueroute_daemon::{DaemonService, emit_event};
-use blueroute_protocol::{ApiVersion, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, Event};
+use blueroute_protocol::{
+    ApiVersion, Command, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, Event, Response,
+};
 use futures_lite::future;
 use zbus::Connection;
 use zbus::connection::Builder;
@@ -60,6 +62,21 @@ fn client_queries_events_reconnects_and_fails_closed_on_incompatibility()
         assert_eq!(status.local_node, Some(first_node));
         assert_eq!(status.health, HealthLevel::Healthy);
         assert_eq!(client.capabilities().await?, NodeCapabilities::default());
+        let Response::Nodes(nodes) = client.request(&Command::ListNodes).await? else {
+            panic!("expected node inventory");
+        };
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].id, first_node);
+        assert_eq!(nodes[0].reachability, Reachability::Local);
+        let Response::Node(None) = client
+            .request(&Command::GetNode {
+                node: NodeId::from_bytes([99; 16]),
+            })
+            .await?
+        else {
+            panic!("unknown node must not be fabricated");
+        };
+
 
         let mut events = client.events().await?;
         let expected_event = Event::HealthChanged(HealthLevel::Degraded);
@@ -92,6 +109,18 @@ fn client_queries_events_reconnects_and_fails_closed_on_incompatibility()
         let status = client.status().await?;
         assert_eq!(status.local_node, Some(second_node));
         assert_eq!(status.health, HealthLevel::Degraded);
+        let Response::Nodes(nodes) = client.request(&Command::ListNodes).await? else {
+            panic!("expected replacement daemon node inventory");
+        };
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].id, second_node);
+        let Response::Node(None) = client
+            .request(&Command::GetNode { node: first_node })
+            .await?
+        else {
+            panic!("stale local node must not survive daemon restart");
+        };
+
 
         assert!(second_server.release_name(DBUS_SERVICE_NAME).await?);
         second_server.close().await?;
