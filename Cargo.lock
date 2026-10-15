@@ -217,6 +217,7 @@ dependencies = [
  "async-io",
  "blueroute-core",
  "futures-lite",
+ "rustix",
  "zbus",
 ]
 

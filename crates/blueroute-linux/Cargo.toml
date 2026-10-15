@@ -11,6 +11,7 @@ repository.workspace = true
 blueroute-core = { path = "../blueroute-core" }
 async-io = "2.6.0"
 futures-lite = "2.6.0"
+rustix = { version = "1.1.4", features = ["net"] }
 zbus = { version = "5.19.0", default-features = false, features = ["async-io"] }
 
 [lints]
