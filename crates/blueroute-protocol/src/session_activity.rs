@@ -42,12 +42,8 @@ impl AuthenticatedInboundActivity {
         if deadline.stage() != ConnectionStage::Active {
             return Err(InboundActivityError::NotActive);
         }
-        let stream = SessionControlStream::after_verified_hello(
-            network,
-            peer,
-            exported_session_id,
-        )
-        .map_err(InboundActivityError::Scope)?;
+        let stream = SessionControlStream::after_verified_hello(network, peer, exported_session_id)
+            .map_err(InboundActivityError::Scope)?;
         Ok(Self {
             stream,
             deadline,
@@ -169,11 +165,27 @@ mod tests {
         let heartbeat = wire(peer(), 3, ControlMessage::Heartbeat);
         let initial_expiry = session.expires_ms();
         assert_eq!(initial_expiry, 30_003);
-        assert!(session.feed_verified_plaintext(&heartbeat[..4], 29_900).unwrap().is_empty());
+        assert!(
+            session
+                .feed_verified_plaintext(&heartbeat[..4], 29_900)
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(session.expires_ms(), initial_expiry);
-        assert_eq!(session.feed_verified_plaintext(&heartbeat[4..], 29_999).unwrap().len(), 1);
+        assert_eq!(
+            session
+                .feed_verified_plaintext(&heartbeat[4..], 29_999)
+                .unwrap()
+                .len(),
+            1
+        );
         assert_eq!(session.expires_ms(), 59_999);
-        assert!(session.feed_verified_plaintext(&[], 59_998).unwrap().is_empty());
+        assert!(
+            session
+                .feed_verified_plaintext(&[], 59_998)
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(session.expires_ms(), 59_999);
         assert_eq!(
             session.feed_verified_plaintext(&[], 59_999),
@@ -190,7 +202,12 @@ mod tests {
     fn partial_frame_across_timeout_never_becomes_authorized_activity() {
         let mut session = activity();
         let frame = wire(peer(), 3, ControlMessage::Heartbeat);
-        assert!(session.feed_verified_plaintext(&frame[..frame.len() - 1], 29_999).unwrap().is_empty());
+        assert!(
+            session
+                .feed_verified_plaintext(&frame[..frame.len() - 1], 29_999)
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             session.feed_verified_plaintext(&frame[frame.len() - 1..], 30_003),
             Err(InboundActivityError::Deadline(DeadlineError::Expired))
@@ -204,7 +221,9 @@ mod tests {
         let wrong = wire(NodeId::from_bytes([9; 16]), 3, ControlMessage::Heartbeat);
         assert_eq!(
             session.feed_verified_plaintext(&wrong, 10),
-            Err(InboundActivityError::Scope(SessionStreamError::WrongContext))
+            Err(InboundActivityError::Scope(
+                SessionStreamError::WrongContext
+            ))
         );
         assert_eq!(
             session.feed_verified_plaintext(&wire(peer(), 3, ControlMessage::Heartbeat), 11),
@@ -216,15 +235,17 @@ mod tests {
         // The deadline's last observed time only advances on authenticated
         // frames. A valid heartbeat at t=20 makes subsequent t=19 invalid.
         assert_eq!(
-            another.feed_verified_plaintext(
-                &wire(peer(), 3, ControlMessage::Heartbeat),
-                20
-            ).unwrap().len(),
+            another
+                .feed_verified_plaintext(&wire(peer(), 3, ControlMessage::Heartbeat), 20)
+                .unwrap()
+                .len(),
             1
         );
         assert_eq!(
             another.feed_verified_plaintext(&[], 19),
-            Err(InboundActivityError::Deadline(DeadlineError::ClockRegression))
+            Err(InboundActivityError::Deadline(
+                DeadlineError::ClockRegression
+            ))
         );
     }
 
@@ -232,7 +253,10 @@ mod tests {
     fn goodbye_requires_clean_eof_and_never_resurrects() {
         let mut session = activity();
         assert_eq!(
-            session.feed_verified_plaintext(&wire(peer(), 3, ControlMessage::Goodbye), 10).unwrap().len(),
+            session
+                .feed_verified_plaintext(&wire(peer(), 3, ControlMessage::Goodbye), 10)
+                .unwrap()
+                .len(),
             1
         );
         assert!(session.goodbye_seen());
@@ -248,7 +272,9 @@ mod tests {
         let mut abrupt = activity();
         assert_eq!(
             abrupt.finish(),
-            Err(InboundActivityError::Scope(SessionStreamError::UnexpectedEof))
+            Err(InboundActivityError::Scope(
+                SessionStreamError::UnexpectedEof
+            ))
         );
         assert!(abrupt.is_terminal());
     }
@@ -257,15 +283,23 @@ mod tests {
     fn rejects_unverified_deadline_stages_and_zero_exporter() {
         assert!(matches!(
             AuthenticatedInboundActivity::after_verified_hello(
-                network(), peer(), [3; 16], ConnectionDeadline::new(0)
+                network(),
+                peer(),
+                [3; 16],
+                ConnectionDeadline::new(0)
             ),
             Err(InboundActivityError::NotActive)
         ));
         assert!(matches!(
             AuthenticatedInboundActivity::after_verified_hello(
-                network(), peer(), [0; 16], active_deadline()
+                network(),
+                peer(),
+                [0; 16],
+                active_deadline()
             ),
-            Err(InboundActivityError::Scope(SessionStreamError::InvalidSession))
+            Err(InboundActivityError::Scope(
+                SessionStreamError::InvalidSession
+            ))
         ));
     }
 }
