@@ -67,6 +67,17 @@ fn dbus_service_round_trip_and_event() -> Result<(), Box<dyn Error>> {
         assert_eq!(nodes[0].id, local_node);
         assert_eq!(nodes[0].reachability, blueroute_core::Reachability::Local);
 
+        let command = encode_command(&Command::GetDiagnostics)?;
+        let payload: String = proxy.call("Request", &(command.as_str(),)).await?;
+        let Response::Diagnostics(diagnostics) = decode_response(&payload)? else {
+            panic!("GetDiagnostics returned the wrong response");
+        };
+        assert_eq!(diagnostics.api_version, status.api_version);
+        assert_eq!(diagnostics.health, status.health);
+        assert_eq!(diagnostics.current_network, status.current_network);
+        assert_eq!(diagnostics.visible_nodes, 1);
+        assert_eq!(diagnostics.capabilities, status.capabilities);
+
         for (requested, expected_present) in
             [(local_node, true), (NodeId::from_bytes([8; 16]), false)]
         {

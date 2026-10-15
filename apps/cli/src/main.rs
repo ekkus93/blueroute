@@ -3,9 +3,9 @@
 
 use blueroute_client::BlueRouteClient;
 use blueroute_core::{DisplayName, NodeCapabilities, NodeId};
-use blueroute_protocol::{Command, DaemonStatus, NetworkSummary, NodeSummary, Response};
+use blueroute_protocol::{Command, DaemonStatus, DiagnosticSnapshot, NetworkSummary, NodeSummary, Response};
 
-const HELP: &str = "Usage: blueroute [--json] status\n       blueroute [--json] capability show\n       blueroute [--json] network list\n       blueroute [--json] node list\n       blueroute [--json] node show <node-id>\n       blueroute [--json] peer trust <node-id>\n       blueroute [--json] peer forget <node-id>\n       blueroute [--json] network create <name>\n       blueroute [--json] discover start|stop\n       blueroute --version\n       blueroute --help";
+const HELP: &str = "Usage: blueroute [--json] status\n       blueroute [--json] capability show\n       blueroute [--json] network list\n       blueroute [--json] node list\n       blueroute [--json] node show <node-id>\n       blueroute [--json] diagnostics show\n       blueroute [--json] peer trust <node-id>\n       blueroute [--json] peer forget <node-id>\n       blueroute [--json] network create <name>\n       blueroute [--json] discover start|stop\n       blueroute --version\n       blueroute --help";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Operation {
@@ -13,6 +13,7 @@ enum Operation {
     Version,
     Status { json: bool },
     Capabilities { json: bool },
+    Diagnostics { json: bool },
     NetworkList { json: bool },
     NodeList { json: bool },
     NodeShow { node: NodeId, json: bool },
@@ -42,6 +43,7 @@ fn parse(args: &[String]) -> Result<Operation, &'static str> {
     match tokens.as_slice() {
         ["status"] => Ok(Operation::Status { json }),
         ["capability", "show"] => Ok(Operation::Capabilities { json }),
+        ["diagnostics", "show"] => Ok(Operation::Diagnostics { json }),
         ["network", "list"] => Ok(Operation::NetworkList { json }),
         ["node", "list"] => Ok(Operation::NodeList { json }),
         ["node", "show", node] => Ok(Operation::NodeShow {
@@ -87,6 +89,24 @@ fn format_capabilities(caps: &NodeCapabilities, json: bool) -> Result<String, se
         serde_json::to_string_pretty(caps)
     } else {
         Ok(format!("BlueRoute capabilities:\n{caps:#?}"))
+    }
+}
+
+fn format_diagnostics(
+    snapshot: &DiagnosticSnapshot,
+    json: bool,
+) -> Result<String, serde_json::Error> {
+    if json {
+        serde_json::to_string_pretty(snapshot)
+    } else {
+        Ok(format!(
+            "API: {}\nHealth: {:?}\nNetwork: {:?}\nReported nodes: {} (local-only until peer authentication)\nCapabilities:\n{:#?}",
+            snapshot.api_version,
+            snapshot.health,
+            snapshot.current_network,
+            snapshot.visible_nodes,
+            snapshot.capabilities
+        ))
     }
 }
 
@@ -179,6 +199,16 @@ fn run(args: &[String]) -> i32 {
         Operation::Capabilities { json } => futures_lite::future::block_on(client.capabilities())
             .map_err(|error| error.to_string())
             .and_then(|caps| format_capabilities(&caps, json).map_err(|error| error.to_string())),
+        Operation::Diagnostics { json } => {
+            futures_lite::future::block_on(client.request(&Command::GetDiagnostics))
+                .map_err(|error| error.to_string())
+                .and_then(|response| match response {
+                    Response::Diagnostics(snapshot) => {
+                        format_diagnostics(&snapshot, json).map_err(|error| error.to_string())
+                    }
+                    _ => Err("daemon returned an unexpected diagnostics response".to_owned()),
+                })
+        }
         Operation::NetworkList { json } => {
             futures_lite::future::block_on(client.request(&Command::ListNetworks))
                 .map_err(|error| error.to_string())
@@ -298,6 +328,11 @@ mod tests {
             parse(&args(&["network", "list", "--json"])),
             Ok(Operation::NetworkList { json: true })
         );
+        assert_eq!(
+            parse(&args(&["diagnostics", "show", "--json"])),
+            Ok(Operation::Diagnostics { json: true })
+        );
+        assert!(parse(&args(&["diagnostics"])).is_err());
         assert!(parse(&args(&["network", "join"])).is_err());
         assert_eq!(
             parse(&args(&["node", "list", "--json"])),
@@ -360,6 +395,24 @@ mod tests {
         let caps_json = format_capabilities(&caps, true).unwrap();
         let parsed: NodeCapabilities = serde_json::from_str(&caps_json).unwrap();
         assert_eq!(parsed, caps);
+    }
+
+    #[test]
+    fn diagnostics_formatters_report_only_daemon_snapshot_fields() {
+        let snapshot = DiagnosticSnapshot {
+            api_version: ApiVersion::CURRENT,
+            health: HealthLevel::Degraded,
+            current_network: None,
+            visible_nodes: 1,
+            capabilities: NodeCapabilities::default(),
+        };
+        let output = format_diagnostics(&snapshot, false).unwrap();
+        assert!(output.contains("Health: Degraded"));
+        assert!(output.contains("local-only until peer authentication"));
+        assert!(!output.contains("verified remote peers"));
+        let json = format_diagnostics(&snapshot, true).unwrap();
+        let decoded: DiagnosticSnapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, snapshot);
     }
 
     #[test]

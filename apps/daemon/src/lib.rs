@@ -20,7 +20,7 @@ use blueroute_core::{
     Reachability,
 };
 use blueroute_protocol::{
-    ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, Event, NodeSummary,
+    ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, DiagnosticSnapshot, Event, NodeSummary,
     ProtocolCodecError, Response, decode_command, encode_event, encode_response,
 };
 pub use join_network::{
@@ -185,6 +185,19 @@ impl DaemonService {
         }))
     }
 
+    /// Read-only diagnostics never invent members from approvals, Bluetooth
+    /// discovery or unverified peer-controlled Hello fields.
+    pub fn diagnostics_snapshot(&self) -> Result<DiagnosticSnapshot, CoreError> {
+        let status = self.status_snapshot()?;
+        Ok(DiagnosticSnapshot {
+            api_version: status.api_version,
+            health: status.health,
+            current_network: status.current_network,
+            visible_nodes: u32::from(status.local_node.is_some()),
+            capabilities: status.capabilities,
+        })
+    }
+
     fn update_current_network(&self, network: Option<NetworkId>) -> fdo::Result<()> {
         let mut status = self
             .status
@@ -241,6 +254,10 @@ impl DaemonService {
                     .await
                     .map_err(core_error_to_dbus)?;
                 Self::encode_response(&Response::Networks(networks))
+            }
+            Command::GetDiagnostics => {
+                let snapshot = self.diagnostics_snapshot().map_err(core_error_to_dbus)?;
+                Self::encode_response(&Response::Diagnostics(snapshot))
             }
             Command::ListNodes => {
                 let nodes: Vec<_> = self.local_node_summary()?.into_iter().collect();
@@ -410,5 +427,20 @@ mod local_node_tests {
             capabilities: NodeCapabilities::default(),
         });
         assert_eq!(service.local_node_summary().unwrap(), None);
+        assert_eq!(service.diagnostics_snapshot().unwrap().visible_nodes, 0);
+    }
+
+    #[test]
+    fn diagnostics_only_counts_local_observation_until_p7_peer_authentication() {
+        let daemon = DaemonService::new(
+            NodeId::from_bytes([7; 16]),
+            HealthLevel::Degraded,
+            NodeCapabilities::default(),
+        );
+        let diagnostics = daemon.diagnostics_snapshot().unwrap();
+        assert_eq!(diagnostics.visible_nodes, 1);
+        assert_eq!(diagnostics.api_version, ApiVersion::CURRENT);
+        assert_eq!(diagnostics.health, HealthLevel::Degraded);
+        assert_eq!(diagnostics.current_network, None);
     }
 }
