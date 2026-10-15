@@ -13,6 +13,7 @@ Run `blueroute --help` for the installed version's command list and `blueroute -
 | `blueroute diagnostics show` | Show the current diagnostic snapshot. Node counts are local-only until authenticated peer runtime is integrated. |
 | `blueroute network list` | List known networks. |
 | `blueroute network create NAME` | Request creation of a BlueRoute star. This is a privileged operation. |
+| `blueroute network leave` | Stop a locally hosted network whose runtime is still owned by this daemon. This is privileged and idempotent after leave succeeds. |
 | `blueroute discover start` / `stop` | Start or stop BlueRoute network discovery. |
 | `blueroute node list` / `node show NODE_ID` | Inspect node records currently exposed by the daemon. Current runtime reports the local node only. |
 | `blueroute peer trust NODE_ID` | Record explicit legacy peer trust. This is not TLS-key enrollment or network membership. |
@@ -28,7 +29,7 @@ blueroute network list --json
 blueroute node show 0123456789abcdef0123456789abcdef
 ```
 
-The daemon enforces authorization for mutations. An authorization failure is reported separately from an unavailable daemon or unsupported capability. `network join` and `network leave` are not currently exposed as successful production operations; production JoinNetwork remains fail-closed until authenticated peer transport is integrated.
+The daemon enforces authorization for mutations. An authorization failure is reported separately from an unavailable daemon or unsupported capability. Production `network join` remains fail-closed until authenticated peer transport is integrated. `network leave` currently supports the local host runtime only; it refuses to clear persisted membership if this daemon cannot confirm ownership of an active host runtime, including after a daemon restart. Client-side leave and restart reconciliation remain unimplemented.
 
 ## Capability and network diagnosis
 

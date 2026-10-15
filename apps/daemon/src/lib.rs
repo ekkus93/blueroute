@@ -299,6 +299,14 @@ impl DaemonService {
                 self.update_current_network(Some(network))?;
                 Self::encode_response(&Response::Ack)
             }
+            Command::LeaveNetwork => {
+                self.network_operations()?
+                    .leave_network()
+                    .await
+                    .map_err(core_error_to_dbus)?;
+                self.update_current_network(None)?;
+                Self::encode_response(&Response::Ack)
+            }
             Command::TrustPeer { node } => {
                 self.ensure_not_local_node(node)?;
                 self.peer_trust_operations()?

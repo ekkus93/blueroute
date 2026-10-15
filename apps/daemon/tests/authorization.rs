@@ -73,6 +73,10 @@ impl NetworkOperations for FakeNetworkOperations {
         })
     }
 
+    fn leave_network(&self) -> NetworkOperationFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
     fn list_networks(&self) -> NetworkOperationFuture<'_, Vec<NetworkSummary>> {
         Box::pin(async { Ok(Vec::new()) })
     }

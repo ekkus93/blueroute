@@ -24,6 +24,7 @@ const MAX_ADDRESS_CONFLICT_RETRIES: usize = 16;
 
 pub trait NetworkOperations: Send + Sync {
     fn create_network(&self, name: DisplayName) -> NetworkOperationFuture<'_, NetworkId>;
+    fn leave_network(&self) -> NetworkOperationFuture<'_, ()>;
     fn list_networks(&self) -> NetworkOperationFuture<'_, Vec<NetworkSummary>>;
     fn start_discovery(&self) -> NetworkOperationFuture<'_, ()>;
     fn stop_discovery(&self) -> NetworkOperationFuture<'_, ()>;
@@ -215,7 +216,12 @@ impl StarHostRuntime for LinuxStarHostRuntime {
             let active = {
                 let slot = self.active.lock().map_err(lock_error)?;
                 match slot.as_ref() {
-                    None => return Ok(()),
+                    None => {
+                        return Err(CoreError::new(
+                            ErrorKind::InvalidState,
+                            "cannot confirm ownership of the persisted BlueRoute host runtime",
+                        ));
+                    }
                     Some(active) if active.network != network => {
                         return Err(CoreError::new(
                             ErrorKind::InvalidState,
@@ -389,6 +395,59 @@ where
 {
     fn create_network(&self, name: DisplayName) -> NetworkOperationFuture<'_, NetworkId> {
         self.create_network_inner(name)
+    }
+
+    fn leave_network(&self) -> NetworkOperationFuture<'_, ()> {
+        Box::pin(async move {
+            let _transition = TransitionGuard::claim(&self.creating)?;
+            let mut registry = self.store.load()?;
+            let Some(network) = current_network(&registry)? else {
+                return Ok(());
+            };
+            if registry.network(&network).is_none() {
+                return Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "active BlueRoute membership is missing from durable state",
+                ));
+            }
+            let bridge = bridge_name(network)?;
+            let address = local_star_address(network, &self.config)?;
+
+            self.runtime
+                .stop_host(network, bridge.clone(), address.clone())
+                .await?;
+
+            let membership = registry.network_mut(&network).ok_or_else(|| {
+                CoreError::new(
+                    ErrorKind::InvalidState,
+                    "BlueRoute membership changed during leave",
+                )
+            })?;
+            membership.state = membership
+                .state
+                .transition(MembershipState::Leaving)?
+                .transition(MembershipState::NotMember)?;
+            for peer in membership
+                .peers()
+                .map(|peer| peer.node_id)
+                .collect::<Vec<_>>()
+            {
+                membership.set_peer_member(peer, false);
+            }
+            if let Err(persist_error) = self.store.save(&registry) {
+                return match self.runtime.start_host(network, bridge, address).await {
+                    Ok(()) => Err(persist_error),
+                    Err(rollback_error) => Err(CoreError::with_diagnostic(
+                        ErrorKind::PersistenceError,
+                        persist_error.message(),
+                        format!(
+                            "durable leave failed and host runtime restoration also failed: {rollback_error}"
+                        ),
+                    )),
+                };
+            }
+            Ok(())
+        })
     }
 
     fn list_networks(&self) -> NetworkOperationFuture<'_, Vec<NetworkSummary>> {
@@ -745,7 +804,9 @@ mod tests {
     struct FakeRuntimeState {
         starts: AtomicUsize,
         stops: AtomicUsize,
+        active: AtomicBool,
         fail_start: AtomicBool,
+        fail_stop: AtomicBool,
         address_conflicts_remaining: AtomicUsize,
     }
 
@@ -785,6 +846,7 @@ mod tests {
                 if self.state.fail_start.load(Ordering::SeqCst) {
                     Err(CoreError::new(ErrorKind::PanFailure, "fake NAP failure"))
                 } else {
+                    self.state.active.store(true, Ordering::SeqCst);
                     Ok(())
                 }
             })
@@ -798,6 +860,16 @@ mod tests {
         ) -> NetworkOperationFuture<'_, ()> {
             Box::pin(async move {
                 self.state.stops.fetch_add(1, Ordering::SeqCst);
+                if !self.state.active.load(Ordering::SeqCst) {
+                    return Err(CoreError::new(
+                        ErrorKind::InvalidState,
+                        "fake host runtime is not active",
+                    ));
+                }
+                if self.state.fail_stop.load(Ordering::SeqCst) {
+                    return Err(CoreError::new(ErrorKind::PanFailure, "fake stop failure"));
+                }
+                self.state.active.store(false, Ordering::SeqCst);
                 Ok(())
             })
         }
@@ -892,6 +964,109 @@ mod tests {
             assert_eq!(networks[0].name.as_str(), "Workshop");
             assert_eq!(networks[0].member_count, 1);
 
+            fs::remove_dir_all(root).unwrap();
+        });
+    }
+
+    #[test]
+    fn leave_stops_owned_host_clears_membership_and_retains_peer_trust() {
+        futures_lite::future::block_on(async {
+            let (root, store) = temp_store("leave");
+            let network = NetworkId::from_bytes([0x31; 16]);
+            let peer = blueroute_core::NodeId::from_bytes([0x32; 16]);
+            let runtime = FakeRuntime::default();
+            let operations = SingleStarNetworkOperations::with_runtime_and_generator(
+                store,
+                DaemonConfig::default(),
+                nap_capabilities(Some(true)),
+                runtime.clone(),
+                SequenceGenerator::new([network]),
+            );
+            operations
+                .create_network(DisplayName::new("Leave me").unwrap())
+                .await
+                .unwrap();
+            let mut registry = operations.store.load().unwrap();
+            let membership = registry.network_mut(&network).unwrap();
+            membership.trust_peer(peer);
+            membership.set_peer_member(peer, true);
+            operations.store.save(&registry).unwrap();
+
+            operations.leave_network().await.unwrap();
+            operations.leave_network().await.unwrap();
+
+            let restored = operations.store.load().unwrap();
+            let membership = restored.network(&network).unwrap();
+            assert_eq!(membership.state, MembershipState::NotMember);
+            assert!(membership.is_peer_trusted(&peer));
+            assert!(!membership.is_peer_member(&peer));
+            assert_eq!(current_network(&restored).unwrap(), None);
+            assert_eq!(runtime.state.stops.load(Ordering::SeqCst), 1);
+            assert!(!runtime.state.active.load(Ordering::SeqCst));
+            fs::remove_dir_all(root).unwrap();
+        });
+    }
+
+    #[test]
+    fn leave_refuses_to_clear_membership_when_runtime_is_not_owned() {
+        futures_lite::future::block_on(async {
+            let (root, store) = temp_store("leave-not-owned");
+            let network = NetworkId::from_bytes([0x41; 16]);
+            let runtime = FakeRuntime::default();
+            let mut registry = MembershipRegistry::default();
+            let mut membership =
+                NetworkMembership::new(network, DisplayName::new("Retained").unwrap());
+            membership.state = MembershipState::Joining
+                .transition(MembershipState::Member)
+                .unwrap();
+            registry.remember_network(membership);
+            store.save(&registry).unwrap();
+            let operations = SingleStarNetworkOperations::with_runtime_and_generator(
+                store,
+                DaemonConfig::default(),
+                nap_capabilities(Some(true)),
+                runtime,
+                SequenceGenerator::new([]),
+            );
+
+            let error = operations.leave_network().await.unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::InvalidState);
+            assert_eq!(
+                current_network(&operations.store.load().unwrap()).unwrap(),
+                Some(network)
+            );
+            fs::remove_dir_all(root).unwrap();
+        });
+    }
+
+    #[test]
+    fn failed_host_cleanup_keeps_membership_for_retry() {
+        futures_lite::future::block_on(async {
+            let (root, store) = temp_store("leave-cleanup-failure");
+            let network = NetworkId::from_bytes([0x51; 16]);
+            let runtime = FakeRuntime::default();
+            let operations = SingleStarNetworkOperations::with_runtime_and_generator(
+                store,
+                DaemonConfig::default(),
+                nap_capabilities(Some(true)),
+                runtime.clone(),
+                SequenceGenerator::new([network]),
+            );
+            operations
+                .create_network(DisplayName::new("Retry leave").unwrap())
+                .await
+                .unwrap();
+            runtime.state.fail_stop.store(true, Ordering::SeqCst);
+
+            assert_eq!(
+                operations.leave_network().await.unwrap_err().kind(),
+                ErrorKind::PanFailure
+            );
+            assert_eq!(
+                current_network(&operations.store.load().unwrap()).unwrap(),
+                Some(network)
+            );
+            assert!(runtime.state.active.load(Ordering::SeqCst));
             fs::remove_dir_all(root).unwrap();
         });
     }

@@ -57,6 +57,7 @@ enum DiagnosticsCommand {
 enum NetworkCommand {
     List,
     Create { name: String },
+    Leave,
 }
 #[derive(Debug, Subcommand)]
 enum NodeCommand {
@@ -87,6 +88,7 @@ enum Operation {
     TrustPeer { node: NodeId, json: bool },
     ForgetPeer { node: NodeId, json: bool },
     CreateNetwork { name: DisplayName, json: bool },
+    LeaveNetwork { json: bool },
     StartDiscovery { json: bool },
     StopDiscovery { json: bool },
 }
@@ -137,6 +139,9 @@ fn parse(args: &[String]) -> Result<Operation, String> {
                 json,
             }
         }
+        Some(CliCommand::Network {
+            command: NetworkCommand::Leave,
+        }) => Operation::LeaveNetwork { json },
         Some(CliCommand::Node {
             command: NodeCommand::List,
         }) => Operation::NodeList { json },
@@ -403,6 +408,14 @@ fn run(args: &[String]) -> i32 {
                     _ => Err("daemon returned an unexpected network-create response".into()),
                 })
         }
+        Operation::LeaveNetwork { json } => {
+            futures_lite::future::block_on(client.request(&Command::LeaveNetwork))
+                .map_err(CliFailure::from)
+                .and_then(|response| match response {
+                    Response::Ack => Ok(mutation_ack(json, "Left BlueRoute network")),
+                    _ => Err("daemon returned an unexpected network-leave response".into()),
+                })
+        }
         Operation::StartDiscovery { json } => {
             futures_lite::future::block_on(client.request(&Command::StartDiscovery))
                 .map_err(CliFailure::from)
@@ -464,6 +477,10 @@ mod tests {
         assert_eq!(
             parse(&args(&["network", "list", "--json"])),
             Ok(Operation::NetworkList { json: true })
+        );
+        assert_eq!(
+            parse(&args(&["--json", "network", "leave"])),
+            Ok(Operation::LeaveNetwork { json: true })
         );
         assert_eq!(
             parse(&args(&["diagnostics", "show", "--json"])),
