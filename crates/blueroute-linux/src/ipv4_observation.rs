@@ -8,7 +8,10 @@ use zbus::names::BusName;
 use zbus::zvariant::{OwnedObjectPath, OwnedValue};
 use zbus::{Connection, Proxy};
 
-use crate::{BackendFuture, IpNetworkObservationBackend, NetworkManagerBackend};
+use crate::{
+    ActiveIpv4Prefix, BackendFuture, IpNetworkObservationBackend, NetworkInterfaceHandle,
+    NetworkManagerBackend,
+};
 
 const NM_SERVICE: &str = "org.freedesktop.NetworkManager";
 const NM_PATH: &str = "/org/freedesktop/NetworkManager";
@@ -18,11 +21,24 @@ const IP4_CONFIG_INTERFACE: &str = "org.freedesktop.NetworkManager.IP4Config";
 
 impl IpNetworkObservationBackend for NetworkManagerBackend {
     fn active_ipv4_prefixes(&self) -> BackendFuture<'_, Vec<IpPrefix>> {
-        Box::pin(async { active_ipv4_prefixes().await })
+        Box::pin(async {
+            let mut prefixes = active_ipv4_prefixes_with_interfaces()
+                .await?
+                .into_iter()
+                .map(|observed| observed.prefix)
+                .collect::<Vec<_>>();
+            prefixes.sort();
+            prefixes.dedup();
+            Ok(prefixes)
+        })
+    }
+
+    fn active_ipv4_prefixes_with_interfaces(&self) -> BackendFuture<'_, Vec<ActiveIpv4Prefix>> {
+        Box::pin(async { active_ipv4_prefixes_with_interfaces().await })
     }
 }
 
-async fn active_ipv4_prefixes() -> Result<Vec<IpPrefix>, CoreError> {
+async fn active_ipv4_prefixes_with_interfaces() -> Result<Vec<ActiveIpv4Prefix>, CoreError> {
     let connection = Connection::system().await.map_err(|error| {
         network_error(
             ErrorKind::NetworkBackendUnavailable,
@@ -59,6 +75,14 @@ async fn active_ipv4_prefixes() -> Result<Vec<IpPrefix>, CoreError> {
                     error,
                 )
             })?;
+        let interface_name: String = device.get_property("Interface").await.map_err(|error| {
+            network_error(
+                ErrorKind::NetworkBackendUnavailable,
+                "failed to read a NetworkManager device interface name",
+                error,
+            )
+        })?;
+        let interface = NetworkInterfaceHandle::new(interface_name).ok();
         let config_path: OwnedObjectPath =
             device.get_property("Ip4Config").await.map_err(|error| {
                 network_error(
@@ -94,11 +118,10 @@ async fn active_ipv4_prefixes() -> Result<Vec<IpPrefix>, CoreError> {
                 )
             })?;
         for entry in addresses {
-            prefixes.push(observed_ipv4_prefix(
-                &entry,
-                "address",
-                "active IPv4 address",
-            )?);
+            prefixes.push(ActiveIpv4Prefix {
+                interface: interface.clone(),
+                prefix: observed_ipv4_prefix(&entry, "address", "active IPv4 address")?,
+            });
         }
 
         let routes: Vec<HashMap<String, OwnedValue>> =
@@ -110,10 +133,17 @@ async fn active_ipv4_prefixes() -> Result<Vec<IpPrefix>, CoreError> {
                 )
             })?;
         for entry in routes {
-            prefixes.push(observed_ipv4_prefix(&entry, "dest", "active IPv4 route")?);
+            prefixes.push(ActiveIpv4Prefix {
+                interface: interface.clone(),
+                prefix: observed_ipv4_prefix(&entry, "dest", "active IPv4 route")?,
+            });
         }
     }
-    prefixes.sort();
+    prefixes.sort_by(|left, right| {
+        left.interface
+            .cmp(&right.interface)
+            .then_with(|| left.prefix.cmp(&right.prefix))
+    });
     prefixes.dedup();
     Ok(prefixes)
 }

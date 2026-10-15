@@ -268,6 +268,29 @@ pub struct LinuxRoute {
 /// only BlueRoute-owned state for safe reconciliation and cleanup.
 pub trait IpNetworkObservationBackend: Send + Sync {
     fn active_ipv4_prefixes(&self) -> BackendFuture<'_, Vec<IpPrefix>>;
+
+    /// Active prefixes with interface provenance. Older/test backends may use
+    /// the conservative default, which marks provenance unknown so callers
+    /// cannot accidentally ignore a collision during ownership reconciliation.
+    fn active_ipv4_prefixes_with_interfaces(&self) -> BackendFuture<'_, Vec<ActiveIpv4Prefix>> {
+        Box::pin(async move {
+            self.active_ipv4_prefixes().await.map(|prefixes| {
+                prefixes
+                    .into_iter()
+                    .map(|prefix| ActiveIpv4Prefix {
+                        interface: None,
+                        prefix,
+                    })
+                    .collect()
+            })
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ActiveIpv4Prefix {
+    pub interface: Option<NetworkInterfaceHandle>,
+    pub prefix: IpPrefix,
 }
 
 /// Linux IP/network configuration boundary. It is intentionally not NetworkManager-specific.

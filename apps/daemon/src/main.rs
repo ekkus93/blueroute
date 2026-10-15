@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use blueroute_core::{DaemonConfig, HealthLevel};
 use blueroute_daemon::{
-    ControlTlsIdentityStore, DaemonService, DurablePeerTrustOperations, PeerPinStore,
-    SingleStarNetworkOperations, TransactionalJoinNetworkOperations, current_network,
+    ControlTlsIdentityStore, DaemonService, DurablePeerTrustOperations, NetworkOperations,
+    PeerPinStore, SingleStarNetworkOperations, TransactionalJoinNetworkOperations, current_network,
 };
 use blueroute_linux::{
     NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
@@ -49,7 +49,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
         SystemSupportLevel::Unsupported => HealthLevel::Error,
     };
     let capabilities = capability_report.runtime.node;
-    let status = DaemonStatus {
+    let mut status = DaemonStatus {
         api_version: ApiVersion::CURRENT,
         local_node: Some(local_node),
         current_network,
@@ -77,6 +77,20 @@ async fn run() -> Result<(), Box<dyn Error>> {
         config,
         capabilities,
     ));
+    if let Err(error) = network_operations.reconcile_on_startup().await {
+        if status.health == HealthLevel::Healthy {
+            status.health = HealthLevel::Degraded;
+        }
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "component": "daemon_runtime",
+                "event": "startup_reconciliation",
+                "outcome": "failed",
+                "failure_class": format!("{:?}", error.kind()),
+            })
+        );
+    }
     let system_diagnostics = SystemDiagnosticMetadata {
         daemon_version: env!("CARGO_PKG_VERSION").to_owned(),
         platform: "Linux".to_owned(),

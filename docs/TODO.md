@@ -83,6 +83,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P6-005 | `[x]` | **COMPLETE** in `master` at `c2db781`. Deterministic RFC1918 subnet, live conflict detection, NAP/PANU addresses, cleanup and two real NetworkManager apply/remove cycles; see `docs/P6-005-HARDWARE-EVIDENCE-2026-09-02.md`. |
 | P6-006 | `[-]` | **SOFTWARE COMPLETE / HARDWARE DEFERRED:** Existing PR #41 acceptance tooling (host/client probes, kernel-address helper, standard socket transfer tests and runbook) was reconciled directly onto `master` at `eca4a3bed8d29d484f8ac35b46601580fbe3cea6` ([CI 38688388357](https://github.com/ekkus93/blueroute/actions/runs/38688388357) passed). Mock TCP/UDP tests passed [CI 38689429987](https://github.com/ekkus93/blueroute/actions/runs/38689429987), localhost socket tests [CI 38689620724](https://github.com/ekkus93/blueroute/actions/runs/38689620724), and adversarial UDP source-isolation checks [CI 38690957388](https://github.com/ekkus93/blueroute/actions/runs/38690957388). [PR #41](https://github.com/ekkus93/blueroute/pull/41) remains open but stale and conflicting; its software changes are on master, with later fixes not present on the PR branch. Physical ping/SSH/TCP/UDP/DNS/cleanup and Wi-Fi isolation remain deferred; production JoinNetwork stays fail-closed. |
 | P6-008 | `[-]` | **SOFTWARE PARTIAL:** `blueroute network leave` tears down the actively owned local-host NAP/advertisement/bridge/address, clears local/peer member flags only after cleanup, and retains trust. Unknown runtime ownership after restart fails closed pending P6-009; joined-client PANU/session leave awaits P6-004. |
+| P6-009 | `[-]` | **SOFTWARE PARTIAL:** daemon startup reloads durable local-host membership, re-observes owned NetworkManager addresses and interface-scoped active prefixes, and reasserts the host runtime idempotently. Unknown/foreign prefix conflicts still block restore; joiner roles and live service-restart handling remain open. |
 | P7-001 | `[x]` | **SOFTWARE COMPLETE:** transport/authentication ADR selects control TCP-over-PAN and explicitly pinned mutual TLS 1.3; commit `84f05a6` implements foundational TLS helpers. Live runtime integration and enrollment UX remain P7-003/004 prerequisites before production join. |
 | P7-002 | `[x]` | **SOFTWARE COMPLETE**: strict bounded frame codec/replay tracker; [CI 38397384422](https://github.com/ekkus93/blueroute/actions/runs/38397384422) passed at `63e8cf7`. It does not perform peer authentication. |
 | P7-003 | `[-]` | **IN PROGRESS**: typed validated claims, fail-closed key pins, owner-only enrollment records and durable approval checks are implemented. Commit `84f05a6` adds actual TLS certificate/key verification, TLS 1.3 mutual authentication, exporter-bound Hello/HelloAck and pin-gated stream helpers. Commit `f88e1f3` adds an unauthenticated candidate-certificate display/exchange primitive that requires a separately confirmed matching fingerprint before it can become a TLS trust input. The user enrollment UX/ceremony and integration with the live daemon transport remain open; no production join is enabled. |
@@ -826,9 +827,13 @@ This is the first complete product slice.
 
 ## P6-009 — Implement daemon restart reconciliation
 
-- [ ] restart with PAN links present.
-- [ ] re-observe system state.
-- [ ] reconcile instead of duplicating.
+- [x] reload durable local-host membership on daemon startup and attempt idempotent NAP, advertisement, bridge and address restoration.
+- [x] re-observe NetworkManager-owned addresses and active IPv4 prefixes with interface provenance; ignore only the exact persisted BlueRoute address on its owned interface.
+- [x] keep durable membership intact and report degraded health if restoration fails, so a later daemon restart can retry.
+- [ ] restore a joined-client PANU/control session (depends on production P6-004 and durable host/client role).
+- [ ] live acceptance with pre-existing PAN links and recovery after radio/service restart.
+
+**Software partial (2026-10-15):** Startup reconciliation is implemented for locally hosted networks. It does not infer a host/client role from Bluetooth addresses or untrusted observations; current JoinNetwork remains fail-closed. Service restarts while the daemon stays running and physical PAN recovery remain open.
 
 **Acceptance**
 
@@ -1460,11 +1465,13 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P13-001 — Central desired-vs-observed reconciliation loop
 
-- [ ] observe BlueZ.
-- [ ] observe network backend.
-- [ ] observe interfaces/routes.
-- [ ] compare desired state.
-- [ ] bounded corrective actions.
+- [x] startup reconciliation re-enumerates powered BlueZ adapters before restoring hosted NAP state.
+- [x] startup reconciliation re-queries NetworkManager devices, owned addresses and active interface-scoped IPv4 prefixes.
+- [x] compare durable local-host membership with observed backend state before restoring.
+- [x] bound startup corrective work to the deterministic host bridge/address/NAP/advertisement plan and preserve rollback behavior.
+- [ ] keep one long-running desired-vs-observed loop for BlueZ, NetworkManager, interface/address/route changes while the daemon stays up.
+
+**Software partial (2026-10-15):** P6-009 adds an ownership-aware startup reconciliation pass with deterministic re-observation and fail-closed collision handling. This is not yet the central continuous loop; service-owner change events, route reconciliation and live adapter reset handling remain open.
 
 **Acceptance**
 

@@ -11,7 +11,7 @@ use blueroute_core::{
     MembershipState, NetworkId, NetworkMembership, NodeCapabilities, ensure_ipv4_segment_available,
 };
 use blueroute_linux::{
-    BluetoothBackend, BluezBackend, InterfaceAddress, IpNetworkBackend,
+    ActiveIpv4Prefix, BluetoothBackend, BluezBackend, InterfaceAddress, IpNetworkBackend,
     IpNetworkObservationBackend, NetworkAdvertisement, NetworkInterfaceHandle,
     NetworkManagerBackend, NetworkMembershipStore, NetworkStateBackend, PanBackend,
 };
@@ -25,6 +25,9 @@ const MAX_ADDRESS_CONFLICT_RETRIES: usize = 16;
 pub trait NetworkOperations: Send + Sync {
     fn create_network(&self, name: DisplayName) -> NetworkOperationFuture<'_, NetworkId>;
     fn leave_network(&self) -> NetworkOperationFuture<'_, ()>;
+    fn reconcile_on_startup(&self) -> NetworkOperationFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
     fn list_networks(&self) -> NetworkOperationFuture<'_, Vec<NetworkSummary>>;
     fn start_discovery(&self) -> NetworkOperationFuture<'_, ()>;
     fn stop_discovery(&self) -> NetworkOperationFuture<'_, ()>;
@@ -116,8 +119,18 @@ impl StarHostRuntime for LinuxStarHostRuntime {
 
             let bluez = BluezBackend::connect_system().await?;
             let network_backend = NetworkManagerBackend::connect_system().await?;
-            let active_prefixes = network_backend.active_ipv4_prefixes().await?;
-            ensure_ipv4_segment_available(address.prefix, active_prefixes)?;
+            let active_prefixes = network_backend
+                .active_ipv4_prefixes_with_interfaces()
+                .await?;
+            let owned_addresses = network_backend.addresses().await?;
+            let unowned_prefixes = active_prefix_conflicts_after_restart(
+                network,
+                &bridge,
+                &address,
+                &owned_addresses,
+                &active_prefixes,
+            );
+            ensure_ipv4_segment_available(address.prefix, unowned_prefixes)?;
             let adapter = select_powered_adapter(&bluez).await?;
 
             network_backend
@@ -450,6 +463,27 @@ where
         })
     }
 
+    fn reconcile_on_startup(&self) -> NetworkOperationFuture<'_, ()> {
+        Box::pin(async move {
+            let _transition = TransitionGuard::claim(&self.creating)?;
+            let registry = self.store.load()?;
+            let Some(network) = current_network(&registry)? else {
+                return Ok(());
+            };
+            // Production JoinNetwork remains fail-closed, so a persisted local
+            // Member currently represents a host created by this daemon.
+            // Persisted role must be added before client join is enabled.
+            ensure_nap_capability(&self.capabilities)?;
+            self.runtime
+                .start_host(
+                    network,
+                    bridge_name(network)?,
+                    local_star_address(network, &self.config)?,
+                )
+                .await
+        })
+    }
+
     fn list_networks(&self) -> NetworkOperationFuture<'_, Vec<NetworkSummary>> {
         Box::pin(async move {
             let registry = self.store.load()?;
@@ -560,6 +594,30 @@ fn merge_discovered_networks(
         }
     }
     Ok(())
+}
+
+fn active_prefix_conflicts_after_restart(
+    network: NetworkId,
+    bridge: &NetworkInterfaceHandle,
+    address: &InterfaceAddress,
+    owned_addresses: &[InterfaceAddress],
+    active_prefixes: &[ActiveIpv4Prefix],
+) -> Vec<blueroute_core::IpPrefix> {
+    let exact_owned_address_exists = owned_addresses.iter().any(|owned| {
+        owned.owner == network
+            && owned.interface == *bridge
+            && owned.interface == address.interface
+            && owned.prefix == address.prefix
+    });
+    active_prefixes
+        .iter()
+        .filter(|active| {
+            !(exact_owned_address_exists
+                && active.interface.as_ref() == Some(bridge)
+                && active.prefix == address.prefix)
+        })
+        .map(|active| active.prefix)
+        .collect()
 }
 
 fn discovered_network_summary(network: NetworkId) -> Result<NetworkSummary, CoreError> {
@@ -939,6 +997,38 @@ mod tests {
     }
 
     #[test]
+    fn restart_collision_check_ignores_only_exact_owned_interface_address() {
+        let network = NetworkId::from_bytes([0x61; 16]);
+        let bridge = NetworkInterfaceHandle::new("brb-61616161").unwrap();
+        let foreign = NetworkInterfaceHandle::new("eth0").unwrap();
+        let address = InterfaceAddress {
+            interface: bridge.clone(),
+            prefix: blueroute_core::IpPrefix::new("10.201.44.0".parse().unwrap(), 24).unwrap(),
+            owner: network,
+        };
+        let owned = vec![address.clone()];
+        let active = vec![
+            ActiveIpv4Prefix {
+                interface: Some(bridge.clone()),
+                prefix: address.prefix,
+            },
+            ActiveIpv4Prefix {
+                interface: Some(foreign),
+                prefix: blueroute_core::IpPrefix::new("10.201.44.0".parse().unwrap(), 24).unwrap(),
+            },
+        ];
+
+        assert_eq!(
+            active_prefix_conflicts_after_restart(network, &bridge, &address, &owned, &active),
+            vec![address.prefix]
+        );
+        assert_eq!(
+            active_prefix_conflicts_after_restart(network, &bridge, &address, &[], &active),
+            vec![address.prefix, address.prefix]
+        );
+    }
+
+    #[test]
     fn create_network_commits_membership_only_after_runtime_setup() {
         futures_lite::future::block_on(async {
             let (root, store) = temp_store("commit");
@@ -1031,6 +1121,76 @@ mod tests {
 
             let error = operations.leave_network().await.unwrap_err();
             assert_eq!(error.kind(), ErrorKind::InvalidState);
+            assert_eq!(
+                current_network(&operations.store.load().unwrap()).unwrap(),
+                Some(network)
+            );
+            fs::remove_dir_all(root).unwrap();
+        });
+    }
+
+    #[test]
+    fn startup_reconciliation_restores_host_from_durable_membership() {
+        futures_lite::future::block_on(async {
+            let (root, store) = temp_store("startup-reconcile");
+            let network = NetworkId::from_bytes([0x71; 16]);
+            let mut registry = MembershipRegistry::default();
+            let mut membership =
+                NetworkMembership::new(network, DisplayName::new("Restore me").unwrap());
+            membership.state = MembershipState::Joining
+                .transition(MembershipState::Member)
+                .unwrap();
+            registry.remember_network(membership);
+            store.save(&registry).unwrap();
+            let runtime = FakeRuntime::default();
+            let operations = SingleStarNetworkOperations::with_runtime_and_generator(
+                store,
+                DaemonConfig::default(),
+                nap_capabilities(Some(true)),
+                runtime.clone(),
+                SequenceGenerator::new([]),
+            );
+
+            operations.reconcile_on_startup().await.unwrap();
+
+            assert_eq!(runtime.starts(), 1);
+            assert!(runtime.state.active.load(Ordering::SeqCst));
+            assert_eq!(
+                current_network(&operations.store.load().unwrap()).unwrap(),
+                Some(network)
+            );
+            fs::remove_dir_all(root).unwrap();
+        });
+    }
+
+    #[test]
+    fn startup_reconciliation_keeps_membership_when_runtime_restore_fails() {
+        futures_lite::future::block_on(async {
+            let (root, store) = temp_store("startup-reconcile-failure");
+            let network = NetworkId::from_bytes([0x72; 16]);
+            let mut registry = MembershipRegistry::default();
+            let mut membership =
+                NetworkMembership::new(network, DisplayName::new("Retry restore").unwrap());
+            membership.state = MembershipState::Joining
+                .transition(MembershipState::Member)
+                .unwrap();
+            registry.remember_network(membership);
+            store.save(&registry).unwrap();
+            let runtime = FakeRuntime::default();
+            runtime.state.fail_start.store(true, Ordering::SeqCst);
+            let operations = SingleStarNetworkOperations::with_runtime_and_generator(
+                store,
+                DaemonConfig::default(),
+                nap_capabilities(Some(true)),
+                runtime.clone(),
+                SequenceGenerator::new([]),
+            );
+
+            assert_eq!(
+                operations.reconcile_on_startup().await.unwrap_err().kind(),
+                ErrorKind::PanFailure
+            );
+            assert_eq!(runtime.starts(), 1);
             assert_eq!(
                 current_network(&operations.store.load().unwrap()).unwrap(),
                 Some(network)
