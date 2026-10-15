@@ -26,6 +26,15 @@ enum Operation {
     StopDiscovery { json: bool },
 }
 
+// Reject the all-zero sentinel before sending node-directed mutations to D-Bus.
+fn parse_node_id(value: &str) -> Result<NodeId, &'static str> {
+    let node: NodeId = value.parse().map_err(|_| "invalid full node NodeId")?;
+    if node == NodeId::from_bytes([0; 16]) {
+        return Err("zero NodeId is not a valid peer identity");
+    }
+    Ok(node)
+}
+
 fn parse(args: &[String]) -> Result<Operation, &'static str> {
     if args.is_empty() || args == ["--help"] || args == ["-h"] {
         return Ok(Operation::Help);
@@ -49,7 +58,7 @@ fn parse(args: &[String]) -> Result<Operation, &'static str> {
         ["network", "list"] => Ok(Operation::NetworkList { json }),
         ["node", "list"] => Ok(Operation::NodeList { json }),
         ["node", "show", node] => Ok(Operation::NodeShow {
-            node: node.parse().map_err(|_| "invalid full node NodeId")?,
+            node: parse_node_id(node)?,
             json,
         }),
         ["network", "create", name] => {
@@ -64,11 +73,11 @@ fn parse(args: &[String]) -> Result<Operation, &'static str> {
         ["discover", "start"] => Ok(Operation::StartDiscovery { json }),
         ["discover", "stop"] => Ok(Operation::StopDiscovery { json }),
         ["peer", "trust", node] => Ok(Operation::TrustPeer {
-            node: node.parse().map_err(|_| "invalid full peer NodeId")?,
+            node: parse_node_id(node)?,
             json,
         }),
         ["peer", "forget", node] => Ok(Operation::ForgetPeer {
-            node: node.parse().map_err(|_| "invalid full peer NodeId")?,
+            node: parse_node_id(node)?,
             json,
         }),
         _ => Err("unknown command or option"),
@@ -398,6 +407,14 @@ mod tests {
             parse(&args(&["--json", "peer", "forget", &id])),
             Ok(Operation::ForgetPeer { node, json: true })
         );
+        let invalid_node = NodeId::from_bytes([0; 16]).to_string();
+        for command in [
+            args(&["node", "show", &invalid_node]),
+            args(&["peer", "trust", &invalid_node]),
+            args(&["peer", "forget", &invalid_node]),
+        ] {
+            assert!(parse(&command).is_err(), "zero NodeId must fail locally");
+        }
         assert!(parse(&args(&["peer", "trust"])).is_err());
         assert!(parse(&args(&["peer", "trust", "unknown-peer"])).is_err());
         assert!(parse(&args(&["peer", "forget", &id, "extra"])).is_err());
