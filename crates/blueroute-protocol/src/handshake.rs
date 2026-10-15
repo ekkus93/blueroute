@@ -33,6 +33,12 @@ pub fn tls_control_exporter_context(
     first: NodeId,
     second: NodeId,
 ) -> Result<[u8; 48], &'static str> {
+    if network == NetworkId::from_bytes([0; 16])
+        || first == NodeId::from_bytes([0; 16])
+        || second == NodeId::from_bytes([0; 16])
+    {
+        return Err("control exporter requires nonzero network and node identities");
+    }
     if first == second {
         return Err("control exporter requires two distinct nodes");
     }
@@ -234,6 +240,14 @@ where
         local_facts,
         deadline,
     } = request;
+    if network == NetworkId::from_bytes([0; 16])
+        || local == NodeId::from_bytes([0; 16])
+        || remote == NodeId::from_bytes([0; 16])
+    {
+        return Err(HelloExchangeError::InvalidTranscript(
+            "control exchange requires nonzero network and node identities",
+        ));
+    }
     if local == remote {
         return Err(HelloExchangeError::InvalidTranscript(
             "local and remote node must differ",
@@ -392,6 +406,9 @@ mod tests {
             tls_control_exporter_context(NetworkId::from_bytes([2; 16]), a, b).unwrap()
         );
         assert!(tls_control_exporter_context(network, a, a).is_err());
+        assert!(tls_control_exporter_context(NetworkId::from_bytes([0; 16]), a, b).is_err());
+        assert!(tls_control_exporter_context(network, NodeId::from_bytes([0; 16]), b).is_err());
+        assert!(tls_control_exporter_context(network, a, NodeId::from_bytes([0; 16])).is_err());
         assert_eq!(TLS_CONTROL_EXPORTER_BYTES, 16);
     }
 
@@ -615,6 +632,36 @@ mod tests {
         );
         assert!(matches!(result, Err(HelloExchangeError::Transport(_))));
         assert!(stream.outbound.is_empty());
+    }
+
+
+    #[test]
+    fn zero_identity_handshake_preflight_never_emits_unauthenticated_bytes() {
+        let frames = exchange();
+        for case in 0..3 {
+            let mut stream = scripted_transcript(frames[1].clone(), frames[3].clone());
+            let mut request = HelloExchangeRequest {
+                network: NetworkId::from_bytes([1; 16]),
+                local: NodeId::from_bytes([4; 16]),
+                remote: NodeId::from_bytes([5; 16]),
+                exported_session_id: [3; 16],
+                local_challenge: [10; 16],
+                local_facts: facts(),
+                deadline: Instant::now() + std::time::Duration::from_secs(2),
+            };
+            match case {
+                0 => request.network = NetworkId::from_bytes([0; 16]),
+                1 => request.local = NodeId::from_bytes([0; 16]),
+                _ => request.remote = NodeId::from_bytes([0; 16]),
+            }
+            assert!(matches!(
+                exchange_hello_claims_with_deadline(&mut stream, request),
+                Err(HelloExchangeError::InvalidTranscript(_))
+            ));
+            assert!(stream.outbound.is_empty(), "unexpected output for case {case}");
+            assert_eq!(stream.write_timeouts, 0);
+            assert_eq!(stream.read_timeouts, 0);
+        }
     }
 
     #[test]
