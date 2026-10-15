@@ -44,6 +44,8 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 | P17-005, P17-006 | Final tested-support matrix, multi-controller evidence and v1 physical signoff | Draft docs and software-ready release candidate only; not final release. |
 
 ## Software-only control-session evidence (2026-10-14)
+- **P7-003 zero identity key-pin rejection (software only):** Enrolling or authorizing all-zero network/peer IDs now fails before changing in-memory pins. Malformed owner-only key-pin records containing zero IDs are rejected at daemon load; valid records still round-trip. [Exact-head CI 38692365152](https://github.com/ekkus93/blueroute/actions/runs/38692365152) passed at `efd0708bf5c14e8fff92d57cb525a94c8186f8b8`. This is not cryptographic peer verification or physical PAN acceptance.
+
 
 - **P7-004 post-Hello zero-identity guard (software only):** Inbound and outbound session constructors reject all-zero NetworkId/NodeId identities. Negative tests and exact-head CI passed at `fa94078699462f10a26d71f02291bb540475d37d` (run 38691742382). Mutual TLS, independent enrollment, production join and physical PAN acceptance remain open.
 
