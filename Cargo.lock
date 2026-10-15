@@ -315,6 +315,7 @@ dependencies = [
  "getrandom 0.4.3",
  "rcgen",
  "rustls",
+ "serde_json",
  "sha2",
  "x509-parser",
  "zbus",

@@ -13,6 +13,7 @@ mod pinned_ingress;
 mod single_star;
 
 use std::fmt;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -54,6 +55,8 @@ use zbus::fdo;
 use zbus::message::Header;
 use zbus::object_server::SignalEmitter;
 use zbus::{Connection, interface};
+
+static NEXT_API_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Versioned local D-Bus interface implementation.
 #[derive(Clone)]
@@ -247,104 +250,171 @@ impl DaemonService {
         #[zbus(connection)] connection: &Connection,
         #[zbus(header)] header: Header<'_>,
     ) -> fdo::Result<String> {
-        let command = decode_command(payload)
-            .map_err(|_| fdo::Error::InvalidArgs("malformed BlueRoute command payload".into()))?;
+        let request_id = NEXT_API_REQUEST_ID.fetch_add(1, Ordering::Relaxed);
+        let command = match decode_command(payload) {
+            Ok(command) => command,
+            Err(_) => {
+                eprintln!(
+                    "{}",
+                    format_api_log(
+                        request_id,
+                        "invalid_request",
+                        "rejected",
+                        Some("invalid_argument")
+                    )
+                );
+                return Err(fdo::Error::InvalidArgs(
+                    "malformed BlueRoute command payload".into(),
+                ));
+            }
+        };
+        let operation = command_operation(&command);
+        let result = async {
+            authorization::authorize_command(connection, &header, &command).await?;
+            let _mutation = matches!(
+                authorization::command_authorization(&command),
+                CommandAuthorization::PolicyKit(_)
+            )
+            .then(|| MutationGuard::claim(&self.mutation_in_progress))
+            .transpose()?;
 
-        authorization::authorize_command(connection, &header, &command).await?;
-        let _mutation = matches!(
-            authorization::command_authorization(&command),
-            CommandAuthorization::PolicyKit(_)
-        )
-        .then(|| MutationGuard::claim(&self.mutation_in_progress))
-        .transpose()?;
-
-        match command {
-            Command::GetStatus => self.status(),
-            Command::GetCapabilities => self.capabilities(),
-            Command::ListNetworks => {
-                let networks = self
-                    .network_operations()?
-                    .list_networks()
-                    .await
-                    .map_err(core_error_to_dbus)?;
-                Self::encode_response(&Response::Networks(networks))
+            match command {
+                Command::GetStatus => self.status(),
+                Command::GetCapabilities => self.capabilities(),
+                Command::ListNetworks => {
+                    let networks = self
+                        .network_operations()?
+                        .list_networks()
+                        .await
+                        .map_err(core_error_to_dbus)?;
+                    Self::encode_response(&Response::Networks(networks))
+                }
+                Command::GetDiagnostics => {
+                    let snapshot = self.diagnostics_snapshot().map_err(core_error_to_dbus)?;
+                    Self::encode_response(&Response::Diagnostics(snapshot))
+                }
+                Command::ListNodes => {
+                    let nodes: Vec<_> = self.local_node_summary()?.into_iter().collect();
+                    Self::encode_response(&Response::Nodes(nodes))
+                }
+                Command::GetNode { node } => {
+                    let local = self.local_node_summary()?;
+                    let matching = local.filter(|entry| entry.id == node);
+                    Self::encode_response(&Response::Node(matching))
+                }
+                Command::CreateNetwork { name } => {
+                    let network = self
+                        .network_operations()?
+                        .create_network(name)
+                        .await
+                        .map_err(core_error_to_dbus)?;
+                    self.update_current_network(Some(network))?;
+                    Self::encode_response(&Response::Ack)
+                }
+                Command::JoinNetwork { network } => {
+                    self.join_network_operations()?
+                        .join_network(network)
+                        .await
+                        .map_err(core_error_to_dbus)?;
+                    self.update_current_network(Some(network))?;
+                    Self::encode_response(&Response::Ack)
+                }
+                Command::LeaveNetwork => {
+                    self.network_operations()?
+                        .leave_network()
+                        .await
+                        .map_err(core_error_to_dbus)?;
+                    self.update_current_network(None)?;
+                    Self::encode_response(&Response::Ack)
+                }
+                Command::TrustPeer { node } => {
+                    self.ensure_not_local_node(node)?;
+                    self.peer_trust_operations()?
+                        .trust_peer(node)
+                        .await
+                        .map_err(core_error_to_dbus)?;
+                    Self::encode_response(&Response::Ack)
+                }
+                Command::ForgetPeer { node } => {
+                    self.ensure_not_local_node(node)?;
+                    self.peer_trust_operations()?
+                        .forget_peer(node)
+                        .await
+                        .map_err(core_error_to_dbus)?;
+                    Self::encode_response(&Response::Ack)
+                }
+                Command::StartDiscovery => {
+                    self.network_operations()?
+                        .start_discovery()
+                        .await
+                        .map_err(core_error_to_dbus)?;
+                    Self::encode_response(&Response::Ack)
+                }
+                Command::StopDiscovery => {
+                    self.network_operations()?
+                        .stop_discovery()
+                        .await
+                        .map_err(core_error_to_dbus)?;
+                    Self::encode_response(&Response::Ack)
+                }
+                _ => Err(fdo::Error::NotSupported(
+                    "command is not implemented by the current daemon".into(),
+                )),
             }
-            Command::GetDiagnostics => {
-                let snapshot = self.diagnostics_snapshot().map_err(core_error_to_dbus)?;
-                Self::encode_response(&Response::Diagnostics(snapshot))
-            }
-            Command::ListNodes => {
-                let nodes: Vec<_> = self.local_node_summary()?.into_iter().collect();
-                Self::encode_response(&Response::Nodes(nodes))
-            }
-            Command::GetNode { node } => {
-                let local = self.local_node_summary()?;
-                let matching = local.filter(|entry| entry.id == node);
-                Self::encode_response(&Response::Node(matching))
-            }
-            Command::CreateNetwork { name } => {
-                let network = self
-                    .network_operations()?
-                    .create_network(name)
-                    .await
-                    .map_err(core_error_to_dbus)?;
-                self.update_current_network(Some(network))?;
-                Self::encode_response(&Response::Ack)
-            }
-            Command::JoinNetwork { network } => {
-                self.join_network_operations()?
-                    .join_network(network)
-                    .await
-                    .map_err(core_error_to_dbus)?;
-                self.update_current_network(Some(network))?;
-                Self::encode_response(&Response::Ack)
-            }
-            Command::LeaveNetwork => {
-                self.network_operations()?
-                    .leave_network()
-                    .await
-                    .map_err(core_error_to_dbus)?;
-                self.update_current_network(None)?;
-                Self::encode_response(&Response::Ack)
-            }
-            Command::TrustPeer { node } => {
-                self.ensure_not_local_node(node)?;
-                self.peer_trust_operations()?
-                    .trust_peer(node)
-                    .await
-                    .map_err(core_error_to_dbus)?;
-                Self::encode_response(&Response::Ack)
-            }
-            Command::ForgetPeer { node } => {
-                self.ensure_not_local_node(node)?;
-                self.peer_trust_operations()?
-                    .forget_peer(node)
-                    .await
-                    .map_err(core_error_to_dbus)?;
-                Self::encode_response(&Response::Ack)
-            }
-            Command::StartDiscovery => {
-                self.network_operations()?
-                    .start_discovery()
-                    .await
-                    .map_err(core_error_to_dbus)?;
-                Self::encode_response(&Response::Ack)
-            }
-            Command::StopDiscovery => {
-                self.network_operations()?
-                    .stop_discovery()
-                    .await
-                    .map_err(core_error_to_dbus)?;
-                Self::encode_response(&Response::Ack)
-            }
-            _ => Err(fdo::Error::NotSupported(
-                "command is not implemented by the current daemon".into(),
-            )),
         }
+        .await;
+        eprintln!(
+            "{}",
+            format_api_log(
+                request_id,
+                operation,
+                if result.is_ok() {
+                    "succeeded"
+                } else {
+                    "failed"
+                },
+                result.as_ref().err().map(fdo_error_class)
+            )
+        );
+        result
     }
 
     #[zbus(signal)]
     async fn event(emitter: &SignalEmitter<'_>, payload: &str) -> zbus::Result<()>;
+}
+
+fn fdo_error_class(error: &fdo::Error) -> &'static str {
+    match error {
+        fdo::Error::AccessDenied(_) => "authorization_denied",
+        fdo::Error::InvalidArgs(_) => "invalid_argument",
+        fdo::Error::NotSupported(_) => "unsupported",
+        fdo::Error::Failed(_) => "operation_failed",
+        _ => "dbus_error",
+    }
+}
+
+fn format_api_log(
+    request_id: u64,
+    operation: &str,
+    outcome: &str,
+    failure_class: Option<&str>,
+) -> String {
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let mut record = serde_json::json!({
+        "timestamp_unix_ms": timestamp_ms,
+        "component": "daemon_api",
+        "event": "request",
+        "request_id": format!("api-{request_id:016x}"),
+        "operation": operation,
+        "outcome": outcome,
+    });
+    if let Some(failure_class) = failure_class {
+        record["failure_class"] = serde_json::Value::String(failure_class.to_owned());
+    }
+    record.to_string()
 }
 
 fn core_error_to_dbus(error: CoreError) -> fdo::Error {
@@ -464,5 +534,26 @@ mod local_node_tests {
         assert_eq!(diagnostics.api_version, ApiVersion::CURRENT);
         assert_eq!(diagnostics.health, HealthLevel::Degraded);
         assert_eq!(diagnostics.current_network, None);
+    }
+
+    #[test]
+    fn api_log_is_structured_correlatable_and_excludes_request_payloads() {
+        let record: serde_json::Value = serde_json::from_str(&format_api_log(
+            42,
+            "create_network",
+            "failed",
+            Some("operation_failed"),
+        ))
+        .unwrap();
+        assert_eq!(record["component"], "daemon_api");
+        assert_eq!(record["event"], "request");
+        assert_eq!(record["request_id"], "api-000000000000002a");
+        assert_eq!(record["operation"], "create_network");
+        assert_eq!(record["outcome"], "failed");
+        assert_eq!(record["failure_class"], "operation_failed");
+        assert!(record["timestamp_unix_ms"].as_u64().is_some());
+        let serialized = record.to_string();
+        assert!(!serialized.contains("Workshop"));
+        assert!(!serialized.contains("private-key"));
     }
 }

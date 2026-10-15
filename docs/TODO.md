@@ -1524,10 +1524,12 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P13-007 — Add structured journald logging
 
-- [ ] consistent fields.
-- [ ] safe IDs.
-- [ ] operation correlation.
-- [ ] secret redaction.
+- [x] emit one-line JSON request records with stable component/event/operation/outcome/failure-class fields; systemd captures daemon stderr in journald.
+- [x] use a process-local opaque request correlation ID and omit peer-controlled labels, addresses, payloads, credentials and key material.
+- [x] log success/failure outcomes for every decoded daemon API request, including authorization failures.
+- [x] cover malformed payload logging and ensure request payloads are absent from structured records.
+
+**Software partial (2026-10-15):** The daemon API emits structured JSON logs with opaque correlation IDs and coarse typed failure classes. It intentionally excludes user/peer payloads and secret diagnostics. Detailed error diagnostics remain in the D-Bus response and CLI; richer safe diagnostic codes and adapter lifecycle events are still needed for full acceptance.
 
 **Acceptance**
 
