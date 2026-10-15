@@ -344,5 +344,3 @@ mod error_class_tests {
         );
     }
 }
-
-

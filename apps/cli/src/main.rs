@@ -271,9 +271,7 @@ fn run(args: &[String]) -> i32 {
             futures_lite::future::block_on(client.request(&Command::ListNodes))
                 .map_err(CliFailure::from)
                 .and_then(|response| match response {
-                    Response::Nodes(nodes) => {
-                        format_nodes(&nodes, json).map_err(CliFailure::from)
-                    }
+                    Response::Nodes(nodes) => format_nodes(&nodes, json).map_err(CliFailure::from),
                     _ => Err("daemon returned an unexpected node-list response".into()),
                 })
         }
@@ -284,9 +282,7 @@ fn run(args: &[String]) -> i32 {
                     Response::Node(Some(node)) => {
                         format_node(&node, json).map_err(CliFailure::from)
                     }
-                    Response::Node(None) => {
-                        Err("the daemon has no record for that NodeId".into())
-                    }
+                    Response::Node(None) => Err("the daemon has no record for that NodeId".into()),
                     _ => Err("daemon returned an unexpected node-detail response".into()),
                 })
         }
