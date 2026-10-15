@@ -300,7 +300,10 @@ mod tests {
             Err(InboundActivityError::Deadline(DeadlineError::Expired))
         );
         assert!(timed_out.is_terminal());
-        assert_eq!(timed_out.finish_at(5_009), Err(InboundActivityError::Terminal));
+        assert_eq!(
+            timed_out.finish_at(5_009),
+            Err(InboundActivityError::Terminal)
+        );
 
         let mut post_goodbye = activity();
         post_goodbye
@@ -311,7 +314,10 @@ mod tests {
             Err(InboundActivityError::Terminal)
         );
         assert!(post_goodbye.is_terminal());
-        assert_eq!(post_goodbye.finish_at(12), Err(InboundActivityError::Terminal));
+        assert_eq!(
+            post_goodbye.finish_at(12),
+            Err(InboundActivityError::Terminal)
+        );
     }
 
     #[test]
