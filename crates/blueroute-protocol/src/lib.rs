@@ -7,6 +7,7 @@ pub mod handshake;
 pub mod peer_pin;
 pub mod session;
 pub mod session_stream;
+pub mod session_writer;
 
 use std::fmt;
 
