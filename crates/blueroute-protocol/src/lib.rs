@@ -6,6 +6,7 @@ pub mod control_stream;
 pub mod handshake;
 pub mod peer_pin;
 pub mod session;
+pub mod session_activity;
 pub mod session_stream;
 pub mod session_writer;
 
