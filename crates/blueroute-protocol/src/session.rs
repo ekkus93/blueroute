@@ -167,6 +167,14 @@ pub struct PeerSessionKey {
     pub peer: NodeId,
 }
 
+impl PeerSessionKey {
+    /// A zero logical identity is never a valid authenticated peer.
+    pub fn is_valid(self) -> bool {
+        self.network != NetworkId::from_bytes([0; 16])
+            && self.peer != NodeId::from_bytes([0; 16])
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SessionPhase {
     Active,
@@ -189,6 +197,7 @@ pub enum SessionRegistration {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SessionRegistryError {
+    InvalidPeerIdentity,
     ZeroSessionId,
     DuplicateActiveSession,
     SessionLimitReached,
@@ -197,6 +206,7 @@ pub enum SessionRegistryError {
 impl fmt::Display for SessionRegistryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidPeerIdentity => f.write_str("invalid zero control-session peer identity"),
             Self::ZeroSessionId => f.write_str("invalid zero session id"),
             Self::DuplicateActiveSession => {
                 f.write_str("a different session is already active for this peer")
@@ -240,6 +250,9 @@ impl ControlSessionRegistry {
         key: PeerSessionKey,
         session_id: [u8; 16],
     ) -> Result<SessionRegistration, SessionRegistryError> {
+        if !key.is_valid() {
+            return Err(SessionRegistryError::InvalidPeerIdentity);
+        }
         if session_id.iter().all(|byte| *byte == 0) {
             return Err(SessionRegistryError::ZeroSessionId);
         }
@@ -369,7 +382,7 @@ impl ReconnectScheduler {
         session_id: [u8; 16],
         now_ms: u64,
     ) -> Result<bool, ReconnectScheduleError> {
-        if session_id.iter().all(|byte| *byte == 0) {
+        if !key.is_valid() || session_id.iter().all(|byte| *byte == 0) {
             return Ok(false);
         }
         if let Some(existing) = self.slots.get(&key) {
@@ -532,6 +545,37 @@ mod tests {
         assert!(scheduler.cancel_if_current(key(2), [3; 16]));
         assert_eq!(scheduler.len(), 1);
         assert_eq!(scheduler.schedule_loss(key(3), [0; 16], 500), Ok(false));
+    }
+
+    #[test]
+    fn impossible_peer_identities_never_enter_session_or_reconnect_registry() {
+        let mut sessions = ControlSessionRegistry::new();
+        let mut retries = ReconnectScheduler::new();
+        let invalid_keys = [
+            PeerSessionKey {
+                network: NetworkId::from_bytes([0; 16]),
+                peer: NodeId::from_bytes([2; 16]),
+            },
+            PeerSessionKey {
+                network: NetworkId::from_bytes([1; 16]),
+                peer: NodeId::from_bytes([0; 16]),
+            },
+        ];
+        for invalid in invalid_keys {
+            assert!(!invalid.is_valid());
+            assert_eq!(
+                sessions.activate_after_authentication(invalid, [3; 16]),
+                Err(SessionRegistryError::InvalidPeerIdentity)
+            );
+            assert_eq!(retries.schedule_loss(invalid, [3; 16], 0), Ok(false));
+        }
+        assert!(sessions.is_empty());
+        assert!(retries.is_empty());
+        assert!(key(2).is_valid());
+        assert_eq!(
+            sessions.activate_after_authentication(key(2), [3; 16]),
+            Ok(SessionRegistration::New)
+        );
     }
 
     #[test]
