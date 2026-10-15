@@ -902,6 +902,9 @@ This is the first complete product slice.
 
 **P7-004 authenticated-inbound activity deadline coupling (software-only, 2026-10-14):** `crates/blueroute-protocol/src/session_activity.rs` now connects a previously validated post-Hello frame parser to its active-stage monotonic idle clock: incomplete frames, empty polls and malformed/wrong-peer control messages cannot renew liveness, while deadline expiry, clock regression, invalid scope and unexpected EOF terminate the logical session. Goodbye moves into bounded closing, with terminal EOF handling. Deterministic simulated-peer/unit regression coverage passed [exact-head CI 38678299553](https://github.com/ekkus93/blueroute/actions/runs/38678299553) at `71a8fc8b117a320ce7a956198d4aaad8254c466d`. This helper assumes an independently authenticated channel; **no mutual TLS, user-approved enrollment, real daemon socket, physical Bluetooth or production JoinNetwork is implemented by it**. P7-003/P7-004 security gates and hardware acceptance remain open.
 
+**P7-004 bounded Goodbye/EOF (software-only, 2026-10-14):** `AuthenticatedInboundActivity::finish_at` now refuses a late EOF after a verified Goodbye, and any unexpected plaintext after Goodbye irreversibly terminates the logical session. Separate regression cases distinguish clean Goodbye+EOF, early EOF, timeout expiry, and post-Goodbye violations; exact-head [CI 38679210137](https://github.com/ekkus93/blueroute/actions/runs/38679210137) passed at `bda3176aa6b25e3a479283c03ae290576b3347b7`. This is bounded simulated transport logic; **actual mutual TLS, independent key enrollment, daemon integration, authenticated join and physical Bluetooth validation are not complete**.
+
+
 **Acceptance**
 
 - Repeated PAN reconnects do not leak sessions/tasks.
