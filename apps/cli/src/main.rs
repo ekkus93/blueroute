@@ -3,7 +3,9 @@
 
 use blueroute_client::BlueRouteClient;
 use blueroute_core::{DisplayName, NodeCapabilities, NodeId};
-use blueroute_protocol::{Command, DaemonStatus, DiagnosticSnapshot, NetworkSummary, NodeSummary, Response};
+use blueroute_protocol::{
+    Command, DaemonStatus, DiagnosticSnapshot, NetworkSummary, NodeSummary, Response,
+};
 
 const HELP: &str = "Usage: blueroute [--json] status\n       blueroute [--json] capability show\n       blueroute [--json] network list\n       blueroute [--json] node list\n       blueroute [--json] node show <node-id>\n       blueroute [--json] diagnostics show\n       blueroute [--json] peer trust <node-id>\n       blueroute [--json] peer forget <node-id>\n       blueroute [--json] network create <name>\n       blueroute [--json] discover start|stop\n       blueroute --version\n       blueroute --help";
 

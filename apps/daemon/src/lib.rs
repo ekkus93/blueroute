@@ -20,8 +20,9 @@ use blueroute_core::{
     Reachability,
 };
 use blueroute_protocol::{
-    ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, DiagnosticSnapshot, Event, NodeSummary,
-    ProtocolCodecError, Response, decode_command, encode_event, encode_response,
+    ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, DiagnosticSnapshot,
+    Event, NodeSummary, ProtocolCodecError, Response, decode_command, encode_event,
+    encode_response,
 };
 pub use join_network::{
     JoinControlSession, JoinIpLease, JoinNetworkFuture, JoinNetworkOperations, JoinPanLink,
