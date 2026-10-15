@@ -12,9 +12,7 @@ use std::time::{Duration, Instant};
 
 use blueroute_core::{NetworkId, NodeCapabilities, NodeId};
 use blueroute_protocol::control::{ControlMessage, HelloFacts};
-use blueroute_protocol::handshake::{
-    HelloExchangeRequest, exchange_hello_claims_with_deadline,
-};
+use blueroute_protocol::handshake::{HelloExchangeRequest, exchange_hello_claims_with_deadline};
 use blueroute_protocol::session_stream::{SessionControlStream, SessionReadIoError};
 use blueroute_protocol::session_writer::SessionControlWriter;
 
@@ -39,12 +37,7 @@ fn facts() -> HelloFacts {
     }
 }
 
-fn hello(
-    stream: &mut TcpStream,
-    local: NodeId,
-    remote: NodeId,
-    challenge: [u8; 16],
-) {
+fn hello(stream: &mut TcpStream, local: NodeId, remote: NodeId, challenge: [u8; 16]) {
     let received = exchange_hello_claims_with_deadline(
         stream,
         HelloExchangeRequest {
@@ -68,13 +61,15 @@ fn lifecycle(mut stream: TcpStream, local: NodeId, remote: NodeId, challenge: [u
     // to exercise only post-hello session framing and replay checks.
     let mut outbound =
         SessionControlWriter::after_verified_hello(network(), local, remote, [4; 16]).unwrap();
-    let mut inbound = SessionControlStream::after_verified_hello(network(), remote, [4; 16])
-        .unwrap();
+    let mut inbound =
+        SessionControlStream::after_verified_hello(network(), remote, [4; 16]).unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
     outbound
         .write_heartbeat_with_deadline(&mut stream, deadline)
         .unwrap();
-    let received = inbound.read_one_with_deadline(&mut stream, deadline).unwrap();
+    let received = inbound
+        .read_one_with_deadline(&mut stream, deadline)
+        .unwrap();
     assert_eq!(received.sender, remote);
     assert_eq!(received.sequence, 3);
     assert!(matches!(received.message, ControlMessage::Heartbeat));
@@ -82,7 +77,9 @@ fn lifecycle(mut stream: TcpStream, local: NodeId, remote: NodeId, challenge: [u
     outbound
         .write_goodbye_with_deadline(&mut stream, deadline)
         .unwrap();
-    let received = inbound.read_one_with_deadline(&mut stream, deadline).unwrap();
+    let received = inbound
+        .read_one_with_deadline(&mut stream, deadline)
+        .unwrap();
     assert_eq!(received.sequence, 4);
     assert!(matches!(received.message, ControlMessage::Goodbye));
     assert!(outbound.is_closed());
@@ -91,7 +88,9 @@ fn lifecycle(mut stream: TcpStream, local: NodeId, remote: NodeId, challenge: [u
     // A TLS adapter must likewise close after Goodbye; test real TCP
     // half-close ordering rather than assuming goodbye implies socket EOF.
     stream.shutdown(Shutdown::Write).unwrap();
-    stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
     let mut extra = [0_u8; 1];
     assert_eq!(stream.read(&mut extra).unwrap(), 0);
     assert_eq!(inbound.finish(), Ok(()));
@@ -121,7 +120,8 @@ fn loopback_unannounced_loss_poisoned_after_valid_hello() {
             SessionControlStream::after_verified_hello(network(), alice(), [4; 16]).unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         assert!(matches!(
-            inbound.read_one_with_deadline(&mut socket, deadline)
+            inbound
+                .read_one_with_deadline(&mut socket, deadline)
                 .unwrap()
                 .message,
             ControlMessage::Heartbeat
