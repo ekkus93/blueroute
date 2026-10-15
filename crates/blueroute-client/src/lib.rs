@@ -235,9 +235,7 @@ impl ClientError {
             Self::IncompatibleVersion { .. } | Self::ReconnectTimeout { .. } => {
                 ClientErrorKind::Unavailable
             }
-            Self::Bus(zbus::Error::MethodError(name, _, _)) => {
-                remote_error_kind(name.as_str())
-            }
+            Self::Bus(zbus::Error::MethodError(name, _, _)) => remote_error_kind(name.as_str()),
             Self::Bus(zbus::Error::FDO(error)) => match error.as_ref() {
                 zbus::fdo::Error::AccessDenied(_)
                 | zbus::fdo::Error::AuthFailed(_)
@@ -252,9 +250,7 @@ impl ClientError {
                 _ => ClientErrorKind::Operational,
             },
             Self::Bus(
-                zbus::Error::InputOutput(_)
-                | zbus::Error::Address(_)
-                | zbus::Error::Handshake(_),
+                zbus::Error::InputOutput(_) | zbus::Error::Address(_) | zbus::Error::Handshake(_),
             ) => ClientErrorKind::Unavailable,
             _ => ClientErrorKind::Operational,
         }
@@ -318,10 +314,7 @@ mod error_class_tests {
             "Error: AccessDenied",
             "org.freedesktop.DBus.Error.Failed",
         ] {
-            assert_eq!(
-                remote_error_kind(suspicious),
-                ClientErrorKind::Operational
-            );
+            assert_eq!(remote_error_kind(suspicious), ClientErrorKind::Operational);
         }
     }
 
@@ -340,9 +333,9 @@ mod error_class_tests {
             ClientErrorKind::Operational
         );
         assert_eq!(
-            ClientError::Bus(zbus::Error::FDO(Box::new(
-                zbus::fdo::Error::AccessDenied("denied".into())
-            )))
+            ClientError::Bus(zbus::Error::FDO(Box::new(zbus::fdo::Error::AccessDenied(
+                "denied".into()
+            ))))
             .kind(),
             ClientErrorKind::Authorization
         );
