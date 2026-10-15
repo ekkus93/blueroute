@@ -45,6 +45,7 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 
 ## Software-only control-session evidence (2026-10-14)
 
+- **P6-006 cross-sender UDP rejection (software only):** The acceptance probe refuses to combine valid datagrams from distinct remote source IP/port endpoints; deterministic adversarial regression and localhost traffic smoke tests passed [exact-head CI 38690957388](https://github.com/ekkus93/blueroute/actions/runs/38690957388) at `5a92748d0535539d070edf398882492de9cce878`. Hardware PAN traffic and path-isolation acceptance remain deferred.
 - **P6-006 simulated and localhost socket evidence (software only):** Deterministic mocked TCP/UDP contract checks passed [CI 38689429987](https://github.com/ekkus93/blueroute/actions/runs/38689429987) at `7af480b252eb0ad4e0ef6e69c1732af5e8dcb800`; real localhost-only 127.0.0.1 TCP/UDP probe smoke tests passed [CI 38689620724](https://github.com/ekkus93/blueroute/actions/runs/38689620724) at `dfcdcc2205b1bfd8d50d6a46b378a457e4b13816`. Physical PAN ping/SSH/TCP/UDP/DNS observation and Wi-Fi path isolation all remain **HARDWARE DEFERRED**.
 - **P7 exporter and Hello preflight zero-ID rejection (software only):** The control exporter context refuses all-zero network/peer IDs, and the claim-only Hello exchange refuses invalid context without sending bytes. [CI 38690485129](https://github.com/ekkus93/blueroute/actions/runs/38690485129) passed at `091d94e8c796dfff85596b455e5aafa667e66f68`. Real mutually verified TLS 1.3 and independent key enrollment remain absent, production JoinNetwork remains disabled, physical acceptance remains open.
 
@@ -99,4 +100,4 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 
 For each task keep independent code/CI facts (exact SHA) and hardware facts (test rig, logs, assertions). Software qualification can finish while a required hardware acceptance stays deferred. Update both this backlog and `docs/TODO.md` after later physical runs; record failures rather than silently converting tests to passes.
 
-**Immediate next software task:** Qualify/reconcile PR #41, then build P7-001..P7-004 control sessions before completing P6-004.
+**Immediate next software task:** P6-006 software tooling from existing PR #41 is reconciled onto `master` and CI qualified (the old PR still needs separate closure when Ralph Bridge merge/close operations permit it). Implement production TLS 1.3 mutual key-possession proof, cryptographically verified peer SPKI and exporter binding, independently approved enrollment, daemon authenticated control-session runtime, then P6-004. Never remove the fail-closed production JoinNetwork preflight or treat localhost tests as Bluetooth acceptance.
