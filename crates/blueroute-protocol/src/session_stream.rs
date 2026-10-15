@@ -6,9 +6,12 @@
 //! Production JoinNetwork must remain disabled until mutual TLS 1.3, pin
 //! approval, and channel binding have been implemented by the daemon.
 
+use std::time::Instant;
+
 use blueroute_core::{NetworkId, NodeId};
 
-use crate::control::{ControlEnvelope, ControlMessage};
+use crate::control::{ControlEnvelope, ControlFrameError, ControlMessage, encode_control_frame};
+use crate::control_io::{ControlIoError, DeadlineControlRead, read_one_control_frame_with_deadline};
 use crate::control_stream::{ControlStreamDecoder, StreamDecodeError};
 
 /// Bounded parsing and context checks for frames after both Hello/HelloAck
@@ -35,6 +38,15 @@ pub enum SessionStreamError {
     AfterGoodbye,
     UnexpectedEof,
     Poisoned,
+}
+
+/// Any framing, transport or scope violation terminates this logical
+/// session. A caller must discard the separately authenticated TLS channel.
+#[derive(Debug)]
+pub enum SessionReadIoError {
+    Transport(ControlIoError),
+    Scope(SessionStreamError),
+    InternalFrame(ControlFrameError),
 }
 
 impl SessionControlStream {
@@ -108,6 +120,42 @@ impl SessionControlStream {
         Ok(frames)
     }
 
+    /// Read exactly one bounded frame with a whole-frame absolute deadline
+    /// from a caller-owned already authenticated transport. The underlying
+    /// adapter must enforce blocking-read timeouts. Any read failure is
+    /// terminal, including a truncated header/body or late completion.
+    ///
+    /// This method does not establish TLS identity, key pinning or channel
+    /// binding. Those remain mandatory prerequisites for production use.
+    pub fn read_one_with_deadline<R: DeadlineControlRead>(
+        &mut self,
+        source: &mut R,
+        deadline: Instant,
+    ) -> Result<ControlEnvelope, SessionReadIoError> {
+        if self.poisoned {
+            return Err(SessionReadIoError::Scope(SessionStreamError::Poisoned));
+        }
+        if self.closed {
+            return Err(SessionReadIoError::Scope(SessionStreamError::AfterGoodbye));
+        }
+        let envelope = read_one_control_frame_with_deadline(source, deadline).map_err(|error| {
+            self.poisoned = true;
+            SessionReadIoError::Transport(error)
+        })?;
+        let bytes = encode_control_frame(&envelope).map_err(|error| {
+            self.poisoned = true;
+            SessionReadIoError::InternalFrame(error)
+        })?;
+        let mut accepted = self.feed(&bytes).map_err(SessionReadIoError::Scope)?;
+        // The read primitive returns exactly one bounded validated frame.
+        // Treat any unexpected disagreement as terminal, not authorization.
+        if accepted.len() != 1 {
+            self.poisoned = true;
+            return Err(SessionReadIoError::Scope(SessionStreamError::Poisoned));
+        }
+        Ok(accepted.remove(0))
+    }
+
     /// EOF is graceful only after an authenticated Goodbye and at a frame
     /// boundary. A missing Goodbye is loss, not normal close; even successful
     /// EOF irrevocably consumes the parser so it cannot be reused for a
@@ -142,6 +190,9 @@ impl SessionControlStream {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{self, Cursor, ErrorKind, Read};
+    use std::time::Duration;
+
     use super::*;
     use crate::control::{CONTROL_VERSION, HelloFacts, encode_control_frame};
     use blueroute_core::NodeCapabilities;
@@ -329,6 +380,90 @@ mod tests {
 
         let mut session = stream();
         assert_eq!(session.finish(), Err(SessionStreamError::UnexpectedEof));
+        assert_eq!(session.finish(), Err(SessionStreamError::Poisoned));
+    }
+
+    struct DeadlineCursor {
+        data: Cursor<Vec<u8>>,
+        saw_deadline: bool,
+    }
+
+    impl Read for DeadlineCursor {
+        fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+            self.data.read(&mut bytes[..bytes.len().min(1)])
+        }
+    }
+
+    impl DeadlineControlRead for DeadlineCursor {
+        fn set_control_read_timeout(&mut self, _: Duration) -> io::Result<()> {
+            self.saw_deadline = true;
+            Ok(())
+        }
+    }
+
+    fn reader(bytes: Vec<u8>) -> DeadlineCursor {
+        DeadlineCursor {
+            data: Cursor::new(bytes),
+            saw_deadline: false,
+        }
+    }
+
+    #[test]
+    fn deadline_inbound_read_checks_scope_goodbye_and_refuses_reuse() {
+        let mut bytes = bytes(&heartbeat(3));
+        bytes.extend(bytes(&message(4, ControlMessage::Goodbye)));
+        let mut source = reader(bytes);
+        let mut session = stream();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        assert_eq!(
+            session.read_one_with_deadline(&mut source, deadline).unwrap(),
+            heartbeat(3)
+        );
+        assert_eq!(
+            session.read_one_with_deadline(&mut source, deadline).unwrap(),
+            message(4, ControlMessage::Goodbye)
+        );
+        assert!(source.saw_deadline);
+        assert!(matches!(
+            session.read_one_with_deadline(&mut source, deadline),
+            Err(SessionReadIoError::Scope(SessionStreamError::AfterGoodbye))
+        ));
+        assert_eq!(session.finish(), Ok(()));
+    }
+
+    #[test]
+    fn truncated_deadline_and_wrong_context_poison_the_reader() {
+        let complete = bytes(&heartbeat(3));
+        for end in [0, 1, 4, complete.len() - 1] {
+            let mut session = stream();
+            let mut source = reader(complete[..end].to_vec());
+            let deadline = Instant::now() + Duration::from_secs(2);
+            assert!(matches!(
+                session.read_one_with_deadline(&mut source, deadline),
+                Err(SessionReadIoError::Transport(ControlIoError::Io(ref error)))
+                    if error.kind() == ErrorKind::UnexpectedEof
+            ));
+            assert_eq!(session.feed(&complete), Err(SessionStreamError::Poisoned));
+        }
+
+        let mut session = stream();
+        let mut source = reader(complete.clone());
+        assert!(matches!(
+            session.read_one_with_deadline(&mut source, Instant::now()),
+            Err(SessionReadIoError::Transport(ControlIoError::Io(ref error)))
+                if error.kind() == ErrorKind::TimedOut
+        ));
+        assert_eq!(session.feed(&complete), Err(SessionStreamError::Poisoned));
+        assert!(!source.saw_deadline);
+
+        let mut wrong = heartbeat(3);
+        wrong.network = NetworkId::from_bytes([9; 16]);
+        let mut source = reader(bytes(&wrong));
+        let mut session = stream();
+        assert!(matches!(
+            session.read_one_with_deadline(&mut source, Instant::now() + Duration::from_secs(2)),
+            Err(SessionReadIoError::Scope(SessionStreamError::WrongContext))
+        ));
         assert_eq!(session.finish(), Err(SessionStreamError::Poisoned));
     }
 
