@@ -766,7 +766,7 @@ mod tests {
         let mut sessions = ControlSessionRegistry::new();
         for i in 0..MAX_CONTROL_SESSIONS {
             let peer = PeerSessionKey {
-                network: NetworkId::from_bytes([(i >> 8) as u8; 16]),
+                network: NetworkId::from_bytes([1 + (i / 64) as u8; 16]),
                 peer: NodeId::from_bytes([(i + 1) as u8; 16]),
             };
             assert_eq!(
