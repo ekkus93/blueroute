@@ -1,5 +1,6 @@
 #![doc = "BlueRoute daemon D-Bus service implementation."]
 
+mod attempt_socket;
 mod authorization;
 mod join_network;
 mod peer_pin_store;
@@ -158,6 +159,7 @@ impl DaemonService {
             .local_node
             == Some(node)
         {
+
             Err(fdo::Error::InvalidArgs(
                 "the local BlueRoute node cannot be approved as its own peer".into(),
             ))
@@ -318,6 +320,7 @@ impl DaemonService {
             }
             _ => Err(fdo::Error::NotSupported(
                 "command is not implemented by the current daemon".into(),
+
             )),
         }
     }
