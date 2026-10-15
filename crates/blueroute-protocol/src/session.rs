@@ -983,3 +983,6 @@ mod tests {
             ),
             Err(SessionRegistryError::SessionLimitReached)
         );
+        assert_eq!(sessions.len(), MAX_CONTROL_SESSIONS);
+    }
+}
