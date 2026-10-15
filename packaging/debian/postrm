@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = remove ]; then
+    deb-systemd-helper disable blueroute.service >/dev/null || true
+fi
+
+# Durable identity and membership under /var/lib/blueroute are deliberately
+# retained on remove. Debian's purge operation is the explicit data deletion.
+if [ "$1" = purge ]; then
+    rm -rf /var/lib/blueroute
+fi
+
+#DEBHELPER#
+
+exit 0

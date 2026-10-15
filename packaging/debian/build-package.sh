@@ -24,6 +24,9 @@ install -D -m 0644 packaging/dbus/org.blueroute.Service1.conf \
   "$stage_directory/usr/share/dbus-1/system.d/org.blueroute.Service1.conf"
 install -D -m 0644 packaging/polkit/org.blueroute.policy \
   "$stage_directory/usr/share/polkit-1/actions/org.blueroute.policy"
+install -D -m 0755 packaging/debian/postinst "$stage_directory/DEBIAN/postinst"
+install -D -m 0755 packaging/debian/prerm "$stage_directory/DEBIAN/prerm"
+install -D -m 0755 packaging/debian/postrm "$stage_directory/DEBIAN/postrm"
 
 mkdir -p "$stage_directory/DEBIAN"
 sed \
@@ -36,8 +39,10 @@ package_path="$output_directory/blueroute_${package_version}_${package_arch}.deb
 dpkg-deb --build --root-owner-group "$stage_directory" "$package_path"
 
 verification_directory="$(mktemp -d "$output_directory/verify.XXXXXX")"
-trap 'rm -rf "$stage_directory" "$verification_directory"' EXIT
+control_directory="$(mktemp -d "$output_directory/control.XXXXXX")"
+trap 'rm -rf "$stage_directory" "$verification_directory" "$control_directory"' EXIT
 dpkg-deb --extract "$package_path" "$verification_directory"
+dpkg-deb --control "$package_path" "$control_directory"
 
 expected_paths=(
   usr/bin/blueroute
@@ -49,6 +54,13 @@ expected_paths=(
 for relative_path in "${expected_paths[@]}"; do
   test -f "$verification_directory/$relative_path" || {
     printf 'Package is missing manifest path: /%s\n' "$relative_path" >&2
+    exit 1
+  }
+done
+
+for maintainer_script in postinst prerm postrm; do
+  test -x "$control_directory/$maintainer_script" || {
+    printf 'Package is missing executable maintainer script: %s\n' "$maintainer_script" >&2
     exit 1
   }
 done

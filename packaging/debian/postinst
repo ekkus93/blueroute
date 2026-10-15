@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = configure ]; then
+    deb-systemd-helper enable blueroute.service >/dev/null || true
+    deb-systemd-invoke start blueroute.service >/dev/null || true
+fi
+
+#DEBHELPER#
+
+exit 0

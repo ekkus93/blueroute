@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = remove ] || [ "$1" = deconfigure ]; then
+    deb-systemd-invoke stop blueroute.service >/dev/null || true
+fi
+
+#DEBHELPER#
+
+exit 0

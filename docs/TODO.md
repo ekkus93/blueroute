@@ -101,6 +101,9 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P14-002 | `[x]` | **SOFTWARE COMPLETE:** root-only system D-Bus service ownership, read-only default access, exhaustive PolicyKit mutation classification, denied dispatch tests (including network leave), and normal-user D-Bus client coverage passed under `dbus-run-session`. |
 | P15-001 | `[x]` | **MANIFEST COMPLETE:** `docs/P15-001-PACKAGE-MANIFEST.md` defines Debian binary paths, system service and policy files, runtime dependencies, retained state, and gates empty frontend shells; P15-002 package build/install qualification remains separate. |
 | P15-002 | `[-]` | **SOFTWARE BUILD COMPLETE / INSTALL ACCEPTANCE OPEN:** `packaging/debian/build-package.sh` creates a locked release `.deb`, then verifies its file list and runtime dependencies against the manifest. Debian clean-install qualification on multiple computer models remains open. |
+| P15-003 | `[-]` | **IN PROGRESS:** package `postinst` enables and starts the daemon; fresh daemon startup has no network membership to reconcile. Clean-install behavior and GUI capability detection remain open; the desktop application is still a placeholder. |
+| P15-005 | `[-]` | **POLICY IMPLEMENTED / CLEANUP ACCEPTANCE OPEN:** package removal stops/disables the service and removes package-owned files through dpkg; ordinary removal retains durable state and purge deletes it. No-active-network cleanup needs an installed-system test. |
+| P15-006 | `[x]` | **SOFTWARE COMPLETE:** `docs/P15-006-PACKAGING-BOUNDARY.md` defines Debian-specific integration and the requirements for another distribution package. |
 | P8-001 | `[x]` | **SOFTWARE COMPLETE (observation model):** `NeighborObservations` keeps expiring untrusted discovered candidate peers separate from active observed `TopologyGraph` PAN links, with bounded capacity, monotonic timestamp ordering and capability annotations; [CI 38469158021](https://github.com/ekkus93/blueroute/actions/runs/38469158021) passed at `56208e3`. Live BlueZ/P7 ingestion remains P8 integration, not evidence of RF behavior. |
 | P8-002 | `[-]` | **IN PROGRESS:** deterministic non-overlapping multi-segment private IPv4 allocation, host-prefix collision checks and owner-scoped *reservation* release passed [CI 38470193934](https://github.com/ekkus93/blueroute/actions/runs/38470193934) at `2c2c108`. A regression fix now revalidates newly observed foreign routes before reusing an existing reservation; exact-head CI 38477587852 passed at `ed628447`. Live kernel route/address ownership teardown and actual PAN segment integration remain; no physical hardware claim. |
 | P8-003 | `[-]` | **IN PROGRESS:** deterministic fail-closed multi-PAN forwarding intent requires explicitly routing-capable local node and active links in at least two distinct PAN segments; [CI 38478135480](https://github.com/ekkus93/blueroute/actions/runs/38478135480) passed at `167221e`. Actual privileged forwarding reconciliation, owner-scoped lease and kernel network namespace qualification remain. |
@@ -1684,13 +1687,15 @@ Cover:
 
 ## P15-003 — First-install service behavior
 
-- [ ] enable/start according to policy.
-- [ ] do not automatically create/share network.
+- [x] enable/start the system daemon after installation using Debian systemd helpers.
+- [x] fresh startup reconciles only persisted membership; an empty first-install state does not create/share a network.
 - [ ] GUI detects daemon and capability state.
 
 **Acceptance**
 
 - Installation alone exposes no Bluetooth network or Internet uplink.
+
+**IN PROGRESS:** package `postinst` enables and starts the service. The daemon creates its local identity and reports capabilities on startup; it does not create a network when no membership exists. Package installation itself has not been exercised on a clean Debian machine, and GUI detection awaits the functional P12 application.
 
 ## P15-004 — Upgrade test
 
@@ -1705,14 +1710,16 @@ Cover:
 
 ## P15-005 — Uninstall cleanup test
 
-- [ ] stop service.
-- [ ] remove package-created system policy.
+- [x] stop service on package removal.
+- [x] remove/disable package-owned service and policy files through dpkg and the systemd helper.
 - [ ] verify no active routes/NAT/firewall state.
-- [ ] define retained/purged user data.
+- [x] define retained/purged user data: retain `/var/lib/blueroute` on remove; delete it only on explicit purge.
 
 **Acceptance**
 
 - Uninstall leaves no active BlueRoute networking configuration.
+
+**POLICY IMPLEMENTED / ACCEPTANCE OPEN:** `prerm` stops the service and `postrm` disables it on removal. Dpkg removes installed service, D-Bus and PolicyKit files. Ordinary removal retains durable identity/membership; explicit purge deletes `/var/lib/blueroute`. An installed-system check for active owned routes and runtime networking remains.
 
 ## P15-006 — Define future distribution packaging boundary
 
