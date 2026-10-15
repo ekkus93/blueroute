@@ -100,6 +100,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P14-001 | `[x]` | **COMPLETE (threat model only):** `docs/P14-001-THREAT-MODEL.md`, [CI 38466101723](https://github.com/ekkus93/blueroute/actions/runs/38466101723); implementation safeguards and physical acceptance remain separate. |
 | P14-002 | `[x]` | **SOFTWARE COMPLETE:** root-only system D-Bus service ownership, read-only default access, exhaustive PolicyKit mutation classification, denied dispatch tests (including network leave), and normal-user D-Bus client coverage passed under `dbus-run-session`. |
 | P15-001 | `[x]` | **MANIFEST COMPLETE:** `docs/P15-001-PACKAGE-MANIFEST.md` defines Debian binary paths, system service and policy files, runtime dependencies, retained state, and gates empty frontend shells; P15-002 package build/install qualification remains separate. |
+| P15-002 | `[-]` | **SOFTWARE BUILD COMPLETE / INSTALL ACCEPTANCE OPEN:** `packaging/debian/build-package.sh` creates a locked release `.deb`, then verifies its file list and runtime dependencies against the manifest. Debian clean-install qualification on multiple computer models remains open. |
 | P8-001 | `[x]` | **SOFTWARE COMPLETE (observation model):** `NeighborObservations` keeps expiring untrusted discovered candidate peers separate from active observed `TopologyGraph` PAN links, with bounded capacity, monotonic timestamp ordering and capability annotations; [CI 38469158021](https://github.com/ekkus93/blueroute/actions/runs/38469158021) passed at `56208e3`. Live BlueZ/P7 ingestion remains P8 integration, not evidence of RF behavior. |
 | P8-002 | `[-]` | **IN PROGRESS:** deterministic non-overlapping multi-segment private IPv4 allocation, host-prefix collision checks and owner-scoped *reservation* release passed [CI 38470193934](https://github.com/ekkus93/blueroute/actions/runs/38470193934) at `2c2c108`. A regression fix now revalidates newly observed foreign routes before reusing an existing reservation; exact-head CI 38477587852 passed at `ed628447`. Live kernel route/address ownership teardown and actual PAN segment integration remain; no physical hardware claim. |
 | P8-003 | `[-]` | **IN PROGRESS:** deterministic fail-closed multi-PAN forwarding intent requires explicitly routing-capable local node and active links in at least two distinct PAN segments; [CI 38478135480](https://github.com/ekkus93/blueroute/actions/runs/38478135480) passed at `167221e`. Actual privileged forwarding reconciliation, owner-scoped lease and kernel network namespace qualification remain. |
@@ -1671,13 +1672,15 @@ Cover:
 
 ## P15-002 — Build Debian package
 
-- [ ] automated build.
-- [ ] runtime dependencies.
-- [ ] standard install locations.
+- [x] automated locked release build in `packaging/debian/build-package.sh`.
+- [x] declare and validate runtime dependencies.
+- [x] install binaries and service policy into standard Debian locations; verify exact package file list against P15-001.
 
 **Acceptance**
 
 - Package installs on clean supported Debian baseline on more than one compatible computer model when available.
+
+**SOFTWARE BUILD COMPLETE / HARDWARE DEFERRED:** `packaging/debian/build-package.sh` produced `target/debian/blueroute_0.1.0_amd64.deb` and verified the extracted file list and dependency fields. Clean Debian install and multi-model qualification remain outstanding.
 
 ## P15-003 — First-install service behavior
 
@@ -1713,9 +1716,9 @@ Cover:
 
 ## P15-006 — Define future distribution packaging boundary
 
-- [ ] identify Debian-specific packaging vs core runtime assumptions.
-- [ ] ensure package scripts do not leak into core logic.
-- [ ] document what another distribution would need to provide.
+- [x] identify Debian-specific packaging vs core runtime assumptions.
+- [x] keep package scripts under `packaging/`, outside core crates.
+- [x] document what another distribution would need to provide in `docs/P15-006-PACKAGING-BOUNDARY.md`.
 
 **Acceptance**
 

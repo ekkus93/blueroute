@@ -1,0 +1,11 @@
+Package: blueroute
+Version: @VERSION@
+Section: net
+Priority: optional
+Architecture: @ARCH@
+Maintainer: BlueRoute maintainers <ekkus93@users.noreply.github.com>
+Depends: dbus, bluez, network-manager, polkitd, systemd
+Description: Bluetooth PAN network management for Linux
+ BlueRoute creates managed IPv4 networks over compatible Bluetooth PAN
+ adapters. The daemon owns privileged networking operations; its command
+ line client runs as the invoking user.
