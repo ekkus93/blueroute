@@ -8,9 +8,7 @@
 use std::collections::BTreeMap;
 use std::net::{Shutdown, TcpStream};
 
-use blueroute_protocol::session::{
-    PeerSessionKey, ReconnectScheduleError, ReconnectScheduler,
-};
+use blueroute_protocol::session::{PeerSessionKey, ReconnectScheduleError, ReconnectScheduler};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WatchdogResult {
@@ -54,9 +52,7 @@ impl PendingHandshakeSockets {
         now_ms: u64,
         socket: TcpStream,
     ) -> Result<bool, ReconnectScheduleError> {
-        if self.sockets.contains_key(&key)
-            || !self.scheduler.take_due(key, generation, now_ms)?
-        {
+        if self.sockets.contains_key(&key) || !self.scheduler.take_due(key, generation, now_ms)? {
             return Ok(false);
         }
         self.sockets.insert(key, (generation, socket));
@@ -71,7 +67,10 @@ impl PendingHandshakeSockets {
         generation: [u8; 16],
         now_ms: u64,
     ) -> Result<WatchdogResult, ReconnectScheduleError> {
-        if !self.scheduler.take_expired_attempt(key, generation, now_ms)? {
+        if !self
+            .scheduler
+            .take_expired_attempt(key, generation, now_ms)?
+        {
             return Ok(WatchdogResult::NotExpired);
         }
         // Only begin() can start an attempt; the generation must still match.
