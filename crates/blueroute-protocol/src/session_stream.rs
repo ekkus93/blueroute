@@ -475,3 +475,10 @@ mod tests {
         assert_eq!(
             session.feed(&bytes(&heartbeat(7))).unwrap(),
             vec![heartbeat(7)]
+        );
+        assert_eq!(
+            session.feed(&bytes(&heartbeat(4))),
+            Err(SessionStreamError::Replay)
+        );
+    }
+}
