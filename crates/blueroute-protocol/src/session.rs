@@ -170,8 +170,7 @@ pub struct PeerSessionKey {
 impl PeerSessionKey {
     /// A zero logical identity is never a valid authenticated peer.
     pub fn is_valid(self) -> bool {
-        self.network != NetworkId::from_bytes([0; 16])
-            && self.peer != NodeId::from_bytes([0; 16])
+        self.network != NetworkId::from_bytes([0; 16]) && self.peer != NodeId::from_bytes([0; 16])
     }
 }
 
