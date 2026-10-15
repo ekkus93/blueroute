@@ -193,6 +193,32 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_handshake_failure_closes_socket_before_retry_and_ignores_stale_result() {
+        let mut owner = PendingHandshakeSockets::new();
+        let peer = key(7);
+        let generation = [7; 16];
+        assert!(owner.schedule_loss(peer, generation, 0).unwrap());
+        let (socket, mut remote) = pair();
+        assert!(owner.begin(peer, generation, 250, socket).unwrap());
+
+        // An out-of-generation callback must not close the live attempt.
+        assert_eq!(owner.failed(peer, [8; 16], 300).unwrap(), None);
+        assert_eq!(owner.pending_len(), 1);
+        remote.write_all(b"still open").unwrap();
+
+        // Failure must close the owned socket before making retry eligible.
+        assert_eq!(owner.failed(peer, generation, 300).unwrap(), Some(800));
+        assert_eq!(owner.pending_len(), 0);
+        assert_eq!(remote.read(&mut [0]).unwrap(), 0);
+        assert_eq!(owner.failed(peer, generation, 301).unwrap(), None);
+
+        let (early, _) = pair();
+        assert!(!owner.begin(peer, generation, 799, early).unwrap());
+        let (retry, _) = pair();
+        assert!(owner.begin(peer, generation, 800, retry).unwrap());
+    }
+
+    #[test]
     fn stale_cancel_does_not_close_another_peer_and_drop_closes_sockets() {
         let mut owner = PendingHandshakeSockets::new();
         for id in [2_u8, 3] {
