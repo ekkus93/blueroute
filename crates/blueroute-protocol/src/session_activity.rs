@@ -271,12 +271,12 @@ mod tests {
         );
         assert!(session.goodbye_seen());
         assert_eq!(session.expires_ms(), 5_010);
-        assert_eq!(
-            session.feed_verified_plaintext(&wire(peer(), 4, ControlMessage::Heartbeat), 11),
-            Err(InboundActivityError::Terminal)
-        );
         assert_eq!(session.finish_at(11), Ok(()));
         assert!(session.is_terminal());
+        assert_eq!(
+            session.feed_verified_plaintext(&wire(peer(), 4, ControlMessage::Heartbeat), 12),
+            Err(InboundActivityError::Terminal)
+        );
         assert_eq!(session.finish_at(12), Err(InboundActivityError::Terminal));
 
         let mut abrupt = activity();
