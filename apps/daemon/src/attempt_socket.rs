@@ -105,11 +105,10 @@ impl PendingHandshakeSockets {
     }
 
     /// Explicit shutdown/revocation: close the owned socket before removing
-    /// the generation, without creating another retry.
+    /// the generation, without creating another retry. A pending backoff has
+    /// no socket yet but MUST still be cancellable after peer revocation.
     pub fn cancel(&mut self, key: PeerSessionKey, generation: [u8; 16]) -> bool {
-        if !self.close_if_current(key, generation) {
-            return false;
-        }
+        self.close_if_current(key, generation);
         self.scheduler.cancel_if_current(key, generation)
     }
 
@@ -226,6 +225,36 @@ mod tests {
         assert!(!owner.begin(peer, generation, 799, early).unwrap());
         let (retry, _) = pair();
         assert!(owner.begin(peer, generation, 800, retry).unwrap());
+    }
+
+    #[test]
+    fn revocation_cancels_queued_and_backoff_retries_without_open_sockets() {
+        let mut owner = PendingHandshakeSockets::new();
+        let peer = key(8);
+        let old = [8; 16];
+        assert!(owner.schedule_loss(peer, old, 0).unwrap());
+        // No TCP socket exists until the due time. Revocation must still
+        // erase the pending retry, or a revoked peer could be dialed later.
+        assert_eq!(owner.pending_len(), 0);
+        assert!(owner.cancel(peer, old));
+        assert!(!owner.cancel(peer, old));
+        let (unused, _) = pair();
+        assert!(!owner.begin(peer, old, 250, unused).unwrap());
+
+        // The same rule applies after a failed handshake has closed its
+        // socket but left a future retry queued in the scheduler.
+        let fresh = [9; 16];
+        assert!(owner.schedule_loss(peer, fresh, 300).unwrap());
+        let (socket, mut remote) = pair();
+        assert!(owner.begin(peer, fresh, 550, socket).unwrap());
+        assert_eq!(owner.failed(peer, fresh, 600).unwrap(), Some(1_100));
+        assert_eq!(remote.read(&mut [0]).unwrap(), 0);
+        assert_eq!(owner.pending_len(), 0);
+        assert!(!owner.cancel(peer, old));
+        assert!(owner.cancel(peer, fresh));
+        let (unused, _) = pair();
+        assert!(!owner.begin(peer, fresh, 1_100, unused).unwrap());
+        assert!(owner.schedule_loss(peer, [10; 16], 1_200).unwrap());
     }
 
     #[test]
