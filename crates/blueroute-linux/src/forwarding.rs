@@ -1,6 +1,6 @@
 use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind as IoErrorKind, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use blueroute_core::{CoreError, ErrorKind};
@@ -240,6 +240,34 @@ fn write_forwarding_value(path: &Path, enabled: bool) -> Result<(), CoreError> {
 }
 
 fn read_lease(path: &Path) -> Result<Option<ForwardingLease>, CoreError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_file() => metadata,
+        Ok(_) => {
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "BlueRoute IPv4 forwarding lease is not a regular file",
+            ));
+        }
+        Err(error) if error.kind() == IoErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(io_error(
+                "failed to inspect the BlueRoute IPv4 forwarding lease",
+                path,
+                error,
+            ));
+        }
+    };
+    if metadata.permissions().mode() & 0o077 != 0 {
+        fs::set_permissions(path, fs::Permissions::from_mode(LEASE_FILE_MODE)).map_err(
+            |error| {
+                io_error(
+                    "failed to secure the BlueRoute IPv4 forwarding lease",
+                    path,
+                    error,
+                )
+            },
+        )?;
+    }
     match fs::read_to_string(path) {
         Ok(contents) => ForwardingLease::parse(&contents).map(Some),
         Err(error) if error.kind() == IoErrorKind::NotFound => Ok(None),
@@ -292,6 +320,7 @@ fn diagnostic(error: &CoreError) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::symlink;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
@@ -408,6 +437,48 @@ mod tests {
 
         let error = paths.controller().set(true).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidState);
+        assert!(!read_forwarding_value(&paths.sysctl).unwrap());
+    }
+
+    #[test]
+    fn symlink_lease_fails_closed_without_reading_target_or_changing_forwarding() {
+        let paths = TestPaths::new(false);
+        fs::create_dir_all(paths.lease.parent().unwrap()).unwrap();
+        let target = paths.root.join("outside");
+        fs::write(&target, "schema=1\nbaseline=0\n").unwrap();
+        symlink(&target, &paths.lease).unwrap();
+
+        let error = paths.controller().set(false).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidState);
+        assert!(!read_forwarding_value(&paths.sysctl).unwrap());
+        assert_eq!(
+            fs::read_to_string(target).unwrap(),
+            "schema=1\nbaseline=0\n"
+        );
+        assert!(
+            fs::symlink_metadata(&paths.lease)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+    }
+
+    #[test]
+    fn existing_forwarding_lease_permissions_are_tightened_before_use() {
+        let paths = TestPaths::new(false);
+        let controller = paths.controller();
+        controller.set(true).unwrap();
+        fs::set_permissions(&paths.lease, fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert_eq!(
+            read_lease(&paths.lease).unwrap(),
+            Some(ForwardingLease { baseline: false })
+        );
+        assert_eq!(
+            fs::metadata(&paths.lease).unwrap().permissions().mode() & 0o777,
+            LEASE_FILE_MODE
+        );
+        controller.set(false).unwrap();
         assert!(!read_forwarding_value(&paths.sysctl).unwrap());
     }
 

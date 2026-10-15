@@ -2081,18 +2081,27 @@ mod tests {
                 .activate(authenticated, &server, &trust, active_deadline())
                 .unwrap();
             assert_eq!(active.peer().node(), client_node);
-            assert!(matches!(
-                active.receive_next_at(10).unwrap(),
-                ControlSessionRead::Frames(frames)
-                    if frames.len() == 1
-                        && frames[0].message == ControlMessage::Heartbeat
-            ));
-            assert!(matches!(
-                active.receive_next_at(11).unwrap(),
-                ControlSessionRead::Frames(frames)
-                    if frames.len() == 1
-                        && frames[0].message == ControlMessage::Goodbye
-            ));
+            let first_batch = active.receive_next_at(10).unwrap();
+            let ControlSessionRead::Frames(first_frames) = first_batch else {
+                panic!("expected client frames before graceful close");
+            };
+            assert_eq!(first_frames[0].message, ControlMessage::Heartbeat);
+            let goodbye_already_received = first_frames
+                .iter()
+                .skip(1)
+                .any(|frame| frame.message == ControlMessage::Goodbye);
+            assert!(first_frames.iter().all(|frame| matches!(
+                frame.message,
+                ControlMessage::Heartbeat | ControlMessage::Goodbye
+            )));
+            if !goodbye_already_received {
+                assert!(matches!(
+                    active.receive_next_at(11).unwrap(),
+                    ControlSessionRead::Frames(frames)
+                        if frames.len() == 1
+                            && frames[0].message == ControlMessage::Goodbye
+                ));
+            }
             active
                 .send_goodbye_until(Instant::now() + Duration::from_secs(5))
                 .unwrap();

@@ -1609,8 +1609,8 @@ Cover:
 
 ## P14-005 — Verify shell-free privileged path
 
-- [ ] audit production code.
-- [ ] isolate/remove development shell wrappers.
+- [x] audit production code; document the sole fixed-argument `bluetoothd --version` probe in `docs/P14-005-SHELL-FREE-AUDIT.md`.
+- [x] keep acceptance subprocess scripts isolated under `scripts/`; they use argument vectors with shell execution disabled and are not used by the privileged daemon path.
 
 **Acceptance**
 
@@ -1618,10 +1618,12 @@ Cover:
 
 ## P14-006 — Security review persistence
 
-- [ ] permissions/ownership.
-- [ ] symlink/path handling.
-- [ ] atomic writes.
-- [ ] corruption recovery.
+- [x] permissions/ownership under the packaged systemd state-directory boundary.
+- [x] symlink/path handling for final persisted file paths; parent-path protection assumptions are documented.
+- [x] atomic writes and first-identity directory-entry durability.
+- [x] corruption recovery fails closed without silently resetting identity or trust.
+
+**Software review (2026-10-15):** See [P14-006-PERSISTENCE-REVIEW.md](P14-006-PERSISTENCE-REVIEW.md). Node identity creation now synchronizes its parent directory after syncing the new identity file. Identity and membership stores have explicit symlink regressions that verify the target remains untouched. Linux persistence tests pass; no CI or hardware claim is made for these local changes.
 
 **Acceptance**
 

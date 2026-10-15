@@ -490,6 +490,7 @@ fn malformed_value(line_number: usize, message: &str, error: impl std::fmt::Disp
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::symlink;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
@@ -758,5 +759,32 @@ mod tests {
 
         let error = NetworkMembershipStore::new(path).load().unwrap_err();
         assert_eq!(error.kind(), ErrorKind::PersistenceError);
+    }
+
+    #[test]
+    fn symlink_membership_path_is_rejected_without_reading_or_replacing_target() {
+        let directory = TestDirectory::new();
+        let path = directory.state_path();
+        let target = directory.0.join("outside");
+        fs::write(&target, "BLUEROUTE_MEMBERSHIP_V2\n").unwrap();
+        symlink(&target, &path).unwrap();
+
+        let store = NetworkMembershipStore::new(&path);
+        assert_eq!(
+            store.load().unwrap_err().kind(),
+            ErrorKind::PersistenceError
+        );
+        let mut registry = MembershipRegistry::default();
+        registry.remember_network(network(3, "preserved", true));
+        assert_eq!(
+            store.save(&registry).unwrap_err().kind(),
+            ErrorKind::PersistenceError
+        );
+
+        assert_eq!(
+            fs::read_to_string(target).unwrap(),
+            "BLUEROUTE_MEMBERSHIP_V2\n"
+        );
+        assert!(fs::symlink_metadata(path).unwrap().file_type().is_symlink());
     }
 }

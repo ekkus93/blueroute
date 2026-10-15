@@ -88,6 +88,8 @@ where
                         error,
                     ));
                 }
+                drop(file);
+                sync_parent_directory(&self.path)?;
                 Ok(identity)
             }
             Err(error) if error.kind() == IoErrorKind::AlreadyExists => {
@@ -164,12 +166,25 @@ where
     }
 }
 
+fn sync_parent_directory(path: &Path) -> Result<(), CoreError> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| {
+            persistence_error("failed to synchronize the node identity directory", error)
+        })
+}
+
 fn persistence_error(message: &'static str, error: std::io::Error) -> CoreError {
     CoreError::with_diagnostic(ErrorKind::PersistenceError, message, error.to_string())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::symlink;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
@@ -276,5 +291,24 @@ mod tests {
         let error = store.load_or_create().unwrap_err();
 
         assert_eq!(error.kind(), ErrorKind::PersistenceError);
+    }
+
+    #[test]
+    fn symlink_identity_path_is_rejected_without_reading_or_replacing_target() {
+        let directory = TestDirectory::new();
+        let path = directory.identity_path();
+        let target = directory.0.join("outside");
+        fs::write(&target, "0123456789abcdef0123456789abcdef\n").unwrap();
+        symlink(&target, &path).unwrap();
+
+        let store = NodeIdentityStore::with_generator(&path, FixedGenerator(id(3)));
+        let error = store.load_or_create().unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::PersistenceError);
+        assert_eq!(
+            fs::read_to_string(target).unwrap(),
+            "0123456789abcdef0123456789abcdef\n"
+        );
+        assert!(fs::symlink_metadata(path).unwrap().file_type().is_symlink());
     }
 }
