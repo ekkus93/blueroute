@@ -97,6 +97,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P10-001 | `[x]` | **SOFTWARE COMPLETE:** Clap defines the global `--json`, help/version handling, and typed subcommand tree for implemented CLI operations in commit `84f05a6`. Existing typed exit taxonomy remains covered by P10-006. |
 | P10-002 | `[-]` | **IN PROGRESS:** `status`, `capability show`, and `network list` have human/JSON output. `node list` and `node show <node-id>` parse with strict NodeId validation and typed version-gated daemon requests. A conservative daemon local-only NodeId summary is implemented; unknown remote IDs produce no record, never invented reachability. Real D-Bus broker and restart tests passed exact-head [CI 38607313157](https://github.com/ekkus93/blueroute/actions/runs/38607313157) at `0743af18`. Authenticated remote-node inventory, actual display names and live reachability remain pending P7/runtime integration; this is **not** end-to-end peer discovery. |
 | P14-001 | `[x]` | **COMPLETE (threat model only):** `docs/P14-001-THREAT-MODEL.md`, [CI 38466101723](https://github.com/ekkus93/blueroute/actions/runs/38466101723); implementation safeguards and physical acceptance remain separate. |
+| P14-002 | `[x]` | **SOFTWARE COMPLETE:** root-only system D-Bus service ownership, read-only default access, exhaustive PolicyKit mutation classification, denied dispatch tests (including network leave), and normal-user D-Bus client coverage passed under `dbus-run-session`. |
 | P8-001 | `[x]` | **SOFTWARE COMPLETE (observation model):** `NeighborObservations` keeps expiring untrusted discovered candidate peers separate from active observed `TopologyGraph` PAN links, with bounded capacity, monotonic timestamp ordering and capability annotations; [CI 38469158021](https://github.com/ekkus93/blueroute/actions/runs/38469158021) passed at `56208e3`. Live BlueZ/P7 ingestion remains P8 integration, not evidence of RF behavior. |
 | P8-002 | `[-]` | **IN PROGRESS:** deterministic non-overlapping multi-segment private IPv4 allocation, host-prefix collision checks and owner-scoped *reservation* release passed [CI 38470193934](https://github.com/ekkus93/blueroute/actions/runs/38470193934) at `2c2c108`. A regression fix now revalidates newly observed foreign routes before reusing an existing reservation; exact-head CI 38477587852 passed at `ed628447`. Live kernel route/address ownership teardown and actual PAN segment integration remain; no physical hardware claim. |
 | P8-003 | `[-]` | **IN PROGRESS:** deterministic fail-closed multi-PAN forwarding intent requires explicitly routing-capable local node and active links in at least two distinct PAN segments; [CI 38478135480](https://github.com/ekkus93/blueroute/actions/runs/38478135480) passed at `167221e`. Actual privileged forwarding reconciliation, owner-scoped lease and kernel network namespace qualification remain. |
@@ -1582,10 +1583,12 @@ Cover:
 
 ## P14-002 — Harden local D-Bus authorization
 
-- [ ] allowed callers.
-- [ ] read/write policy.
-- [ ] denied-access tests.
-- [ ] normal-user frontend tests.
+- [x] allowed callers: root alone may own the system-bus service name; local callers may send requests but do not gain mutation authority.
+- [x] read/write policy: read-only commands bypass PolicyKit, every mutation has an exhaustive explicit action mapping.
+- [x] denied-access tests confirm unauthorized create/join/leave/trust do not dispatch; missing PolicyKit fails closed.
+- [x] normal-user D-Bus client tests run under an isolated session bus.
+
+**SOFTWARE COMPLETE (2026-10-15):** The existing policy and implementation were re-audited after adding leave. `authorization_is_read_only_by_default_and_polkit_gates_mutations` passes under `dbus-run-session`; D-Bus service/client and CLI typed-error broker tests also pass there. This does not replace distro package installation or manual desktop-agent acceptance.
 
 **Acceptance**
 
