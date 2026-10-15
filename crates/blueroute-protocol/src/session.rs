@@ -866,3 +866,12 @@ mod tests {
             sessions.activate_after_authentication(
                 PeerSessionKey {
                     network: NetworkId::from_bytes([9; 16]),
+                    peer: NodeId::from_bytes([9; 16]),
+                },
+                [0xFF; 16]
+            ),
+            Err(SessionRegistryError::SessionLimitReached)
+        );
+        assert_eq!(sessions.len(), MAX_CONTROL_SESSIONS);
+    }
+}
