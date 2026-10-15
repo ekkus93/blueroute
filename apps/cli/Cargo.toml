@@ -11,6 +11,7 @@ repository.workspace = true
 blueroute-client = { path = "../../crates/blueroute-client" }
 blueroute-core = { path = "../../crates/blueroute-core" }
 blueroute-protocol = { path = "../../crates/blueroute-protocol" }
+clap = { version = "4", features = ["derive"] }
 futures-lite = "2.6.0"
 serde_json = "1.0"
 zbus = { version = "5.19.0", default-features = false, features = ["async-io"] }

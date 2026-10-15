@@ -1,7 +1,7 @@
 # P7-001 — Inter-node Control Transport (ADR)
 
 **Date:** 2026-10-13
-**Status:** Accepted architecture decision only; implementation pending P7-002..P7-004.
+**Status:** Accepted architecture decision; implementation is in progress locally.
 
 ## Context
 
@@ -26,6 +26,7 @@ BlueRoute uses Linux IP over Bluetooth PAN (BNEP). The system daemon also needs 
 
 - Each node requires a persistent asymmetric signing/authentication keypair in restricted secret storage. Use a widely audited TLS 1.3 implementation such as rustls, without inventing cryptography or permissive custom certificate verification.
 - NodeId is a *separately generated logical identifier*, not itself a cryptographic public key. An approved (NetworkId, NodeId) must be pinned to a verified peer certificate/public-key fingerprint via a deliberate enrollment ceremony or equivalent independently authenticated proof. Check proof of possession, valid cryptography, pinned peer key, logical NodeId, and NetworkId on **both ends**.
+- The current certificate format is an X.509 leaf with exactly one DNS SAN, `node-<NodeId>`, backed by a persistent per-node key. Before TLS, peers exchange only a fixed-magic, length-prefixed certificate preface (maximum 16 KiB); each side matches the certificate's NodeId and SPKI-SHA256 to its already approved pin set, then requires TLS 1.3 proof of private-key possession. The preface is an untrusted locator for candidate certificate material, never an authentication result. Invalid framing, identity, pin, or TLS proof closes the socket with no plaintext fallback.
 - Existing P6-003 NodeId-only trust records have **no verified key binding**. They must not become live network authorization without explicit key enrollment/migration and reapproval. A changed key, revoked approval or conflicting identity fails closed.
 - Bind framed messages to the **verified TLS channel**, intended NetworkId, NodeId and a fresh session nonce (for example via TLS exporter/transcript binding). Merely including identity fields in plaintext JSON proves nothing.
 - Bluetooth MAC, display name, LE advertisements, IP source, BlueZ Trusted flag, self-reported hello and claimed capability never grant membership.
@@ -41,6 +42,6 @@ BlueRoute uses Linux IP over Bluetooth PAN (BNEP). The system daemon also needs 
 
 ## Open technical decisions
 
-Finalize audited TLS library/certificate format, secure enrollment UX, key rotation and persistent trust-schema migration while implementing P7-003/004. The 46071 port is the v1 convention, not an identity claim.
+Use rustls with the ring provider and standard WebPKI verification against the exact out-of-band pinned leaf certificate; do not add a custom certificate verifier. Secure enrollment UX, key rotation and persistent trust-schema migration remain open. The 46071 port is the v1 convention, not an identity claim.
 
 **Acceptance:** IP address is never sole identity proof. Production join remains unavailable until cryptographic authorization is in place.

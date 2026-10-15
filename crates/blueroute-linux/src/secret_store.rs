@@ -64,12 +64,52 @@ impl SecretFileStore {
         self.ensure_secure_directory()?;
         self.validate_destination(&path)?;
 
-        let temporary_path = self.temporary_path(name)?;
-        let result = self.write_temporary_and_replace(&temporary_path, &path, secret.expose());
-        if result.is_err() {
+        self.write_temporary_and_replace(name, &path, secret.expose())
+    }
+
+    /// Create a secret only when no destination exists. Returns `false` when
+    /// another writer has already created it; existing content is never
+    /// replaced. This is useful for persistent identities that must not be
+    /// silently rotated by concurrent first-start processes.
+    pub fn save_if_absent(&self, name: &str, secret: &Secret<Vec<u8>>) -> Result<bool, CoreError> {
+        let path = self.secret_path(name)?;
+        self.ensure_secure_directory()?;
+        let (temporary_path, mut file) = self.create_temporary_file(name)?;
+        if let Err(error) = file
+            .write_all(secret.expose())
+            .and_then(|()| file.sync_all())
+        {
+            drop(file);
             let _ = fs::remove_file(&temporary_path);
+            return Err(persistence_error(
+                "failed to persist secret material",
+                error,
+            ));
         }
-        result
+        drop(file);
+
+        match fs::hard_link(&temporary_path, &path) {
+            Ok(()) => {
+                fs::remove_file(&temporary_path).map_err(|error| {
+                    persistence_error("failed to remove the temporary secret file", error)
+                })?;
+                sync_directory(&self.directory)?;
+                Ok(true)
+            }
+            Err(error) if error.kind() == IoErrorKind::AlreadyExists => {
+                fs::remove_file(&temporary_path).map_err(|error| {
+                    persistence_error("failed to remove the temporary secret file", error)
+                })?;
+                Ok(false)
+            }
+            Err(error) => {
+                let _ = fs::remove_file(&temporary_path);
+                Err(persistence_error(
+                    "failed to create a new secret file",
+                    error,
+                ))
+            }
+        }
     }
 
     fn secret_path(&self, name: &str) -> Result<PathBuf, CoreError> {
@@ -142,28 +182,61 @@ impl SecretFileStore {
             .join(format!(".{name}.tmp-{}-{sequence}", std::process::id())))
     }
 
+    /// Create a unique owner-only temporary file. A prior process can die
+    /// after writing a temp file, then restart with a reused PID and sequence;
+    /// discard that stale same-directory temp and try a fresh sequence.
+    fn create_temporary_file(&self, name: &str) -> Result<(PathBuf, fs::File), CoreError> {
+        for _ in 0..128 {
+            let path = self.temporary_path(name)?;
+            match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(SECRET_FILE_MODE)
+                .open(&path)
+            {
+                Ok(file) => return Ok((path, file)),
+                Err(error) if error.kind() == IoErrorKind::AlreadyExists => {
+                    let _ = fs::remove_file(path);
+                }
+                Err(error) => {
+                    return Err(persistence_error(
+                        "failed to create a temporary secret file",
+                        error,
+                    ));
+                }
+            }
+        }
+        Err(CoreError::new(
+            ErrorKind::PersistenceError,
+            "could not allocate a unique temporary secret file",
+        ))
+    }
+
     fn write_temporary_and_replace(
         &self,
-        temporary_path: &Path,
+        name: &str,
         destination: &Path,
         secret: &[u8],
     ) -> Result<(), CoreError> {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(SECRET_FILE_MODE)
-            .open(temporary_path)
-            .map_err(|error| {
-                persistence_error("failed to create a temporary secret file", error)
-            })?;
+        let (temporary_path, mut file) = self.create_temporary_file(name)?;
 
-        file.write_all(secret)
-            .and_then(|()| file.sync_all())
-            .map_err(|error| persistence_error("failed to persist secret material", error))?;
+        if let Err(error) = file.write_all(secret).and_then(|()| file.sync_all()) {
+            drop(file);
+            let _ = fs::remove_file(&temporary_path);
+            return Err(persistence_error(
+                "failed to persist secret material",
+                error,
+            ));
+        }
         drop(file);
 
-        fs::rename(temporary_path, destination)
-            .map_err(|error| persistence_error("failed to replace persisted secret", error))?;
+        if let Err(error) = fs::rename(&temporary_path, destination) {
+            let _ = fs::remove_file(&temporary_path);
+            return Err(persistence_error(
+                "failed to replace persisted secret",
+                error,
+            ));
+        }
         sync_directory(&self.directory)
     }
 
@@ -238,6 +311,70 @@ mod tests {
         assert!(store.load("control-key").unwrap().is_none());
         let mode = fs::metadata(secret_directory).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, SECRET_DIRECTORY_MODE);
+    }
+
+    #[test]
+    fn save_if_absent_never_replaces_the_first_secret() {
+        let directory = TestDirectory::new();
+        let path = directory.secret_directory();
+        let store = SecretFileStore::new(&path);
+
+        assert!(
+            store
+                .save_if_absent("identity", &Secret::new(vec![1, 2, 3]))
+                .unwrap()
+        );
+        assert!(
+            !store
+                .save_if_absent("identity", &Secret::new(vec![9, 8, 7]))
+                .unwrap()
+        );
+        assert_eq!(
+            store.load("identity").unwrap().unwrap().expose(),
+            &[1, 2, 3]
+        );
+        assert_eq!(
+            fs::metadata(path.join("identity"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            SECRET_FILE_MODE
+        );
+    }
+
+    #[test]
+    fn concurrent_first_writers_publish_one_complete_secret() {
+        use std::sync::{Arc, Barrier};
+
+        let directory = TestDirectory::new();
+        let path = directory.secret_directory();
+        let barrier = Arc::new(Barrier::new(8));
+        let writers = (0..8)
+            .map(|value| {
+                let path = path.clone();
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    let store = SecretFileStore::new(path);
+                    let secret = Secret::new(vec![value; 4096]);
+                    barrier.wait();
+                    store.save_if_absent("identity", &secret).unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let created = writers
+            .into_iter()
+            .map(|writer| writer.join().unwrap())
+            .filter(|created| *created)
+            .count();
+        assert_eq!(created, 1);
+        let saved = SecretFileStore::new(&path)
+            .load("identity")
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.expose().len(), 4096);
+        assert!(saved.expose().iter().all(|byte| *byte == saved.expose()[0]));
     }
 
     #[test]

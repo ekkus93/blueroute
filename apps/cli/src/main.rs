@@ -1,13 +1,78 @@
-//! Read-only BlueRoute CLI commands through the shared version-checked daemon
-//! client. The clap option layer and mutation subcommands are still pending.
+//! BlueRoute CLI commands through the shared version-checked daemon client.
 
 use blueroute_client::{BlueRouteClient, ClientError, ClientErrorKind};
 use blueroute_core::{DisplayName, NodeCapabilities, NodeId};
 use blueroute_protocol::{
     Command, DaemonStatus, DiagnosticSnapshot, NetworkSummary, NodeSummary, Response,
 };
+use clap::{CommandFactory, Parser, Subcommand};
 
-const HELP: &str = "Usage: blueroute [--json] status\n       blueroute [--json] capability show\n       blueroute [--json] network list\n       blueroute [--json] node list\n       blueroute [--json] node show <node-id>\n       blueroute [--json] diagnostics show\n       blueroute [--json] peer trust <node-id>\n       blueroute [--json] peer forget <node-id>\n       blueroute [--json] network create <name>\n       blueroute [--json] discover start|stop\n       blueroute --version\n       blueroute --help";
+#[derive(Debug, Parser)]
+#[command(name = "blueroute", version, about = "Manage BlueRoute networks")]
+struct Cli {
+    #[arg(long, global = true)]
+    json: bool,
+    #[command(subcommand)]
+    command: Option<CliCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+enum CliCommand {
+    Status,
+    Capability {
+        #[command(subcommand)]
+        command: CapabilityCommand,
+    },
+    Diagnostics {
+        #[command(subcommand)]
+        command: DiagnosticsCommand,
+    },
+    Network {
+        #[command(subcommand)]
+        command: NetworkCommand,
+    },
+    Node {
+        #[command(subcommand)]
+        command: NodeCommand,
+    },
+    Peer {
+        #[command(subcommand)]
+        command: PeerCommand,
+    },
+    Discover {
+        #[command(subcommand)]
+        command: DiscoverCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum CapabilityCommand {
+    Show,
+}
+#[derive(Debug, Subcommand)]
+enum DiagnosticsCommand {
+    Show,
+}
+#[derive(Debug, Subcommand)]
+enum NetworkCommand {
+    List,
+    Create { name: String },
+}
+#[derive(Debug, Subcommand)]
+enum NodeCommand {
+    List,
+    Show { node: String },
+}
+#[derive(Debug, Subcommand)]
+enum PeerCommand {
+    Trust { node: String },
+    Forget { node: String },
+}
+#[derive(Debug, Subcommand)]
+enum DiscoverCommand {
+    Start,
+    Stop,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Operation {
@@ -35,53 +100,72 @@ fn parse_node_id(value: &str) -> Result<NodeId, &'static str> {
     Ok(node)
 }
 
-fn parse(args: &[String]) -> Result<Operation, &'static str> {
-    if args.is_empty() || args == ["--help"] || args == ["-h"] {
-        return Ok(Operation::Help);
-    }
-    if args == ["--version"] || args == ["-V"] {
-        return Ok(Operation::Version);
-    }
-    let json = args.iter().any(|arg| arg == "--json");
-    if args.iter().filter(|arg| arg.as_str() == "--json").count() > 1 {
-        return Err("duplicate --json option");
-    }
-    let tokens: Vec<_> = args
-        .iter()
-        .filter(|arg| arg.as_str() != "--json")
-        .map(String::as_str)
-        .collect();
-    match tokens.as_slice() {
-        ["status"] => Ok(Operation::Status { json }),
-        ["capability", "show"] => Ok(Operation::Capabilities { json }),
-        ["diagnostics", "show"] => Ok(Operation::Diagnostics { json }),
-        ["network", "list"] => Ok(Operation::NetworkList { json }),
-        ["node", "list"] => Ok(Operation::NodeList { json }),
-        ["node", "show", node] => Ok(Operation::NodeShow {
-            node: parse_node_id(node)?,
-            json,
-        }),
-        ["network", "create", name] => {
-            if name.chars().any(char::is_control) {
-                return Err("network name cannot contain control characters");
-            }
-            Ok(Operation::CreateNetwork {
-                name: DisplayName::new(*name).map_err(|_| "invalid network name")?,
-                json,
-            })
+fn parse(args: &[String]) -> Result<Operation, String> {
+    let cli = match Cli::try_parse_from(
+        std::iter::once("blueroute".to_owned()).chain(args.iter().cloned()),
+    ) {
+        Ok(cli) => cli,
+        Err(error) if error.kind() == clap::error::ErrorKind::DisplayHelp => {
+            return Ok(Operation::Help);
         }
-        ["discover", "start"] => Ok(Operation::StartDiscovery { json }),
-        ["discover", "stop"] => Ok(Operation::StopDiscovery { json }),
-        ["peer", "trust", node] => Ok(Operation::TrustPeer {
-            node: parse_node_id(node)?,
+        Err(error) if error.kind() == clap::error::ErrorKind::DisplayVersion => {
+            return Ok(Operation::Version);
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    let json = cli.json;
+    let operation = match cli.command {
+        None => return Ok(Operation::Help),
+        Some(CliCommand::Status) => Operation::Status { json },
+        Some(CliCommand::Capability {
+            command: CapabilityCommand::Show,
+        }) => Operation::Capabilities { json },
+        Some(CliCommand::Diagnostics {
+            command: DiagnosticsCommand::Show,
+        }) => Operation::Diagnostics { json },
+        Some(CliCommand::Network {
+            command: NetworkCommand::List,
+        }) => Operation::NetworkList { json },
+        Some(CliCommand::Network {
+            command: NetworkCommand::Create { name },
+        }) => {
+            if name.chars().any(char::is_control) {
+                return Err("network name cannot contain control characters".into());
+            }
+            Operation::CreateNetwork {
+                name: DisplayName::new(name).map_err(|_| "invalid network name")?,
+                json,
+            }
+        }
+        Some(CliCommand::Node {
+            command: NodeCommand::List,
+        }) => Operation::NodeList { json },
+        Some(CliCommand::Node {
+            command: NodeCommand::Show { node },
+        }) => Operation::NodeShow {
+            node: parse_node_id(&node).map_err(str::to_owned)?,
             json,
-        }),
-        ["peer", "forget", node] => Ok(Operation::ForgetPeer {
-            node: parse_node_id(node)?,
+        },
+        Some(CliCommand::Peer {
+            command: PeerCommand::Trust { node },
+        }) => Operation::TrustPeer {
+            node: parse_node_id(&node).map_err(str::to_owned)?,
             json,
-        }),
-        _ => Err("unknown command or option"),
-    }
+        },
+        Some(CliCommand::Peer {
+            command: PeerCommand::Forget { node },
+        }) => Operation::ForgetPeer {
+            node: parse_node_id(&node).map_err(str::to_owned)?,
+            json,
+        },
+        Some(CliCommand::Discover {
+            command: DiscoverCommand::Start,
+        }) => Operation::StartDiscovery { json },
+        Some(CliCommand::Discover {
+            command: DiscoverCommand::Stop,
+        }) => Operation::StopDiscovery { json },
+    };
+    Ok(operation)
 }
 
 fn format_status(status: &DaemonStatus, json: bool) -> Result<String, serde_json::Error> {
@@ -225,13 +309,13 @@ fn run(args: &[String]) -> i32 {
     let operation = match parse(args) {
         Ok(operation) => operation,
         Err(message) => {
-            eprintln!("blueroute: {message}\n{HELP}");
+            eprintln!("blueroute: {message}");
             return 2;
         }
     };
     match &operation {
         Operation::Help => {
-            println!("{HELP}");
+            println!("{}", Cli::command().render_help());
             return 0;
         }
         Operation::Version => {

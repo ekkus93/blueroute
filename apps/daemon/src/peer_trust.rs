@@ -158,15 +158,37 @@ impl DurablePeerTrustOperations {
     /// Persist a key enrollment ONLY after an independently authenticated
     /// human has compared the remote peer's key fingerprint out of band.
     ///
-    /// `verified_tls_spki` MUST come from completed certificate validation
-    /// and TLS proof-of-possession, not the peer's untrusted Hello or Bluetooth
-    /// discovery. `confirmed_spki` MUST be independently verified by the
-    /// operator. A future PolicyKit-protected enrollment UI must collect that
-    /// confirmation; no D-Bus enrollment operation is exposed yet.
-    ///
-    /// This policy helper is NOT itself an enrollment ceremony or a TLS
-    /// verifier. It cannot be used to activate production JoinNetwork.
+    /// The opaque peer identity can only be created by the mutual TLS verifier.
+    /// `confirmed_spki` MUST be independently verified by the operator. This
+    /// helper is not itself an enrollment ceremony; a PolicyKit-protected UI
+    /// must collect that confirmation before calling it.
     pub fn enroll_key_after_independent_confirmation(
+        &self,
+        verified_peer: &crate::VerifiedControlTlsPeer,
+        confirmed_spki: SpkiSha256,
+    ) -> Result<bool, CoreError> {
+        self.enroll_key_inner(
+            verified_peer.network(),
+            verified_peer.node(),
+            verified_peer.fingerprint(),
+            confirmed_spki,
+        )
+    }
+
+    /// Synthetic policy seam for tests and internal callers. Production
+    /// enrollment must use the opaque TLS-verified peer entry point above.
+    #[cfg(test)]
+    pub(crate) fn enroll_verified_key(
+        &self,
+        network: NetworkId,
+        node: NodeId,
+        verified_tls_spki: SpkiSha256,
+        confirmed_spki: SpkiSha256,
+    ) -> Result<bool, CoreError> {
+        self.enroll_key_inner(network, node, verified_tls_spki, confirmed_spki)
+    }
+
+    fn enroll_key_inner(
         &self,
         network: NetworkId,
         node: NodeId,
@@ -422,7 +444,7 @@ mod tests {
                 PeerPinStore::new(root.join("enrollment-pins")),
             );
             let enroll = |node, verified, confirmed| {
-                trust.enroll_key_after_independent_confirmation(network, node, verified, confirmed)
+                trust.enroll_verified_key(network, node, verified, confirmed)
             };
             assert_eq!(
                 enroll(node, key, key).unwrap_err().kind(),
@@ -503,7 +525,7 @@ mod tests {
                 gate.wait();
                 futures_lite::future::block_on(operations.trust_peer(node)).unwrap();
                 assert_eq!(
-                    operations.enroll_key_after_independent_confirmation(network, node, pin, pin),
+                    operations.enroll_verified_key(network, node, pin, pin),
                     Ok(true)
                 );
             }));

@@ -1,10 +1,12 @@
 //! P7 software-only ingress boundary for a previously verified TLS channel.
 //!
-//! No TLS verifier, channel binding, or enrollment UI exists in this module.
-//! The provided fingerprint must come from a completed certificate-verified
-//! TLS handshake with private-key proof. A raw TCP socket, untrusted hello,
-//! Bluetooth name or advertised fingerprint must NEVER construct this gate.
-//! Production JoinNetwork remains fail-closed until the real transport exists.
+//! TLS identity, mutual-authentication and exporter helpers exist in
+//! `control_tls`, but they are not wired into a live peer runtime or enrollment
+//! UI yet. The provided fingerprint must come from a completed
+//! certificate-verified TLS handshake with private-key proof. A raw TCP
+//! socket, untrusted hello, Bluetooth name or advertised fingerprint must
+//! NEVER construct this gate. Production JoinNetwork remains fail-closed
+//! until the real transport exists.
 
 use blueroute_core::{CoreError, NetworkId, NodeId};
 use blueroute_protocol::control::ControlEnvelope;
@@ -23,15 +25,16 @@ pub enum PinnedIngressError {
 
 /// Opaque evidence of a cryptographically authenticated peer and the
 /// exporter-bound Hello transcript. It has intentionally private fields and
-/// NO production constructor until a real mutual-TLS 1.3 verifier exists.
+/// Its production constructor consumes authenticated control-TLS evidence;
+/// callers cannot fabricate it from identity claims or a fingerprint.
 ///
 /// A public fingerprint, peer-provided NodeId, advertisement or raw socket
-/// cannot forge this type through the safe API. The future TLS implementation
-/// must live at this boundary and create evidence only after certificate
+/// cannot forge this type through the safe API. The TLS runtime must create
+/// evidence only after certificate
 /// validation, key possession, independent key enrollment, correct network,
 /// transcript verification and fresh exporter derivation.
 ///
-/// Compile-fail guard: callers outside this module cannot supply a fabricated
+/// Compile-fail guard: callers outside the crate cannot supply a fabricated
 /// TLS exporter and identity claims in lieu of a cryptographic verifier.
 ///
 /// ```compile_fail
@@ -51,6 +54,22 @@ pub struct VerifiedTlsIdentity {
     peer: NodeId,
     verified_tls_key: SpkiSha256,
     exporter_session_id: [u8; 16],
+}
+
+impl VerifiedTlsIdentity {
+    pub(crate) fn from_control_tls(
+        network: NetworkId,
+        peer: NodeId,
+        verified_tls_key: SpkiSha256,
+        exporter_session_id: [u8; 16],
+    ) -> Self {
+        Self {
+            network,
+            peer,
+            verified_tls_key,
+            exporter_session_id,
+        }
+    }
 }
 
 /// Holds the exact approved peer identity and verified channel's existing
@@ -235,8 +254,9 @@ mod tests {
         (root, trust)
     }
 
-    // Only this module's synthetic tests can construct identity evidence.
-    // There is no public production constructor until actual TLS validation.
+    // This literal is for synthetic policy tests only. Production evidence is
+    // created by the control-TLS Hello path and rebound to the same stream by
+    // ControlTlsStream::activate before durable ingress is opened.
     fn fake_verified_tls_identity(node: NodeId, tls_key: SpkiSha256) -> VerifiedTlsIdentity {
         VerifiedTlsIdentity {
             network: network(),
@@ -283,7 +303,7 @@ mod tests {
         ));
         assert!(
             trust
-                .enroll_key_after_independent_confirmation(network(), peer(), key(54), key(54))
+                .enroll_verified_key(network(), peer(), key(54), key(54))
                 .unwrap()
         );
         assert!(matches!(
@@ -298,7 +318,7 @@ mod tests {
         let (_root, trust) = setup();
         futures_lite::future::block_on(trust.trust_peer(peer())).unwrap();
         trust
-            .enroll_key_after_independent_confirmation(network(), peer(), key(54), key(54))
+            .enroll_verified_key(network(), peer(), key(54), key(54))
             .unwrap();
         let mut active = session(&trust, key(54)).unwrap();
         assert_eq!(
@@ -326,7 +346,7 @@ mod tests {
         ));
         // Re-enrollment can create only a FRESH, independently verified session.
         trust
-            .enroll_key_after_independent_confirmation(network(), peer(), key(54), key(54))
+            .enroll_verified_key(network(), peer(), key(54), key(54))
             .unwrap();
         assert!(session(&trust, key(54)).is_ok());
         assert!(active.is_terminal());
@@ -337,7 +357,7 @@ mod tests {
         let (_root, trust) = setup();
         futures_lite::future::block_on(trust.trust_peer(peer())).unwrap();
         trust
-            .enroll_key_after_independent_confirmation(network(), peer(), key(54), key(54))
+            .enroll_verified_key(network(), peer(), key(54), key(54))
             .unwrap();
         let mut active = session(&trust, key(54)).unwrap();
         assert!(matches!(
@@ -369,7 +389,7 @@ mod tests {
         let (_root, trust) = setup();
         futures_lite::future::block_on(trust.trust_peer(peer())).unwrap();
         trust
-            .enroll_key_after_independent_confirmation(network(), peer(), key(54), key(54))
+            .enroll_verified_key(network(), peer(), key(54), key(54))
             .unwrap();
         let mut active = session(&trust, key(54)).unwrap();
         active
@@ -394,7 +414,7 @@ mod tests {
         let (root, trust) = setup();
         futures_lite::future::block_on(trust.trust_peer(peer())).unwrap();
         trust
-            .enroll_key_after_independent_confirmation(network(), peer(), key(54), key(54))
+            .enroll_verified_key(network(), peer(), key(54), key(54))
             .unwrap();
         let mut active = session(&trust, key(54)).unwrap();
         let persisted = PeerPinStore::new(root.0.join("peer-pins"));
@@ -429,10 +449,10 @@ mod tests {
         futures_lite::future::block_on(trust.trust_peer(peer())).unwrap();
         futures_lite::future::block_on(trust.trust_peer(second)).unwrap();
         trust
-            .enroll_key_after_independent_confirmation(network(), peer(), key(54), key(54))
+            .enroll_verified_key(network(), peer(), key(54), key(54))
             .unwrap();
         trust
-            .enroll_key_after_independent_confirmation(network(), second, key(55), key(55))
+            .enroll_verified_key(network(), second, key(55), key(55))
             .unwrap();
         let mut first = session(&trust, key(54)).unwrap();
         let mut other = PinnedSessionIngress::after_verified_handshake(

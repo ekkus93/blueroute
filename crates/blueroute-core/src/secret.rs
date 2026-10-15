@@ -20,6 +20,12 @@ impl<T> Secret<T> {
     pub const fn expose(&self) -> &T {
         &self.value
     }
+
+    /// Explicitly grants mutable access for operations such as zeroizing a
+    /// temporary copy after persistent storage has consumed it.
+    pub fn expose_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
 }
 
 impl<T> fmt::Debug for Secret<T> {

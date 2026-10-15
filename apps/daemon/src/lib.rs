@@ -5,6 +5,7 @@
 #[allow(dead_code)]
 mod attempt_socket;
 mod authorization;
+mod control_tls;
 mod join_network;
 mod peer_pin_store;
 mod peer_trust;
@@ -27,6 +28,13 @@ use blueroute_protocol::{
     ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, DiagnosticSnapshot,
     Event, NodeSummary, ProtocolCodecError, Response, decode_command, encode_event,
     encode_response,
+};
+pub use control_tls::{
+    ActiveControlSession, AuthenticatedControlPeer, ControlSessionError, ControlTlsError,
+    ControlTlsIdentityStore, ControlTlsStream, LocalControlTlsIdentity,
+    PinnedControlTlsCertificate, PinnedControlTlsPeer, VerifiedControlTlsPeer,
+    accept_pinned_control_tls, connect_pinned_control_tls, exchange_control_tls_certificate,
+    export_control_session_id, verify_control_tls_peer,
 };
 pub use join_network::{
     JoinControlSession, JoinIpLease, JoinNetworkFuture, JoinNetworkOperations, JoinPanLink,

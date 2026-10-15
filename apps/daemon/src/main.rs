@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use blueroute_core::{DaemonConfig, HealthLevel};
 use blueroute_daemon::{
-    DaemonService, DurablePeerTrustOperations, PeerPinStore, SingleStarNetworkOperations,
-    TransactionalJoinNetworkOperations, current_network,
+    ControlTlsIdentityStore, DaemonService, DurablePeerTrustOperations, PeerPinStore,
+    SingleStarNetworkOperations, TransactionalJoinNetworkOperations, current_network,
 };
 use blueroute_linux::{
     NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
@@ -30,6 +30,9 @@ async fn run() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|| PathBuf::from(DEFAULT_STATE_DIRECTORY));
     let identity_store = NodeIdentityStore::new(node_identity_path(&state_directory));
     let local_node = identity_store.load_or_create()?;
+    let _local_control_tls_identity =
+        ControlTlsIdentityStore::new(control_tls_identity_path(&state_directory))
+            .load_or_create(local_node)?;
 
     let membership_path = network_membership_path(&state_directory);
     let membership_store = NetworkMembershipStore::new(membership_path.clone());
@@ -56,7 +59,8 @@ async fn run() -> Result<(), Box<dyn Error>> {
     // Legacy NodeId trust alone cannot authorize a control connection, and a
     // corrupt, unsupported or insecure pin store must prevent daemon startup.
     // This does not enroll peers: the out-of-band user-verification ceremony
-    // and mutual TLS transport are separate mandatory P7 prerequisites.
+    // and wiring mutual TLS into the peer transport are separate mandatory
+    // P7 prerequisites.
     let peer_pin_store = PeerPinStore::new(peer_pin_directory(&state_directory));
     peer_pin_store.load()?;
     let peer_trust_operations = Arc::new(DurablePeerTrustOperations::with_peer_pin_store(
@@ -97,6 +101,10 @@ fn peer_pin_directory(state_directory: &Path) -> PathBuf {
     state_directory.join("peer-keys")
 }
 
+fn control_tls_identity_path(state_directory: &Path) -> PathBuf {
+    state_directory.join("control-tls")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,6 +123,10 @@ mod tests {
         assert_eq!(
             peer_pin_directory(state_directory),
             PathBuf::from("/tmp/blueroute-state/peer-keys")
+        );
+        assert_eq!(
+            control_tls_identity_path(state_directory),
+            PathBuf::from("/tmp/blueroute-state/control-tls")
         );
     }
 }

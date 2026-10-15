@@ -12,6 +12,12 @@ blueroute-core = { path = "../../crates/blueroute-core" }
 blueroute-linux = { path = "../../crates/blueroute-linux" }
 blueroute-protocol = { path = "../../crates/blueroute-protocol" }
 futures-lite = "2.6.0"
+getrandom = "0.4.3"
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
+rcgen = { version = "0.14.10", default-features = false, features = ["ring"] }
+sha2 = "0.10.9"
+x509-parser = "0.18.0"
+zeroize = "1.9.1"
 zbus = { version = "5.19.0", default-features = false, features = ["async-io"] }
 
 [dev-dependencies]
