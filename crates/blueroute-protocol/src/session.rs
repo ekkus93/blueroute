@@ -495,9 +495,9 @@ impl ReconnectScheduler {
             return Ok(false);
         }
         slot.last_ms = now_ms;
-        let overdue = slot.in_flight_started_ms.is_some_and(|started| {
-            now_ms >= started.saturating_add(MAX_CONNECT_AUTH_ATTEMPT_MS)
-        });
+        let overdue = slot
+            .in_flight_started_ms
+            .is_some_and(|started| now_ms >= started.saturating_add(MAX_CONNECT_AUTH_ATTEMPT_MS));
         if !slot.in_flight || !overdue || slot.cancel_requested {
             return Ok(false);
         }
@@ -592,22 +592,13 @@ mod tests {
         assert_eq!(MAX_CONNECT_AUTH_ATTEMPT_MS, 20_000);
         assert_eq!(scheduler.schedule_loss(peer, old, 1_000), Ok(true));
         assert_eq!(scheduler.take_due(peer, old, 1_250), Ok(true));
-        assert_eq!(
-            scheduler.take_expired_attempt(peer, old, 21_249),
-            Ok(false)
-        );
+        assert_eq!(scheduler.take_expired_attempt(peer, old, 21_249), Ok(false));
         assert_eq!(
             scheduler.take_expired_attempt(peer, [8; 16], 21_250),
             Ok(false)
         );
-        assert_eq!(
-            scheduler.take_expired_attempt(peer, old, 21_250),
-            Ok(true)
-        );
-        assert_eq!(
-            scheduler.take_expired_attempt(peer, old, 21_251),
-            Ok(false)
-        );
+        assert_eq!(scheduler.take_expired_attempt(peer, old, 21_250), Ok(true));
+        assert_eq!(scheduler.take_expired_attempt(peer, old, 21_251), Ok(false));
         assert_eq!(scheduler.take_due(peer, old, 50_000), Ok(false));
         assert_eq!(
             scheduler.take_expired_attempt(peer, old, 49_999),
@@ -615,21 +606,15 @@ mod tests {
         );
         // The transport owner confirms cancellation/teardown before
         // advancing the retry budget; no new attempt was made in parallel.
-        assert_eq!(scheduler.attempt_failed(peer, old, 50_000), Ok(Some(50_500)));
         assert_eq!(
-            scheduler.take_expired_attempt(peer, old, 50_500),
-            Ok(false)
+            scheduler.attempt_failed(peer, old, 50_000),
+            Ok(Some(50_500))
         );
+        assert_eq!(scheduler.take_expired_attempt(peer, old, 50_500), Ok(false));
         assert_eq!(scheduler.take_due(peer, old, 50_500), Ok(true));
-        assert_eq!(
-            scheduler.take_expired_attempt(peer, old, 70_500),
-            Ok(true)
-        );
+        assert_eq!(scheduler.take_expired_attempt(peer, old, 70_500), Ok(true));
         assert!(scheduler.cancel_if_current(peer, old));
-        assert_eq!(
-            scheduler.take_expired_attempt(peer, old, 90_500),
-            Ok(false)
-        );
+        assert_eq!(scheduler.take_expired_attempt(peer, old, 90_500), Ok(false));
     }
 
     #[test]
@@ -998,6 +983,3 @@ mod tests {
             ),
             Err(SessionRegistryError::SessionLimitReached)
         );
-        assert_eq!(sessions.len(), MAX_CONTROL_SESSIONS);
-    }
-}
