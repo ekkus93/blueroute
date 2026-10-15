@@ -45,6 +45,9 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 
 ## Software-only control-session evidence (2026-10-14)
 
+- **P7-003 API privacy compile-fail check (software only):** Rust doctest rejects external construction of fabricated `VerifiedTlsIdentity` values with arbitrary key/exporter inputs. [Exact-head CI 38685887069](https://github.com/ekkus93/blueroute/actions/runs/38685887069) passed at `0cc257fc2e5fa7bf631c42fa805203efd130b29f`. Real mutual TLS 1.3, peer-key possession, independent enrollment and Bluetooth acceptance remain unimplemented or deferred.
+
+
 - **P7-003/P7-004 type-level fail-closed ingress (software only):** The modeled daemon ingress API requires an opaque `VerifiedTlsIdentity`, privately fielded with no production constructor until actual mutual TLS and exporter verification exist. Synthetic unit tests preserve negative authorization coverage; [CI 38685477595](https://github.com/ekkus93/blueroute/actions/runs/38685477595) passed at `dceec21456052830b441b9e4efe83ff24d18ce13`. This intentionally cannot enable production JoinNetwork and does not qualify any physical radio/network criterion.
 
 
