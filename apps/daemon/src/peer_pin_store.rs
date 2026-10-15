@@ -296,6 +296,8 @@ mod tests {
             format!("{HEADER}\n{}\t{}\t{}\n", n(1), node(2), "0G".repeat(32)),
             format!("{good}{}\t{}\t{}\n", n(1), node(2), "03".repeat(32)),
             format!("{good}{}\t{}\t{}\n", n(1), node(3), "03".repeat(32)),
+            format!("{HEADER}\n{}\t{}\t{}\n", n(0), node(2), "03".repeat(32)),
+            format!("{HEADER}\n{}\t{}\t{}\n", n(1), node(0), "03".repeat(32)),
             "x".repeat(MAX_BYTES + 1),
         ];
         for input in inputs {

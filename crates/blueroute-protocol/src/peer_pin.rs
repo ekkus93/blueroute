@@ -68,6 +68,7 @@ impl SpkiSha256 {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PeerPinError {
     InvalidFingerprint,
+    InvalidIdentity,
     UnknownEnrollment,
     KeyConflict,
     NotApprovedForNetwork,
@@ -78,6 +79,7 @@ impl fmt::Display for PeerPinError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidFingerprint => f.write_str("invalid peer key fingerprint"),
+            Self::InvalidIdentity => f.write_str("zero network or node identity cannot be enrolled"),
             Self::UnknownEnrollment => f.write_str("no verified peer key enrollment exists"),
             Self::KeyConflict => f.write_str("peer key changed; explicit re-enrollment required"),
             Self::NotApprovedForNetwork => f.write_str("peer lacks network membership approval"),
@@ -111,6 +113,9 @@ impl PeerKeyPins {
         node: NodeId,
         pin: SpkiSha256,
     ) -> Result<bool, PeerPinError> {
+        if network == NetworkId::from_bytes([0; 16]) || node == NodeId::from_bytes([0; 16]) {
+            return Err(PeerPinError::InvalidIdentity);
+        }
         // One enrolled TLS key must not impersonate multiple logical NodeIds
         // in the same network. This holds even if both NodeIds have legacy
         // trust records. Cross-network key reuse is a separate policy choice.
@@ -149,6 +154,9 @@ impl PeerKeyPins {
         current_network_approval: bool,
         verified_peer_spki_sha256: SpkiSha256,
     ) -> Result<(), PeerPinError> {
+        if network == NetworkId::from_bytes([0; 16]) || node == NodeId::from_bytes([0; 16]) {
+            return Err(PeerPinError::InvalidIdentity);
+        }
         if !current_network_approval {
             return Err(PeerPinError::NotApprovedForNetwork);
         }
@@ -270,6 +278,26 @@ mod tests {
             pins.authorize(network(1), node(2), true, fingerprint(3)),
             Ok(())
         );
+    }
+
+    #[test]
+    fn zero_network_and_node_id_never_enter_or_authorize_enrollment_registry() {
+        let mut pins = PeerKeyPins::new();
+        let valid = fingerprint(3);
+        for (network, node) in [(network(0), node(2)), (network(1), node(0))] {
+            assert_eq!(
+                pins.enroll_verified(network, node, valid),
+                Err(PeerPinError::InvalidIdentity)
+            );
+            assert_eq!(
+                pins.authorize(network, node, true, valid),
+                Err(PeerPinError::InvalidIdentity)
+            );
+        }
+        assert!(pins.is_empty());
+        assert_eq!(pins.enroll_verified(network(1), node(2), valid), Ok(true));
+        assert_eq!(pins.len(), 1);
+        assert_eq!(pins.authorize(network(1), node(2), true, valid), Ok(()));
     }
 
     #[test]
