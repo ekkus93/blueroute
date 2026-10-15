@@ -103,6 +103,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P14-004 | `[-]` | **IN PROGRESS:** shared `DisplayName` rejects control/escape and Unicode bidirectional-override characters while preserving printable international names; unit tests pass [CI 38467939586](https://github.com/ekkus93/blueroute/actions/runs/38467939586) at `939935e`. Full peer-field limits, unsupported messages and fuzz/domain conversion review still outstanding. |
 | P10-003 | `[-]` | **IN PROGRESS:** network creation and discovery start/stop delegate to PolicyKit-protected typed daemon API; parsing/validation tests pass [CI 38466994092](https://github.com/ekkus93/blueroute/actions/runs/38466994092) at `c786f77`. Production join/leave and full end-to-end lifecycle remain. |
 | P10-004 | `[-]` | **IN PROGRESS:** explicit full-NodeId `peer trust`/`peer forget` invoke existing PolicyKit-protected D-Bus commands; tests and [CI 38466585585](https://github.com/ekkus93/blueroute/actions/runs/38466585585) at `8183225` passed. Pending requests/authenticated-join UX remain; trust is **not** TLS enrollment or membership. |
+| P10-005 | `[-]` | **IN PROGRESS:** `blueroute diagnostics show` now sends the read-only `GetDiagnostics` command through the version-gated D-Bus client and displays daemon-provided health/network/capabilities/local-only observed-node count in human/JSON form. Unit and real-broker tests passed [exact-head CI 38692903150](https://github.com/ekkus93/blueroute/actions/runs/38692903150) at `9ac40ea6b3c7212d1842854bcde41a7b268fae71`. The snapshot contains no secrets and does not fabricate remote identities; complete Linux platform/backend, interface/route diagnostics and detailed troubleshooting remain to be implemented. |
 | All other tasks | `[ ]` | Not started unless explicitly documented in that task; remaining hardware acceptance is not a blocker for independent software work. |
 
 **P7-003/P7-004 durable-pin-gated inbound control (software only, 2026-10-14):** `apps/daemon/src/pinned_ingress.rs` ties a previously authenticated post-Hello parser to a fresh on-disk network-approval and enrolled SPKI-pin check for every frame/EOF operation. The in-process trust mutex now encloses both authorization and parsing, preventing local revocation from interleaving between their checks. Unknown or wrong keys, trust-only approval, revocation/reapproval and forged/deadline-expired frames remain fail-closed and permanently terminate the modeled session. [Exact-head CI 38683882275](https://github.com/ekkus93/blueroute/actions/runs/38683882275) passed at `dc6721946a1553e37515f9f78d5ce5827a38132a`. **This is not real mutual TLS, independently approved enrollment UX, external-process locking, active daemon ingress, authenticated JoinNetwork, or physical PAN acceptance.** Those prerequisites remain open.
@@ -1202,10 +1203,12 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P10-005 — Implement diagnostics command
 
-- [ ] concise and detailed output.
-- [ ] JSON.
-- [ ] redact secrets.
-- [ ] show platform/capabilities/backend.
+- [ ] concise and detailed output (basic human-readable status exists; full detail still pending).
+- [x] JSON (versioned daemon `DiagnosticSnapshot`, through `blueroute diagnostics show --json`).
+- [ ] redact secrets (current snapshot contains no secrets; expand explicit redaction when introducing additional diagnostic fields).
+- [ ] show platform/capabilities/backend (node capabilities included, detailed platform/backend/route observation pending).
+
+**Software partial (2026-10-14):** `apps/daemon/src/lib.rs` now serves `GetDiagnostics` read-only over system D-Bus using the existing typed `DiagnosticSnapshot` contract. The CLI displays the daemon's actual health, network and capabilities in human or JSON form, and labels node counts local-only until P7 authenticated peers exist. An empty local identity yields zero reported nodes; remote discovery/trust is never treated as authenticated reachability. Unit and D-Bus broker integration tests passed [exact-head CI 38692903150](https://github.com/ekkus93/blueroute/actions/runs/38692903150) at `9ac40ea6b3c7212d1842854bcde41a7b268fae71`. **No TLS peer authentication, PAN network path, physical controller diagnostics or hardware acceptance is implied.**
 
 **Acceptance**
 
