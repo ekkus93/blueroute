@@ -49,6 +49,9 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --locked
 
+      - name: Run P6-006 simulated socket contract tests
+        run: python3 -m unittest discover -s scripts -p 'test_p6_006_*.py' -v
+
       - name: Run daemon D-Bus integration test
         run: dbus-run-session -- cargo test -p blueroute-daemon --test dbus_service --locked dbus_service_round_trip_and_event -- --ignored --exact
 
