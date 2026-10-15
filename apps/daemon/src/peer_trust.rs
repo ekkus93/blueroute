@@ -457,14 +457,11 @@ mod tests {
             let gate = Arc::clone(&barrier);
             threads.push(thread::spawn(move || {
                 let node = NodeId::from_bytes([index as u8; 16]);
-                let pin =
-                    SpkiSha256::from_verified_certificate_digest([index as u8; 32]).unwrap();
+                let pin = SpkiSha256::from_verified_certificate_digest([index as u8; 32]).unwrap();
                 gate.wait();
                 futures_lite::future::block_on(operations.trust_peer(node)).unwrap();
                 assert_eq!(
-                    operations.enroll_key_after_independent_confirmation(
-                        network, node, pin, pin
-                    ),
+                    operations.enroll_key_after_independent_confirmation(network, node, pin, pin),
                     Ok(true)
                 );
             }));
@@ -477,7 +474,9 @@ mod tests {
         for index in 1..=count {
             let node = NodeId::from_bytes([index as u8; 16]);
             let pin = SpkiSha256::from_verified_certificate_digest([index as u8; 32]).unwrap();
-            trust.require_approved_pinned_tls_peer(network, node, pin).unwrap();
+            trust
+                .require_approved_pinned_tls_peer(network, node, pin)
+                .unwrap();
         }
 
         // A completed revocation must erase the pin; reapproving a logical
@@ -487,12 +486,16 @@ mod tests {
         futures_lite::future::block_on(trust.trust_peer(revoked)).unwrap();
         let pin = SpkiSha256::from_verified_certificate_digest([1; 32]).unwrap();
         assert_eq!(
-            trust.require_approved_pinned_tls_peer(network, revoked, pin)
+            trust
+                .require_approved_pinned_tls_peer(network, revoked, pin)
                 .unwrap_err()
                 .kind(),
             ErrorKind::AuthenticationFailed
         );
-        assert_eq!(trust.pin_store.as_ref().unwrap().load().unwrap().len(), count - 1);
+        assert_eq!(
+            trust.pin_store.as_ref().unwrap().load().unwrap().len(),
+            count - 1
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
