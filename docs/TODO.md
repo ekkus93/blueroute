@@ -99,6 +99,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P10-002 | `[-]` | **IN PROGRESS:** `status`, `capability show`, and `network list` have human/JSON output. `node list` and `node show <node-id>` parse with strict NodeId validation and typed version-gated daemon requests. A conservative daemon local-only NodeId summary is implemented; unknown remote IDs produce no record, never invented reachability. Real D-Bus broker and restart tests passed exact-head [CI 38607313157](https://github.com/ekkus93/blueroute/actions/runs/38607313157) at `0743af18`. Authenticated remote-node inventory, actual display names and live reachability remain pending P7/runtime integration; this is **not** end-to-end peer discovery. |
 | P14-001 | `[x]` | **COMPLETE (threat model only):** `docs/P14-001-THREAT-MODEL.md`, [CI 38466101723](https://github.com/ekkus93/blueroute/actions/runs/38466101723); implementation safeguards and physical acceptance remain separate. |
 | P14-002 | `[x]` | **SOFTWARE COMPLETE:** root-only system D-Bus service ownership, read-only default access, exhaustive PolicyKit mutation classification, denied dispatch tests (including network leave), and normal-user D-Bus client coverage passed under `dbus-run-session`. |
+| P15-001 | `[x]` | **MANIFEST COMPLETE:** `docs/P15-001-PACKAGE-MANIFEST.md` defines Debian binary paths, system service and policy files, runtime dependencies, retained state, and gates empty frontend shells; P15-002 package build/install qualification remains separate. |
 | P8-001 | `[x]` | **SOFTWARE COMPLETE (observation model):** `NeighborObservations` keeps expiring untrusted discovered candidate peers separate from active observed `TopologyGraph` PAN links, with bounded capacity, monotonic timestamp ordering and capability annotations; [CI 38469158021](https://github.com/ekkus93/blueroute/actions/runs/38469158021) passed at `56208e3`. Live BlueZ/P7 ingestion remains P8 integration, not evidence of RF behavior. |
 | P8-002 | `[-]` | **IN PROGRESS:** deterministic non-overlapping multi-segment private IPv4 allocation, host-prefix collision checks and owner-scoped *reservation* release passed [CI 38470193934](https://github.com/ekkus93/blueroute/actions/runs/38470193934) at `2c2c108`. A regression fix now revalidates newly observed foreign routes before reusing an existing reservation; exact-head CI 38477587852 passed at `ed628447`. Live kernel route/address ownership teardown and actual PAN segment integration remain; no physical hardware claim. |
 | P8-003 | `[-]` | **IN PROGRESS:** deterministic fail-closed multi-PAN forwarding intent requires explicitly routing-capable local node and active links in at least two distinct PAN segments; [CI 38478135480](https://github.com/ekkus93/blueroute/actions/runs/38478135480) passed at `167221e`. Actual privileged forwarding reconciliation, owner-scoped lease and kernel network namespace qualification remain. |
@@ -1603,11 +1604,12 @@ Cover:
 
 ## P14-003 — Harden inter-node authentication
 
-- [ ] bind session to identity.
-- [ ] verify membership.
-- [ ] prevent unauthenticated topology/route control.
+- [x] TLS peer identity, NodeId, NetworkId, certificate fingerprint and exporter-bound Hello/HelloAck are tied to one verified control session.
+- [x] activation and inbound session processing require durable same-network peer approval and matching enrolled key pin.
+- [x] current wire protocol accepts no route/topology/membership mutations; forged extensions fail strict decoding, including when batched after a valid heartbeat.
+- [ ] wire verified sessions into the live daemon/PAN transport and complete the independent user key-enrollment ceremony.
 
-**Software partial — provisional protocol denial only (2026-10-14):** The current control-wire decoder rejects forged route, topology, membership, and Internet-gateway command variants, including a malicious frame batched after an otherwise valid Heartbeat, without advancing session liveness. Tests pass [exact-head CI 38684997714](https://github.com/ekkus93/blueroute/actions/runs/38684997714) at `6fe80318a40b5f829b1ea0a861d09f31d9118d3e`. This is a deny-by-absence boundary until authenticated route-control semantics are designed; it does **not** verify mutual TLS, link a remote identity to the peer key, or implement authenticated routing updates. P14-003 remains open.
+**Software partial (2026-10-15):** TLS 1.3 mutual-certificate verification, NodeId/NetworkId binding, exporter-bound Hello, durable pin/membership checks, revocation checks and strict route-command denial are implemented in tested primitives. These are not wired to live daemon PAN sockets, and no independent key-enrollment UX is enabled. Route/topology control remains deny-by-absence. P14-003 remains open.
 
 **Acceptance**
 
@@ -1615,11 +1617,13 @@ Cover:
 
 ## P14-004 — Validate peer-controlled fields
 
-- [ ] complete lengths/characters/ranges/bounds review for *all* remote metadata and route/topology fields.
+- [x] complete lengths/characters/ranges/bounds review for the current Hello/control envelope metadata; unimplemented route/topology fields remain rejected as unsupported.
 - [x] prevent C0/C1 control sequences, terminal ESC and common Unicode bidirectional-override/isolate characters in shared `DisplayName` (including deserialized peer labels); preserve printable multilingual names.
 - [ ] unsupported-message behavior across fully integrated authenticated daemon transport.
 
 **Software partial:** `crates/blueroute-core/src/id.rs` input checks and negative tests passed exact-head [CI 38467939586](https://github.com/ekkus93/blueroute/actions/runs/38467939586) at `939935e`. Further reject leading/trailing raw control characters *before* trimming and Unicode line/paragraph separators, preserving printable multilingual names; committed at `acc9686c`, corrected in `43b4f697`, and qualified by [CI 38606590270](https://github.com/ekkus93/blueroute/actions/runs/38606590270) at `19472acc`. Control Hello metadata now has boundary regressions for software-version character/length limits, 32 direct neighbors, and canonical IPv4 segments. Remaining peer-field review and authenticated daemon transport integration are open.
+
+**Software partial:** The current authenticated-session primitives consume the strict bounded decoder and poison sessions after malformed frames, but are not yet connected to a live daemon listener. Fuzz-style protocol mutation, truncation, oversized frame, unknown nested-field and boundary tests pass; transport crash acceptance remains open until P7 daemon integration.
 
 **Acceptance**
 
@@ -1653,11 +1657,13 @@ Cover:
 
 ## P15-001 — Define Debian package contents
 
-- [ ] daemon/CLI/TUI/desktop.
-- [ ] systemd unit.
-- [ ] D-Bus policy/service.
-- [ ] Polkit if required.
-- [ ] desktop metadata/icons.
+- [x] define daemon/CLI/TUI/desktop artifact paths and gate the empty TUI/desktop shells from release installation until functional.
+- [x] define systemd unit path and ownership.
+- [x] define D-Bus policy/service path and ownership.
+- [x] define PolicyKit action path and ownership.
+- [x] document reserved desktop metadata/icon paths and their P12 implementation dependency.
+
+**COMPLETE (manifest):** [P15-001-PACKAGE-MANIFEST.md](P15-001-PACKAGE-MANIFEST.md) defines package contents, runtime dependencies, persistent state behavior and the reproducibility boundary. The manifest is not a built-package claim.
 
 **Acceptance**
 
