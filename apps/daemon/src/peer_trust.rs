@@ -6,6 +6,7 @@ use blueroute_core::{CoreError, ErrorKind, NetworkId, NodeId};
 use blueroute_linux::{BluetoothBackend, BluezBackend, NetworkMembershipStore, PeerHandle};
 use blueroute_protocol::peer_pin::SpkiSha256;
 
+use crate::peer_pin_store::PeerPinFileLock;
 use crate::{PeerPinStore, current_network};
 
 pub type PeerTrustFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, CoreError>> + Send + 'a>>;
@@ -22,6 +23,14 @@ pub struct DurablePeerTrustOperations {
     // daemon. This does not protect against unauthorized external file edits
     // or independently running daemon processes.
     state_lock: Mutex<()>,
+}
+
+/// Both RAII guards live through a complete trust/pin transaction.
+/// This is advisory cooperation between BlueRoute instances, not a defense
+/// against arbitrary privileged file tampering or actual TLS authentication.
+struct PeerTrustStateGuard<'a> {
+    _thread_guard: MutexGuard<'a, ()>,
+    _process_lock: Option<PeerPinFileLock>,
 }
 
 impl DurablePeerTrustOperations {
@@ -43,12 +52,19 @@ impl DurablePeerTrustOperations {
         }
     }
 
-    fn lock_state(&self) -> Result<MutexGuard<'_, ()>, CoreError> {
-        self.state_lock.lock().map_err(|_| {
+    fn lock_state(&self) -> Result<PeerTrustStateGuard<'_>, CoreError> {
+        let thread_guard = self.state_lock.lock().map_err(|_| {
             CoreError::new(
                 ErrorKind::Internal,
                 "peer trust state lock poisoned; refusing to use unverified approval state",
             )
+        })?;
+        // The local mutex MUST be taken before the shared on-disk lock so
+        // operations cannot invert lock order in a single daemon process.
+        let process_lock = self.pin_store.as_ref().map(PeerPinStore::try_lock).transpose()?;
+        Ok(PeerTrustStateGuard {
+            _thread_guard: thread_guard,
+            _process_lock: process_lock,
         })
     }
 

@@ -4,6 +4,8 @@
 //! enrollment. It does not confer current network membership or bypass TLS
 //! certificate proof-of-possession. Missing/legacy state means no enrolled keys.
 
+use std::fs::{self, File, OpenOptions, TryLockError};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::PathBuf;
 
 use blueroute_core::{CoreError, ErrorKind, NetworkId, NodeId, Secret};
@@ -14,6 +16,19 @@ const FILE_NAME: &str = "peer-key-pins-v1";
 const HEADER: &str = "BLUEROUTE_PEER_PINS_V1";
 const MAX_BYTES: usize = 256 * 1024;
 const MAX_RECORDS: usize = 128;
+// A persistent inode, never renamed or unlinked during ordinary operation.
+// The Linux O_NOFOLLOW flag prevents following a crafted lock-path symlink.
+// O_NOFOLLOW is 0o400000 on supported Linux targets (asm-generic fcntl).
+const PEER_LOCK_FILE: &str = ".peer-approval.lock";
+const LINUX_O_NOFOLLOW: i32 = 0o400000;
+
+/// Holds a nonblocking OS-wide advisory lock until dropped. Every BlueRoute
+/// daemon handling the same persistent peer-key directory must cooperate.
+/// External writers ignoring the lock are outside this guarantee.
+#[derive(Debug)]
+pub(crate) struct PeerPinFileLock {
+    _file: File,
+}
 
 pub struct PeerPinStore {
     secrets: SecretFileStore,
@@ -23,6 +38,81 @@ impl PeerPinStore {
     pub fn new(secret_directory: impl Into<PathBuf>) -> Self {
         Self {
             secrets: SecretFileStore::new(secret_directory),
+        }
+    }
+
+    /// Fail closed if another BlueRoute daemon instance is already reading
+    /// or modifying durable peer authorization state. This lock is held
+    /// across the full approval/pin read-modify-write and frame decision.
+    ///
+    /// Do not unlink or atomically replace the lock inode: persistent file
+    /// identity is necessary for process-level advisory locking to work.
+    pub(crate) fn try_lock(&self) -> Result<PeerPinFileLock, CoreError> {
+        // The same existing secret-store check creates a 0700 directory and
+        // rejects nonregular key-pin state before opening the lock path.
+        let _ = self.secrets.load(FILE_NAME)?;
+        let lock_path = self.secrets.directory().join(PEER_LOCK_FILE);
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .mode(0o600)
+            .custom_flags(LINUX_O_NOFOLLOW)
+            .open(&lock_path)
+            .map_err(|error| {
+                CoreError::with_diagnostic(
+                    ErrorKind::PersistenceError,
+                    "failed to open owner-only peer approval lock without following symlinks",
+                    error.to_string(),
+                )
+            })?;
+        let descriptor = file.metadata().map_err(|error| {
+            CoreError::with_diagnostic(
+                ErrorKind::PersistenceError,
+                "failed to inspect peer approval lock handle",
+                error.to_string(),
+            )
+        })?;
+        let on_disk = fs::symlink_metadata(&lock_path).map_err(|error| {
+            CoreError::with_diagnostic(
+                ErrorKind::PersistenceError,
+                "failed to verify persistent peer approval lock path",
+                error.to_string(),
+            )
+        })?;
+        let directory = fs::symlink_metadata(self.secrets.directory()).map_err(|error| {
+            CoreError::with_diagnostic(
+                ErrorKind::PersistenceError,
+                "failed to verify peer approval lock directory",
+                error.to_string(),
+            )
+        })?;
+        if !descriptor.file_type().is_file()
+            || !on_disk.file_type().is_file()
+            || !directory.file_type().is_dir()
+            || descriptor.permissions().mode() & 0o777 != 0o600
+            || directory.permissions().mode() & 0o777 != 0o700
+            || descriptor.nlink() != 1
+            || descriptor.ino() != on_disk.ino()
+            || descriptor.dev() != on_disk.dev()
+            || descriptor.uid() != directory.uid()
+        {
+            return Err(CoreError::new(
+                ErrorKind::PersistenceError,
+                "peer approval lock file or directory has unsafe identity or permissions",
+            ));
+        }
+        match file.try_lock() {
+            Ok(()) => Ok(PeerPinFileLock { _file: file }),
+            Err(TryLockError::WouldBlock) => Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "another BlueRoute daemon is updating peer approval; retry safely",
+            )),
+            Err(TryLockError::Error(error)) => Err(CoreError::with_diagnostic(
+                ErrorKind::PersistenceError,
+                "failed to acquire peer approval process lock",
+                error.to_string(),
+            )),
         }
     }
 
@@ -234,5 +324,43 @@ mod tests {
             ErrorKind::PersistenceError
         );
         assert_eq!(fs::read(destination).unwrap(), b"do-not-touch");
+    }
+
+    #[test]
+    fn separate_handles_cannot_hold_concurrent_peer_approval_process_locks() {
+        let tmp = Temp::new();
+        let first = tmp.store();
+        let second = tmp.store();
+        let guard = first.try_lock().unwrap();
+        let lock_path = tmp.0.join("secret-state").join(PEER_LOCK_FILE);
+        let permissions = fs::metadata(&lock_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(permissions, 0o600);
+        assert_eq!(second.try_lock().unwrap_err().kind(), ErrorKind::InvalidState);
+        drop(guard);
+        assert!(second.try_lock().is_ok());
+    }
+
+    #[test]
+    fn forged_symlink_and_world_readable_lock_file_fail_closed() {
+        let tmp = Temp::new();
+        let store = tmp.store();
+        drop(store.try_lock().unwrap());
+        let lock_path = tmp.0.join("secret-state").join(PEER_LOCK_FILE);
+        let outside = tmp.0.join("unrelated");
+        fs::write(&outside, b"do-not-touch").unwrap();
+        fs::remove_file(&lock_path).unwrap();
+        symlink(&outside, &lock_path).unwrap();
+        assert_eq!(
+            store.try_lock().unwrap_err().kind(),
+            ErrorKind::PersistenceError
+        );
+        assert_eq!(fs::read(&outside).unwrap(), b"do-not-touch");
+        fs::remove_file(&lock_path).unwrap();
+        fs::write(&lock_path, b"").unwrap();
+        fs::set_permissions(&lock_path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            store.try_lock().unwrap_err().kind(),
+            ErrorKind::PersistenceError
+        );
     }
 }
