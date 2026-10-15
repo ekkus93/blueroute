@@ -5,6 +5,7 @@ mod capability_report;
 mod forwarding;
 mod identity;
 mod ipv4_observation;
+mod kernel_address;
 mod membership_store;
 mod network_discovery;
 mod networkmanager;
@@ -17,6 +18,7 @@ pub use capability_report::{
     RuntimePrerequisite, SystemCapabilityProbe, SystemCapabilityReport, SystemSupportLevel,
 };
 pub use identity::{NodeIdentityGenerator, NodeIdentityStore, SystemNodeIdentityGenerator};
+pub use kernel_address::{KernelAddressBackend, KernelAddressLease};
 pub use membership_store::NetworkMembershipStore;
 pub use network_discovery::NetworkAdvertisement;
 pub use networkmanager::NetworkManagerBackend;
