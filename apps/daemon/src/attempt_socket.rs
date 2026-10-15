@@ -91,7 +91,17 @@ impl PendingHandshakeSockets {
         if !self.close_if_current(key, generation) {
             return Ok(None);
         }
-        self.scheduler.attempt_failed(key, generation, now_ms)
+        // The socket is already shut down. If a regressed timestamp makes
+        // scheduler bookkeeping fail, retire the generation rather than leave
+        // an in-flight slot with no socket that could block future recovery.
+        // Never schedule a retry on a clock error.
+        match self.scheduler.attempt_failed(key, generation, now_ms) {
+            Ok(next_retry_ms) => Ok(next_retry_ms),
+            Err(error) => {
+                self.scheduler.cancel_if_current(key, generation);
+                Err(error)
+            }
+        }
     }
 
     /// Explicit shutdown/revocation: close the owned socket before removing
@@ -237,4 +247,36 @@ mod tests {
         drop(owner);
         assert_eq!(second_remote.read(&mut [0]).unwrap(), 0);
     }
+    #[test]
+    fn regressed_failure_clock_closes_socket_and_retires_in_flight_generation() {
+        let mut owner = PendingHandshakeSockets::new();
+        let peer = key(9);
+        let old = [9; 16];
+        assert!(owner.schedule_loss(peer, old, 0).unwrap());
+        let (socket, mut remote) = pair();
+        assert!(owner.begin(peer, old, 250, socket).unwrap());
+
+        // A regressed callback cannot leave a socketless in-flight retry slot.
+        assert_eq!(
+            owner.failed(peer, old, 249),
+            Err(ReconnectScheduleError::ClockRegression)
+        );
+        assert_eq!(owner.pending_len(), 0);
+        assert_eq!(remote.read(&mut [0]).unwrap(), 0);
+        assert_eq!(owner.watchdog(peer, old, 20_250).unwrap(), WatchdogResult::NotExpired);
+
+        // A fresh loss generation can be scheduled explicitly, but the stale
+        // callback must never cancel or close its replacement socket.
+        let fresh = [10; 16];
+        assert!(owner.schedule_loss(peer, fresh, 300).unwrap());
+        let (replacement, mut replacement_remote) = pair();
+        assert!(owner.begin(peer, fresh, 550, replacement).unwrap());
+        assert_eq!(owner.failed(peer, old, 551).unwrap(), None);
+        assert!(!owner.cancel(peer, old));
+        assert_eq!(owner.pending_len(), 1);
+        replacement_remote.write_all(b"fresh attempt").unwrap();
+        assert!(owner.cancel(peer, fresh));
+        assert_eq!(replacement_remote.read(&mut [0]).unwrap(), 0);
+    }
+
 }
