@@ -1,0 +1,363 @@
+//! P7 software-only ingress boundary for a previously verified TLS channel.
+//!
+//! No TLS verifier, channel binding, or enrollment UI exists in this module.
+//! The provided fingerprint must come from a completed certificate-verified
+//! TLS handshake with private-key proof. A raw TCP socket, untrusted hello,
+//! Bluetooth name or advertised fingerprint must NEVER construct this gate.
+//! Production JoinNetwork remains fail-closed until the real transport exists.
+
+use blueroute_core::{CoreError, NetworkId, NodeId};
+use blueroute_protocol::control::ControlEnvelope;
+use blueroute_protocol::peer_pin::SpkiSha256;
+use blueroute_protocol::session::ConnectionDeadline;
+use blueroute_protocol::session_activity::{AuthenticatedInboundActivity, InboundActivityError};
+
+use crate::DurablePeerTrustOperations;
+
+#[derive(Debug)]
+pub enum PinnedIngressError {
+    Authorization(CoreError),
+    Protocol(InboundActivityError),
+    Terminal,
+}
+
+/// Holds the exact approved peer identity and verified channel's existing
+/// post-Hello stream, but does not itself establish or verify TLS.
+///
+/// Every plaintext frame delivery is guarded by freshly loaded durable
+/// network approval AND enrolled key pin. The daemon's trust lock covers the
+/// check and processing so in-process revocation cannot interleave. An
+/// authorization or framing failure irreversibly invalidates this instance.
+pub struct PinnedSessionIngress<'a> {
+    trust: &'a DurablePeerTrustOperations,
+    network: NetworkId,
+    peer: NodeId,
+    verified_tls_key: SpkiSha256,
+    activity: AuthenticatedInboundActivity,
+    terminal: bool,
+}
+
+impl<'a> PinnedSessionIngress<'a> {
+    /// Only an independently authenticated TLS/Hello runtime may call this.
+    /// Construction *never* authorizes production joining by itself.
+    pub fn after_verified_handshake(
+        trust: &'a DurablePeerTrustOperations,
+        network: NetworkId,
+        peer: NodeId,
+        verified_tls_key: SpkiSha256,
+        exporter_session_id: [u8; 16],
+        deadline: ConnectionDeadline,
+    ) -> Result<Self, PinnedIngressError> {
+        trust
+            .require_approved_pinned_tls_peer(network, peer, verified_tls_key)
+            .map_err(PinnedIngressError::Authorization)?;
+        let activity = AuthenticatedInboundActivity::after_verified_hello(
+            network,
+            peer,
+            exporter_session_id,
+            deadline,
+        )
+        .map_err(PinnedIngressError::Protocol)?;
+        Ok(Self {
+            trust,
+            network,
+            peer,
+            verified_tls_key,
+            activity,
+            terminal: false,
+        })
+    }
+
+    pub fn receive_verified_plaintext(
+        &mut self,
+        plaintext: &[u8],
+        now_ms: u64,
+    ) -> Result<Vec<ControlEnvelope>, PinnedIngressError> {
+        if self.terminal {
+            return Err(PinnedIngressError::Terminal);
+        }
+        let result = self.trust.with_approved_pinned_tls_peer(
+            self.network,
+            self.peer,
+            self.verified_tls_key,
+            || self.activity.feed_verified_plaintext(plaintext, now_ms),
+        );
+        match result {
+            Ok(Ok(messages)) => Ok(messages),
+            Ok(Err(error)) => {
+                self.terminal = true;
+                Err(PinnedIngressError::Protocol(error))
+            }
+            Err(error) => {
+                self.terminal = true;
+                Err(PinnedIngressError::Authorization(error))
+            }
+        }
+    }
+
+    /// A graceful close still needs a current approval; teardown itself must
+    /// always be performed by the caller even after revocation or failure.
+    pub fn finish_at(&mut self, now_ms: u64) -> Result<(), PinnedIngressError> {
+        if self.terminal {
+            return Err(PinnedIngressError::Terminal);
+        }
+        let result = self.trust.with_approved_pinned_tls_peer(
+            self.network,
+            self.peer,
+            self.verified_tls_key,
+            || self.activity.finish_at(now_ms),
+        );
+        self.terminal = true;
+        match result {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err(PinnedIngressError::Protocol(error)),
+            Err(error) => Err(PinnedIngressError::Authorization(error)),
+        }
+    }
+
+    pub const fn is_terminal(&self) -> bool {
+        self.terminal
+    }
+
+    pub const fn expires_ms(&self) -> u64 {
+        self.activity.expires_ms()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use blueroute_core::{
+        DisplayName, ErrorKind, MembershipRegistry, MembershipState, NetworkMembership,
+    };
+    use blueroute_linux::NetworkMembershipStore;
+    use blueroute_protocol::control::{
+        CONTROL_VERSION, ControlEnvelope, ControlMessage, encode_control_frame,
+    };
+    use blueroute_protocol::session::{ConnectionStage, DeadlineError};
+
+    use super::*;
+    use crate::{PeerPinStore, PeerTrustOperations};
+
+    static NEXT_TEST: AtomicUsize = AtomicUsize::new(0);
+
+    struct Temp(PathBuf);
+
+    impl Temp {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "blueroute-ingress-test-{}-{}",
+                std::process::id(),
+                NEXT_TEST.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for Temp {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn network() -> NetworkId {
+        NetworkId::from_bytes([51; 16])
+    }
+
+    fn peer() -> NodeId {
+        NodeId::from_bytes([52; 16])
+    }
+
+    fn key(value: u8) -> SpkiSha256 {
+        SpkiSha256::from_verified_certificate_digest([value; 32]).unwrap()
+    }
+
+    fn deadline() -> ConnectionDeadline {
+        let mut deadline = ConnectionDeadline::new(0);
+        deadline.advance(ConnectionStage::TlsHandshake, 1).unwrap();
+        deadline.advance(ConnectionStage::Hello, 2).unwrap();
+        deadline.advance(ConnectionStage::Active, 3).unwrap();
+        deadline
+    }
+
+    fn setup() -> (Temp, DurablePeerTrustOperations) {
+        let root = Temp::new();
+        let store = NetworkMembershipStore::new(root.0.join("memberships-v1"));
+        let mut network_state =
+            NetworkMembership::new(network(), DisplayName::new("Simulated network").unwrap());
+        network_state.state = MembershipState::Member;
+        let mut registry = MembershipRegistry::default();
+        registry.remember_network(network_state);
+        store.save(&registry).unwrap();
+        let trust = DurablePeerTrustOperations::with_peer_pin_store(
+            store,
+            PeerPinStore::new(root.0.join("peer-pins")),
+        );
+        (root, trust)
+    }
+
+    fn session<'a>(
+        trust: &'a DurablePeerTrustOperations,
+        tls_key: SpkiSha256,
+    ) -> Result<PinnedSessionIngress<'a>, PinnedIngressError> {
+        PinnedSessionIngress::after_verified_handshake(
+            trust,
+            network(),
+            peer(),
+            tls_key,
+            [53; 16],
+            deadline(),
+        )
+    }
+
+    fn frame(sequence: u64, message: ControlMessage, sender: NodeId) -> Vec<u8> {
+        encode_control_frame(&ControlEnvelope {
+            version: CONTROL_VERSION,
+            network: network(),
+            sender,
+            session_id: [53; 16],
+            sequence,
+            message,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn neither_untrusted_approval_nor_an_unenrolled_key_opens_ingress() {
+        let (_root, trust) = setup();
+        assert!(matches!(
+            session(&trust, key(54)),
+            Err(PinnedIngressError::Authorization(_))
+        ));
+        futures_lite::future::block_on(trust.trust_peer(peer())).unwrap();
+        assert!(matches!(
+            session(&trust, key(54)),
+            Err(PinnedIngressError::Authorization(_))
+        ));
+        assert!(trust
+            .enroll_key_after_independent_confirmation(network(), peer(), key(54), key(54))
+            .unwrap());
+        assert!(matches!(
+            session(&trust, key(55)),
+            Err(PinnedIngressError::Authorization(_))
+        ));
+        assert!(session(&trust, key(54)).is_ok());
+    }
+
+    #[test]
+    fn revocation_blocks_next_frame_and_reapproval_cannot_revive_old_session() {
+        let (_root, trust) = setup();
+        futures_lite::future::block_on(trust.trust_peer(peer())).unwrap();
+        trust
+            .enroll_key_after_independent_confirmation(network(), peer(), key(54), key(54))
+            .unwrap();
+        let mut active = session(&trust, key(54)).unwrap();
+        assert_eq!(
+            active
+                .receive_verified_plaintext(
+                    &frame(3, ControlMessage::Heartbeat, peer()),
+                    10,
+                )
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(active.expires_ms(), 30_010);
+        futures_lite::future::block_on(trust.forget_peer(peer())).unwrap();
+        assert!(matches!(
+            active.receive_verified_plaintext(
+                &frame(4, ControlMessage::Heartbeat, peer()),
+                11
+            ),
+            Err(PinnedIngressError::Authorization(_))
+        ));
+        assert!(active.is_terminal());
+        futures_lite::future::block_on(trust.trust_peer(peer())).unwrap();
+        assert!(matches!(
+            session(&trust, key(54)),
+            Err(PinnedIngressError::Authorization(_))
+        ));
+        assert!(matches!(
+            active.receive_verified_plaintext(
+                &frame(5, ControlMessage::Heartbeat, peer()),
+                12
+            ),
+            Err(PinnedIngressError::Terminal)
+        ));
+        // Re-enrollment can create only a FRESH, independently verified session.
+        trust
+            .enroll_key_after_independent_confirmation(network(), peer(), key(54), key(54))
+            .unwrap();
+        assert!(session(&trust, key(54)).is_ok());
+        assert!(active.is_terminal());
+    }
+
+    #[test]
+    fn clock_expiry_and_bad_peer_poison_session_without_refresh() {
+        let (_root, trust) = setup();
+        futures_lite::future::block_on(trust.trust_peer(peer())).unwrap();
+        trust
+            .enroll_key_after_independent_confirmation(network(), peer(), key(54), key(54))
+            .unwrap();
+        let mut active = session(&trust, key(54)).unwrap();
+        assert!(matches!(
+            active.receive_verified_plaintext(
+                &frame(3, ControlMessage::Heartbeat, NodeId::from_bytes([99; 16])),
+                10
+            ),
+            Err(PinnedIngressError::Protocol(_))
+        ));
+        assert!(active.is_terminal());
+        assert!(matches!(
+            active.receive_verified_plaintext(
+                &frame(3, ControlMessage::Heartbeat, peer()),
+                11
+            ),
+            Err(PinnedIngressError::Terminal)
+        ));
+
+        let mut expired = session(&trust, key(54)).unwrap();
+        assert!(matches!(
+            expired.receive_verified_plaintext(
+                &frame(3, ControlMessage::Heartbeat, peer()),
+                30_003
+            ),
+            Err(PinnedIngressError::Protocol(
+                InboundActivityError::Deadline(DeadlineError::Expired)
+            ))
+        ));
+        assert!(expired.is_terminal());
+    }
+
+    #[test]
+    fn revocation_refuses_even_graceful_close_and_teardown_stays_terminal() {
+        let (_root, trust) = setup();
+        futures_lite::future::block_on(trust.trust_peer(peer())).unwrap();
+        trust
+            .enroll_key_after_independent_confirmation(network(), peer(), key(54), key(54))
+            .unwrap();
+        let mut active = session(&trust, key(54)).unwrap();
+        active
+            .receive_verified_plaintext(
+                &frame(3, ControlMessage::Goodbye, peer()),
+                10,
+            )
+            .unwrap();
+        futures_lite::future::block_on(trust.forget_peer(peer())).unwrap();
+        match active.finish_at(11) {
+            Err(PinnedIngressError::Authorization(error)) => {
+                assert_eq!(error.kind(), ErrorKind::AuthenticationFailed);
+            }
+            _ => panic!("revoked peer must not close as approved"),
+        }
+        assert!(active.is_terminal());
+        assert!(matches!(
+            active.finish_at(12),
+            Err(PinnedIngressError::Terminal)
+        ));
+    }
+}

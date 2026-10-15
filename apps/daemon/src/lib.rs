@@ -3,6 +3,7 @@
 mod authorization;
 mod join_network;
 mod peer_pin_store;
+mod pinned_ingress;
 mod peer_trust;
 mod single_star;
 
@@ -27,6 +28,7 @@ pub use join_network::{
     JoinRuntime, LinuxJoinRuntime, TransactionalJoinNetworkOperations,
 };
 pub use peer_pin_store::PeerPinStore;
+pub use pinned_ingress::{PinnedIngressError, PinnedSessionIngress};
 pub use peer_trust::{
     DurablePeerTrustOperations, PeerTrustFuture, PeerTrustOperations, pair_and_trust_bluetooth_peer,
 };

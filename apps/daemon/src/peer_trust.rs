@@ -94,6 +94,25 @@ impl DurablePeerTrustOperations {
         node: NodeId,
         verified_spki_sha256: SpkiSha256,
     ) -> Result<(), CoreError> {
+        self.with_approved_pinned_tls_peer(network, node, verified_spki_sha256, || ())
+    }
+
+    /// Serialize a trust/pin check and one local control-frame operation
+    /// against in-process trust updates and revocations. The caller MUST
+    /// supply a cryptographically verified TLS SPKI, not a peer claim.
+    ///
+    /// The state lock stays held through `operation`: a concurrent
+    /// `forget_peer` cannot revoke approval in between the check and frame
+    /// delivery. The operation must not block on network I/O or reenter
+    /// peer-trust operations. This does not protect against external writers
+    /// or authenticate a TLS certificate by itself.
+    pub fn with_approved_pinned_tls_peer<T>(
+        &self,
+        network: NetworkId,
+        node: NodeId,
+        verified_spki_sha256: SpkiSha256,
+        operation: impl FnOnce() -> T,
+    ) -> Result<T, CoreError> {
         let _guard = self.lock_state()?;
         self.require_peer_approved(network, node)?;
         let store = self.pin_store.as_ref().ok_or_else(|| {
@@ -110,7 +129,8 @@ impl DurablePeerTrustOperations {
                     "peer has no matching explicitly enrolled BlueRoute cryptographic identity",
                     error.to_string(),
                 )
-            })
+            })?;
+        Ok(operation())
     }
 
     /// Persist a key enrollment ONLY after an independently authenticated
