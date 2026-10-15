@@ -195,10 +195,7 @@ mod tests {
         let frame = writer.heartbeat().unwrap();
         assert_eq!(decode_control_frame(&frame).unwrap().sequence, u64::MAX - 1);
         assert_eq!(writer.next_sequence(), u64::MAX);
-        assert_eq!(
-            writer.goodbye(),
-            Err(SessionWriteError::SequenceExhausted)
-        );
+        assert_eq!(writer.goodbye(), Err(SessionWriteError::SequenceExhausted));
         assert_eq!(writer.heartbeat(), Err(SessionWriteError::Poisoned));
         assert!(!writer.is_closed());
 
