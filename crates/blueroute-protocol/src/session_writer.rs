@@ -5,11 +5,15 @@
 //! peer and exporter-bound Hello transcript may construct the writer. Never
 //! attach it to raw TCP. P6-004 production JoinNetwork remains fail-closed.
 
+use std::time::Instant;
+
 use blueroute_core::{NetworkId, NodeId};
 
 use crate::control::{
-    CONTROL_VERSION, ControlEnvelope, ControlFrameError, ControlMessage, encode_control_frame,
+    CONTROL_VERSION, ControlEnvelope, ControlFrameError, ControlMessage, decode_control_frame,
+    encode_control_frame,
 };
+use crate::control_io::{ControlIoError, DeadlineControlWrite, write_one_control_frame_with_deadline};
 
 /// Monotonic local sequence allocation after Hello(sequence=1) and
 /// HelloAck(sequence=2). This writer does not handle handshake messages,
@@ -31,6 +35,15 @@ pub enum SessionWriteError {
     SequenceExhausted,
     Encode(ControlFrameError),
     Poisoned,
+}
+
+/// Errors from the bounded transport path. A partial write always poisons
+/// the writer; the TLS channel must be discarded, not retried or resumed.
+#[derive(Debug)]
+pub enum SessionWriteIoError {
+    State(SessionWriteError),
+    Transport(ControlIoError),
+    InternalFrame(ControlFrameError),
 }
 
 impl SessionControlWriter {
@@ -66,6 +79,48 @@ impl SessionControlWriter {
     /// frame on a new socket or declare a graceful Goodbye.
     pub fn goodbye(&mut self) -> Result<Vec<u8>, SessionWriteError> {
         self.encode(ControlMessage::Goodbye)
+    }
+
+    /// Write one scoped heartbeat with a whole-frame absolute deadline.
+    /// An I/O error (including late completion) irreversibly poisons the
+    /// session; callers MUST close the separately authenticated TLS channel.
+    pub fn write_heartbeat_with_deadline<W: DeadlineControlWrite>(
+        &mut self,
+        destination: &mut W,
+        deadline: Instant,
+    ) -> Result<(), SessionWriteIoError> {
+        self.write_message_with_deadline(destination, deadline, ControlMessage::Heartbeat)
+    }
+
+    /// Write terminal Goodbye; successful issuance closes this writer.
+    /// The caller must still close its authenticated transport gracefully.
+    pub fn write_goodbye_with_deadline<W: DeadlineControlWrite>(
+        &mut self,
+        destination: &mut W,
+        deadline: Instant,
+    ) -> Result<(), SessionWriteIoError> {
+        self.write_message_with_deadline(destination, deadline, ControlMessage::Goodbye)
+    }
+
+    fn write_message_with_deadline<W: DeadlineControlWrite>(
+        &mut self,
+        destination: &mut W,
+        deadline: Instant,
+        message: ControlMessage,
+    ) -> Result<(), SessionWriteIoError> {
+        let frame = self.encode(message).map_err(SessionWriteIoError::State)?;
+        // The writer creates only validated canonical frames. Recheck before
+        // calling the existing absolute-deadline I/O primitive, whose API
+        // accepts a typed envelope rather than arbitrary serialized bytes.
+        let envelope = decode_control_frame(&frame).map_err(|error| {
+            self.poisoned = true;
+            SessionWriteIoError::InternalFrame(error)
+        })?;
+        if let Err(error) = write_one_control_frame_with_deadline(destination, &envelope, deadline) {
+            self.poisoned = true;
+            return Err(SessionWriteIoError::Transport(error));
+        }
+        Ok(())
     }
 
     pub const fn is_closed(&self) -> bool {
@@ -111,8 +166,10 @@ impl SessionControlWriter {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{self, ErrorKind, Write};
+    use std::time::Duration;
+
     use super::*;
-    use crate::control::decode_control_frame;
     use crate::session_stream::{SessionControlStream, SessionStreamError};
 
     fn network() -> NetworkId {
@@ -186,6 +243,94 @@ mod tests {
             wrong_exporter.feed(&frame),
             Err(SessionStreamError::WrongContext)
         );
+    }
+
+    struct DeadlineBuffer {
+        bytes: Vec<u8>,
+        fail_after: Option<usize>,
+        seen_timeout: bool,
+    }
+
+    impl Write for DeadlineBuffer {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if self.fail_after.is_some_and(|limit| self.bytes.len() >= limit) {
+                return Err(io::Error::from(ErrorKind::BrokenPipe));
+            }
+            let count = bytes.len().min(1);
+            self.bytes.extend_from_slice(&bytes[..count]);
+            Ok(count)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl DeadlineControlWrite for DeadlineBuffer {
+        fn set_control_write_timeout(&mut self, _: Duration) -> io::Result<()> {
+            self.seen_timeout = true;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn deadline_writer_emits_strict_frames_and_closes_after_goodbye() {
+        let mut writer = outbound();
+        let mut destination = DeadlineBuffer {
+            bytes: Vec::new(),
+            fail_after: None,
+            seen_timeout: false,
+        };
+        let deadline = Instant::now() + Duration::from_secs(3);
+        writer
+            .write_heartbeat_with_deadline(&mut destination, deadline)
+            .unwrap();
+        let first = decode_control_frame(&destination.bytes).unwrap();
+        assert_eq!(first.sequence, 3);
+        assert!(destination.seen_timeout);
+        destination.bytes.clear();
+        writer
+            .write_goodbye_with_deadline(&mut destination, deadline)
+            .unwrap();
+        let final_frame = decode_control_frame(&destination.bytes).unwrap();
+        assert_eq!(final_frame.sequence, 4);
+        assert!(matches!(final_frame.message, ControlMessage::Goodbye));
+        assert!(matches!(
+            writer.write_heartbeat_with_deadline(&mut destination, deadline),
+            Err(SessionWriteIoError::State(SessionWriteError::AfterGoodbye))
+        ));
+    }
+
+    #[test]
+    fn partial_write_and_expired_deadline_poison_the_session() {
+        let mut writer = outbound();
+        let mut destination = DeadlineBuffer {
+            bytes: Vec::new(),
+            fail_after: Some(7),
+            seen_timeout: false,
+        };
+        let deadline = Instant::now() + Duration::from_secs(3);
+        assert!(matches!(
+            writer.write_heartbeat_with_deadline(&mut destination, deadline),
+            Err(SessionWriteIoError::Transport(ControlIoError::Io(ref error)))
+                if error.kind() == ErrorKind::BrokenPipe
+        ));
+        assert_eq!(destination.bytes.len(), 7);
+        assert_eq!(writer.heartbeat(), Err(SessionWriteError::Poisoned));
+
+        let mut expired = outbound();
+        let mut intact = DeadlineBuffer {
+            bytes: Vec::new(),
+            fail_after: None,
+            seen_timeout: false,
+        };
+        assert!(matches!(
+            expired.write_heartbeat_with_deadline(&mut intact, Instant::now()),
+            Err(SessionWriteIoError::Transport(ControlIoError::Io(ref error)))
+                if error.kind() == ErrorKind::TimedOut
+        ));
+        assert!(intact.bytes.is_empty());
+        assert_eq!(expired.goodbye(), Err(SessionWriteError::Poisoned));
     }
 
     #[test]
