@@ -13,7 +13,9 @@ use crate::control::{
     CONTROL_VERSION, ControlEnvelope, ControlFrameError, ControlMessage, decode_control_frame,
     encode_control_frame,
 };
-use crate::control_io::{ControlIoError, DeadlineControlWrite, write_one_control_frame_with_deadline};
+use crate::control_io::{
+    ControlIoError, DeadlineControlWrite, write_one_control_frame_with_deadline,
+};
 
 /// Monotonic local sequence allocation after Hello(sequence=1) and
 /// HelloAck(sequence=2). This writer does not handle handshake messages,
@@ -116,7 +118,8 @@ impl SessionControlWriter {
             self.poisoned = true;
             SessionWriteIoError::InternalFrame(error)
         })?;
-        if let Err(error) = write_one_control_frame_with_deadline(destination, &envelope, deadline) {
+        if let Err(error) = write_one_control_frame_with_deadline(destination, &envelope, deadline)
+        {
             self.poisoned = true;
             return Err(SessionWriteIoError::Transport(error));
         }
@@ -253,7 +256,10 @@ mod tests {
 
     impl Write for DeadlineBuffer {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            if self.fail_after.is_some_and(|limit| self.bytes.len() >= limit) {
+            if self
+                .fail_after
+                .is_some_and(|limit| self.bytes.len() >= limit)
+            {
                 return Err(io::Error::from(ErrorKind::BrokenPipe));
             }
             let count = bytes.len().min(1);
