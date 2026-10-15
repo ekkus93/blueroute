@@ -95,6 +95,9 @@ fn validate_facts(facts: &HelloFacts, sender: NodeId) -> Result<(), ControlFrame
     }
     let mut ids = BTreeSet::new();
     for node in &facts.direct_neighbors {
+        if *node == NodeId::from_bytes([0; 16]) {
+            return Err(invalid("zero direct neighbor identity"));
+        }
         if *node == sender || !ids.insert(*node) {
             return Err(invalid("duplicated or self-referential neighbor"));
         }
@@ -195,6 +198,12 @@ fn validate(envelope: &ControlEnvelope) -> Result<(), ControlFrameError> {
     if envelope.version != CONTROL_VERSION {
         return Err(invalid("unsupported control protocol version"));
     }
+    if envelope.network == NetworkId::from_bytes([0; 16]) {
+        return Err(invalid("zero network identity"));
+    }
+    if envelope.sender == NodeId::from_bytes([0; 16]) {
+        return Err(invalid("zero sender identity"));
+    }
     if envelope.session_id.iter().all(|byte| *byte == 0) {
         return Err(invalid("zero session identifier"));
     }
@@ -275,6 +284,9 @@ impl VerifiedSessionSequence {
         sender: NodeId,
         session_id: [u8; 16],
     ) -> Result<Self, ControlFrameError> {
+        if network == NetworkId::from_bytes([0; 16]) || sender == NodeId::from_bytes([0; 16]) {
+            return Err(invalid("zero verified session identity"));
+        }
         if session_id.iter().all(|byte| *byte == 0) {
             return Err(invalid("zero session identifier"));
         }
@@ -596,6 +608,56 @@ mod tests {
             framed.extend_from_slice(payload.as_bytes());
             assert!(decode_control_frame(&framed).is_err());
         }
+    }
+
+
+    #[test]
+    fn zero_logical_identities_fail_closed_on_encode_decode_and_session_scope() {
+        let baseline = sample();
+        for case in 0..3 {
+            let mut envelope = baseline.clone();
+            match case {
+                0 => envelope.network = NetworkId::from_bytes([0; 16]),
+                1 => envelope.sender = NodeId::from_bytes([0; 16]),
+                _ => {
+                    let ControlMessage::Hello { facts, .. } = &mut envelope.message else {
+                        unreachable!()
+                    };
+                    facts.direct_neighbors.push(NodeId::from_bytes([0; 16]));
+                }
+            }
+            assert!(encode_control_frame(&envelope).is_err(), "encode case {case}");
+
+            // Reframe independently serialized wire input: decode must apply
+            // exactly the same rejection to hostile peer-controlled claims.
+            let payload = serde_json::to_vec(&envelope).unwrap();
+            let mut framed = (payload.len() as u32).to_be_bytes().to_vec();
+            framed.extend(payload);
+            assert!(decode_control_frame(&framed).is_err(), "decode case {case}");
+        }
+
+        assert!(VerifiedSessionSequence::new(
+            NetworkId::from_bytes([0; 16]),
+            baseline.sender,
+            baseline.session_id,
+        )
+        .is_err());
+        assert!(VerifiedSessionSequence::new(
+            baseline.network,
+            NodeId::from_bytes([0; 16]),
+            baseline.session_id,
+        )
+        .is_err());
+
+        // Valid scope and ordinary post-Hello liveness frames are unaffected.
+        let heartbeat = ControlEnvelope {
+            message: ControlMessage::Heartbeat,
+            ..baseline.clone()
+        };
+        assert_eq!(
+            decode_control_frame(&encode_control_frame(&heartbeat).unwrap()).unwrap(),
+            heartbeat
+        );
     }
 
     #[test]
