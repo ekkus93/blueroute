@@ -45,6 +45,8 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 
 ## Software-only control-session evidence (2026-10-14)
 
+- **P7-004 outbound lifecycle framing (software only):** Session-bound Heartbeat/Goodbye framing with monotonic post-handshake sequences, context mismatch, no reuse after Goodbye and sequence-exhaustion tests passed [exact-head CI 38672265801](https://github.com/ekkus93/blueroute/actions/runs/38672265801) at `a8a30663e333955a34d2d3f011355088ff46e130`. Outbound serialization is not proof of mutually authenticated TLS or completed production control runtime; real Bluetooth and multiple-machine criteria remain deliberately **HARDWARE DEFERRED**.
+
 - **P7-005 parser mutation coverage (software only):** 2,048 deterministic hostile control-stream mutations plus valid Heartbeat/Goodbye fragmentation and replay-rejection persistence; exact-head [CI 38649890223](https://github.com/ekkus93/blueroute/actions/runs/38649890223) passed at `1f92c50e6c5708f5a55b00d3c641b0856287aaab`. This does not prove TLS authentication or physical Bluetooth acceptance; actual daemon/peer qualification remains outstanding.
 
 - **P7-004:** Post-hello incremental frame parser with strict network, peer, TLS-exporter session-ID and increasing-sequence scope; rejects repeated Hello, replay, malformed frames and post-Goodbye traffic. Exact-head `9878dca724f4d208ed007093869fd21a57a9ea8b`; [CI 38601668411](https://github.com/ekkus93/blueroute/actions/runs/38601668411) passed. This is **not** a real TLS session, user-confirmed peer enrollment, authenticated daemon runtime or Bluetooth test.
