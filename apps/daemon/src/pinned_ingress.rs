@@ -238,9 +238,11 @@ mod tests {
             session(&trust, key(54)),
             Err(PinnedIngressError::Authorization(_))
         ));
-        assert!(trust
-            .enroll_key_after_independent_confirmation(network(), peer(), key(54), key(54))
-            .unwrap());
+        assert!(
+            trust
+                .enroll_key_after_independent_confirmation(network(), peer(), key(54), key(54))
+                .unwrap()
+        );
         assert!(matches!(
             session(&trust, key(55)),
             Err(PinnedIngressError::Authorization(_))
@@ -258,10 +260,7 @@ mod tests {
         let mut active = session(&trust, key(54)).unwrap();
         assert_eq!(
             active
-                .receive_verified_plaintext(
-                    &frame(3, ControlMessage::Heartbeat, peer()),
-                    10,
-                )
+                .receive_verified_plaintext(&frame(3, ControlMessage::Heartbeat, peer()), 10,)
                 .unwrap()
                 .len(),
             1
@@ -269,10 +268,7 @@ mod tests {
         assert_eq!(active.expires_ms(), 30_010);
         futures_lite::future::block_on(trust.forget_peer(peer())).unwrap();
         assert!(matches!(
-            active.receive_verified_plaintext(
-                &frame(4, ControlMessage::Heartbeat, peer()),
-                11
-            ),
+            active.receive_verified_plaintext(&frame(4, ControlMessage::Heartbeat, peer()), 11),
             Err(PinnedIngressError::Authorization(_))
         ));
         assert!(active.is_terminal());
@@ -282,10 +278,7 @@ mod tests {
             Err(PinnedIngressError::Authorization(_))
         ));
         assert!(matches!(
-            active.receive_verified_plaintext(
-                &frame(5, ControlMessage::Heartbeat, peer()),
-                12
-            ),
+            active.receive_verified_plaintext(&frame(5, ControlMessage::Heartbeat, peer()), 12),
             Err(PinnedIngressError::Terminal)
         ));
         // Re-enrollment can create only a FRESH, independently verified session.
@@ -313,19 +306,14 @@ mod tests {
         ));
         assert!(active.is_terminal());
         assert!(matches!(
-            active.receive_verified_plaintext(
-                &frame(3, ControlMessage::Heartbeat, peer()),
-                11
-            ),
+            active.receive_verified_plaintext(&frame(3, ControlMessage::Heartbeat, peer()), 11),
             Err(PinnedIngressError::Terminal)
         ));
 
         let mut expired = session(&trust, key(54)).unwrap();
         assert!(matches!(
-            expired.receive_verified_plaintext(
-                &frame(3, ControlMessage::Heartbeat, peer()),
-                30_003
-            ),
+            expired
+                .receive_verified_plaintext(&frame(3, ControlMessage::Heartbeat, peer()), 30_003),
             Err(PinnedIngressError::Protocol(
                 InboundActivityError::Deadline(DeadlineError::Expired)
             ))
@@ -342,10 +330,7 @@ mod tests {
             .unwrap();
         let mut active = session(&trust, key(54)).unwrap();
         active
-            .receive_verified_plaintext(
-                &frame(3, ControlMessage::Goodbye, peer()),
-                10,
-            )
+            .receive_verified_plaintext(&frame(3, ControlMessage::Goodbye, peer()), 10)
             .unwrap();
         futures_lite::future::block_on(trust.forget_peer(peer())).unwrap();
         match active.finish_at(11) {
