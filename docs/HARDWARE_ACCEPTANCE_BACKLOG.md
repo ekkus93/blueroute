@@ -45,6 +45,8 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 
 ## Software-only control-session evidence (2026-10-14)
 
+- **P7-005 hostile idle-gate input (software only):** 2,048 deterministic wire mutations, every heartbeat fragmentation boundary at deadline, peer isolation/replay and abrupt EOF cases pass [exact-head CI 38680491093](https://github.com/ekkus93/blueroute/actions/runs/38680491093) at `b377d98dce55551a7f940c4fa3ae9fe6c80440db`. No authenticated TLS daemon, peer-key ceremony, multi-machine PAN or hardware acceptance is represented.
+
 - **P7-004 bounded authenticated-session close (software only):** Goodbye-to-EOF now has a strict closing deadline; late EOF and post-Goodbye bytes permanently terminate the model, while clean EOF is accepted once. Regression CI [38679210137](https://github.com/ekkus93/blueroute/actions/runs/38679210137) passed at `bda3176aa6b25e3a479283c03ae290576b3347b7`. No TLS or two-device PAN tests; P7 and physical hardware acceptance remain open.
 
 - **P7-004 inbound authenticated-activity model (software only):** Only scope/replay-checked complete post-hello messages refresh an existing active-stage idle deadline; partial frames, empty polls, wrong-peer frames, clock regression, timeout and abrupt EOF fail closed in deterministic tests. [Exact-head CI 38678299553](https://github.com/ekkus93/blueroute/actions/runs/38678299553) passed at `71a8fc8b117a320ce7a956198d4aaad8254c466d`. No production TLS, independently approved peer enrollment, network join or Bluetooth peer acceptance is proven; keep physical requirements deferred.

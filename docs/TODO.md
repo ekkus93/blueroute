@@ -911,6 +911,8 @@ This is the first complete product slice.
 
 ## P7-005 — Fuzz/property-test parser
 
+**Additional P7-005 session-idle fault injection (software-only, 2026-10-14):** `crates/blueroute-protocol/tests/session_activity_faults.rs` covers every possible single split point of a bounded Heartbeat at the absolute idle deadline, two separately scoped peer sessions, replay poisoning, abrupt EOF and 2,048 reproducible hostile frame mutations. Exact-head [CI 38680491093](https://github.com/ekkus93/blueroute/actions/runs/38680491093) passed at `b377d98dce55551a7f940c4fa3ae9fe6c80440db`. All tests use synthetic already-verified channel assumptions; they **do not** authenticate peers, exercise daemon TLS, or prove any real Bluetooth behavior. Keep P7-005 daemon integration and physical acceptance open.
+
 - [x] deterministic malformed/truncated/oversized/unknown-field input tests for control parser.
 - [x] per-message round-trip and frame-mutation tests.
 - [x] control-version rejection/compatibility tests.
