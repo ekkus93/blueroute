@@ -203,6 +203,14 @@ impl From<String> for CliFailure {
         Self { code: 1, message }
     }
 }
+impl From<&'static str> for CliFailure {
+    fn from(message: &'static str) -> Self {
+        Self {
+            code: 1,
+            message: message.to_owned(),
+        }
+    }
+}
 
 fn run(args: &[String]) -> i32 {
     let operation = match parse(args) {
@@ -246,7 +254,7 @@ fn run(args: &[String]) -> i32 {
                     Response::Diagnostics(snapshot) => {
                         format_diagnostics(&snapshot, json).map_err(CliFailure::from)
                     }
-                    _ => Err(CliFailure::from("daemon returned an unexpected diagnostics response".to_owned())),
+                    _ => Err("daemon returned an unexpected diagnostics response".into()),
                 })
         }
         Operation::NetworkList { json } => {
@@ -256,7 +264,7 @@ fn run(args: &[String]) -> i32 {
                     Response::Networks(networks) => {
                         format_networks(&networks, json).map_err(CliFailure::from)
                     }
-                    _ => Err(CliFailure::from("daemon returned an unexpected network-list response".to_owned())),
+                    _ => Err("daemon returned an unexpected network-list response".into()),
                 })
         }
         Operation::NodeList { json } => {
@@ -266,7 +274,7 @@ fn run(args: &[String]) -> i32 {
                     Response::Nodes(nodes) => {
                         format_nodes(&nodes, json).map_err(CliFailure::from)
                     }
-                    _ => Err(CliFailure::from("daemon returned an unexpected node-list response".to_owned())),
+                    _ => Err("daemon returned an unexpected node-list response".into()),
                 })
         }
         Operation::NodeShow { node, json } => {
@@ -277,9 +285,9 @@ fn run(args: &[String]) -> i32 {
                         format_node(&node, json).map_err(CliFailure::from)
                     }
                     Response::Node(None) => {
-                        Err(CliFailure::from("the daemon has no record for that NodeId".to_owned()))
+                        Err("the daemon has no record for that NodeId".into())
                     }
-                    _ => Err(CliFailure::from("daemon returned an unexpected node-detail response".to_owned())),
+                    _ => Err("daemon returned an unexpected node-detail response".into()),
                 })
         }
         Operation::TrustPeer { node, json } => {
@@ -287,7 +295,7 @@ fn run(args: &[String]) -> i32 {
                 .map_err(CliFailure::from)
                 .and_then(|response| match response {
                     Response::Ack => Ok(mutation_ack(json, "Peer trust approved")),
-                    _ => Err(CliFailure::from("daemon returned an unexpected trust response".to_owned())),
+                    _ => Err("daemon returned an unexpected trust response".into()),
                 })
         }
         Operation::ForgetPeer { node, json } => {
@@ -295,7 +303,7 @@ fn run(args: &[String]) -> i32 {
                 .map_err(CliFailure::from)
                 .and_then(|response| match response {
                     Response::Ack => Ok(mutation_ack(json, "Peer trust revoked")),
-                    _ => Err(CliFailure::from("daemon returned an unexpected forget response".to_owned())),
+                    _ => Err("daemon returned an unexpected forget response".into()),
                 })
         }
         Operation::CreateNetwork { name, json } => {
@@ -303,7 +311,7 @@ fn run(args: &[String]) -> i32 {
                 .map_err(CliFailure::from)
                 .and_then(|response| match response {
                     Response::Ack => Ok(mutation_ack(json, "Network created")),
-                    _ => Err(CliFailure::from("daemon returned an unexpected network-create response".to_owned())),
+                    _ => Err("daemon returned an unexpected network-create response".into()),
                 })
         }
         Operation::StartDiscovery { json } => {
@@ -311,7 +319,7 @@ fn run(args: &[String]) -> i32 {
                 .map_err(CliFailure::from)
                 .and_then(|response| match response {
                     Response::Ack => Ok(mutation_ack(json, "Discovery started")),
-                    _ => Err(CliFailure::from("daemon returned an unexpected discovery response".to_owned())),
+                    _ => Err("daemon returned an unexpected discovery response".into()),
                 })
         }
         Operation::StopDiscovery { json } => {
@@ -319,7 +327,7 @@ fn run(args: &[String]) -> i32 {
                 .map_err(CliFailure::from)
                 .and_then(|response| match response {
                     Response::Ack => Ok(mutation_ack(json, "Discovery stopped")),
-                    _ => Err(CliFailure::from("daemon returned an unexpected discovery response".to_owned())),
+                    _ => Err("daemon returned an unexpected discovery response".into()),
                 })
         }
         Operation::Help | Operation::Version => unreachable!(),
@@ -495,7 +503,7 @@ mod tests {
             zbus::fdo::Error::NotSupported("unsupported runtime capability".into()),
         ))));
         assert_eq!(unsupported.code, 5);
-        assert_eq!(CliFailure::from("unrecognized daemon response".to_owned()).code, 1);
+        assert_eq!(CliFailure::from("unrecognized daemon response").code, 1);
     }
 
     #[test]

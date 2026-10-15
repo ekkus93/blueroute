@@ -290,6 +290,9 @@ impl fmt::Display for ClientError {
 
 impl std::error::Error for ClientError {}
 
+/// The human-readable project name.
+pub const PROJECT_NAME: &str = "BlueRoute";
+
 #[cfg(test)]
 mod error_class_tests {
     use super::*;
@@ -342,5 +345,4 @@ mod error_class_tests {
     }
 }
 
-/// The human-readable project name.
-pub const PROJECT_NAME: &str = "BlueRoute";
+
