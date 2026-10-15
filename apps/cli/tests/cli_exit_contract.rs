@@ -56,3 +56,65 @@ fn daemon_unavailable_exits_three_without_falling_back_to_privileged_tools() {
         "unexpected connection diagnostic: {error}"
     );
 }
+
+#[test]
+#[ignore = "requires dbus-run-session; CI starts an isolated broker"]
+fn cli_exit_statuses_propagate_typed_broker_failures() -> Result<(), Box<dyn std::error::Error>> {
+    use blueroute_protocol::{ApiVersion, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME};
+    use zbus::{connection::Builder, fdo, interface};
+
+    struct FakeDaemon;
+
+    #[interface(name = "org.blueroute.Service1")]
+    impl FakeDaemon {
+        fn version(&self) -> (u16, u16) {
+            (ApiVersion::CURRENT.major, ApiVersion::CURRENT.minor)
+        }
+
+        fn request(&self, payload: &str) -> fdo::Result<String> {
+            let json: serde_json::Value = serde_json::from_str(payload)
+                .map_err(|_| fdo::Error::InvalidArgs("malformed fixture request".into()))?;
+            match json["type"].as_str() {
+                Some("get_diagnostics") => {
+                    Err(fdo::Error::NotSupported("mock platform capability unavailable".into()))
+                }
+                Some("trust_peer") => {
+                    Err(fdo::Error::AccessDenied("mock PolicyKit authorization denied".into()))
+                }
+                Some("list_networks") => {
+                    // Spoofed diagnostic TEXT must not be treated as a typed AccessDenied.
+                    Err(fdo::Error::Failed("AccessDenied string is not an auth error".into()))
+                }
+                _ => Err(fdo::Error::InvalidArgs("unexpected fixture command".into())),
+            }
+        }
+    }
+
+    futures_lite::future::block_on(async {
+        let _server = Builder::session()?
+            .name(DBUS_SERVICE_NAME)?
+            .serve_at(DBUS_OBJECT_PATH, FakeDaemon)?
+            .build()
+            .await?;
+        let broker_address = std::env::var("DBUS_SESSION_BUS_ADDRESS")?;
+        let peer = blueroute_core::NodeId::from_bytes([7; 16]).to_string();
+        for (arguments, expected) in [
+            (vec!["diagnostics", "show"], 5),
+            (vec!["peer", "trust", peer.as_str()], 4),
+            (vec!["network", "list"], 1),
+        ] {
+            let result = Command::new(env!("CARGO_BIN_EXE_blueroute"))
+                .env("DBUS_SYSTEM_BUS_ADDRESS", &broker_address)
+                .args(&arguments)
+                .output()?;
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            assert_eq!(
+                result.status.code(),
+                Some(expected),
+                "args={arguments:?}; stderr={stderr}"
+            );
+            assert!(result.stdout.is_empty());
+        }
+        Ok(())
+    })
+}
