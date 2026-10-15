@@ -13,6 +13,7 @@ Run `blueroute --help` for the installed version's command list and `blueroute -
 | `blueroute diagnostics show` | Show the current diagnostic snapshot. Node counts are local-only until authenticated peer runtime is integrated. |
 | `blueroute network list` | List known networks. |
 | `blueroute network create NAME` | Request creation of a BlueRoute star. This is a privileged operation. |
+| `blueroute network join NETWORK_ID` | Request a network join. The current daemon intentionally rejects this as unsupported until authenticated peer transport and production join runtime are integrated. |
 | `blueroute network leave` | Stop a locally hosted network whose runtime is still owned by this daemon. This is privileged and idempotent after leave succeeds. |
 | `blueroute discover start` / `stop` | Start or stop BlueRoute network discovery. |
 | `blueroute node list` / `node show NODE_ID` | Inspect node records currently exposed by the daemon. Current runtime reports the local node only. |

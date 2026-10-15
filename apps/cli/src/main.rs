@@ -1,7 +1,7 @@
 //! BlueRoute CLI commands through the shared version-checked daemon client.
 
 use blueroute_client::{BlueRouteClient, ClientError, ClientErrorKind};
-use blueroute_core::{DisplayName, NodeCapabilities, NodeId};
+use blueroute_core::{DisplayName, NetworkId, NodeCapabilities, NodeId};
 use blueroute_protocol::{
     Command, DaemonStatus, DiagnosticSnapshot, NetworkSummary, NodeSummary, Response,
 };
@@ -57,6 +57,7 @@ enum DiagnosticsCommand {
 enum NetworkCommand {
     List,
     Create { name: String },
+    Join { network: String },
     Leave,
 }
 #[derive(Debug, Subcommand)]
@@ -88,6 +89,7 @@ enum Operation {
     TrustPeer { node: NodeId, json: bool },
     ForgetPeer { node: NodeId, json: bool },
     CreateNetwork { name: DisplayName, json: bool },
+    JoinNetwork { network: NetworkId, json: bool },
     LeaveNetwork { json: bool },
     StartDiscovery { json: bool },
     StopDiscovery { json: bool },
@@ -100,6 +102,14 @@ fn parse_node_id(value: &str) -> Result<NodeId, &'static str> {
         return Err("zero NodeId is not a valid peer identity");
     }
     Ok(node)
+}
+
+fn parse_network_id(value: &str) -> Result<NetworkId, &'static str> {
+    let network: NetworkId = value.parse().map_err(|_| "invalid full network ID")?;
+    if network == NetworkId::from_bytes([0; 16]) {
+        return Err("zero NetworkId is not a valid network identity");
+    }
+    Ok(network)
 }
 
 fn parse(args: &[String]) -> Result<Operation, String> {
@@ -139,6 +149,12 @@ fn parse(args: &[String]) -> Result<Operation, String> {
                 json,
             }
         }
+        Some(CliCommand::Network {
+            command: NetworkCommand::Join { network },
+        }) => Operation::JoinNetwork {
+            network: parse_network_id(&network).map_err(str::to_owned)?,
+            json,
+        },
         Some(CliCommand::Network {
             command: NetworkCommand::Leave,
         }) => Operation::LeaveNetwork { json },
@@ -408,6 +424,14 @@ fn run(args: &[String]) -> i32 {
                     _ => Err("daemon returned an unexpected network-create response".into()),
                 })
         }
+        Operation::JoinNetwork { network, json } => {
+            futures_lite::future::block_on(client.request(&Command::JoinNetwork { network }))
+                .map_err(CliFailure::from)
+                .and_then(|response| match response {
+                    Response::Ack => Ok(mutation_ack(json, "Joined BlueRoute network")),
+                    _ => Err("daemon returned an unexpected network-join response".into()),
+                })
+        }
         Operation::LeaveNetwork { json } => {
             futures_lite::future::block_on(client.request(&Command::LeaveNetwork))
                 .map_err(CliFailure::from)
@@ -488,6 +512,22 @@ mod tests {
         );
         assert!(parse(&args(&["diagnostics"])).is_err());
         assert!(parse(&args(&["network", "join"])).is_err());
+        let network = NetworkId::from_bytes([0x44; 16]);
+        assert_eq!(
+            parse(&args(&["network", "join", &network.to_string()])),
+            Ok(Operation::JoinNetwork {
+                network,
+                json: false
+            })
+        );
+        assert!(
+            parse(&args(&[
+                "network",
+                "join",
+                &NetworkId::from_bytes([0; 16]).to_string()
+            ]))
+            .is_err()
+        );
         assert_eq!(
             parse(&args(&["node", "list", "--json"])),
             Ok(Operation::NodeList { json: true })
