@@ -26,13 +26,8 @@ fn active_session() -> AuthenticatedInboundActivity {
     deadline.advance(ConnectionStage::TlsHandshake, 1).unwrap();
     deadline.advance(ConnectionStage::Hello, 2).unwrap();
     deadline.advance(ConnectionStage::Active, 3).unwrap();
-    AuthenticatedInboundActivity::after_verified_hello(
-        network(),
-        peer(72),
-        [73; 16],
-        deadline,
-    )
-    .unwrap()
+    AuthenticatedInboundActivity::after_verified_hello(network(), peer(72), [73; 16], deadline)
+        .unwrap()
 }
 
 fn frame(sender: NodeId, sequence: u64, message: ControlMessage) -> Vec<u8> {
@@ -54,7 +49,9 @@ fn valid_heartbeat_followed_by_wrong_peer_in_one_batch_never_renews_idle() {
     batch.extend(frame(peer(74), 4, ControlMessage::Heartbeat));
     assert_eq!(
         session.feed_verified_plaintext(&batch, 100),
-        Err(InboundActivityError::Scope(SessionStreamError::WrongContext))
+        Err(InboundActivityError::Scope(
+            SessionStreamError::WrongContext
+        ))
     );
     assert_eq!(session.expires_ms(), 30_003);
     assert!(session.is_terminal());
@@ -85,7 +82,9 @@ fn goodbye_with_trailing_incomplete_header_is_not_graceful() {
     batch.push(0);
     assert_eq!(
         session.feed_verified_plaintext(&batch, 100),
-        Err(InboundActivityError::Scope(SessionStreamError::AfterGoodbye))
+        Err(InboundActivityError::Scope(
+            SessionStreamError::AfterGoodbye
+        ))
     );
     assert!(!session.goodbye_seen());
     assert!(session.is_terminal());
