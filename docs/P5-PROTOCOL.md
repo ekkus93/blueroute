@@ -9,9 +9,11 @@ The v1 local service uses:
 - service: `org.blueroute.Service1`
 - object: `/org/blueroute/Service1`
 - interface: `org.blueroute.Service1`
-- current semantic API version: `1.0`
+- current semantic API version: `1.1`
 
 Major versions are incompatible. Minor versions are additive. A client may use a server with the same major version when the client's minor version is less than or equal to the server's minor version. P5-005 is responsible for enforcing this negotiation before normal commands are sent.
+
+API 1.1 adds optional system metadata, live-observation slots, and bounded recent failures to `DiagnosticSnapshot`. An older 1.0 client can continue to consume the additive 1.1 response; newer interface/route/topology observations remain absent until implemented.
 
 ## Payload encoding
 

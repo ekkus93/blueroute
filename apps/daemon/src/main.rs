@@ -11,6 +11,7 @@ use blueroute_linux::{
     NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
 };
 use blueroute_protocol::{ApiVersion, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, DaemonStatus};
+use blueroute_protocol::{DiagnosticAdapter, SystemDiagnosticMetadata};
 use futures_lite::future;
 use zbus::connection::Builder;
 
@@ -76,8 +77,26 @@ async fn run() -> Result<(), Box<dyn Error>> {
         config,
         capabilities,
     ));
+    let system_diagnostics = SystemDiagnosticMetadata {
+        daemon_version: env!("CARGO_PKG_VERSION").to_owned(),
+        platform: "Linux".to_owned(),
+        kernel_release: capability_report.kernel_release.clone(),
+        bluez_version: capability_report.bluez_version.clone(),
+        network_backend_version: capability_report.network_backend_version.clone(),
+        adapters: capability_report
+            .controllers
+            .iter()
+            .map(|adapter| DiagnosticAdapter {
+                id: adapter.handle.clone(),
+                powered: adapter.powered,
+                address: adapter.address.clone(),
+                driver: adapter.driver.clone(),
+            })
+            .collect(),
+    };
     let service = DaemonService::with_operations(status, network_operations, peer_trust_operations)
-        .with_join_network_operations(join_network_operations);
+        .with_join_network_operations(join_network_operations)
+        .with_system_diagnostics(system_diagnostics);
 
     let _connection = Builder::system()?
         .name(DBUS_SERVICE_NAME)?

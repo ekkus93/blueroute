@@ -104,7 +104,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P14-004 | `[-]` | **IN PROGRESS:** shared `DisplayName` rejects control/escape and Unicode bidirectional-override characters while preserving printable international names; unit tests pass [CI 38467939586](https://github.com/ekkus93/blueroute/actions/runs/38467939586) at `939935e`. Full peer-field limits, unsupported messages and fuzz/domain conversion review still outstanding. |
 | P10-003 | `[-]` | **IN PROGRESS:** network creation and discovery start/stop delegate to PolicyKit-protected typed daemon API; parsing/validation tests pass [CI 38466994092](https://github.com/ekkus93/blueroute/actions/runs/38466994092) at `c786f77`. CLI `network join NETWORK_ID` now sends the typed join request and reports the daemon's fail-closed unsupported result; `network leave` invokes local-host teardown, but restart recovery and client leave are pending. Production join and full end-to-end lifecycle remain. |
 | P10-004 | `[-]` | **IN PROGRESS:** explicit full-NodeId `peer trust`/`peer forget` invoke existing PolicyKit-protected D-Bus commands; tests and [CI 38466585585](https://github.com/ekkus93/blueroute/actions/runs/38466585585) at `8183225` passed. Pending requests/authenticated-join UX remain; trust is **not** TLS enrollment or membership. |
-| P10-005 | `[-]` | **IN PROGRESS:** `blueroute diagnostics show` now sends the read-only `GetDiagnostics` command through the version-gated D-Bus client and displays daemon-provided health/network/capabilities/local-only observed-node count in human/JSON form. Unit and real-broker tests passed [exact-head CI 38692903150](https://github.com/ekkus93/blueroute/actions/runs/38692903150) at `9ac40ea6b3c7212d1842854bcde41a7b268fae71`. The snapshot contains no secrets and does not fabricate remote identities; complete Linux platform/backend, interface/route diagnostics and detailed troubleshooting remain to be implemented. |
+| P10-005 | `[-]` | **IN PROGRESS:** `blueroute diagnostics show` sends the read-only `GetDiagnostics` command through the version-gated D-Bus client and displays daemon health/network/capabilities/local-only node count plus daemon/kernel/backend version and adapter metadata when available. API 1.1 keeps newer detail fields additive. The snapshot contains no secrets and does not fabricate remote identities; interface/route/topology diagnostics and detailed troubleshooting remain open. |
 | P10-006 | `[-]` | **IN PROGRESS:** CLI exit status 0/2/3 executable contract tests passed [CI 38693385185](https://github.com/ekkus93/blueroute/actions/runs/38693385185); exact typed D-Bus categories map `4` denied, `5` unsupported, `3` unavailable and `1` operational. Isolated real-broker CLI subprocess tests verify denial, unsupported and spoofed generic diagnostics with [exact-head CI 38695337220](https://github.com/ekkus93/blueroute/actions/runs/38695337220). Clap parsing is now implemented in commit `84f05a6`; remaining cross-command integration is still open. |
 | All other tasks | `[ ]` | Not started unless explicitly documented in that task; remaining hardware acceptance is not a blocker for independent software work. |
 
@@ -1537,10 +1537,11 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P13-008 — Add diagnostic snapshot model
 
-- [ ] versions/platform.
-- [ ] adapters/capabilities.
-- [ ] peers/interfaces/addresses/routes/topology.
-- [ ] recent errors.
+- [x] daemon/kernel and BlueZ/NetworkManager versions plus adapter inventory and capability facts in one API 1.1 snapshot.
+- [ ] authenticated peers, interfaces/addresses, routes and topology (model fields are present as unavailable until a live observation provider exists).
+- [x] bounded recent API failures with timestamp, operation and coarse failure class.
+
+**Software partial (2026-10-15):** `DiagnosticSnapshot` is the shared CLI/API model. Startup capability metadata and the last 16 daemon API failures are populated; unavailable live interface, route, peer and topology observations are represented as `None`, not fabricated empty results. This task remains open until one live Linux observation provider fills those fields and front ends consume them.
 
 **Acceptance**
 

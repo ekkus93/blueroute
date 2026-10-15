@@ -26,9 +26,9 @@ use blueroute_core::{
     Reachability,
 };
 use blueroute_protocol::{
-    ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, DiagnosticSnapshot,
-    Event, NodeSummary, ProtocolCodecError, Response, decode_command, encode_event,
-    encode_response,
+    ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, DiagnosticFailure,
+    DiagnosticSnapshot, Event, NodeSummary, ProtocolCodecError, Response, SystemDiagnosticMetadata,
+    decode_command, encode_event, encode_response,
 };
 pub use control_tls::{
     ActiveControlSession, AuthenticatedControlPeer, ControlSessionError,
@@ -66,6 +66,8 @@ pub struct DaemonService {
     peer_trust_operations: Option<Arc<dyn PeerTrustOperations>>,
     join_network_operations: Option<Arc<dyn JoinNetworkOperations>>,
     mutation_in_progress: Arc<AtomicBool>,
+    system_diagnostics: Arc<Mutex<Option<SystemDiagnosticMetadata>>>,
+    recent_errors: Arc<Mutex<Vec<DiagnosticFailure>>>,
 }
 
 impl DaemonService {
@@ -86,6 +88,8 @@ impl DaemonService {
             peer_trust_operations: None,
             join_network_operations: None,
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
+            system_diagnostics: Arc::new(Mutex::new(None)),
+            recent_errors: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -99,6 +103,8 @@ impl DaemonService {
             peer_trust_operations: None,
             join_network_operations: None,
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
+            system_diagnostics: Arc::new(Mutex::new(None)),
+            recent_errors: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -113,6 +119,8 @@ impl DaemonService {
             peer_trust_operations: Some(peer_trust_operations),
             join_network_operations: None,
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
+            system_diagnostics: Arc::new(Mutex::new(None)),
+            recent_errors: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -121,6 +129,11 @@ impl DaemonService {
         join_network_operations: Arc<dyn JoinNetworkOperations>,
     ) -> Self {
         self.join_network_operations = Some(join_network_operations);
+        self
+    }
+
+    pub fn with_system_diagnostics(mut self, diagnostics: SystemDiagnosticMetadata) -> Self {
+        self.system_diagnostics = Arc::new(Mutex::new(Some(diagnostics)));
         self
     }
 
@@ -206,13 +219,55 @@ impl DaemonService {
     /// discovery or unverified peer-controlled Hello fields.
     pub fn diagnostics_snapshot(&self) -> Result<DiagnosticSnapshot, CoreError> {
         let status = self.status_snapshot()?;
+        let system = self
+            .system_diagnostics
+            .lock()
+            .map_err(|error| {
+                CoreError::with_diagnostic(
+                    ErrorKind::Internal,
+                    "BlueRoute system diagnostics are unavailable",
+                    error.to_string(),
+                )
+            })?
+            .clone();
+        let recent_errors = self
+            .recent_errors
+            .lock()
+            .map_err(|error| {
+                CoreError::with_diagnostic(
+                    ErrorKind::Internal,
+                    "BlueRoute recent diagnostics are unavailable",
+                    error.to_string(),
+                )
+            })?
+            .clone();
         Ok(DiagnosticSnapshot {
             api_version: status.api_version,
             health: status.health,
             current_network: status.current_network,
             visible_nodes: u32::from(status.local_node.is_some()),
             capabilities: status.capabilities,
+            system,
+            observed_peers: None,
+            interfaces: None,
+            routes: None,
+            topology: None,
+            recent_errors,
         })
+    }
+
+    fn record_recent_failure(&self, operation: &str, error: &fdo::Error) {
+        let Ok(mut errors) = self.recent_errors.lock() else {
+            return;
+        };
+        errors.push(DiagnosticFailure {
+            timestamp_unix_ms: unix_time_ms(),
+            operation: operation.to_owned(),
+            failure_class: fdo_error_class(error).to_owned(),
+        });
+        if errors.len() > 16 {
+            errors.remove(0);
+        }
     }
 
     fn update_current_network(&self, network: Option<NetworkId>) -> fdo::Result<()> {
@@ -291,7 +346,7 @@ impl DaemonService {
                 }
                 Command::GetDiagnostics => {
                     let snapshot = self.diagnostics_snapshot().map_err(core_error_to_dbus)?;
-                    Self::encode_response(&Response::Diagnostics(snapshot))
+                    Self::encode_response(&Response::Diagnostics(Box::new(snapshot)))
                 }
                 Command::ListNodes => {
                     let nodes: Vec<_> = self.local_node_summary()?.into_iter().collect();
@@ -376,6 +431,9 @@ impl DaemonService {
                 result.as_ref().err().map(fdo_error_class)
             )
         );
+        if let Err(error) = &result {
+            self.record_recent_failure(operation, error);
+        }
         result
     }
 
@@ -391,6 +449,14 @@ fn fdo_error_class(error: &fdo::Error) -> &'static str {
         fdo::Error::Failed(_) => "operation_failed",
         _ => "dbus_error",
     }
+}
+
+fn unix_time_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
 }
 
 fn format_api_log(
@@ -555,5 +621,30 @@ mod local_node_tests {
         let serialized = record.to_string();
         assert!(!serialized.contains("Workshop"));
         assert!(!serialized.contains("private-key"));
+    }
+
+    #[test]
+    fn recent_diagnostics_are_bounded_and_do_not_store_error_messages() {
+        let daemon = DaemonService::new(
+            NodeId::from_bytes([7; 16]),
+            HealthLevel::Degraded,
+            NodeCapabilities::default(),
+        );
+        for _ in 0..20 {
+            daemon.record_recent_failure(
+                "join_network",
+                &fdo::Error::Failed("credential-or-user-data sentinel".into()),
+            );
+        }
+        let snapshot = daemon.diagnostics_snapshot().unwrap();
+        assert_eq!(snapshot.recent_errors.len(), 16);
+        assert!(snapshot.recent_errors.iter().all(|error| {
+            error.operation == "join_network" && error.failure_class == "operation_failed"
+        }));
+        assert!(
+            !serde_json::to_string(&snapshot)
+                .unwrap()
+                .contains("credential-or-user-data sentinel")
+        );
     }
 }

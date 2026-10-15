@@ -31,7 +31,7 @@ pub struct ApiVersion {
 }
 
 impl ApiVersion {
-    pub const CURRENT: Self = Self { major: 1, minor: 0 };
+    pub const CURRENT: Self = Self { major: 1, minor: 1 };
 
     pub const fn new(major: u16, minor: u16) -> Self {
         Self { major, minor }
@@ -106,6 +106,64 @@ pub struct DiagnosticSnapshot {
     pub current_network: Option<NetworkId>,
     pub visible_nodes: u32,
     pub capabilities: NodeCapabilities,
+    #[serde(default)]
+    pub system: Option<SystemDiagnosticMetadata>,
+    #[serde(default)]
+    pub observed_peers: Option<Vec<NodeSummary>>,
+    #[serde(default)]
+    pub interfaces: Option<Vec<DiagnosticInterface>>,
+    #[serde(default)]
+    pub routes: Option<Vec<Route>>,
+    #[serde(default)]
+    pub topology: Option<DiagnosticTopology>,
+    #[serde(default)]
+    pub recent_errors: Vec<DiagnosticFailure>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SystemDiagnosticMetadata {
+    pub daemon_version: String,
+    pub platform: String,
+    pub kernel_release: Option<String>,
+    pub bluez_version: Option<String>,
+    pub network_backend_version: Option<String>,
+    pub adapters: Vec<DiagnosticAdapter>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DiagnosticAdapter {
+    pub id: String,
+    pub powered: bool,
+    pub address: Option<String>,
+    pub driver: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DiagnosticInterface {
+    pub name: String,
+    pub addresses: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DiagnosticTopology {
+    pub nodes: Vec<NodeSummary>,
+    pub links: Vec<DiagnosticTopologyLink>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DiagnosticTopologyLink {
+    pub id: String,
+    pub left: NodeId,
+    pub right: NodeId,
+    pub state: LinkState,
+    pub health: LinkHealth,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DiagnosticFailure {
+    pub timestamp_unix_ms: u64,
+    pub operation: String,
+    pub failure_class: String,
 }
 
 /// Semantic local-daemon operations shared by all front ends.
@@ -153,7 +211,7 @@ pub enum Response {
     Networks(Vec<NetworkSummary>),
     Nodes(Vec<NodeSummary>),
     Node(Option<NodeSummary>),
-    Diagnostics(DiagnosticSnapshot),
+    Diagnostics(Box<DiagnosticSnapshot>),
 }
 
 /// State-change events published by the daemon to local clients.
@@ -415,6 +473,12 @@ mod tests {
             current_network: None,
             visible_nodes: 2,
             capabilities: capabilities(),
+            system: None,
+            observed_peers: None,
+            interfaces: None,
+            routes: None,
+            topology: None,
+            recent_errors: Vec::new(),
         };
         let responses = vec![
             Response::Ack,
@@ -428,7 +492,7 @@ mod tests {
             Response::Nodes(vec![node_summary(8)]),
             Response::Node(Some(node_summary(9))),
             Response::Node(None),
-            Response::Diagnostics(diagnostics),
+            Response::Diagnostics(Box::new(diagnostics)),
         ];
 
         for response in responses {
@@ -436,6 +500,40 @@ mod tests {
             assert_eq!(first, encode_response(&response).unwrap());
             assert_eq!(decode_response(&first).unwrap(), response);
         }
+    }
+
+    #[test]
+    fn diagnostics_fields_are_additive_for_api_1_0_clients() {
+        assert_eq!(
+            ApiVersion::new(1, 0).compatibility_with_server(ApiVersion::CURRENT),
+            ApiCompatibility::Compatible
+        );
+        let snapshot = DiagnosticSnapshot {
+            api_version: ApiVersion::CURRENT,
+            health: HealthLevel::Healthy,
+            current_network: None,
+            visible_nodes: 1,
+            capabilities: capabilities(),
+            system: None,
+            observed_peers: None,
+            interfaces: None,
+            routes: None,
+            topology: None,
+            recent_errors: Vec::new(),
+        };
+        let mut value = serde_json::to_value(&snapshot).unwrap();
+        for field in [
+            "system",
+            "observed_peers",
+            "interfaces",
+            "routes",
+            "topology",
+            "recent_errors",
+        ] {
+            value.as_object_mut().unwrap().remove(field);
+        }
+        let decoded: DiagnosticSnapshot = serde_json::from_value(value).unwrap();
+        assert_eq!(decoded, snapshot);
     }
 
     #[test]

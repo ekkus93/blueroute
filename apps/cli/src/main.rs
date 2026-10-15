@@ -4,6 +4,7 @@ use blueroute_client::{BlueRouteClient, ClientError, ClientErrorKind};
 use blueroute_core::{DisplayName, NetworkId, NodeCapabilities, NodeId};
 use blueroute_protocol::{
     Command, DaemonStatus, DiagnosticSnapshot, NetworkSummary, NodeSummary, Response,
+    SystemDiagnosticMetadata,
 };
 use clap::{CommandFactory, Parser, Subcommand};
 
@@ -216,14 +217,31 @@ fn format_diagnostics(
         serde_json::to_string_pretty(snapshot)
     } else {
         Ok(format!(
-            "API: {}\nHealth: {:?}\nNetwork: {:?}\nReported nodes: {} (local-only until peer authentication)\nCapabilities:\n{:#?}",
+            "API: {}\nHealth: {:?}\nNetwork: {:?}\nReported nodes: {} (local-only until peer authentication)\nSystem: {}\nRecent API failures: {}\nCapabilities:\n{:#?}",
             snapshot.api_version,
             snapshot.health,
             snapshot.current_network,
             snapshot.visible_nodes,
+            snapshot.system.as_ref().map_or_else(
+                || "platform details unavailable".to_owned(),
+                format_system_diagnostics,
+            ),
+            snapshot.recent_errors.len(),
             snapshot.capabilities
         ))
     }
+}
+
+fn format_system_diagnostics(system: &SystemDiagnosticMetadata) -> String {
+    format!(
+        "platform={} daemon={} kernel={:?} BlueZ={:?} network-backend={:?} adapters={}",
+        system.platform,
+        system.daemon_version,
+        system.kernel_release,
+        system.bluez_version,
+        system.network_backend_version,
+        system.adapters.len()
+    )
 }
 
 fn format_networks(networks: &[NetworkSummary], json: bool) -> Result<String, serde_json::Error> {
@@ -601,16 +619,31 @@ mod tests {
 
     #[test]
     fn diagnostics_formatters_report_only_daemon_snapshot_fields() {
-        let snapshot = DiagnosticSnapshot {
+        let mut snapshot = DiagnosticSnapshot {
             api_version: ApiVersion::CURRENT,
             health: HealthLevel::Degraded,
             current_network: None,
             visible_nodes: 1,
             capabilities: NodeCapabilities::default(),
+            system: None,
+            observed_peers: None,
+            interfaces: None,
+            routes: None,
+            topology: None,
+            recent_errors: Vec::new(),
         };
+        snapshot.system = Some(SystemDiagnosticMetadata {
+            daemon_version: "0.1.0".into(),
+            platform: "Linux".into(),
+            kernel_release: Some("6.12.0".into()),
+            bluez_version: Some("5.79".into()),
+            network_backend_version: None,
+            adapters: Vec::new(),
+        });
         let output = format_diagnostics(&snapshot, false).unwrap();
         assert!(output.contains("Health: Degraded"));
         assert!(output.contains("local-only until peer authentication"));
+        assert!(output.contains("daemon=0.1.0"));
         assert!(!output.contains("verified remote peers"));
         let json = format_diagnostics(&snapshot, true).unwrap();
         let decoded: DiagnosticSnapshot = serde_json::from_str(&json).unwrap();
