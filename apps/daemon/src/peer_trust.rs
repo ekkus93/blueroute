@@ -61,7 +61,11 @@ impl DurablePeerTrustOperations {
         })?;
         // The local mutex MUST be taken before the shared on-disk lock so
         // operations cannot invert lock order in a single daemon process.
-        let process_lock = self.pin_store.as_ref().map(PeerPinStore::try_lock).transpose()?;
+        let process_lock = self
+            .pin_store
+            .as_ref()
+            .map(PeerPinStore::try_lock)
+            .transpose()?;
         Ok(PeerTrustStateGuard {
             _thread_guard: thread_guard,
             _process_lock: process_lock,

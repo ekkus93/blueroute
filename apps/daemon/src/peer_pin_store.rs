@@ -335,7 +335,10 @@ mod tests {
         let lock_path = tmp.0.join("secret-state").join(PEER_LOCK_FILE);
         let permissions = fs::metadata(&lock_path).unwrap().permissions().mode() & 0o777;
         assert_eq!(permissions, 0o600);
-        assert_eq!(second.try_lock().unwrap_err().kind(), ErrorKind::InvalidState);
+        assert_eq!(
+            second.try_lock().unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
         drop(guard);
         assert!(second.try_lock().is_ok());
     }
