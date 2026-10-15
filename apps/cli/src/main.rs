@@ -1,7 +1,7 @@
 //! Read-only BlueRoute CLI commands through the shared version-checked daemon
 //! client. The clap option layer and mutation subcommands are still pending.
 
-use blueroute_client::BlueRouteClient;
+use blueroute_client::{BlueRouteClient, ClientError, ClientErrorKind};
 use blueroute_core::{DisplayName, NodeCapabilities, NodeId};
 use blueroute_protocol::{
     Command, DaemonStatus, DiagnosticSnapshot, NetworkSummary, NodeSummary, Response,
@@ -166,6 +166,44 @@ fn mutation_ack(json: bool, success: &'static str) -> String {
     }
 }
 
+/// Stable process exit codes: 1 operational, 2 usage, 3 unavailable,
+/// 4 authorization failure, 5 unsupported capability.
+#[derive(Debug)]
+struct CliFailure {
+    code: i32,
+    message: String,
+}
+
+impl From<ClientError> for CliFailure {
+    fn from(error: ClientError) -> Self {
+        let code = match error.kind() {
+            ClientErrorKind::Unavailable => 3,
+            ClientErrorKind::Authorization => 4,
+            ClientErrorKind::Unsupported => 5,
+            ClientErrorKind::Operational => 1,
+        };
+        Self {
+            code,
+            message: error.to_string(),
+        }
+    }
+}
+
+impl From<serde_json::Error> for CliFailure {
+    fn from(error: serde_json::Error) -> Self {
+        Self {
+            code: 1,
+            message: error.to_string(),
+        }
+    }
+}
+
+impl From<String> for CliFailure {
+    fn from(message: String) -> Self {
+        Self { code: 1, message }
+    }
+}
+
 fn run(args: &[String]) -> i32 {
     let operation = match parse(args) {
         Ok(operation) => operation,
@@ -196,92 +234,92 @@ fn run(args: &[String]) -> i32 {
     };
     let result = match operation {
         Operation::Status { json } => futures_lite::future::block_on(client.status())
-            .map_err(|error| error.to_string())
-            .and_then(|status| format_status(&status, json).map_err(|error| error.to_string())),
+            .map_err(CliFailure::from)
+            .and_then(|status| format_status(&status, json).map_err(CliFailure::from)),
         Operation::Capabilities { json } => futures_lite::future::block_on(client.capabilities())
-            .map_err(|error| error.to_string())
-            .and_then(|caps| format_capabilities(&caps, json).map_err(|error| error.to_string())),
+            .map_err(CliFailure::from)
+            .and_then(|caps| format_capabilities(&caps, json).map_err(CliFailure::from)),
         Operation::Diagnostics { json } => {
             futures_lite::future::block_on(client.request(&Command::GetDiagnostics))
-                .map_err(|error| error.to_string())
+                .map_err(CliFailure::from)
                 .and_then(|response| match response {
                     Response::Diagnostics(snapshot) => {
-                        format_diagnostics(&snapshot, json).map_err(|error| error.to_string())
+                        format_diagnostics(&snapshot, json).map_err(CliFailure::from)
                     }
-                    _ => Err("daemon returned an unexpected diagnostics response".to_owned()),
+                    _ => Err(CliFailure::from("daemon returned an unexpected diagnostics response".to_owned())),
                 })
         }
         Operation::NetworkList { json } => {
             futures_lite::future::block_on(client.request(&Command::ListNetworks))
-                .map_err(|error| error.to_string())
+                .map_err(CliFailure::from)
                 .and_then(|response| match response {
                     Response::Networks(networks) => {
-                        format_networks(&networks, json).map_err(|error| error.to_string())
+                        format_networks(&networks, json).map_err(CliFailure::from)
                     }
-                    _ => Err("daemon returned an unexpected network-list response".to_owned()),
+                    _ => Err(CliFailure::from("daemon returned an unexpected network-list response".to_owned())),
                 })
         }
         Operation::NodeList { json } => {
             futures_lite::future::block_on(client.request(&Command::ListNodes))
-                .map_err(|error| error.to_string())
+                .map_err(CliFailure::from)
                 .and_then(|response| match response {
                     Response::Nodes(nodes) => {
-                        format_nodes(&nodes, json).map_err(|error| error.to_string())
+                        format_nodes(&nodes, json).map_err(CliFailure::from)
                     }
-                    _ => Err("daemon returned an unexpected node-list response".to_owned()),
+                    _ => Err(CliFailure::from("daemon returned an unexpected node-list response".to_owned())),
                 })
         }
         Operation::NodeShow { node, json } => {
             futures_lite::future::block_on(client.request(&Command::GetNode { node }))
-                .map_err(|error| error.to_string())
+                .map_err(CliFailure::from)
                 .and_then(|response| match response {
                     Response::Node(Some(node)) => {
-                        format_node(&node, json).map_err(|error| error.to_string())
+                        format_node(&node, json).map_err(CliFailure::from)
                     }
                     Response::Node(None) => {
-                        Err("the daemon has no record for that NodeId".to_owned())
+                        Err(CliFailure::from("the daemon has no record for that NodeId".to_owned()))
                     }
-                    _ => Err("daemon returned an unexpected node-detail response".to_owned()),
+                    _ => Err(CliFailure::from("daemon returned an unexpected node-detail response".to_owned())),
                 })
         }
         Operation::TrustPeer { node, json } => {
             futures_lite::future::block_on(client.request(&Command::TrustPeer { node }))
-                .map_err(|error| error.to_string())
+                .map_err(CliFailure::from)
                 .and_then(|response| match response {
                     Response::Ack => Ok(mutation_ack(json, "Peer trust approved")),
-                    _ => Err("daemon returned an unexpected trust response".to_owned()),
+                    _ => Err(CliFailure::from("daemon returned an unexpected trust response".to_owned())),
                 })
         }
         Operation::ForgetPeer { node, json } => {
             futures_lite::future::block_on(client.request(&Command::ForgetPeer { node }))
-                .map_err(|error| error.to_string())
+                .map_err(CliFailure::from)
                 .and_then(|response| match response {
                     Response::Ack => Ok(mutation_ack(json, "Peer trust revoked")),
-                    _ => Err("daemon returned an unexpected forget response".to_owned()),
+                    _ => Err(CliFailure::from("daemon returned an unexpected forget response".to_owned())),
                 })
         }
         Operation::CreateNetwork { name, json } => {
             futures_lite::future::block_on(client.request(&Command::CreateNetwork { name }))
-                .map_err(|error| error.to_string())
+                .map_err(CliFailure::from)
                 .and_then(|response| match response {
                     Response::Ack => Ok(mutation_ack(json, "Network created")),
-                    _ => Err("daemon returned an unexpected network-create response".to_owned()),
+                    _ => Err(CliFailure::from("daemon returned an unexpected network-create response".to_owned())),
                 })
         }
         Operation::StartDiscovery { json } => {
             futures_lite::future::block_on(client.request(&Command::StartDiscovery))
-                .map_err(|error| error.to_string())
+                .map_err(CliFailure::from)
                 .and_then(|response| match response {
                     Response::Ack => Ok(mutation_ack(json, "Discovery started")),
-                    _ => Err("daemon returned an unexpected discovery response".to_owned()),
+                    _ => Err(CliFailure::from("daemon returned an unexpected discovery response".to_owned())),
                 })
         }
         Operation::StopDiscovery { json } => {
             futures_lite::future::block_on(client.request(&Command::StopDiscovery))
-                .map_err(|error| error.to_string())
+                .map_err(CliFailure::from)
                 .and_then(|response| match response {
                     Response::Ack => Ok(mutation_ack(json, "Discovery stopped")),
-                    _ => Err("daemon returned an unexpected discovery response".to_owned()),
+                    _ => Err(CliFailure::from("daemon returned an unexpected discovery response".to_owned())),
                 })
         }
         Operation::Help | Operation::Version => unreachable!(),
@@ -292,8 +330,8 @@ fn run(args: &[String]) -> i32 {
             0
         }
         Err(error) => {
-            eprintln!("blueroute: {error}");
-            1
+            eprintln!("blueroute: {}", error.message);
+            error.code
         }
     }
 }
@@ -440,6 +478,24 @@ mod tests {
                 .contains("No BlueRoute nodes")
         );
         assert_eq!(format_nodes(&[], true).unwrap(), "[]");
+    }
+
+    #[test]
+    fn cli_error_exit_classes_are_stable_and_do_not_leak_unverified_peer_claims() {
+        let unavailable = CliFailure::from(ClientError::IncompatibleVersion {
+            client: ApiVersion::new(1, 0),
+            server: ApiVersion::new(2, 0),
+        });
+        assert_eq!(unavailable.code, 3);
+        let denied = CliFailure::from(ClientError::Bus(zbus::Error::FDO(Box::new(
+            zbus::fdo::Error::AccessDenied("authorization denied".into()),
+        ))));
+        assert_eq!(denied.code, 4);
+        let unsupported = CliFailure::from(ClientError::Bus(zbus::Error::FDO(Box::new(
+            zbus::fdo::Error::NotSupported("unsupported runtime capability".into()),
+        ))));
+        assert_eq!(unsupported.code, 5);
+        assert_eq!(CliFailure::from("unrecognized daemon response".to_owned()).code, 1);
     }
 
     #[test]
