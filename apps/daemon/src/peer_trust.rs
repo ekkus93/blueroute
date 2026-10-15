@@ -564,10 +564,8 @@ mod tests {
         let pin_path = root.join("peer-pins");
         let external = PeerPinStore::new(&pin_path);
         let guard = external.try_lock().unwrap();
-        let trust = DurablePeerTrustOperations::with_peer_pin_store(
-            store,
-            PeerPinStore::new(pin_path),
-        );
+        let trust =
+            DurablePeerTrustOperations::with_peer_pin_store(store, PeerPinStore::new(pin_path));
         let error = futures_lite::future::block_on(trust.trust_peer(node)).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidState);
         assert_eq!(
