@@ -9,9 +9,7 @@ use blueroute_protocol::control::{
     CONTROL_VERSION, ControlEnvelope, ControlMessage, encode_control_frame,
 };
 use blueroute_protocol::session::{ConnectionDeadline, ConnectionStage, DeadlineError};
-use blueroute_protocol::session_activity::{
-    AuthenticatedInboundActivity, InboundActivityError,
-};
+use blueroute_protocol::session_activity::{AuthenticatedInboundActivity, InboundActivityError};
 
 fn network() -> NetworkId {
     NetworkId::from_bytes([31; 16])
@@ -56,10 +54,12 @@ fn all_heartbeat_fragment_boundaries_obey_original_idle_deadline() {
     let wire = frame(peer(51), 3, ControlMessage::Heartbeat);
     for split in 1..wire.len() {
         let mut inbound = activity(peer(51));
-        assert!(inbound
-            .feed_verified_plaintext(&wire[..split], 29_999)
-            .unwrap()
-            .is_empty());
+        assert!(
+            inbound
+                .feed_verified_plaintext(&wire[..split], 29_999)
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(inbound.expires_ms(), 30_003);
         assert_eq!(
             inbound.feed_verified_plaintext(&wire[split..], 30_003),
@@ -93,7 +93,8 @@ fn validated_peer_activity_does_not_extend_another_peer_lifetime() {
         alice.feed_verified_plaintext(&from_alice, 21),
         Err(InboundActivityError::Terminal)
     );
-    assert_eq!(bob.feed_verified_plaintext(&from_bob, 22),
+    assert_eq!(
+        bob.feed_verified_plaintext(&from_bob, 22),
         Err(InboundActivityError::Scope(
             blueroute_protocol::session_stream::SessionStreamError::Replay
         ))
@@ -148,7 +149,13 @@ fn two_thousand_forty_eight_reproducible_wire_mutations_cannot_bypass_scope() {
 fn full_heartbeat_without_goodbye_is_never_a_graceful_disconnect() {
     let mut inbound = activity(peer(51));
     let heartbeat = frame(peer(51), 3, ControlMessage::Heartbeat);
-    assert_eq!(inbound.feed_verified_plaintext(&heartbeat, 10).unwrap().len(), 1);
+    assert_eq!(
+        inbound
+            .feed_verified_plaintext(&heartbeat, 10)
+            .unwrap()
+            .len(),
+        1
+    );
     assert!(inbound.finish_at(11).is_err());
     assert!(inbound.is_terminal());
     assert_eq!(
