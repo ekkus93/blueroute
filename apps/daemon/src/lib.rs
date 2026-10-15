@@ -1,5 +1,8 @@
 #![doc = "BlueRoute daemon D-Bus service implementation."]
 
+// Prepared for the future authenticated transport runtime. Keep this
+// fail-closed socket owner compiled and tested without treating it as wired.
+#[allow(dead_code)]
 mod attempt_socket;
 mod authorization;
 mod join_network;

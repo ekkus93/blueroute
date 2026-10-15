@@ -104,10 +104,10 @@ impl PendingHandshakeSockets {
     }
 
     fn close_if_current(&mut self, key: PeerSessionKey, generation: [u8; 16]) -> bool {
-        if !self
+        if self
             .sockets
             .get(&key)
-            .is_some_and(|(current, _)| *current == generation)
+            .is_none_or(|(current, _)| *current != generation)
         {
             return false;
         }
