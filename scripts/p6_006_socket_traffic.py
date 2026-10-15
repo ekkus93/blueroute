@@ -96,8 +96,13 @@ def udp_server(bind: str, port: int, count: int, payload_size: int, timeout: flo
             expected = bytes([sequence % 251]) * payload_size
             if packet[4:] != expected:
                 raise RuntimeError(f"UDP payload mismatch for sequence {sequence}")
+            if peer is None:
+                peer = current_peer
+            elif current_peer != peer:
+                raise RuntimeError(
+                    "UDP acceptance stream mixed datagrams from multiple sender endpoints"
+                )
             seen.add(sequence)
-            peer = current_peer
         missing = count - len(seen)
         if peer is not None:
             sock.sendto(f"received={len(seen)} missing={missing}".encode(), peer)

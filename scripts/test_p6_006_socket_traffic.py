@@ -85,7 +85,10 @@ class FakeUdpListener:
         self.timeout = value
 
     def recvfrom(self, _length):
-        return self.packets.pop(0), ("127.0.0.1", 12345)
+        item = self.packets.pop(0)
+        if isinstance(item, tuple):
+            return item
+        return item, ("127.0.0.1", 12345)
 
     def sendto(self, data, peer):
         self.responses.append((data, peer))
@@ -119,6 +122,17 @@ class P6006SocketContractTests(unittest.TestCase):
         with patch.object(probe.socket, "socket", return_value=connection):
             with self.assertRaisesRegex(RuntimeError, "UDP integrity/loss check failed"):
                 probe.udp_client("127.0.0.1", probe.UDP_PORT, 4, 32, 0, 1)
+
+    def test_udp_listener_rejects_cross_peer_splicing_as_false_success(self):
+        payload = lambda seq: struct.pack("!I", seq) + bytes([seq % 251]) * 8
+        listener = FakeUdpListener([
+            (payload(0), ("127.0.0.1", 12345)),
+            (payload(1), ("127.0.0.1", 54321)),
+        ])
+        with patch.object(probe.socket, "socket", return_value=listener):
+            with self.assertRaisesRegex(RuntimeError, "multiple sender endpoints"):
+                probe.udp_server("127.0.0.1", probe.UDP_PORT, 2, 8, 1.0)
+        self.assertEqual(listener.responses, [])
 
     def test_udp_listener_detects_corrupted_payload_and_reports_valid_delivery(self):
         packet = lambda seq: struct.pack("!I", seq) + bytes([seq % 251]) * 8
