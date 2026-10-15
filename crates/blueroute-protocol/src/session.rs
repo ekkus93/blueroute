@@ -249,10 +249,10 @@ impl ControlSessionRegistry {
     }
 
     fn remember_session_id(&mut self, session_id: [u8; 16]) {
-        if self.recent_session_ids.len() == MAX_RECENT_SESSION_IDS {
-            if let Some(oldest) = self.recent_session_ids.pop_front() {
-                self.seen_session_ids.remove(&oldest);
-            }
+        if self.recent_session_ids.len() == MAX_RECENT_SESSION_IDS
+            && let Some(oldest) = self.recent_session_ids.pop_front()
+        {
+            self.seen_session_ids.remove(&oldest);
         }
         self.recent_session_ids.push_back(session_id);
         self.seen_session_ids.insert(session_id);
