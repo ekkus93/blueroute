@@ -45,6 +45,9 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 
 ## Software-only control-session evidence (2026-10-14)
 
+- **P7-003/P7-004 serialized per-frame authorization (software only):** Reloaded durable network trust and exact enrolled key pin are checked under an in-process mutex for each modeled inbound frame and final EOF; revocation, trust-only state, wrong fingerprint, malformed frame and expired deadline fail closed. [Exact-head CI 38683882275](https://github.com/ekkus93/blueroute/actions/runs/38683882275) passed at `dc6721946a1553e37515f9f78d5ce5827a38132a`. No actual TLS cryptography or certificate proof, independent human enrollment UI, daemon ingress socket, cross-process synchronization or physical Bluetooth acceptance. All those remain open/deferred.
+
+
 - **P7-005 malicious coalesced-batch atomicity (software only):** Wrong-peer/replay after a valid heartbeat in one batch, Goodbye with trailing partial header, and 65-frame flood all poison the session without extending idle liveness; valid coalesced frames remain accepted. [Exact-head CI 38681277277](https://github.com/ekkus93/blueroute/actions/runs/38681277277) passed at `5d07bd8f3ccee0988e789f8ed6537e14dbbc3227`. No cryptographic TLS verification, independent enrollment approval, daemon runtime, physical PAN, or production JoinNetwork is proven. Preserve all deferred hardware criteria.
 
 - **P7-005 hostile idle-gate input (software only):** 2,048 deterministic wire mutations, every heartbeat fragmentation boundary at deadline, peer isolation/replay and abrupt EOF cases pass [exact-head CI 38680491093](https://github.com/ekkus93/blueroute/actions/runs/38680491093) at `b377d98dce55551a7f940c4fa3ae9fe6c80440db`. No authenticated TLS daemon, peer-key ceremony, multi-machine PAN or hardware acceptance is represented.
