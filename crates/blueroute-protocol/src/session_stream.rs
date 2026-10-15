@@ -392,7 +392,8 @@ mod tests {
 
     impl Read for DeadlineCursor {
         fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
-            self.data.read(&mut bytes[..bytes.len().min(1)])
+            let count = bytes.len().min(1);
+            self.data.read(&mut bytes[..count])
         }
     }
 
