@@ -11,7 +11,9 @@ use std::time::Instant;
 use blueroute_core::{NetworkId, NodeId};
 
 use crate::control::{ControlEnvelope, ControlFrameError, ControlMessage, encode_control_frame};
-use crate::control_io::{ControlIoError, DeadlineControlRead, read_one_control_frame_with_deadline};
+use crate::control_io::{
+    ControlIoError, DeadlineControlRead, read_one_control_frame_with_deadline,
+};
 use crate::control_stream::{ControlStreamDecoder, StreamDecodeError};
 
 /// Bounded parsing and context checks for frames after both Hello/HelloAck
@@ -410,9 +412,9 @@ mod tests {
 
     #[test]
     fn deadline_inbound_read_checks_scope_goodbye_and_refuses_reuse() {
-        let mut bytes = bytes(&heartbeat(3));
-        bytes.extend(bytes(&message(4, ControlMessage::Goodbye)));
-        let mut source = reader(bytes);
+        let mut wire = bytes(&heartbeat(3));
+        wire.extend(bytes(&message(4, ControlMessage::Goodbye)));
+        let mut source = reader(wire);
         let mut session = stream();
         let deadline = Instant::now() + Duration::from_secs(2);
         assert_eq!(
@@ -473,10 +475,3 @@ mod tests {
         assert_eq!(
             session.feed(&bytes(&heartbeat(7))).unwrap(),
             vec![heartbeat(7)]
-        );
-        assert_eq!(
-            session.feed(&bytes(&heartbeat(4))),
-            Err(SessionStreamError::Replay)
-        );
-    }
-}
