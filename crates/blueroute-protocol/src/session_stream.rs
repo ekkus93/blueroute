@@ -60,7 +60,10 @@ impl SessionControlStream {
         peer: NodeId,
         exporter_session_id: [u8; 16],
     ) -> Result<Self, SessionStreamError> {
-        if exporter_session_id == [0; 16] {
+        if network == NetworkId::from_bytes([0; 16])
+            || peer == NodeId::from_bytes([0; 16])
+            || exporter_session_id == [0; 16]
+        {
             return Err(SessionStreamError::InvalidSession);
         }
         Ok(Self {
@@ -254,6 +257,18 @@ mod tests {
             Err(SessionStreamError::Poisoned)
         );
         assert_eq!(session.feed(&[]), Err(SessionStreamError::Poisoned));
+    }
+
+    #[test]
+    fn zero_network_or_peer_ids_never_create_post_hello_reader() {
+        assert!(matches!(
+            SessionControlStream::after_verified_hello(NetworkId::from_bytes([0; 16]), peer(), [3; 16]),
+            Err(SessionStreamError::InvalidSession)
+        ));
+        assert!(matches!(
+            SessionControlStream::after_verified_hello(network(), NodeId::from_bytes([0; 16]), [3; 16]),
+            Err(SessionStreamError::InvalidSession)
+        ));
     }
 
     #[test]

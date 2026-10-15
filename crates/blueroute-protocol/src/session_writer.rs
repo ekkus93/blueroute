@@ -59,7 +59,12 @@ impl SessionControlWriter {
         peer: NodeId,
         exporter_session_id: [u8; 16],
     ) -> Result<Self, SessionWriteError> {
-        if local == peer || exporter_session_id == [0; 16] {
+        if network == NetworkId::from_bytes([0; 16])
+            || local == NodeId::from_bytes([0; 16])
+            || peer == NodeId::from_bytes([0; 16])
+            || local == peer
+            || exporter_session_id == [0; 16]
+        {
             return Err(SessionWriteError::InvalidSession);
         }
         Ok(Self {
@@ -216,6 +221,20 @@ mod tests {
         assert_eq!(inbound.finish(), Ok(()));
         assert_eq!(writer.heartbeat(), Err(SessionWriteError::AfterGoodbye));
         assert_eq!(writer.goodbye(), Err(SessionWriteError::AfterGoodbye));
+    }
+
+    #[test]
+    fn zero_network_or_node_ids_never_create_post_hello_writer() {
+        for (network, local, peer) in [
+            (NetworkId::from_bytes([0; 16]), alice(), bob()),
+            (network(), NodeId::from_bytes([0; 16]), bob()),
+            (network(), alice(), NodeId::from_bytes([0; 16])),
+        ] {
+            assert!(matches!(
+                SessionControlWriter::after_verified_hello(network, local, peer, [4; 16]),
+                Err(SessionWriteError::InvalidSession)
+            ));
+        }
     }
 
     #[test]
