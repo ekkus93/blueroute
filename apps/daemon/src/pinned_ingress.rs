@@ -356,13 +356,13 @@ mod tests {
         let mut active = session(&trust, key(54)).unwrap();
         let persisted = PeerPinStore::new(root.0.join("peer-pins"));
         let original = persisted.load().unwrap();
-        fs::write(root.0.join("peer-pins").join("peer-key-pins-v1"), b"invalid-state")
-            .unwrap();
+        fs::write(
+            root.0.join("peer-pins").join("peer-key-pins-v1"),
+            b"invalid-state",
+        )
+        .unwrap();
 
-        match active.receive_verified_plaintext(
-            &frame(3, ControlMessage::Heartbeat, peer()),
-            10,
-        ) {
+        match active.receive_verified_plaintext(&frame(3, ControlMessage::Heartbeat, peer()), 10) {
             Err(PinnedIngressError::Authorization(error)) => {
                 assert_eq!(error.kind(), ErrorKind::PersistenceError);
             }
@@ -373,10 +373,7 @@ mod tests {
         // Repairing the file must not revive the old logical TLS session.
         persisted.save(&original).unwrap();
         assert!(matches!(
-            active.receive_verified_plaintext(
-                &frame(3, ControlMessage::Heartbeat, peer()),
-                11
-            ),
+            active.receive_verified_plaintext(&frame(3, ControlMessage::Heartbeat, peer()), 11),
             Err(PinnedIngressError::Terminal)
         ));
         assert!(session(&trust, key(54)).is_ok());
@@ -406,27 +403,24 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            first.receive_verified_plaintext(
-                &frame(3, ControlMessage::Heartbeat, peer()),
-                10
-            ).unwrap().len(),
+            first
+                .receive_verified_plaintext(&frame(3, ControlMessage::Heartbeat, peer()), 10)
+                .unwrap()
+                .len(),
             1
         );
         // A second peer's perfectly framed message cannot be interpreted
         // as the first peer's authenticated control envelope.
         assert!(matches!(
-            other.receive_verified_plaintext(
-                &frame(3, ControlMessage::Heartbeat, peer()),
-                11
-            ),
+            other.receive_verified_plaintext(&frame(3, ControlMessage::Heartbeat, peer()), 11),
             Err(PinnedIngressError::Protocol(_))
         ));
         assert!(other.is_terminal());
         assert_eq!(
-            first.receive_verified_plaintext(
-                &frame(4, ControlMessage::Heartbeat, peer()),
-                12
-            ).unwrap().len(),
+            first
+                .receive_verified_plaintext(&frame(4, ControlMessage::Heartbeat, peer()), 12)
+                .unwrap()
+                .len(),
             1
         );
         assert_eq!(first.expires_ms(), 30_012);
