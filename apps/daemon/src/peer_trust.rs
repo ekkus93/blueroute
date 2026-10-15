@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{Mutex, MutexGuard};
 
 use blueroute_core::{CoreError, ErrorKind, NetworkId, NodeId};
 use blueroute_linux::{BluetoothBackend, BluezBackend, NetworkMembershipStore, PeerHandle};
@@ -17,6 +18,10 @@ pub trait PeerTrustOperations: Send + Sync {
 pub struct DurablePeerTrustOperations {
     store: NetworkMembershipStore,
     pin_store: Option<PeerPinStore>,
+    // Serialize read/modify/write state transitions within the one D-Bus
+    // daemon. This does not protect against unauthorized external file edits
+    // or independently running daemon processes.
+    state_lock: Mutex<()>,
 }
 
 impl DurablePeerTrustOperations {
@@ -24,6 +29,7 @@ impl DurablePeerTrustOperations {
         Self {
             store,
             pin_store: None,
+            state_lock: Mutex::new(()),
         }
     }
 
@@ -33,7 +39,17 @@ impl DurablePeerTrustOperations {
         Self {
             store,
             pin_store: Some(pins),
+            state_lock: Mutex::new(()),
         }
+    }
+
+    fn lock_state(&self) -> Result<MutexGuard<'_, ()>, CoreError> {
+        self.state_lock.lock().map_err(|_| {
+            CoreError::new(
+                ErrorKind::Internal,
+                "peer trust state lock poisoned; refusing to use unverified approval state",
+            )
+        })
     }
 
     pub fn require_peer_approved(&self, network: NetworkId, node: NodeId) -> Result<(), CoreError> {
@@ -78,6 +94,7 @@ impl DurablePeerTrustOperations {
         node: NodeId,
         verified_spki_sha256: SpkiSha256,
     ) -> Result<(), CoreError> {
+        let _guard = self.lock_state()?;
         self.require_peer_approved(network, node)?;
         let store = self.pin_store.as_ref().ok_or_else(|| {
             CoreError::new(
@@ -114,6 +131,7 @@ impl DurablePeerTrustOperations {
         verified_tls_spki: SpkiSha256,
         confirmed_spki: SpkiSha256,
     ) -> Result<bool, CoreError> {
+        let _guard = self.lock_state()?;
         self.require_peer_approved(network, node)?;
         if verified_tls_spki != confirmed_spki {
             return Err(CoreError::new(
@@ -146,6 +164,7 @@ impl DurablePeerTrustOperations {
 impl PeerTrustOperations for DurablePeerTrustOperations {
     fn trust_peer(&self, node: NodeId) -> PeerTrustFuture<'_, ()> {
         Box::pin(async move {
+            let _guard = self.lock_state()?;
             let mut registry = self.store.load()?;
             let network = current_network(&registry)?.ok_or_else(no_current_network)?;
             let membership = registry.network_mut(&network).ok_or_else(|| {
@@ -163,6 +182,7 @@ impl PeerTrustOperations for DurablePeerTrustOperations {
 
     fn forget_peer(&self, node: NodeId) -> PeerTrustFuture<'_, ()> {
         Box::pin(async move {
+            let _guard = self.lock_state()?;
             let mut registry = self.store.load()?;
             let network = current_network(&registry)?.ok_or_else(no_current_network)?;
             let membership = registry.network_mut(&network).ok_or_else(|| {
@@ -414,6 +434,65 @@ mod tests {
                 .kind(),
             ErrorKind::InvalidState
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn concurrent_enrollments_do_not_lose_other_peer_pins_or_trust() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let (root, store) = temp_store("concurrent-enroll");
+        let network = NetworkId::from_bytes([0x18; 16]);
+        seed_current_network(&store, network);
+        let trust = Arc::new(DurablePeerTrustOperations::with_peer_pin_store(
+            store,
+            PeerPinStore::new(root.join("peer-keys")),
+        ));
+        let count = 12;
+        let barrier = Arc::new(Barrier::new(count));
+        let mut threads = Vec::new();
+        for index in 1..=count {
+            let operations = Arc::clone(&trust);
+            let gate = Arc::clone(&barrier);
+            threads.push(thread::spawn(move || {
+                let node = NodeId::from_bytes([index as u8; 16]);
+                let pin =
+                    SpkiSha256::from_verified_certificate_digest([index as u8; 32]).unwrap();
+                gate.wait();
+                futures_lite::future::block_on(operations.trust_peer(node)).unwrap();
+                assert_eq!(
+                    operations.enroll_key_after_independent_confirmation(
+                        network, node, pin, pin
+                    ),
+                    Ok(true)
+                );
+            }));
+        }
+        for task in threads {
+            task.join().unwrap();
+        }
+        let pins = trust.pin_store.as_ref().unwrap().load().unwrap();
+        assert_eq!(pins.len(), count);
+        for index in 1..=count {
+            let node = NodeId::from_bytes([index as u8; 16]);
+            let pin = SpkiSha256::from_verified_certificate_digest([index as u8; 32]).unwrap();
+            trust.require_approved_pinned_tls_peer(network, node, pin).unwrap();
+        }
+
+        // A completed revocation must erase the pin; reapproving a logical
+        // node cannot revive it. The operation lock also protects this path.
+        let revoked = NodeId::from_bytes([1; 16]);
+        futures_lite::future::block_on(trust.forget_peer(revoked)).unwrap();
+        futures_lite::future::block_on(trust.trust_peer(revoked)).unwrap();
+        let pin = SpkiSha256::from_verified_certificate_digest([1; 32]).unwrap();
+        assert_eq!(
+            trust.require_approved_pinned_tls_peer(network, revoked, pin)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::AuthenticationFailed
+        );
+        assert_eq!(trust.pin_store.as_ref().unwrap().load().unwrap().len(), count - 1);
         fs::remove_dir_all(root).unwrap();
     }
 
