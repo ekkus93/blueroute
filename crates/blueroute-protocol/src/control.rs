@@ -610,7 +610,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn zero_logical_identities_fail_closed_on_encode_decode_and_session_scope() {
         let baseline = sample();
@@ -626,7 +625,10 @@ mod tests {
                     facts.direct_neighbors.push(NodeId::from_bytes([0; 16]));
                 }
             }
-            assert!(encode_control_frame(&envelope).is_err(), "encode case {case}");
+            assert!(
+                encode_control_frame(&envelope).is_err(),
+                "encode case {case}"
+            );
 
             // Reframe independently serialized wire input: decode must apply
             // exactly the same rejection to hostile peer-controlled claims.
@@ -636,18 +638,22 @@ mod tests {
             assert!(decode_control_frame(&framed).is_err(), "decode case {case}");
         }
 
-        assert!(VerifiedSessionSequence::new(
-            NetworkId::from_bytes([0; 16]),
-            baseline.sender,
-            baseline.session_id,
-        )
-        .is_err());
-        assert!(VerifiedSessionSequence::new(
-            baseline.network,
-            NodeId::from_bytes([0; 16]),
-            baseline.session_id,
-        )
-        .is_err());
+        assert!(
+            VerifiedSessionSequence::new(
+                NetworkId::from_bytes([0; 16]),
+                baseline.sender,
+                baseline.session_id,
+            )
+            .is_err()
+        );
+        assert!(
+            VerifiedSessionSequence::new(
+                baseline.network,
+                NodeId::from_bytes([0; 16]),
+                baseline.session_id,
+            )
+            .is_err()
+        );
 
         // Valid scope and ordinary post-Hello liveness frames are unaffected.
         let heartbeat = ControlEnvelope {
