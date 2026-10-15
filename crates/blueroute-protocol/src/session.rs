@@ -4,12 +4,15 @@
 //! session layer may call activate_after_authentication; no daemon path uses
 //! this registry yet. Never construct an authorized member from this table.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
 use blueroute_core::{NetworkId, NodeId};
 
 pub const MAX_CONTROL_SESSIONS: usize = 128;
+/// Bounded in-process replay horizon for TLS-exported control-session IDs.
+/// This is defense in depth, not a substitute for fresh cryptographic exporters.
+pub const MAX_RECENT_SESSION_IDS: usize = 4096;
 
 /// Software-only retry policy for a future authenticated control transport.
 /// The transport must also impose connect/handshake timeouts and cancellation.
@@ -200,6 +203,7 @@ pub enum SessionRegistryError {
     ZeroSessionId,
     DuplicateActiveSession,
     SessionLimitReached,
+    ReusedSessionId,
 }
 
 impl fmt::Display for SessionRegistryError {
@@ -211,6 +215,7 @@ impl fmt::Display for SessionRegistryError {
                 f.write_str("a different session is already active for this peer")
             }
             Self::SessionLimitReached => f.write_str("control session capacity reached"),
+            Self::ReusedSessionId => f.write_str("recently used control session ID cannot be replayed"),
         }
     }
 }
@@ -220,6 +225,8 @@ impl std::error::Error for SessionRegistryError {}
 #[derive(Debug, Default)]
 pub struct ControlSessionRegistry {
     sessions: BTreeMap<PeerSessionKey, SessionEntry>,
+    recent_session_ids: VecDeque<[u8; 16]>,
+    seen_session_ids: BTreeSet<[u8; 16]>,
 }
 
 impl ControlSessionRegistry {
@@ -239,6 +246,16 @@ impl ControlSessionRegistry {
         self.sessions.get(&key).copied()
     }
 
+    fn remember_session_id(&mut self, session_id: [u8; 16]) {
+        if self.recent_session_ids.len() == MAX_RECENT_SESSION_IDS {
+            if let Some(oldest) = self.recent_session_ids.pop_front() {
+                self.seen_session_ids.remove(&oldest);
+            }
+        }
+        self.recent_session_ids.push_back(session_id);
+        self.seen_session_ids.insert(session_id);
+    }
+
     /// Call ONLY after mutual TLS, pinned-key NodeId and NetworkId approval
     /// and channel-bound fresh nonce are verified by the future P7-004 layer.
     ///
@@ -255,17 +272,9 @@ impl ControlSessionRegistry {
         if session_id.iter().all(|byte| *byte == 0) {
             return Err(SessionRegistryError::ZeroSessionId);
         }
-        if self
-            .sessions
-            .iter()
-            .any(|(other, existing)| *other != key && existing.session_id == session_id)
-        {
-            return Err(SessionRegistryError::DuplicateActiveSession);
-        }
-        if let Some(existing) = self.sessions.get_mut(&key) {
-            if existing.phase != SessionPhase::Active && existing.session_id == session_id {
-                return Err(SessionRegistryError::DuplicateActiveSession);
-            }
+        // Exact active re-registration is idempotent; a competing generation
+        // cannot replace an active peer, even if the transport reconnects.
+        if let Some(existing) = self.sessions.get(&key) {
             if existing.phase == SessionPhase::Active {
                 return if existing.session_id == session_id {
                     Ok(SessionRegistration::AlreadyActive)
@@ -273,10 +282,25 @@ impl ControlSessionRegistry {
                     Err(SessionRegistryError::DuplicateActiveSession)
                 };
             }
+            if existing.session_id == session_id {
+                return Err(SessionRegistryError::DuplicateActiveSession);
+            }
+        }
+        if self.sessions.iter().any(|(other, existing)| {
+            *other != key && existing.session_id == session_id
+        }) {
+            return Err(SessionRegistryError::DuplicateActiveSession);
+        }
+        // Keep a bounded replay history across replacement and explicit removal.
+        if self.seen_session_ids.contains(&session_id) {
+            return Err(SessionRegistryError::ReusedSessionId);
+        }
+        if let Some(existing) = self.sessions.get_mut(&key) {
             *existing = SessionEntry {
                 session_id,
                 phase: SessionPhase::Active,
             };
+            self.remember_session_id(session_id);
             return Ok(SessionRegistration::Recovered);
         }
         if self.sessions.len() >= MAX_CONTROL_SESSIONS {
@@ -289,6 +313,7 @@ impl ControlSessionRegistry {
                 phase: SessionPhase::Active,
             },
         );
+        self.remember_session_id(session_id);
         Ok(SessionRegistration::New)
     }
 
@@ -672,6 +697,40 @@ mod tests {
             registry.activate_after_authentication(key(1), [8; 16]),
             Ok(SessionRegistration::Recovered)
         );
+    }
+
+    #[test]
+    fn retired_session_ids_cannot_reenter_after_replacement_or_removal() {
+        let mut registry = ControlSessionRegistry::new();
+        let peer = key(2);
+        assert_eq!(registry.activate_after_authentication(peer, [3; 16]), Ok(SessionRegistration::New));
+        assert!(registry.mark_lost(peer, [3; 16]));
+        assert_eq!(registry.activate_after_authentication(peer, [4; 16]), Ok(SessionRegistration::Recovered));
+        assert!(registry.mark_lost(peer, [4; 16]));
+        assert_eq!(registry.activate_after_authentication(peer, [3; 16]), Err(SessionRegistryError::ReusedSessionId));
+        assert!(registry.remove_if_current(peer, [4; 16]));
+        assert_eq!(registry.activate_after_authentication(key(3), [4; 16]), Err(SessionRegistryError::ReusedSessionId));
+        assert_eq!(registry.activate_after_authentication(peer, [5; 16]), Ok(SessionRegistration::New));
+    }
+
+    #[test]
+    fn replay_history_is_bounded_without_leaking_live_session_capacity() {
+        let mut registry = ControlSessionRegistry::new();
+        let peer = key(2);
+        for number in 1..=(MAX_RECENT_SESSION_IDS as u32 + 1) {
+            let mut id = [0_u8; 16];
+            id[..4].copy_from_slice(&number.to_le_bytes());
+            assert_eq!(registry.activate_after_authentication(peer, id), Ok(SessionRegistration::New));
+            assert!(registry.remove_if_current(peer, id));
+        }
+        assert_eq!(registry.recent_session_ids.len(), MAX_RECENT_SESSION_IDS);
+        assert_eq!(registry.seen_session_ids.len(), MAX_RECENT_SESSION_IDS);
+        let mut recent = [0_u8; 16];
+        recent[..4].copy_from_slice(&(MAX_RECENT_SESSION_IDS as u32 + 1).to_le_bytes());
+        assert_eq!(registry.activate_after_authentication(peer, recent), Err(SessionRegistryError::ReusedSessionId));
+        let mut evicted = [0_u8; 16];
+        evicted[..4].copy_from_slice(&1_u32.to_le_bytes());
+        assert_eq!(registry.activate_after_authentication(peer, evicted), Ok(SessionRegistration::New));
     }
 
     #[test]
