@@ -29,8 +29,10 @@ pub struct DurablePeerTrustOperations {
 /// This is advisory cooperation between BlueRoute instances, not a defense
 /// against arbitrary privileged file tampering or actual TLS authentication.
 struct PeerTrustStateGuard<'a> {
-    _thread_guard: MutexGuard<'a, ()>,
+    // Drop the process lock before the thread mutex, otherwise the next
+    // local worker may acquire the mutex while the previous OS lock is held.
     _process_lock: Option<PeerPinFileLock>,
+    _thread_guard: MutexGuard<'a, ()>,
 }
 
 impl DurablePeerTrustOperations {
