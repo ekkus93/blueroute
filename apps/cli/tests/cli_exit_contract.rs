@@ -75,15 +75,17 @@ fn cli_exit_statuses_propagate_typed_broker_failures() -> Result<(), Box<dyn std
             let json: serde_json::Value = serde_json::from_str(payload)
                 .map_err(|_| fdo::Error::InvalidArgs("malformed fixture request".into()))?;
             match json["type"].as_str() {
-                Some("get_diagnostics") => {
-                    Err(fdo::Error::NotSupported("mock platform capability unavailable".into()))
-                }
-                Some("trust_peer") => {
-                    Err(fdo::Error::AccessDenied("mock PolicyKit authorization denied".into()))
-                }
+                Some("get_diagnostics") => Err(fdo::Error::NotSupported(
+                    "mock platform capability unavailable".into(),
+                )),
+                Some("trust_peer") => Err(fdo::Error::AccessDenied(
+                    "mock PolicyKit authorization denied".into(),
+                )),
                 Some("list_networks") => {
                     // Spoofed diagnostic TEXT must not be treated as a typed AccessDenied.
-                    Err(fdo::Error::Failed("AccessDenied string is not an auth error".into()))
+                    Err(fdo::Error::Failed(
+                        "AccessDenied string is not an auth error".into(),
+                    ))
                 }
                 _ => Err(fdo::Error::InvalidArgs("unexpected fixture command".into())),
             }
