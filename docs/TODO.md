@@ -1512,9 +1512,11 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P13-006 — Add bounded retry/backoff
 
-- [ ] retryable vs permanent errors.
-- [ ] bounded exponential backoff.
-- [ ] reset after success.
+- [x] classify transient transport errors separately from permanent authentication/protocol/configuration failures.
+- [x] bounded per-peer exponential backoff with retry exhaustion and no parallel attempts.
+- [x] reset only after authenticated success or explicit cancellation; close pending sockets before retry.
+
+**Software partial (2026-10-15):** `ErrorKind::is_retryable_transport_failure` and `PendingHandshakeSockets::failed_with_kind` now retire permanent failures without retry and schedule transient transport failures through the bounded per-peer scheduler. Existing scheduler tests cover exhaustion, peer isolation, deadlines, clock regression and retry reset policy. The real authenticated session manager is not wired into daemon runtime yet, so overall P13-006 acceptance remains open with P7-003/P7-004 integration.
 
 **Acceptance**
 

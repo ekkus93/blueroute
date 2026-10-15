@@ -23,6 +23,18 @@ pub enum ErrorKind {
     Internal,
 }
 
+impl ErrorKind {
+    /// Whether another bounded transport attempt may help without changing
+    /// configuration or credentials. Authentication and protocol failures are
+    /// deliberately permanent for the current peer/session generation.
+    pub const fn is_retryable_transport_failure(self) -> bool {
+        matches!(
+            self,
+            Self::BluezUnavailable | Self::NetworkBackendUnavailable | Self::PanFailure
+        )
+    }
+}
+
 /// A typed core error with a friendly message and optional diagnostic context.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CoreError {
@@ -91,5 +103,34 @@ mod tests {
             error.diagnostic(),
             Some("org.freedesktop.DBus.Error.ServiceUnknown")
         );
+    }
+
+    #[test]
+    fn only_transient_transport_errors_are_retryable() {
+        for kind in [
+            ErrorKind::BluezUnavailable,
+            ErrorKind::NetworkBackendUnavailable,
+            ErrorKind::PanFailure,
+        ] {
+            assert!(kind.is_retryable_transport_failure());
+        }
+        for kind in [
+            ErrorKind::UnsupportedRuntime,
+            ErrorKind::MissingAdapter,
+            ErrorKind::AdapterDisabled,
+            ErrorKind::CapabilityUnavailable,
+            ErrorKind::PairingFailed,
+            ErrorKind::AuthenticationFailed,
+            ErrorKind::AddressConflict,
+            ErrorKind::RouteFailure,
+            ErrorKind::TopologyFailure,
+            ErrorKind::ProtocolError,
+            ErrorKind::InvalidState,
+            ErrorKind::InvalidInput,
+            ErrorKind::PersistenceError,
+            ErrorKind::Internal,
+        ] {
+            assert!(!kind.is_retryable_transport_failure(), "{kind:?}");
+        }
     }
 }

@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 use std::net::{Shutdown, TcpStream};
 
+use blueroute_core::ErrorKind;
 use blueroute_protocol::session::{PeerSessionKey, ReconnectScheduleError, ReconnectScheduler};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -101,6 +102,33 @@ impl PendingHandshakeSockets {
                 self.scheduler.cancel_if_current(key, generation);
                 Err(error)
             }
+        }
+    }
+
+    /// Close the current attempt, retrying only transient transport failures.
+    /// Permanent authentication, protocol, or configuration failures retire
+    /// this generation so they cannot cause a bounded but pointless retry loop.
+    pub fn failed_with_kind(
+        &mut self,
+        key: PeerSessionKey,
+        generation: [u8; 16],
+        now_ms: u64,
+        kind: ErrorKind,
+    ) -> Result<Option<u64>, ReconnectScheduleError> {
+        if !self.close_if_current(key, generation) {
+            return Ok(None);
+        }
+        if kind.is_retryable_transport_failure() {
+            match self.scheduler.attempt_failed(key, generation, now_ms) {
+                Ok(next_retry_ms) => Ok(next_retry_ms),
+                Err(error) => {
+                    self.scheduler.cancel_if_current(key, generation);
+                    Err(error)
+                }
+            }
+        } else {
+            self.scheduler.cancel_if_current(key, generation);
+            Ok(None)
         }
     }
 
@@ -225,6 +253,45 @@ mod tests {
         assert!(!owner.begin(peer, generation, 799, early).unwrap());
         let (retry, _) = pair();
         assert!(owner.begin(peer, generation, 800, retry).unwrap());
+    }
+
+    #[test]
+    fn permanent_authentication_failure_closes_socket_without_scheduling_retry() {
+        let mut owner = PendingHandshakeSockets::new();
+        let peer = key(6);
+        let generation = [6; 16];
+        assert!(owner.schedule_loss(peer, generation, 0).unwrap());
+        let (socket, mut remote) = pair();
+        assert!(owner.begin(peer, generation, 250, socket).unwrap());
+
+        assert_eq!(
+            owner
+                .failed_with_kind(peer, generation, 300, ErrorKind::AuthenticationFailed)
+                .unwrap(),
+            None
+        );
+        assert_eq!(owner.pending_len(), 0);
+        assert_eq!(remote.read(&mut [0]).unwrap(), 0);
+        let (stale_retry, _) = pair();
+        assert!(!owner.begin(peer, generation, 30_000, stale_retry).unwrap());
+    }
+
+    #[test]
+    fn transient_transport_failure_uses_bounded_retry_schedule() {
+        let mut owner = PendingHandshakeSockets::new();
+        let peer = key(5);
+        let generation = [5; 16];
+        assert!(owner.schedule_loss(peer, generation, 0).unwrap());
+        let (socket, mut remote) = pair();
+        assert!(owner.begin(peer, generation, 250, socket).unwrap());
+
+        assert_eq!(
+            owner
+                .failed_with_kind(peer, generation, 300, ErrorKind::PanFailure)
+                .unwrap(),
+            Some(800)
+        );
+        assert_eq!(remote.read(&mut [0]).unwrap(), 0);
     }
 
     #[test]
