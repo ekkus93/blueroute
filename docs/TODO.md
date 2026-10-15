@@ -107,6 +107,8 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 
 **P7-003/P7-004 durable-pin-gated inbound control (software only, 2026-10-14):** `apps/daemon/src/pinned_ingress.rs` ties a previously authenticated post-Hello parser to a fresh on-disk network-approval and enrolled SPKI-pin check for every frame/EOF operation. The in-process trust mutex now encloses both authorization and parsing, preventing local revocation from interleaving between their checks. Unknown or wrong keys, trust-only approval, revocation/reapproval and forged/deadline-expired frames remain fail-closed and permanently terminate the modeled session. [Exact-head CI 38683882275](https://github.com/ekkus93/blueroute/actions/runs/38683882275) passed at `dc6721946a1553e37515f9f78d5ce5827a38132a`. **This is not real mutual TLS, independently approved enrollment UX, external-process locking, active daemon ingress, authenticated JoinNetwork, or physical PAN acceptance.** Those prerequisites remain open.
 
+**P7-003/P7-004 durable-state corruption and simulated multi-peer isolation (software-only, 2026-10-14):** Two additional integration regressions show that a corrupt pin file permanently poisons the pending session, even after the on-disk state is repaired, and that separate enrolled peers cannot substitute their `NodeId`, SPKI fingerprint, or frames for another peer's session. [Exact-head CI 38684585143](https://github.com/ekkus93/blueroute/actions/runs/38684585143) passed at `c7152e70222a49455f7838ba4fdb4325eb9b22b4`. These simulate already-verified TLS context; **real mutual TLS, independent enrollment UX, cross-process locking, production daemon sockets and Bluetooth PAN remain unimplemented/unqualified**.
+
 ## Platform rule
 
 BlueRoute targets **compatible Linux computers with Bluetooth PAN support**, not Dell Chromebook 3100 specifically. Dell Chromebook 3100 machines running Debian are available early test fixtures and should be used for useful evidence, but implementation code and product policy must remain hardware-agnostic.
@@ -1556,6 +1558,8 @@ Cover:
 - [ ] bind session to identity.
 - [ ] verify membership.
 - [ ] prevent unauthenticated topology/route control.
+
+**Software partial — provisional protocol denial only (2026-10-14):** The current control-wire decoder rejects forged route, topology, membership, and Internet-gateway command variants, including a malicious frame batched after an otherwise valid Heartbeat, without advancing session liveness. Tests pass [exact-head CI 38684997714](https://github.com/ekkus93/blueroute/actions/runs/38684997714) at `6fe80318a40b5f829b1ea0a861d09f31d9118d3e`. This is a deny-by-absence boundary until authenticated route-control semantics are designed; it does **not** verify mutual TLS, link a remote identity to the peer key, or implement authenticated routing updates. P14-003 remains open.
 
 **Acceptance**
 

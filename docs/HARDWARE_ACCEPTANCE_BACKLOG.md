@@ -45,6 +45,10 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 
 ## Software-only control-session evidence (2026-10-14)
 
+- **P14-003 provisional hostile route-command denial (software only):** Unsupported `route_update`, `topology_update`, `network_member_add`, `approve_peer`, `join_network`, `set_default_route` and gateway variants fail strict decode and poison a simulated post-Hello stream, including malicious coalesced frames. [Exact-head CI 38684997714](https://github.com/ekkus93/blueroute/actions/runs/38684997714) passed at `6fe80318a40b5f829b1ea0a861d09f31d9118d3e`. This does not exercise privileged kernel route changes, authenticated routing semantics or actual Bluetooth PAN; inter-node authentication and physical criteria remain open.
+
+- **P7-003 durable-pin corruption / second-peer isolation (software only):** Corrupt persistent enrollment records cause fail-closed authorization, permanently discard a modeled logical session even after file repair, and prevent a different enrolled peer from impersonating the original peer's session. [Exact-head CI 38684585143](https://github.com/ekkus93/blueroute/actions/runs/38684585143) passed at `c7152e70222a49455f7838ba4fdb4325eb9b22b4`. This is not a TLS proof or a physical hardware acceptance result.
+
 - **P7-003/P7-004 serialized per-frame authorization (software only):** Reloaded durable network trust and exact enrolled key pin are checked under an in-process mutex for each modeled inbound frame and final EOF; revocation, trust-only state, wrong fingerprint, malformed frame and expired deadline fail closed. [Exact-head CI 38683882275](https://github.com/ekkus93/blueroute/actions/runs/38683882275) passed at `dc6721946a1553e37515f9f78d5ce5827a38132a`. No actual TLS cryptography or certificate proof, independent human enrollment UI, daemon ingress socket, cross-process synchronization or physical Bluetooth acceptance. All those remain open/deferred.
 
 
