@@ -554,4 +554,36 @@ mod tests {
         assert_eq!(error.kind(), ErrorKind::InvalidState);
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn durable_trust_mutations_fail_closed_while_another_process_holds_lock() {
+        let (root, store) = temp_store("process-lock");
+        let network = NetworkId::from_bytes([0x21; 16]);
+        let node = NodeId::from_bytes([0x22; 16]);
+        seed_current_network(&store, network);
+        let pin_path = root.join("peer-pins");
+        let external = PeerPinStore::new(&pin_path);
+        let guard = external.try_lock().unwrap();
+        let trust = DurablePeerTrustOperations::with_peer_pin_store(
+            store,
+            PeerPinStore::new(pin_path),
+        );
+        let error = futures_lite::future::block_on(trust.trust_peer(node)).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidState);
+        assert_eq!(
+            trust
+                .require_approved_pinned_tls_peer(
+                    network,
+                    node,
+                    SpkiSha256::from_verified_certificate_digest([0x31; 32]).unwrap()
+                )
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidState
+        );
+        drop(guard);
+        futures_lite::future::block_on(trust.trust_peer(node)).unwrap();
+        trust.require_peer_approved(network, node).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
 }
