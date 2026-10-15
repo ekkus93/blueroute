@@ -60,7 +60,11 @@ impl AuthenticatedInboundActivity {
         chunk: &[u8],
         now_ms: u64,
     ) -> Result<Vec<ControlEnvelope>, InboundActivityError> {
-        if self.terminal || self.goodbye_seen {
+        if self.terminal {
+            return Err(InboundActivityError::Terminal);
+        }
+        if self.goodbye_seen {
+            self.terminal = true;
             return Err(InboundActivityError::Terminal);
         }
         if let Err(error) = self.deadline.check(now_ms) {
@@ -95,9 +99,15 @@ impl AuthenticatedInboundActivity {
 
     /// Only a valid terminal Goodbye followed by clean EOF is graceful.
     /// EOF, graceful or not, permanently consumes the logical session.
-    pub fn finish(&mut self) -> Result<(), InboundActivityError> {
+    /// Enforce the closing deadline even if the peer sent a valid Goodbye:
+    /// it must not hold a daemon socket or task open indefinitely.
+    pub fn finish_at(&mut self, now_ms: u64) -> Result<(), InboundActivityError> {
         if self.terminal {
             return Err(InboundActivityError::Terminal);
+        }
+        if let Err(error) = self.deadline.check(now_ms) {
+            self.terminal = true;
+            return Err(InboundActivityError::Deadline(error));
         }
         self.terminal = true;
         self.stream.finish().map_err(InboundActivityError::Scope)
@@ -265,18 +275,43 @@ mod tests {
             session.feed_verified_plaintext(&wire(peer(), 4, ControlMessage::Heartbeat), 11),
             Err(InboundActivityError::Terminal)
         );
-        assert_eq!(session.finish(), Ok(()));
+        assert_eq!(session.finish_at(11), Ok(()));
         assert!(session.is_terminal());
-        assert_eq!(session.finish(), Err(InboundActivityError::Terminal));
+        assert_eq!(session.finish_at(12), Err(InboundActivityError::Terminal));
 
         let mut abrupt = activity();
         assert_eq!(
-            abrupt.finish(),
+            abrupt.finish_at(11),
             Err(InboundActivityError::Scope(
                 SessionStreamError::UnexpectedEof
             ))
         );
         assert!(abrupt.is_terminal());
+    }
+
+    #[test]
+    fn goodbye_eof_is_bounded_and_post_goodbye_input_is_terminal() {
+        let mut timed_out = activity();
+        timed_out
+            .feed_verified_plaintext(&wire(peer(), 3, ControlMessage::Goodbye), 10)
+            .unwrap();
+        assert_eq!(
+            timed_out.finish_at(5_010),
+            Err(InboundActivityError::Deadline(DeadlineError::Expired))
+        );
+        assert!(timed_out.is_terminal());
+        assert_eq!(timed_out.finish_at(5_009), Err(InboundActivityError::Terminal));
+
+        let mut post_goodbye = activity();
+        post_goodbye
+            .feed_verified_plaintext(&wire(peer(), 3, ControlMessage::Goodbye), 10)
+            .unwrap();
+        assert_eq!(
+            post_goodbye.feed_verified_plaintext(&[1], 11),
+            Err(InboundActivityError::Terminal)
+        );
+        assert!(post_goodbye.is_terminal());
+        assert_eq!(post_goodbye.finish_at(12), Err(InboundActivityError::Terminal));
     }
 
     #[test]
