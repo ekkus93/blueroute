@@ -44,6 +44,7 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 | P17-005, P17-006 | Final tested-support matrix, multi-controller evidence and v1 physical signoff | Draft docs and software-ready release candidate only; not final release. |
 
 ## Software-only control-session evidence (through 2026-10-15)
+- **P7-004 bounded retired session-ID rejection (software only, 2026-10-15):** The modeled control-session registry remembers the last 4,096 accepted IDs, rejects ABA reuse across reconnection/removal, and bounds memory. Deterministic tests and [exact-head CI 38727902721](https://github.com/ekkus93/blueroute/actions/runs/38727902721) passed at `c1896ef89718efb50aac87632ce2323cea704f73`. This is not a cryptographic TLS handshake, durable anti-replay state, approved peer-key enrollment, daemon network transport, physical Bluetooth acceptance, or production JoinNetwork. All physical criteria remain deferred.
 
 - **P7-004 zero-identity registry and reconnect gate (software only):** Zero NetworkId/NodeId pairs cannot enter the logical authenticated-session registry or reconnect scheduler. Valid-peer and 128-session test coverage passed [exact-head CI 38724405689](https://github.com/ekkus93/blueroute/actions/runs/38724405689) at `2e62723ace508cb4f33a08fcff3b506fb5a91eaf`. Live mutual TLS, independent key enrollment, production join and physical PAN acceptance remain unimplemented/unqualified.
 
