@@ -79,7 +79,9 @@ impl fmt::Display for PeerPinError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidFingerprint => f.write_str("invalid peer key fingerprint"),
-            Self::InvalidIdentity => f.write_str("zero network or node identity cannot be enrolled"),
+            Self::InvalidIdentity => {
+                f.write_str("zero network or node identity cannot be enrolled")
+            }
             Self::UnknownEnrollment => f.write_str("no verified peer key enrollment exists"),
             Self::KeyConflict => f.write_str("peer key changed; explicit re-enrollment required"),
             Self::NotApprovedForNetwork => f.write_str("peer lacks network membership approval"),
