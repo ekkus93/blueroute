@@ -18,6 +18,12 @@ pub const MAX_RECENT_SESSION_IDS: usize = 4096;
 /// The transport must also impose connect/handshake timeouts and cancellation.
 /// Retrying never grants authorization and must not bypass the TLS trust gate.
 pub const MAX_RECONNECT_ATTEMPTS: u8 = 8;
+/// Maximum time for one connect + mutual TLS + Hello attempt. This is a
+/// scheduler watchdog only: the daemon MUST cancel and close the old socket
+/// before reporting the attempt failed or starting a replacement.
+pub const MAX_CONNECT_AUTH_ATTEMPT_MS: u64 = ConnectionStage::Connecting.timeout_ms()
+    + ConnectionStage::TlsHandshake.timeout_ms()
+    + ConnectionStage::Hello.timeout_ms();
 pub const INITIAL_RECONNECT_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
 pub const MAX_RECONNECT_DELAY: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -381,6 +387,8 @@ struct RetrySlot {
     backoff: ReconnectBackoff,
     next_attempt_ms: Option<u64>,
     in_flight: bool,
+    in_flight_started_ms: Option<u64>,
+    cancel_requested: bool,
     last_ms: u64,
 }
 
@@ -431,6 +439,8 @@ impl ReconnectScheduler {
                 backoff,
                 next_attempt_ms: Some(now_ms.saturating_add(delay.as_millis() as u64)),
                 in_flight: false,
+                in_flight_started_ms: None,
+                cancel_requested: false,
                 last_ms: now_ms,
             },
         );
@@ -459,7 +469,39 @@ impl ReconnectScheduler {
             return Ok(false);
         }
         slot.in_flight = true;
+        slot.in_flight_started_ms = Some(now_ms);
+        slot.cancel_requested = false;
         slot.next_attempt_ms = None;
+        Ok(true)
+    }
+
+    /// Return a one-shot cancellation request for an overdue in-flight attempt.
+    /// A request NEVER schedules another attempt. The transport owner must
+    /// first cancel and close the old connection, then call `attempt_failed`.
+    /// This prevents an expired handshake from overlapping its replacement.
+    pub fn take_expired_attempt(
+        &mut self,
+        key: PeerSessionKey,
+        session_id: [u8; 16],
+        now_ms: u64,
+    ) -> Result<bool, ReconnectScheduleError> {
+        let Some(slot) = self.slots.get_mut(&key) else {
+            return Ok(false);
+        };
+        if now_ms < slot.last_ms {
+            return Err(ReconnectScheduleError::ClockRegression);
+        }
+        if slot.session_id != session_id {
+            return Ok(false);
+        }
+        slot.last_ms = now_ms;
+        let overdue = slot.in_flight_started_ms.is_some_and(|started| {
+            now_ms >= started.saturating_add(MAX_CONNECT_AUTH_ATTEMPT_MS)
+        });
+        if !slot.in_flight || !overdue || slot.cancel_requested {
+            return Ok(false);
+        }
+        slot.cancel_requested = true;
         Ok(true)
     }
 
@@ -482,6 +524,8 @@ impl ReconnectScheduler {
         }
         slot.last_ms = now_ms;
         slot.in_flight = false;
+        slot.in_flight_started_ms = None;
+        slot.cancel_requested = false;
         slot.next_attempt_ms = slot
             .backoff
             .after_failure()
@@ -538,6 +582,88 @@ mod tests {
         assert!(scheduler.cancel_if_current(peer, [3; 16]));
         assert!(!scheduler.cancel_if_current(peer, [3; 16]));
         assert_eq!(scheduler.len(), 0);
+    }
+
+    #[test]
+    fn overdue_handshake_requests_one_cancel_without_parallel_retry() {
+        let mut scheduler = ReconnectScheduler::new();
+        let peer = key(2);
+        let old = [7; 16];
+        assert_eq!(MAX_CONNECT_AUTH_ATTEMPT_MS, 20_000);
+        assert_eq!(scheduler.schedule_loss(peer, old, 1_000), Ok(true));
+        assert_eq!(scheduler.take_due(peer, old, 1_250), Ok(true));
+        assert_eq!(
+            scheduler.take_expired_attempt(peer, old, 21_249),
+            Ok(false)
+        );
+        assert_eq!(
+            scheduler.take_expired_attempt(peer, [8; 16], 21_250),
+            Ok(false)
+        );
+        assert_eq!(
+            scheduler.take_expired_attempt(peer, old, 21_250),
+            Ok(true)
+        );
+        assert_eq!(
+            scheduler.take_expired_attempt(peer, old, 21_251),
+            Ok(false)
+        );
+        assert_eq!(scheduler.take_due(peer, old, 50_000), Ok(false));
+        assert_eq!(
+            scheduler.take_expired_attempt(peer, old, 49_999),
+            Err(ReconnectScheduleError::ClockRegression)
+        );
+        // The transport owner confirms cancellation/teardown before
+        // advancing the retry budget; no new attempt was made in parallel.
+        assert_eq!(scheduler.attempt_failed(peer, old, 50_000), Ok(Some(50_500)));
+        assert_eq!(
+            scheduler.take_expired_attempt(peer, old, 50_500),
+            Ok(false)
+        );
+        assert_eq!(scheduler.take_due(peer, old, 50_500), Ok(true));
+        assert_eq!(
+            scheduler.take_expired_attempt(peer, old, 70_500),
+            Ok(true)
+        );
+        assert!(scheduler.cancel_if_current(peer, old));
+        assert_eq!(
+            scheduler.take_expired_attempt(peer, old, 90_500),
+            Ok(false)
+        );
+    }
+
+    #[test]
+    fn expired_handshake_watchdogs_are_isolated_per_peer_and_generation() {
+        let mut scheduler = ReconnectScheduler::new();
+        let first = key(2);
+        let second = key(3);
+        assert_eq!(scheduler.schedule_loss(first, [4; 16], 0), Ok(true));
+        assert_eq!(scheduler.schedule_loss(second, [5; 16], 0), Ok(true));
+        assert_eq!(scheduler.take_due(first, [4; 16], 250), Ok(true));
+        assert_eq!(scheduler.take_due(second, [5; 16], 250), Ok(true));
+        assert_eq!(
+            scheduler.take_expired_attempt(first, [4; 16], 20_250),
+            Ok(true)
+        );
+        assert_eq!(
+            scheduler.take_expired_attempt(second, [5; 16], 20_249),
+            Ok(false)
+        );
+        assert_eq!(
+            scheduler.take_expired_attempt(second, [5; 16], 20_250),
+            Ok(true)
+        );
+        assert!(scheduler.cancel_if_current(first, [4; 16]));
+        assert_eq!(scheduler.schedule_loss(first, [6; 16], 20_251), Ok(true));
+        assert_eq!(
+            scheduler.take_expired_attempt(first, [4; 16], 99_999),
+            Ok(false)
+        );
+        assert_eq!(scheduler.take_due(first, [6; 16], 20_501), Ok(true));
+        assert_eq!(
+            scheduler.take_expired_attempt(first, [6; 16], 40_501),
+            Ok(true)
+        );
     }
 
     #[test]
