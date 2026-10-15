@@ -181,6 +181,32 @@ fn response_kind(response: &Response) -> &'static str {
     }
 }
 
+/// Stable error categories shared by the CLI and other daemon clients.
+/// Only exact D-Bus protocol error names classify remote failures.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClientErrorKind {
+    Unavailable,
+    Authorization,
+    Unsupported,
+    Operational,
+}
+
+fn remote_error_kind(name: &str) -> ClientErrorKind {
+    match name {
+        "org.freedesktop.DBus.Error.AccessDenied"
+        | "org.freedesktop.DBus.Error.AuthFailed"
+        | "org.freedesktop.DBus.Error.InteractiveAuthorizationRequired" => {
+            ClientErrorKind::Authorization
+        }
+        "org.freedesktop.DBus.Error.NotSupported" => ClientErrorKind::Unsupported,
+        "org.freedesktop.DBus.Error.ServiceUnknown"
+        | "org.freedesktop.DBus.Error.NameHasNoOwner"
+        | "org.freedesktop.DBus.Error.NoReply"
+        | "org.freedesktop.DBus.Error.NoServer" => ClientErrorKind::Unavailable,
+        _ => ClientErrorKind::Operational,
+    }
+}
+
 #[derive(Debug)]
 pub enum ClientError {
     Bus(zbus::Error),
@@ -199,6 +225,40 @@ pub enum ClientError {
         timeout: Duration,
         last_error: String,
     },
+}
+
+impl ClientError {
+    /// Classify a specific typed client failure; do not interpret
+    /// peer-controlled textual diagnostics as authorization decisions.
+    pub fn kind(&self) -> ClientErrorKind {
+        match self {
+            Self::IncompatibleVersion { .. } | Self::ReconnectTimeout { .. } => {
+                ClientErrorKind::Unavailable
+            }
+            Self::Bus(zbus::Error::MethodError(name, _, _)) => {
+                remote_error_kind(name.as_str())
+            }
+            Self::Bus(zbus::Error::FDO(error)) => match error.as_ref() {
+                zbus::fdo::Error::AccessDenied(_)
+                | zbus::fdo::Error::AuthFailed(_)
+                | zbus::fdo::Error::InteractiveAuthorizationRequired(_) => {
+                    ClientErrorKind::Authorization
+                }
+                zbus::fdo::Error::NotSupported(_) => ClientErrorKind::Unsupported,
+                zbus::fdo::Error::ServiceUnknown(_)
+                | zbus::fdo::Error::NameHasNoOwner(_)
+                | zbus::fdo::Error::NoReply(_)
+                | zbus::fdo::Error::NoServer(_) => ClientErrorKind::Unavailable,
+                _ => ClientErrorKind::Operational,
+            },
+            Self::Bus(
+                zbus::Error::InputOutput(_)
+                | zbus::Error::Address(_)
+                | zbus::Error::Handshake(_),
+            ) => ClientErrorKind::Unavailable,
+            _ => ClientErrorKind::Operational,
+        }
+    }
 }
 
 impl fmt::Display for ClientError {
@@ -233,6 +293,61 @@ impl fmt::Display for ClientError {
 }
 
 impl std::error::Error for ClientError {}
+
+#[cfg(test)]
+mod error_class_tests {
+    use super::*;
+
+    #[test]
+    fn error_names_are_exact_and_never_classify_untrusted_message_text() {
+        assert_eq!(
+            remote_error_kind("org.freedesktop.DBus.Error.AccessDenied"),
+            ClientErrorKind::Authorization
+        );
+        assert_eq!(
+            remote_error_kind("org.freedesktop.DBus.Error.NotSupported"),
+            ClientErrorKind::Unsupported
+        );
+        assert_eq!(
+            remote_error_kind("org.freedesktop.DBus.Error.ServiceUnknown"),
+            ClientErrorKind::Unavailable
+        );
+        for suspicious in [
+            "AccessDenied",
+            "org.freedesktop.DBus.Error.AccessDenied.extra",
+            "Error: AccessDenied",
+            "org.freedesktop.DBus.Error.Failed",
+        ] {
+            assert_eq!(
+                remote_error_kind(suspicious),
+                ClientErrorKind::Operational
+            );
+        }
+    }
+
+    #[test]
+    fn version_mismatch_is_unavailable_and_unrelated_errors_remain_operational() {
+        assert_eq!(
+            ClientError::IncompatibleVersion {
+                client: ApiVersion::new(1, 0),
+                server: ApiVersion::new(2, 0),
+            }
+            .kind(),
+            ClientErrorKind::Unavailable
+        );
+        assert_eq!(
+            ClientError::EventStreamClosed.kind(),
+            ClientErrorKind::Operational
+        );
+        assert_eq!(
+            ClientError::Bus(zbus::Error::FDO(Box::new(
+                zbus::fdo::Error::AccessDenied("denied".into())
+            )))
+            .kind(),
+            ClientErrorKind::Authorization
+        );
+    }
+}
 
 /// The human-readable project name.
 pub const PROJECT_NAME: &str = "BlueRoute";
