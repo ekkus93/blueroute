@@ -345,4 +345,96 @@ mod tests {
             Err(PinnedIngressError::Terminal)
         ));
     }
+
+    #[test]
+    fn corrupt_persistent_pin_state_poisoning_cannot_be_recovered_in_place() {
+        let (root, trust) = setup();
+        futures_lite::future::block_on(trust.trust_peer(peer())).unwrap();
+        trust
+            .enroll_key_after_independent_confirmation(network(), peer(), key(54), key(54))
+            .unwrap();
+        let mut active = session(&trust, key(54)).unwrap();
+        let persisted = PeerPinStore::new(root.0.join("peer-pins"));
+        let original = persisted.load().unwrap();
+        fs::write(root.0.join("peer-pins").join("peer-key-pins-v1"), b"invalid-state")
+            .unwrap();
+
+        match active.receive_verified_plaintext(
+            &frame(3, ControlMessage::Heartbeat, peer()),
+            10,
+        ) {
+            Err(PinnedIngressError::Authorization(error)) => {
+                assert_eq!(error.kind(), ErrorKind::PersistenceError);
+            }
+            _ => panic!("corrupt durable pin state must reject the complete frame"),
+        }
+        assert!(active.is_terminal());
+        assert_eq!(active.expires_ms(), 30_003);
+        // Repairing the file must not revive the old logical TLS session.
+        persisted.save(&original).unwrap();
+        assert!(matches!(
+            active.receive_verified_plaintext(
+                &frame(3, ControlMessage::Heartbeat, peer()),
+                11
+            ),
+            Err(PinnedIngressError::Terminal)
+        ));
+        assert!(session(&trust, key(54)).is_ok());
+    }
+
+    #[test]
+    fn two_enrolled_peers_have_independent_pin_and_session_scope() {
+        let (_root, trust) = setup();
+        let second = NodeId::from_bytes([61; 16]);
+        futures_lite::future::block_on(trust.trust_peer(peer())).unwrap();
+        futures_lite::future::block_on(trust.trust_peer(second)).unwrap();
+        trust
+            .enroll_key_after_independent_confirmation(network(), peer(), key(54), key(54))
+            .unwrap();
+        trust
+            .enroll_key_after_independent_confirmation(network(), second, key(55), key(55))
+            .unwrap();
+        let mut first = session(&trust, key(54)).unwrap();
+        let mut other = PinnedSessionIngress::after_verified_handshake(
+            &trust,
+            network(),
+            second,
+            key(55),
+            [53; 16],
+            deadline(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            first.receive_verified_plaintext(
+                &frame(3, ControlMessage::Heartbeat, peer()),
+                10
+            ).unwrap().len(),
+            1
+        );
+        // A second peer's perfectly framed message cannot be interpreted
+        // as the first peer's authenticated control envelope.
+        assert!(matches!(
+            other.receive_verified_plaintext(
+                &frame(3, ControlMessage::Heartbeat, peer()),
+                11
+            ),
+            Err(PinnedIngressError::Protocol(_))
+        ));
+        assert!(other.is_terminal());
+        assert_eq!(
+            first.receive_verified_plaintext(
+                &frame(4, ControlMessage::Heartbeat, peer()),
+                12
+            ).unwrap().len(),
+            1
+        );
+        assert_eq!(first.expires_ms(), 30_012);
+        // Neither a different key nor another NodeId's approval substitutes
+        // for an independent pinned identity.
+        assert!(matches!(
+            session(&trust, key(55)),
+            Err(PinnedIngressError::Authorization(_))
+        ));
+    }
 }
