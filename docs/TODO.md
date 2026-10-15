@@ -785,6 +785,8 @@ This is the first complete product slice.
 **Two distinct gates:** Existing [PR #41](https://github.com/ekkus93/blueroute/pull/41) supplied the standalone host/client acceptance programs, kernel IPv4 adapter, TCP/UDP helper and runbook. The existing code was **reconciled directly onto `master`**, not reimplemented, at `eca4a3bed8d29d484f8ac35b46601580fbe3cea6`; exact-head [CI 38688388357](https://github.com/ekkus93/blueroute/actions/runs/38688388357) passed. PR #41 itself remains open because Ralph Bridge's merge gate returned `INVALID_ARGUMENT`; direct code reconciliation is not a PR merge/closure. **SOFTWARE COMPLETE for the acceptance tooling; HARDWARE DEFERRED** for all original two-machine traffic requirements. This does not enable production JoinNetwork or establish Bluetooth data-path success.
 
 - [x] qualify and reconcile existing PR #41 software acceptance tooling onto `master` (PR closure still pending; no duplicate PR).
+
+**Additional P6-006 software qualification (2026-10-14):** Mocked socket contract tests now verify actual script sequencing, strict UDP payload/loss summary and TCP SHA-256 mismatch rejection ([exact-head CI 38689429987](https://github.com/ekkus93/blueroute/actions/runs/38689429987), `7af480b252eb0ad4e0ef6e69c1732af5e8dcb800`). Real localhost TCP and UDP end-to-end smoke tests using the original Python helper also pass [exact-head CI 38689620724](https://github.com/ekkus93/blueroute/actions/runs/38689620724) at `dfcdcc2205b1bfd8d50d6a46b378a457e4b13816`. These are **SOFTWARE COMPLETE / HARDWARE DEFERRED**, not proof of Bluetooth PAN, two computers, Wi-Fi exclusion, independent DNS, or authenticated production JoinNetwork.
 - [ ] ping.
 - [ ] SSH.
 - [ ] TCP bulk transfer.
@@ -922,6 +924,8 @@ This is the first complete product slice.
 - Repeated PAN reconnects do not leak sessions/tasks.
 
 **P7/P14 wire-identity hardening (software-only, 2026-10-14):** The common control-frame encoder/decoder and verified-session replay context reject zero `NetworkId` or sender `NodeId`; claimed Hello neighbors reject zero `NodeId` even if otherwise syntactically valid. Deterministic hostile raw-wire and valid Heartbeat tests passed in [CI 38687746163](https://github.com/ekkus93/blueroute/actions/runs/38687746163) at `cd4498d26444e0b4f9e2d97d19bf50a2cbebac09`. These checks harden unauthenticated input only; they do not establish peer identity, mutual TLS, session enrollment, or PAN acceptance.
+
+**Additional P7-003/P7-004 exporter preflight hardening (software only, 2026-10-14):** Exporter context construction rejects zero `NetworkId` or `NodeId` inputs and the claim-only Hello/HelloAck helper now rejects zero network/local/remote identities before sending even a single byte. A mock transport verifies no read/write timeouts or outbound bytes for invalid requests; [exact-head CI 38690485129](https://github.com/ekkus93/blueroute/actions/runs/38690485129) passed at `091d94e8c796dfff85596b455e5aafa667e66f68`. This does **not** authenticate any TLS connection, verify key possession, implement an independently approved enrollment UI, or enable production JoinNetwork.
 
 ## P7-005 — Fuzz/property-test parser
 
