@@ -21,6 +21,22 @@ pub enum PinnedIngressError {
     Terminal,
 }
 
+/// Opaque evidence of a cryptographically authenticated peer and the
+/// exporter-bound Hello transcript. It has intentionally private fields and
+/// NO production constructor until a real mutual-TLS 1.3 verifier exists.
+///
+/// A public fingerprint, peer-provided NodeId, advertisement or raw socket
+/// cannot forge this type through the safe API. The future TLS implementation
+/// must live at this boundary and create evidence only after certificate
+/// validation, key possession, independent key enrollment, correct network,
+/// transcript verification and fresh exporter derivation.
+pub struct VerifiedTlsIdentity {
+    network: NetworkId,
+    peer: NodeId,
+    verified_tls_key: SpkiSha256,
+    exporter_session_id: [u8; 16],
+}
+
 /// Holds the exact approved peer identity and verified channel's existing
 /// post-Hello stream, but does not itself establish or verify TLS.
 ///
@@ -42,12 +58,15 @@ impl<'a> PinnedSessionIngress<'a> {
     /// Construction *never* authorizes production joining by itself.
     pub fn after_verified_handshake(
         trust: &'a DurablePeerTrustOperations,
-        network: NetworkId,
-        peer: NodeId,
-        verified_tls_key: SpkiSha256,
-        exporter_session_id: [u8; 16],
+        verified_tls: VerifiedTlsIdentity,
         deadline: ConnectionDeadline,
     ) -> Result<Self, PinnedIngressError> {
+        let VerifiedTlsIdentity {
+            network,
+            peer,
+            verified_tls_key,
+            exporter_session_id,
+        } = verified_tls;
         trust
             .require_approved_pinned_tls_peer(network, peer, verified_tls_key)
             .map_err(PinnedIngressError::Authorization)?;
@@ -200,16 +219,24 @@ mod tests {
         (root, trust)
     }
 
+    // Only this module's synthetic tests can construct identity evidence.
+    // There is no public production constructor until actual TLS validation.
+    fn fake_verified_tls_identity(node: NodeId, tls_key: SpkiSha256) -> VerifiedTlsIdentity {
+        VerifiedTlsIdentity {
+            network: network(),
+            peer: node,
+            verified_tls_key: tls_key,
+            exporter_session_id: [53; 16],
+        }
+    }
+
     fn session<'a>(
         trust: &'a DurablePeerTrustOperations,
         tls_key: SpkiSha256,
     ) -> Result<PinnedSessionIngress<'a>, PinnedIngressError> {
         PinnedSessionIngress::after_verified_handshake(
             trust,
-            network(),
-            peer(),
-            tls_key,
-            [53; 16],
+            fake_verified_tls_identity(peer(), tls_key),
             deadline(),
         )
     }
@@ -394,10 +421,7 @@ mod tests {
         let mut first = session(&trust, key(54)).unwrap();
         let mut other = PinnedSessionIngress::after_verified_handshake(
             &trust,
-            network(),
-            second,
-            key(55),
-            [53; 16],
+            fake_verified_tls_identity(second, key(55)),
             deadline(),
         )
         .unwrap();

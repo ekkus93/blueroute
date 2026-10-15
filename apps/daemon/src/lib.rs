@@ -31,7 +31,7 @@ pub use peer_pin_store::PeerPinStore;
 pub use peer_trust::{
     DurablePeerTrustOperations, PeerTrustFuture, PeerTrustOperations, pair_and_trust_bluetooth_peer,
 };
-pub use pinned_ingress::{PinnedIngressError, PinnedSessionIngress};
+pub use pinned_ingress::{PinnedIngressError, PinnedSessionIngress, VerifiedTlsIdentity};
 pub use single_star::{
     LinuxStarHostRuntime, NetworkIdGenerator, NetworkOperationFuture, NetworkOperations,
     SingleStarNetworkOperations, StarHostRuntime, SystemNetworkIdGenerator, current_network,
