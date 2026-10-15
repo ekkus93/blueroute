@@ -4,12 +4,12 @@
 **Applies to:** Linux daemon, system D-Bus client/API, BlueZ PANU/NAP, NetworkManager, persisted node/network trust, future P7 authenticated control sessions, P8/P9 routing, future Internet gateway.
 **Source of requirements:** [SPEC.md](SPEC.md) sections 3, 8, 10–17, 20–22 and [TODO.md](TODO.md), particularly P6-004, P7-001..005, P14-001..006, P16 and P17-006.
 
-This document is a **risk analysis**, not a certification or claim that all mitigations are implemented. The present code deliberately refuses production \`JoinNetwork\` while P7 mutual TLS and key enrollment are incomplete. That guard must not be relaxed for software tests or hardware qualification.
+This document is a **risk analysis**, not a certification or claim that all mitigations are implemented. The present code deliberately refuses production `JoinNetwork` while independent P7 key enrollment and the live authenticated runtime are incomplete. That guard must not be relaxed for software tests or hardware qualification.
 
 ## 1. Protected assets and security outcomes
 
 - **Host integrity:** system routing table, forwarding state, NetworkManager profiles, PAN server/client sessions, BlueZ pairing/trust, firewall, DNS, optional future NAT and default route. Never modify or remove non-BlueRoute-owned resources.
-- **Network membership and identity:** local long-lived cryptographic private key (planned), stable NodeId, explicitly approved per-network peer key pin, network identifier, session transcripts and freshness values. NodeId, source IP, Bluetooth MAC and display name are **not** independent authentication.
+- **Network membership and identity:** local long-lived NodeId-bound TLS private key, stable NodeId, explicitly approved per-network peer key pin, network identifier, session transcripts and freshness values. NodeId, source IP, Bluetooth MAC and display name are **not** independent authentication.
 - **User data:** ordinary TCP/UDP applications passing over BNEP and routed IP segments. BlueRoute controls admission and routing but cannot promise confidentiality of all user traffic; applications should use SSH/TLS when appropriate.
 - **Privilege boundary:** only the system daemon may mutate BlueZ/NetworkManager and Linux routes; desktop/TUI/CLI/browser content must use its versioned D-Bus API and be subject to PolicyKit.
 - **Availability and safety:** limited controller connections, CPU, file descriptors, memory, log volume and route convergence; error paths must roll back only owned changes.
@@ -61,7 +61,7 @@ Before the daemon may commit remote membership, accept a capability for planning
 5. Only after all checks succeed may an authenticated *and specifically authorized* message mutate membership or route state. A member's authority is scoped: merely belonging to the network cannot imply permission to advertise default route or modify all topology.
 6. On revocation, TLS failure, wrong peer/network, replay, malformed frame, restart or timeout: close session, revoke future control authority, fail closed and reconcile **only BlueRoute-owned** resources. Recheck approval at sensitive decisions.
 
-**Current release gate:** Steps 1–5 are **not fully wired**. The current P7 protocol models, persistent pin policy and read-only control-frame socket tests are security groundwork only. P6-004 production \`JoinNetwork\` must remain unavailable.
+**Current release gate (reviewed 2026-10-15):** Commit `84f05a6` adds owner-only persistent local TLS identity, exact-leaf-pinned mutual TLS 1.3, peer NodeId/SPKI verification, exporter-bound Hello/HelloAck and durable pin-gated session helpers. Local follow-up adds an untrusted candidate-certificate display primitive that only becomes a trust input after matching independent fingerprint confirmation. These pieces are not yet wired to PAN listener/client lifecycle or an independently approved enrollment UI, and route/topology controls remain unimplemented. Steps 1–5 are therefore **not fully wired**. P6-004 production `JoinNetwork` must remain unavailable.
 
 ## 5. Verification plan and release gates
 
@@ -76,7 +76,7 @@ Before the daemon may commit remote membership, accept a capability for planning
 
 **Assumptions:** Linux OS/system D-Bus, BlueZ, NetworkManager and TLS crypto libraries are trusted within their supported boundaries; local root/system compromise is outside BlueRoute's threat containment. BlueRoute does not defeat RF jamming, Bluetooth transport bugs, deliberate malicious traffic from *authorized* members or insecure application protocols.
 
-**Outstanding critical controls:** P7-003 user-verifiable key enrollment and durable local private key; P7-004 mutual TLS 1.3 proof/channel-bound lifecycle; P14-003 authorization of route/topology messages; P6-004 production join sequencing; P13 recovery; P14-002/004/005/006 audit; P18 gateway policies; physical P16 evidence. The current working control frame codec is *not* itself an authenticator.
+**Outstanding critical controls:** P7-003 user-verifiable key enrollment UX/ceremony; P7-004 live PAN-bound mutual-TLS session lifecycle and reconnect; P14-003 authorization of future route/topology messages; P6-004 production join sequencing; P13 recovery; P14-002/004/005/006 audit; P18 gateway policies; physical P16 evidence. The TLS helpers authenticate their tested loopback channel, but the control-frame codec by itself is *not* an authenticator and no production peer runtime consumes it yet.
 
 **Maintenance triggers:** Update this model when (a) a new privileged daemon command or third-party client is exposed, (b) peer key enrollment/rotation changes, (c) P8/P9 route or topology messages are added, (d) the gateway is implemented, (e) persistence paths/permissions change, or (f) test evidence contradicts assumed mitigations.
 

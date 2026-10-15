@@ -1,7 +1,7 @@
 # P7-001 — Inter-node Control Transport (ADR)
 
 **Date:** 2026-10-13
-**Status:** Accepted architecture decision; foundational TLS helpers are implemented in commit `84f05a6`, while enrollment UX and live PAN/runtime integration remain open.
+**Status:** Accepted architecture decision; foundational TLS helpers are implemented in commit `84f05a6`, and an untrusted-certificate candidate/fingerprint-confirmation primitive is under local implementation. Enrollment UX and live PAN/runtime integration remain open.
 
 ## Context
 
@@ -42,6 +42,6 @@ BlueRoute uses Linux IP over Bluetooth PAN (BNEP). The system daemon also needs 
 
 ## Open technical decisions
 
-Use rustls with the ring provider and standard WebPKI verification against the exact out-of-band pinned leaf certificate; do not add a custom certificate verifier. Secure enrollment UX, key rotation and persistent trust-schema migration remain open. The 46071 port is the v1 convention, not an identity claim.
+Use rustls with the ring provider and standard WebPKI verification against the exact independently confirmed leaf certificate; do not add a custom certificate verifier. A bounded unauthenticated certificate candidate may be shown for out-of-band comparison, but cannot become a TLS trust input until its SPKI fingerprint is independently confirmed and matched. Secure enrollment UX, key rotation and persistent trust-schema migration remain open. The 46071 port is the v1 convention, not an identity claim.
 
 **Acceptance:** IP address is never sole identity proof. Production join remains unavailable until cryptographic authorization is in place.

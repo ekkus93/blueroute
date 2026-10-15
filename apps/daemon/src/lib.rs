@@ -30,11 +30,12 @@ use blueroute_protocol::{
     encode_response,
 };
 pub use control_tls::{
-    ActiveControlSession, AuthenticatedControlPeer, ControlSessionError, ControlTlsError,
-    ControlTlsIdentityStore, ControlTlsStream, LocalControlTlsIdentity,
-    PinnedControlTlsCertificate, PinnedControlTlsPeer, VerifiedControlTlsPeer,
-    accept_pinned_control_tls, connect_pinned_control_tls, exchange_control_tls_certificate,
-    export_control_session_id, verify_control_tls_peer,
+    ActiveControlSession, AuthenticatedControlPeer, ControlSessionError,
+    ControlTlsCertificateCandidate, ControlTlsError, ControlTlsIdentityStore, ControlTlsStream,
+    LocalControlTlsIdentity, PinnedControlTlsCertificate, PinnedControlTlsPeer,
+    VerifiedControlTlsPeer, accept_pinned_control_tls, connect_pinned_control_tls,
+    exchange_control_tls_candidate, exchange_control_tls_certificate, export_control_session_id,
+    verify_control_tls_peer,
 };
 pub use join_network::{
     JoinControlSession, JoinIpLease, JoinNetworkFuture, JoinNetworkOperations, JoinPanLink,

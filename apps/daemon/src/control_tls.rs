@@ -314,14 +314,57 @@ fn invalid_identity_record(message: &'static str) -> CoreError {
     CoreError::new(ErrorKind::PersistenceError, message)
 }
 
-/// A peer certificate whose public key and logical identity were checked
-/// against the durable independently approved enrollment record.
+/// A peer certificate whose NodeId and SPKI matched an expected fingerprint.
+/// Durable membership and pin authorization are still rechecked before a
+/// control session is activated.
 #[derive(Clone, Debug)]
 pub struct PinnedControlTlsCertificate {
     network: NetworkId,
     node: NodeId,
     certificate: CertificateDer<'static>,
     fingerprint: SpkiSha256,
+}
+
+/// Untrusted certificate identity received during the enrollment ceremony.
+/// It must not authorize a control session unless a user independently
+/// confirms the exact fingerprint and `confirm_fingerprint` succeeds.
+#[derive(Clone, Debug)]
+pub struct ControlTlsCertificateCandidate {
+    network: NetworkId,
+    node: NodeId,
+    certificate: CertificateDer<'static>,
+    fingerprint: SpkiSha256,
+}
+
+impl ControlTlsCertificateCandidate {
+    pub const fn network(&self) -> NetworkId {
+        self.network
+    }
+
+    pub const fn node(&self) -> NodeId {
+        self.node
+    }
+
+    pub const fn fingerprint(&self) -> SpkiSha256 {
+        self.fingerprint
+    }
+
+    /// Convert candidate material into an exact-leaf TLS trust input only
+    /// when the independently confirmed fingerprint matches it.
+    pub fn confirm_fingerprint(
+        self,
+        independently_confirmed: SpkiSha256,
+    ) -> Result<PinnedControlTlsCertificate, ControlTlsError> {
+        if independently_confirmed != self.fingerprint {
+            return Err(ControlTlsError::FingerprintMismatch);
+        }
+        PinnedControlTlsCertificate::new(
+            self.network,
+            self.node,
+            self.certificate,
+            independently_confirmed,
+        )
+    }
 }
 
 impl PinnedControlTlsCertificate {
@@ -449,13 +492,21 @@ pub fn exchange_control_tls_certificate(
         .write_timeout()
         .map_err(|_| ControlTlsError::CertificateExchangeFailed)?;
 
-    let certificate = match exchange_control_tls_certificate_inner(
-        socket,
-        local,
-        network,
-        allowed_peers,
-        deadline,
-    ) {
+    let candidate = match exchange_control_tls_candidate_inner(socket, local, network, deadline) {
+        Ok(candidate) => candidate,
+        Err(error) => {
+            let _ = socket.shutdown(Shutdown::Both);
+            return Err(error);
+        }
+    };
+    let Some(expected) = allowed_peers
+        .iter()
+        .find(|peer| peer.node == candidate.node)
+    else {
+        let _ = socket.shutdown(Shutdown::Both);
+        return Err(ControlTlsError::CertificateIdentityMismatch);
+    };
+    let certificate = match candidate.confirm_fingerprint(expected.fingerprint) {
         Ok(certificate) => certificate,
         Err(error) => {
             let _ = socket.shutdown(Shutdown::Both);
@@ -469,6 +520,42 @@ pub fn exchange_control_tls_certificate(
         return Err(ControlTlsError::CertificateExchangeFailed);
     }
     Ok(certificate)
+}
+
+/// Exchange and parse a bounded peer certificate for display during explicit
+/// enrollment. The returned candidate is untrusted and cannot be used by the
+/// TLS factories until its fingerprint is independently confirmed.
+pub fn exchange_control_tls_candidate(
+    mut socket: TcpStream,
+    local: &LocalControlTlsIdentity,
+    network: NetworkId,
+    deadline: Instant,
+) -> Result<ControlTlsCertificateCandidate, ControlTlsError> {
+    if is_zero_network(network) {
+        let _ = socket.shutdown(Shutdown::Both);
+        return Err(ControlTlsError::InvalidIdentity);
+    }
+    let original_read_timeout = socket
+        .read_timeout()
+        .map_err(|_| ControlTlsError::CertificateExchangeFailed)?;
+    let original_write_timeout = socket
+        .write_timeout()
+        .map_err(|_| ControlTlsError::CertificateExchangeFailed)?;
+    let candidate =
+        match exchange_control_tls_candidate_inner(&mut socket, local, network, deadline) {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                let _ = socket.shutdown(Shutdown::Both);
+                return Err(error);
+            }
+        };
+    if socket.set_read_timeout(original_read_timeout).is_err()
+        || socket.set_write_timeout(original_write_timeout).is_err()
+    {
+        let _ = socket.shutdown(Shutdown::Both);
+        return Err(ControlTlsError::CertificateExchangeFailed);
+    }
+    Ok(candidate)
 }
 
 /// Exchange and pin-check the peer certificate, then establish the client side
@@ -531,13 +618,12 @@ pub fn accept_pinned_control_tls(
     Ok((stream, peer_certificate))
 }
 
-fn exchange_control_tls_certificate_inner(
+fn exchange_control_tls_candidate_inner(
     socket: &mut TcpStream,
     local: &LocalControlTlsIdentity,
     network: NetworkId,
-    allowed_peers: &[PinnedControlTlsPeer],
     deadline: Instant,
-) -> Result<PinnedControlTlsCertificate, ControlTlsError> {
+) -> Result<ControlTlsCertificateCandidate, ControlTlsError> {
     let local_certificate = local.certificate.as_ref();
     let length =
         u32::try_from(local_certificate.len()).map_err(|_| ControlTlsError::InvalidCertificate)?;
@@ -569,15 +655,16 @@ fn exchange_control_tls_certificate_inner(
 
     let certificate = CertificateDer::from(certificate);
     let node = certificate_node_id(&certificate)?;
-    let fingerprint = certificate_fingerprint(&certificate)?;
-    let expected = allowed_peers
-        .iter()
-        .find(|peer| peer.node == node)
-        .ok_or(ControlTlsError::CertificateIdentityMismatch)?;
-    if fingerprint != expected.fingerprint {
-        return Err(ControlTlsError::FingerprintMismatch);
+    if is_zero_node(node) || node == local.node {
+        return Err(ControlTlsError::InvalidIdentity);
     }
-    PinnedControlTlsCertificate::new(network, node, certificate, expected.fingerprint)
+    let fingerprint = certificate_fingerprint(&certificate)?;
+    Ok(ControlTlsCertificateCandidate {
+        network,
+        node,
+        certificate,
+        fingerprint,
+    })
 }
 
 fn write_until(
@@ -1509,6 +1596,107 @@ mod tests {
         // The remotely supplied candidate becomes a rustls trust input only
         // after the existing independently approved SPKI pin matches.
         let _client_config = client.client_config(network(9), &pinned_server).unwrap();
+    }
+
+    #[test]
+    fn enrollment_candidate_requires_independent_fingerprint_confirmation() {
+        let (client, server) = make_tls_pair();
+        let (client_socket, server_socket) = stream_pair();
+        let server_node = server.node();
+        let server_certificate = server.certificate().clone();
+        let server_private_key = server.private_key.clone_key();
+        let server_thread = thread::spawn(move || {
+            let server = LocalControlTlsIdentity::from_der(
+                server_node,
+                server_certificate,
+                server_private_key,
+            )
+            .unwrap();
+            exchange_control_tls_candidate(
+                server_socket,
+                &server,
+                network(9),
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap()
+        });
+        let client_candidate = exchange_control_tls_candidate(
+            client_socket,
+            &client,
+            network(9),
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+        let server_candidate = server_thread.join().unwrap();
+
+        assert_eq!(client_candidate.network(), network(9));
+        assert_eq!(client_candidate.node(), server_node);
+        assert_eq!(client_candidate.fingerprint(), server.fingerprint());
+        assert_eq!(server_candidate.node(), client.node());
+        assert_eq!(server_candidate.fingerprint(), client.fingerprint());
+
+        let wrong_confirmation = SpkiSha256::from_verified_certificate_digest([99; 32]).unwrap();
+        assert_eq!(
+            client_candidate
+                .clone()
+                .confirm_fingerprint(wrong_confirmation)
+                .unwrap_err(),
+            ControlTlsError::FingerprintMismatch
+        );
+        let confirmed_server = client_candidate
+            .confirm_fingerprint(server.fingerprint())
+            .unwrap();
+        let confirmed_client = server_candidate
+            .confirm_fingerprint(client.fingerprint())
+            .unwrap();
+        assert_eq!(confirmed_server.peer_pin().node(), server_node);
+        assert_eq!(confirmed_server.fingerprint(), server.fingerprint());
+
+        // Enrollment confirmation is only a candidate pin. The actual
+        // connection performs a fresh bounded preface and proves both keys.
+        let (client_socket, server_socket) = stream_pair();
+        let allowed_client = confirmed_client.peer_pin();
+        let server_certificate_der = server.certificate().clone();
+        let server_private_key = server.private_key.clone_key();
+        let server_thread = thread::spawn(move || {
+            let server = LocalControlTlsIdentity::from_der(
+                server_node,
+                server_certificate_der,
+                server_private_key,
+            )
+            .unwrap();
+            accept_pinned_control_tls(
+                server_socket,
+                &server,
+                network(9),
+                &[allowed_client],
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap()
+        });
+        let (mut client_stream, _) = connect_pinned_control_tls(
+            client_socket,
+            &client,
+            network(9),
+            confirmed_server.peer_pin(),
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+        let (mut server_stream, server_certificate) = server_thread.join().unwrap();
+        assert_eq!(
+            verify_control_tls_peer(&client_stream.connection, network(9), &confirmed_server)
+                .unwrap()
+                .fingerprint(),
+            server.fingerprint()
+        );
+        assert_eq!(
+            verify_control_tls_peer(&server_stream.connection, network(9), &server_certificate)
+                .unwrap()
+                .fingerprint(),
+            client.fingerprint()
+        );
+        client_stream.close();
+        server_stream.close();
     }
 
     #[test]
