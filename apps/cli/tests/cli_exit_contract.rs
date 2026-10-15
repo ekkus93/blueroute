@@ -31,7 +31,10 @@ fn invalid_and_duplicate_options_exit_usage_without_contacting_daemon() {
         let result = invoke(args);
         assert_eq!(result.status.code(), Some(2), "args={args:?}");
         let stderr = String::from_utf8_lossy(&result.stderr);
-        assert!(stderr.contains("Usage: blueroute"), "args={args:?}: {stderr}");
+        assert!(
+            stderr.contains("Usage: blueroute"),
+            "args={args:?}: {stderr}"
+        );
     }
 }
 
