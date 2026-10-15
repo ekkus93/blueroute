@@ -30,6 +30,22 @@ pub enum PinnedIngressError {
 /// must live at this boundary and create evidence only after certificate
 /// validation, key possession, independent key enrollment, correct network,
 /// transcript verification and fresh exporter derivation.
+///
+/// Compile-fail guard: callers outside this module cannot supply a fabricated
+/// TLS exporter and identity claims in lieu of a cryptographic verifier.
+///
+/// ```compile_fail
+/// use blueroute_core::{NetworkId, NodeId};
+/// use blueroute_protocol::peer_pin::SpkiSha256;
+/// use blueroute_daemon::VerifiedTlsIdentity;
+///
+/// let fake = VerifiedTlsIdentity {
+///     network: NetworkId::from_bytes([1; 16]),
+///     peer: NodeId::from_bytes([2; 16]),
+///     verified_tls_key: SpkiSha256::from_verified_certificate_digest([3; 32]).unwrap(),
+///     exporter_session_id: [4; 16],
+/// };
+/// ```
 pub struct VerifiedTlsIdentity {
     network: NetworkId,
     peer: NodeId,
