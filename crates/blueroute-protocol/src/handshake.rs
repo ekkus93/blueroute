@@ -634,7 +634,6 @@ mod tests {
         assert!(stream.outbound.is_empty());
     }
 
-
     #[test]
     fn zero_identity_handshake_preflight_never_emits_unauthenticated_bytes() {
         let frames = exchange();
@@ -658,7 +657,10 @@ mod tests {
                 exchange_hello_claims_with_deadline(&mut stream, request),
                 Err(HelloExchangeError::InvalidTranscript(_))
             ));
-            assert!(stream.outbound.is_empty(), "unexpected output for case {case}");
+            assert!(
+                stream.outbound.is_empty(),
+                "unexpected output for case {case}"
+            );
             assert_eq!(stream.write_timeouts, 0);
             assert_eq!(stream.read_timeouts, 0);
         }
