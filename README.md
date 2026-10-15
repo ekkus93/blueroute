@@ -14,3 +14,5 @@ BlueRoute is in early development. The architecture and implementation backlog a
 - `docs/TODO.md`
 
 See `CONTRIBUTING.md` and `docs/DEVELOPMENT.md` for development conventions and checks.
+
+For current commands and system-service diagnostics, see the [administrator guide](docs/ADMINISTRATOR.md). For common platform and connection failures, see the [troubleshooting guide](docs/TROUBLESHOOTING.md).

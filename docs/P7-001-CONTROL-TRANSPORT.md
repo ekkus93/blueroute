@@ -1,7 +1,7 @@
 # P7-001 — Inter-node Control Transport (ADR)
 
 **Date:** 2026-10-13
-**Status:** Accepted architecture decision; implementation is in progress locally.
+**Status:** Accepted architecture decision; foundational TLS helpers are implemented in commit `84f05a6`, while enrollment UX and live PAN/runtime integration remain open.
 
 ## Context
 

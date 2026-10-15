@@ -232,6 +232,44 @@ Normal user IP traffic carried across PAN links and routed by Linux.
 
 The daemon is authoritative for active network state. Front ends must not independently manipulate BlueZ, the network manager, interfaces, or routes.
 
+### Current implementation status and boundaries
+
+This specification describes the product target. The following status records what the current Rust workspace actually wires together; planned behavior above must not be read as evidence that the feature is already available.
+
+#### Implemented software boundaries
+
+- `blueroute-core` contains hardware-independent identifiers, configuration, membership, health, capability, address allocation, topology and route-planning models.
+- `blueroute-protocol` contains the versioned local D-Bus command/response/event types, bounded control-frame codecs, replay/session models, and strict peer claims.
+- `blueroute-linux` contains direct system-D-Bus adapters for BlueZ and NetworkManager, PAN lifecycle operations, address/route/forwarding ownership helpers, durable state stores, and the read-only system capability probe.
+- `blueroute-client` provides the version-gated system-D-Bus client used by the CLI.
+- `blueroute-daemon` exposes status, capability, diagnostics, network discovery/create and peer-trust operations through the local API. Create-network and discovery use the Linux adapters; mutations are subject to daemon authorization.
+- `blueroute` provides the implemented daemon-backed CLI commands, including JSON output and typed process exit classes. The TUI and desktop crates are placeholders, not usable front ends.
+
+#### Incomplete end-to-end behavior
+
+- Production JoinNetwork remains fail-closed. Its transaction coordinator and rollback policy exist, but the Linux join runtime does not yet establish a PANU link, configure the full production join, authenticate the peer, and commit membership as one live operation.
+- Commit `84f05a6` adds persistent local TLS identity, pinned TLS 1.3 connection helpers, exporter-bound Hello/HelloAck, and pin-gated active-session helpers. The daemon loads the local identity, but there is no PAN-bound listener/client runtime, session manager, reconnect loop, or independent user key-enrollment interface wired to those helpers.
+- Existing P6-006 host/client traffic probes and a standard socket test script are acceptance tooling. They do not make production JoinNetwork available; physical two-node application-traffic acceptance remains separately tracked.
+- Core route planning, segment allocation, and forwarding policy are software models. Live inter-segment topology ingestion, route distribution/application, multi-hop recovery, and the TUI/desktop remain incomplete.
+- The current diagnostics API exposes daemon health, current network, local capability facts, and a local-only node count. It does not expose a live remote-peer inventory, topology graph, active control-session state, or complete interface/address/route observations.
+- Internet sharing is not implemented and remains disabled by default.
+
+```mermaid
+flowchart LR
+    cli[CLI] --> client[blueroute-client]
+    client -->|versioned system D-Bus| daemon[blueroute-daemon]
+    daemon --> core[core and protocol models]
+    daemon --> linux[Linux adapters]
+    linux --> bluez[BlueZ]
+    linux --> nm[NetworkManager]
+    daemon -.->|loads identity at startup| tls[Control TLS helpers]
+    tls -.->|no live listener or session runtime| pan[Future authenticated peer runtime]
+    tui[TUI placeholder]
+    desktop[Desktop placeholder]
+```
+
+The implementation backlog and acceptance status are maintained in [TODO.md](TODO.md); physical evidence and deferred hardware requirements are tracked in [HARDWARE_ACCEPTANCE_BACKLOG.md](HARDWARE_ACCEPTANCE_BACKLOG.md).
+
 ## 9. Proposed Rust workspace
 
 ```text
@@ -553,7 +591,7 @@ Control information may include:
 
 Messages must be bounded and validated. Source IP or Bluetooth display name alone is not proof of BlueRoute identity.
 
-The exact transport and authentication mechanism is selected after the PAN proof of concept and recorded in an ADR.
+**Current decision:** The selected transport is TCP over the PAN data plane with mutually authenticated TLS 1.3 and explicit per-node SPKI key pins. See [P7-001-CONTROL-TRANSPORT.md](P7-001-CONTROL-TRANSPORT.md). Key verification and live daemon transport integration remain implementation gates; this decision does not enable production joining by itself.
 
 ## 18. Identity, pairing, and trust
 
