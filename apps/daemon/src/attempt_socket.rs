@@ -263,7 +263,10 @@ mod tests {
         );
         assert_eq!(owner.pending_len(), 0);
         assert_eq!(remote.read(&mut [0]).unwrap(), 0);
-        assert_eq!(owner.watchdog(peer, old, 20_250).unwrap(), WatchdogResult::NotExpired);
+        assert_eq!(
+            owner.watchdog(peer, old, 20_250).unwrap(),
+            WatchdogResult::NotExpired
+        );
 
         // A fresh loss generation can be scheduled explicitly, but the stale
         // callback must never cancel or close its replacement socket.
@@ -278,5 +281,4 @@ mod tests {
         assert!(owner.cancel(peer, fresh));
         assert_eq!(replacement_remote.read(&mut [0]).unwrap(), 0);
     }
-
 }
