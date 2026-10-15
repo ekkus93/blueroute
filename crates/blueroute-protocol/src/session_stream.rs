@@ -262,11 +262,19 @@ mod tests {
     #[test]
     fn zero_network_or_peer_ids_never_create_post_hello_reader() {
         assert!(matches!(
-            SessionControlStream::after_verified_hello(NetworkId::from_bytes([0; 16]), peer(), [3; 16]),
+            SessionControlStream::after_verified_hello(
+                NetworkId::from_bytes([0; 16]),
+                peer(),
+                [3; 16]
+            ),
             Err(SessionStreamError::InvalidSession)
         ));
         assert!(matches!(
-            SessionControlStream::after_verified_hello(network(), NodeId::from_bytes([0; 16]), [3; 16]),
+            SessionControlStream::after_verified_hello(
+                network(),
+                NodeId::from_bytes([0; 16]),
+                [3; 16]
+            ),
             Err(SessionStreamError::InvalidSession)
         ));
     }
