@@ -546,6 +546,50 @@ mod tests {
     }
 
     #[test]
+    fn hello_metadata_enforces_text_neighbor_and_segment_boundaries() {
+        for version in [
+            String::new(),
+            "x".repeat(65),
+            "bad\nversion".into(),
+            "v1\u{202e}".into(),
+        ] {
+            let mut envelope = sample();
+            let ControlMessage::Hello { facts, .. } = &mut envelope.message else {
+                unreachable!()
+            };
+            facts.software_version = version;
+            assert!(encode_control_frame(&envelope).is_err());
+        }
+
+        let mut envelope = sample();
+        if let ControlMessage::Hello { facts, .. } = &mut envelope.message {
+            facts.software_version = "v".repeat(64);
+            facts.direct_neighbors = (5..=36)
+                .map(|byte| NodeId::from_bytes([byte; 16]))
+                .collect();
+        }
+        assert!(encode_control_frame(&envelope).is_ok());
+        if let ControlMessage::Hello { facts, .. } = &mut envelope.message {
+            facts.direct_neighbors.push(NodeId::from_bytes([37; 16]));
+        }
+        assert!(encode_control_frame(&envelope).is_err());
+
+        let mut envelope = sample();
+        if let ControlMessage::Hello { facts, .. } = &mut envelope.message {
+            facts.segment = Some(IpPrefix::new("2001:db8::".parse().unwrap(), 64).unwrap());
+        }
+        assert!(encode_control_frame(&envelope).is_err());
+        if let ControlMessage::Hello { facts, .. } = &mut envelope.message {
+            facts.segment = Some(IpPrefix::new("10.201.44.9".parse().unwrap(), 24).unwrap());
+        }
+        assert!(encode_control_frame(&envelope).is_err());
+        if let ControlMessage::Hello { facts, .. } = &mut envelope.message {
+            facts.segment = Some(IpPrefix::new("10.201.44.0".parse().unwrap(), 24).unwrap());
+        }
+        assert!(encode_control_frame(&envelope).is_ok());
+    }
+
+    #[test]
     fn rejects_unknown_hello_fields() {
         let data =
             String::from_utf8(encode_control_frame(&sample()).unwrap()[4..].to_vec()).unwrap();
