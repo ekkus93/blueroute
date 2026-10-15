@@ -418,11 +418,15 @@ mod tests {
         let mut session = stream();
         let deadline = Instant::now() + Duration::from_secs(2);
         assert_eq!(
-            session.read_one_with_deadline(&mut source, deadline).unwrap(),
+            session
+                .read_one_with_deadline(&mut source, deadline)
+                .unwrap(),
             heartbeat(3)
         );
         assert_eq!(
-            session.read_one_with_deadline(&mut source, deadline).unwrap(),
+            session
+                .read_one_with_deadline(&mut source, deadline)
+                .unwrap(),
             message(4, ControlMessage::Goodbye)
         );
         assert!(source.saw_deadline);
