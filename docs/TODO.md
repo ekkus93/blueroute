@@ -782,9 +782,9 @@ This is the first complete product slice.
 
 ## P6-006 — Prove ordinary application traffic
 
-**Two distinct gates:** Existing [PR #41](https://github.com/ekkus93/blueroute/pull/41) adds standalone host/client acceptance programs, TCP/UDP helper and runbook, but remains unmerged. Review and merge software-qualified tooling (at exact head, preserving security) without asserting production JoinNetwork is functional or raw-IP hardware checks passed. Keep original physical criteria pending in the hardware backlog.
+**Two distinct gates:** Existing [PR #41](https://github.com/ekkus93/blueroute/pull/41) supplied the standalone host/client acceptance programs, kernel IPv4 adapter, TCP/UDP helper and runbook. The existing code was **reconciled directly onto `master`**, not reimplemented, at `eca4a3bed8d29d484f8ac35b46601580fbe3cea6`; exact-head [CI 38688388357](https://github.com/ekkus93/blueroute/actions/runs/38688388357) passed. PR #41 itself remains open because Ralph Bridge's merge gate returned `INVALID_ARGUMENT`; direct code reconciliation is not a PR merge/closure. **SOFTWARE COMPLETE for the acceptance tooling; HARDWARE DEFERRED** for all original two-machine traffic requirements. This does not enable production JoinNetwork or establish Bluetooth data-path success.
 
-- [ ] qualify and reconcile/merge existing PR #41 software acceptance tooling into `master` (not a duplicate PR).
+- [x] qualify and reconcile existing PR #41 software acceptance tooling onto `master` (PR closure still pending; no duplicate PR).
 - [ ] ping.
 - [ ] SSH.
 - [ ] TCP bulk transfer.
@@ -890,6 +890,8 @@ This is the first complete product slice.
 
 - Peers negotiate capability without knowing each other's computer model.
 
+**P7-003 process-lock and authorization-concurrency correction (software-only, 2026-10-14):** A cooperating-daemon, owner-only persistent process file lock now participates in durable peer approval. The RAII guard explicitly drops that lock *before* its local mutex; otherwise a racing local worker could spuriously fail with `InvalidState` despite no second daemon. The 12-thread enrollment regression and external lock-denial checks passed [exact-head CI 38687746163](https://github.com/ekkus93/blueroute/actions/runs/38687746163) at `cd4498d26444e0b4f9e2d97d19bf50a2cbebac09`. This does not prove cryptographic TLS, tamper resistance against noncooperating writers, an independently approved enrollment interface, or physical hardware.
+
 ## P7-004 — Implement control-session lifecycle
 
 **Additional P7-004 EOF fault-injection qualification (2026-10-14):** `SessionControlStream::finish()` now treats graceful Goodbye+EOF as terminal, rejects abrupt EOF without Goodbye and refuses any transport reuse; deterministic tests pass exact-head [CI 38604630252](https://github.com/ekkus93/blueroute/actions/runs/38604630252) at `5c57bc069ef92e6bf559727ba950ebae71df3bdb`. This is parser lifecycle hardening, **not** authenticated TLS or physical network evidence.
@@ -918,6 +920,8 @@ This is the first complete product slice.
 **Acceptance**
 
 - Repeated PAN reconnects do not leak sessions/tasks.
+
+**P7/P14 wire-identity hardening (software-only, 2026-10-14):** The common control-frame encoder/decoder and verified-session replay context reject zero `NetworkId` or sender `NodeId`; claimed Hello neighbors reject zero `NodeId` even if otherwise syntactically valid. Deterministic hostile raw-wire and valid Heartbeat tests passed in [CI 38687746163](https://github.com/ekkus93/blueroute/actions/runs/38687746163) at `cd4498d26444e0b4f9e2d97d19bf50a2cbebac09`. These checks harden unauthenticated input only; they do not establish peer identity, mutual TLS, session enrollment, or PAN acceptance.
 
 ## P7-005 — Fuzz/property-test parser
 
