@@ -980,7 +980,8 @@ impl ControlTlsStream {
     /// blocked close-notify flush could exceed the caller's shutdown budget.
     /// On error the owning active session closes the entire socket.
     fn send_close_notify_until(&mut self, deadline: Instant) -> io::Result<()> {
-        let expired = || io::Error::new(io::ErrorKind::TimedOut, "TLS close-notify deadline expired");
+        let expired =
+            || io::Error::new(io::ErrorKind::TimedOut, "TLS close-notify deadline expired");
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             return Err(expired());
