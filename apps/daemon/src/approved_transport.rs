@@ -157,7 +157,8 @@ pub fn connect_registered_control_session<'a>(
 ) -> Result<RegisteredControlSession<'a>, RegisteredControlSetupError> {
     let session = connect_approved_control_session(socket, local, expected, trust, setup)
         .map_err(RegisteredControlSetupError::Control)?;
-    RegisteredControlSession::admit(session, registry).map_err(RegisteredControlSetupError::Admission)
+    RegisteredControlSession::admit(session, registry)
+        .map_err(RegisteredControlSetupError::Admission)
 }
 
 /// Preferred inbound daemon-runtime entry point. Every candidate must be
@@ -173,7 +174,8 @@ pub fn accept_registered_control_session<'a>(
 ) -> Result<RegisteredControlSession<'a>, RegisteredControlSetupError> {
     let session = accept_approved_control_session(socket, local, allowed, trust, setup)
         .map_err(RegisteredControlSetupError::Control)?;
-    RegisteredControlSession::admit(session, registry).map_err(RegisteredControlSetupError::Admission)
+    RegisteredControlSession::admit(session, registry)
+        .map_err(RegisteredControlSetupError::Admission)
 }
 
 #[cfg(test)]
