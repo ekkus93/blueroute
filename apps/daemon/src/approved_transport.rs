@@ -506,9 +506,8 @@ mod tests {
                 )
                 .unwrap();
             futures_lite::future::block_on(trust.forget_peer(revoked.node())).unwrap();
-            let stale =
-                PinnedControlTlsPeer::new(network(), revoked.node(), revoked.fingerprint())
-                    .unwrap();
+            let stale = PinnedControlTlsPeer::new(network(), revoked.node(), revoked.fingerprint())
+                .unwrap();
             // The snapshot may predate a revocation. The connection from the
             // still-approved peer must succeed without restoring stale trust.
             let session = accept_approved_control_session(
@@ -520,18 +519,18 @@ mod tests {
             )
             .unwrap();
             assert!(!session.is_terminal());
-            assert!(!trust.approved_control_pins(network()).unwrap().contains(&stale));
+            assert!(
+                !trust
+                    .approved_control_pins(network())
+                    .unwrap()
+                    .contains(&stale)
+            );
         });
         let dir = TestDirectory::new();
         let trust = trust_for(&dir.0, server_pin.node(), server_pin.fingerprint(), true);
-        let session = connect_approved_control_session(
-            client_socket,
-            &client,
-            server_pin,
-            &trust,
-            setup(),
-        )
-        .unwrap();
+        let session =
+            connect_approved_control_session(client_socket, &client, server_pin, &trust, setup())
+                .unwrap();
         assert!(!session.is_terminal());
         server_thread.join().unwrap();
     }
