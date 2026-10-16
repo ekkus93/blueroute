@@ -1078,6 +1078,13 @@ impl ActiveControlSession<'_> {
         self.terminal
     }
 
+    /// Force-close the owned TLS socket before releasing the caller's session
+    /// registry slot, so a new peer generation cannot overlap teardown.
+    pub(crate) fn close_owned_socket(&mut self) {
+        self.terminal = true;
+        self.stream.close();
+    }
+
     pub fn send_heartbeat_until(&mut self, deadline: Instant) -> Result<(), ControlSessionError> {
         self.authorize_outbound()?;
         if self

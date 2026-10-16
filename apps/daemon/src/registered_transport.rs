@@ -142,7 +142,9 @@ impl<'a> RegisteredControlSession<'a> {
 
 impl Drop for RegisteredControlSession<'_> {
     fn drop(&mut self) {
+        // Shutdown must precede slot removal: otherwise a new authenticated
+        // generation could enter while this generation still owns TCP I/O.
+        self.session.close_owned_socket();
         self.retire();
-        // The owned ActiveControlSession subsequently drops its TCP socket.
     }
 }
