@@ -101,6 +101,8 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 
 - **P7-004 EOF hardening (software only):** Goodbye+EOF terminates the stream permanently; abrupt EOF is recognized as loss and parser reuse fails closed. Exact-head [CI 38604630252](https://github.com/ekkus93/blueroute/actions/runs/38604630252) passed at `5c57bc069ef92e6bf559727ba950ebae71df3bdb`. Live TLS, reconnection and hardware acceptance remain untested.
 
+- **P7-004 stale-generation replacement TLS regression (software only, 2026-10-16):** Two sequential mutually authenticated localhost channels, a deliberately stale callback, registry ownership checks and a post-callback heartbeat passed [exact-head CI 38953834551](https://github.com/ekkus93/blueroute/actions/runs/38953834551) at `c73a0b2292db46b70e17b25838b16f738e4f052d`. The current-generation callback closes and retires its channel. [Evidence](P7-004-GENERATION-CANCELLATION-EVIDENCE-2026-10-16.md). This is not live daemon PAN callback integration, independently approved enrollment, production join, or physical Bluetooth acceptance; P7-004 remains IN PROGRESS and physical tests HARDWARE DEFERRED.
+
 ## When the computers are available
 
 1. Prepare two compatible Linux systems (NAP host and PANU client), plus further clients for capacity/multi-hop and materially different controller hardware for P1-009/P16-006. Record complete environment and capability inventories; do not assume one Chromebook type represents all Linux hardware.

@@ -15,13 +15,19 @@ remains idempotent. This does not change the existing unconditional
 **Exact-head CI:** run 38947315578, passed (format, check, Clippy,
 workspace tests and existing localhost mutual-TLS regressions).
 
-The new `registered_generation` integration target currently verifies
-that the generation-scoped API is callable from the daemon crate. A proposed
-dedicated two-party localhost stale-callback regression was not retained:
-its first version failed rustfmt, and subsequent revisions could not be
-qualified. **Do not count this as completed stale-generation runtime
-acceptance.** The existing authenticated cancellation regression continues
-to exercise unconditional `cancel()` over localhost TLS.
+The `registered_generation` integration target confirms the API is
+callable from the daemon crate. A dedicated two-party, two-generation localhost
+mutual-TLS regression in `registered_terminal_teardown.rs` now also verifies:
+a mismatched callback leaves the first channel alive; matching cancellation
+closes and retires it; a new independently authenticated TLS connection
+receives a different exporter session ID while the old Rust owner is alive;
+a delayed callback carrying the old ID cannot cancel the new connection or
+retire its registry slot; the replacement sends a valid heartbeat; and
+matching cancellation terminates the replacement. This closes the previously
+unqualified local stale-generation regression, not live daemon integration.
+
+**Regression commit:** `c73a0b2292db46b70e17b25838b16f738e4f052d`.
+**Exact-head CI:** [38953834551](https://github.com/ekkus93/blueroute/actions/runs/38953834551) passed (format, locked check, Clippy, workspace tests, and integration coverage).
 
 **Still open:** connect the guard to actual daemon PAN/link and reconnect
 callbacks; exercise stale-vs-current callbacks against a replacement live
