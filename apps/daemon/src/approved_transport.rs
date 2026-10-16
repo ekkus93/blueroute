@@ -283,6 +283,81 @@ mod tests {
     }
 
     #[test]
+    fn second_live_mutual_tls_session_cannot_replace_active_registered_peer() {
+        let client = LocalControlTlsIdentity::generate(node(1)).unwrap();
+        let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
+        let client_pin =
+            PinnedControlTlsPeer::new(network(), client.node(), client.fingerprint()).unwrap();
+        let server_pin =
+            PinnedControlTlsPeer::new(network(), server.node(), server.fingerprint()).unwrap();
+        let (first_client_socket, first_server_socket) = socket_pair();
+        let (second_client_socket, second_server_socket) = socket_pair();
+        let server_thread = thread::spawn(move || {
+            let dir = TestDirectory::new();
+            let trust = trust_for(&dir.0, client_pin.node(), client_pin.fingerprint(), true);
+            let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+            let first = accept_approved_control_session(
+                first_server_socket,
+                &server,
+                &[client_pin],
+                &trust,
+                setup(),
+            )
+            .unwrap();
+            let first = RegisteredControlSession::admit(first, Arc::clone(&registry)).unwrap();
+            let key = PeerSessionKey {
+                network: network(),
+                peer: client_pin.node(),
+            };
+            let first_id = *first.session_id();
+            assert_eq!(registry.lock().unwrap().get(key).unwrap().session_id, first_id);
+
+            // A second independently authenticated TLS channel from the
+            // same approved NodeId is not allowed to replace an active owner.
+            let second = accept_approved_control_session(
+                second_server_socket,
+                &server,
+                &[client_pin],
+                &trust,
+                setup(),
+            )
+            .unwrap();
+            assert_ne!(second.session_id(), &first_id);
+            assert!(matches!(
+                RegisteredControlSession::admit(second, Arc::clone(&registry)),
+                Err(crate::SessionAdmissionError::Registry(
+                    blueroute_protocol::session::SessionRegistryError::DuplicateActiveSession
+                ))
+            ));
+            assert_eq!(registry.lock().unwrap().get(key).unwrap().session_id, first_id);
+            drop(first);
+            assert!(registry.lock().unwrap().get(key).is_none());
+        });
+        let dir = TestDirectory::new();
+        let trust = trust_for(&dir.0, server_pin.node(), server_pin.fingerprint(), true);
+        let first = connect_approved_control_session(
+            first_client_socket,
+            &client,
+            server_pin,
+            &trust,
+            setup(),
+        )
+        .unwrap();
+        let second = connect_approved_control_session(
+            second_client_socket,
+            &client,
+            server_pin,
+            &trust,
+            setup(),
+        )
+        .unwrap();
+        assert_ne!(first.session_id(), second.session_id());
+        server_thread.join().unwrap();
+        drop(second);
+        drop(first);
+    }
+
+    #[test]
     fn approved_peers_exchange_authenticated_frames_over_owned_tcp() {
         let client = LocalControlTlsIdentity::generate(node(1)).unwrap();
         let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
