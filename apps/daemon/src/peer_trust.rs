@@ -610,6 +610,54 @@ mod tests {
     }
 
     #[test]
+    fn inbound_pin_snapshot_ignores_unapproved_and_foreign_network_enrollments() {
+        let (root, store) = temp_store("inbound-allowlist");
+        let network = NetworkId::from_bytes([0x81; 16]);
+        let foreign_network = NetworkId::from_bytes([0x82; 16]);
+        let approved = NodeId::from_bytes([0x83; 16]);
+        let unapproved = NodeId::from_bytes([0x84; 16]);
+        let foreign_node = NodeId::from_bytes([0x85; 16]);
+        let approved_key = SpkiSha256::from_verified_certificate_digest([0x86; 32]).unwrap();
+        let stale_key = SpkiSha256::from_verified_certificate_digest([0x87; 32]).unwrap();
+        let foreign_key = SpkiSha256::from_verified_certificate_digest([0x88; 32]).unwrap();
+        seed_current_network(&store, network);
+        let trust = DurablePeerTrustOperations::with_peer_pin_store(
+            store,
+            PeerPinStore::new(root.join("peer-keys")),
+        );
+        futures_lite::future::block_on(trust.trust_peer(approved)).unwrap();
+
+        // Simulate a historical/orphaned enrollment record: possession of a
+        // persisted pin must not imply current approval or network membership.
+        let mut pins = PeerKeyPins::new();
+        pins.enroll_verified(network, approved, approved_key).unwrap();
+        pins.enroll_verified(network, unapproved, stale_key).unwrap();
+        pins.enroll_verified(foreign_network, foreign_node, foreign_key)
+            .unwrap();
+        trust.pin_store.as_ref().unwrap().save(&pins).unwrap();
+        assert_eq!(
+            trust.approved_control_pins(network).unwrap(),
+            vec![PinnedControlTlsPeer::new(network, approved, approved_key).unwrap()]
+        );
+        assert_eq!(
+            trust.approved_control_pins(foreign_network).unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
+
+        // Revocation must remove the sole eligible pin; a subsequent
+        // NodeId-only approval cannot silently re-enroll that key.
+        futures_lite::future::block_on(trust.forget_peer(approved)).unwrap();
+        futures_lite::future::block_on(trust.trust_peer(approved)).unwrap();
+        assert!(trust.approved_control_pins(network).unwrap().is_empty());
+
+        // Corrupt durable key material is an error, never an empty allowlist
+        // that a caller could confuse with a successful authorization read.
+        fs::write(root.join("peer-keys/peer-key-pins-v1"), b"invalid pin state").unwrap();
+        assert!(trust.approved_control_pins(network).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn approval_for_wrong_network_is_rejected() {
         let (root, store) = temp_store("wrong-network");
         let network = NetworkId::from_bytes([0x71; 16]);
