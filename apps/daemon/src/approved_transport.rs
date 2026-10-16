@@ -84,11 +84,8 @@ pub fn accept_approved_control_session<'a>(
 ) -> Result<ActiveControlSession<'a>, ControlSessionError> {
     let mut approved = Vec::with_capacity(allowed.len());
     for peer in allowed {
-        match trust.require_approved_pinned_tls_peer(
-            setup.network,
-            peer.node(),
-            peer.fingerprint(),
-        ) {
+        match trust.require_approved_pinned_tls_peer(setup.network, peer.node(), peer.fingerprint())
+        {
             Ok(()) => approved.push(*peer),
             // A stale revoked pin must not deny service to unrelated peers.
             Err(error) if error.kind() == ErrorKind::AuthenticationFailed => {}
