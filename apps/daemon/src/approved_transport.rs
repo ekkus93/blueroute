@@ -637,4 +637,50 @@ mod tests {
         drop(session);
         assert!(registry.lock().unwrap().get(key).is_none());
     }
+
+    #[test]
+    fn revoked_registered_peer_closes_socket_and_slot_without_inbound_frames() {
+        let client = LocalControlTlsIdentity::generate(node(1)).unwrap();
+        let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
+        let client_pin =
+            PinnedControlTlsPeer::new(network(), client.node(), client.fingerprint()).unwrap();
+        let server_pin =
+            PinnedControlTlsPeer::new(network(), server.node(), server.fingerprint()).unwrap();
+        let (client_socket, server_socket) = socket_pair();
+        let (revoked_tx, revoked_rx) = std::sync::mpsc::channel();
+        let (observed_tx, observed_rx) = std::sync::mpsc::channel();
+        let server_thread = thread::spawn(move || {
+            let dir = TestDirectory::new();
+            let trust = trust_for(&dir.0, client_pin.node(), client_pin.fingerprint(), true);
+            let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+            let mut session = accept_registered_from_durable_approval(
+                server_socket, &server, &trust, setup(), Arc::clone(&registry),
+            )
+            .unwrap();
+            let key = PeerSessionKey { network: network(), peer: client_pin.node() };
+            assert!(registry.lock().unwrap().get(key).is_some());
+            futures_lite::future::block_on(trust.forget_peer(client_pin.node())).unwrap();
+            assert!(matches!(
+                session.revalidate_approval(),
+                Err(ControlSessionError::Ingress(PinnedIngressError::Authorization(_)))
+            ));
+            assert!(session.is_terminal());
+            assert!(registry.lock().unwrap().get(key).is_none());
+            revoked_tx.send(()).unwrap();
+            observed_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert!(registry.lock().unwrap().get(key).is_none());
+            drop(session);
+        });
+        let dir = TestDirectory::new();
+        let trust = trust_for(&dir.0, server_pin.node(), server_pin.fingerprint(), true);
+        let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+        let mut session = connect_registered_control_session(
+            client_socket, &client, server_pin, &trust, setup(), Arc::clone(&registry),
+        )
+        .unwrap();
+        revoked_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(session.receive_next_at(10).is_err());
+        observed_tx.send(()).unwrap();
+        server_thread.join().unwrap();
+    }
 }
