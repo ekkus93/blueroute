@@ -122,6 +122,32 @@ impl<'a> PinnedSessionIngress<'a> {
         })
     }
 
+    /// Recheck durable approval and monotonic time before blocking on TLS
+    /// input. This does not feed parser bytes or extend liveness, preserving
+    /// the clean EOF path after an authenticated Goodbye.
+    pub fn check_before_read(&mut self, now_ms: u64) -> Result<(), PinnedIngressError> {
+        if self.terminal {
+            return Err(PinnedIngressError::Terminal);
+        }
+        let result = self.trust.with_approved_pinned_tls_peer(
+            self.network,
+            self.peer,
+            self.verified_tls_key,
+            || self.activity.check_before_read(now_ms),
+        );
+        match result {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => {
+                self.terminal = true;
+                Err(PinnedIngressError::Protocol(error))
+            }
+            Err(error) => {
+                self.terminal = true;
+                Err(PinnedIngressError::Authorization(error))
+            }
+        }
+    }
+
     pub fn receive_verified_plaintext(
         &mut self,
         plaintext: &[u8],
@@ -382,6 +408,34 @@ mod tests {
             ))
         ));
         assert!(expired.is_terminal());
+    }
+
+    #[test]
+    fn pre_read_authorization_preserves_goodbye_eof_and_revocation_is_terminal() {
+        let (_root, trust) = setup();
+        futures_lite::future::block_on(trust.trust_peer(peer())).unwrap();
+        trust
+            .enroll_verified_key(network(), peer(), key(54), key(54))
+            .unwrap();
+
+        let mut closing = session(&trust, key(54)).unwrap();
+        closing
+            .receive_verified_plaintext(&frame(3, ControlMessage::Goodbye, peer()), 10)
+            .unwrap();
+        assert!(closing.check_before_read(11).is_ok());
+        assert!(closing.finish_at(11).is_ok());
+
+        let mut revoked = session(&trust, key(54)).unwrap();
+        futures_lite::future::block_on(trust.forget_peer(peer())).unwrap();
+        assert!(matches!(
+            revoked.check_before_read(4),
+            Err(PinnedIngressError::Authorization(_))
+        ));
+        assert!(revoked.is_terminal());
+        assert!(matches!(
+            revoked.check_before_read(5),
+            Err(PinnedIngressError::Terminal)
+        ));
     }
 
     #[test]
