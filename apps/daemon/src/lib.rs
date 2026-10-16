@@ -5,6 +5,7 @@
 #[allow(dead_code)]
 mod attempt_socket;
 mod authorization;
+mod approved_transport;
 mod control_tls;
 mod join_network;
 mod peer_pin_store;
@@ -17,6 +18,9 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+pub use approved_transport::{
+    ApprovedControlSetup, accept_approved_control_session, connect_approved_control_session,
+};
 pub use authorization::{
     CommandAuthorization, INTERNET_SHARING_ACTION_ID, MODIFY_ACTION_ID, command_authorization,
     command_operation,
