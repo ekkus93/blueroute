@@ -1151,6 +1151,14 @@ impl ActiveControlSession<'_> {
             };
         }
 
+        // Do not enter a blocking read with a peer whose durable approval has
+        // been revoked, or with a regressed session clock.
+        if let Err(error) = self.ingress.check_before_read(now_ms) {
+            self.terminal = true;
+            self.stream.close();
+            return Err(ControlSessionError::Ingress(error));
+        }
+
         let timeout = Duration::from_millis(expires_ms - now_ms);
         if let Err(error) = self.stream.socket.set_read_timeout(Some(timeout)) {
             self.terminal = true;
@@ -1158,18 +1166,33 @@ impl ActiveControlSession<'_> {
             return Err(ControlSessionError::Transport(error));
         }
         let mut plaintext = [0_u8; 4096];
-        match self.stream.read(&mut plaintext) {
+        let read_started = Instant::now();
+        let read_deadline = read_started + timeout;
+        let read_result = self.stream.read(&mut plaintext);
+        let read_finished = Instant::now();
+        // The completion time, not the caller's pre-read time, determines
+        // whether a late-arriving frame may refresh the idle deadline.
+        if read_finished >= read_deadline {
+            let _ = self.ingress.receive_verified_plaintext(&[], expires_ms);
+            self.terminal = true;
+            self.stream.close();
+            return Err(ControlSessionError::IdleDeadlineExpired);
+        }
+        let elapsed_ms = read_finished.duration_since(read_started).as_millis();
+        let elapsed_ms = u64::try_from(elapsed_ms).unwrap_or(u64::MAX);
+        let observed_now_ms = now_ms.saturating_add(elapsed_ms);
+        match read_result {
             Ok(0) => {
                 self.terminal = true;
                 self.stream.close();
                 self.ingress
-                    .finish_at(now_ms)
+                    .finish_at(observed_now_ms)
                     .map(|()| ControlSessionRead::Closed)
                     .map_err(ControlSessionError::Ingress)
             }
             Ok(count) => match self
                 .ingress
-                .receive_verified_plaintext(&plaintext[..count], now_ms)
+                .receive_verified_plaintext(&plaintext[..count], observed_now_ms)
             {
                 Ok(frames) => Ok(ControlSessionRead::Frames(frames)),
                 Err(error) => {
@@ -1184,7 +1207,7 @@ impl ActiveControlSession<'_> {
                     io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
                 ) =>
             {
-                match self.ingress.receive_verified_plaintext(&[], now_ms) {
+                match self.ingress.receive_verified_plaintext(&[], observed_now_ms) {
                     Ok(_) => Ok(ControlSessionRead::Idle),
                     Err(error) => {
                         self.terminal = true;
@@ -1196,12 +1219,11 @@ impl ActiveControlSession<'_> {
             Err(error) => {
                 self.terminal = true;
                 self.stream.close();
-                let _ = self.ingress.finish_at(now_ms);
+                let _ = self.ingress.finish_at(observed_now_ms);
                 Err(ControlSessionError::Transport(error))
             }
         }
-    }
-}
+    }}
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ControlSessionRead {
@@ -2149,6 +2171,84 @@ mod tests {
         );
         server_thread.join().unwrap();
         assert_eq!(server_node, node(2));
+    }
+
+    #[test]
+    fn blocking_tls_read_cannot_renew_idle_deadline_using_stale_timestamp() {
+        let (client, server) = make_tls_pair();
+        let pinned_client = PinnedControlTlsCertificate::new(
+            network(9),
+            client.node(),
+            client.certificate().clone(),
+            client.fingerprint(),
+        )
+        .unwrap();
+        let pinned_server = PinnedControlTlsCertificate::new(
+            network(9),
+            server.node(),
+            server.certificate().clone(),
+            server.fingerprint(),
+        )
+        .unwrap();
+        let (client_config, server_name) =
+            client.client_config(network(9), &pinned_server).unwrap();
+        let server_config = server
+            .server_config(network(9), std::slice::from_ref(&pinned_client))
+            .unwrap();
+        let (client_socket, server_socket) = stream_pair();
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+
+        let server_thread = thread::spawn(move || {
+            let mut stream = ControlTlsStream::server(
+                rustls::ServerConnection::new(server_config).unwrap(),
+                server_socket,
+            );
+            stream
+                .complete_handshake_until(Instant::now() + Duration::from_secs(5))
+                .unwrap();
+            let authenticated = stream
+                .exchange_authenticated_hello(
+                    network(9),
+                    &server,
+                    &pinned_client,
+                    hello_facts("server-test"),
+                    Instant::now() + Duration::from_secs(5),
+                )
+                .unwrap();
+            let test_dir = TempDirectory::new();
+            let trust = trust_for_peer(&test_dir.0, authenticated.peer());
+            let mut active = stream
+                .activate(authenticated, &server, &trust, active_deadline())
+                .unwrap();
+            // The active stage expires at 30_003 ms. A read that finishes at
+            // the socket deadline must not return Idle at the stale timestamp.
+            assert!(matches!(
+                active.receive_next_at(29_903),
+                Err(ControlSessionError::IdleDeadlineExpired)
+            ));
+            assert!(active.is_terminal());
+            finished_tx.send(()).unwrap();
+        });
+
+        let mut stream = ControlTlsStream::client(
+            rustls::ClientConnection::new(client_config, server_name).unwrap(),
+            client_socket,
+        );
+        stream
+            .complete_handshake_until(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        stream
+            .exchange_authenticated_hello(
+                network(9),
+                &client,
+                &pinned_server,
+                hello_facts("client-test"),
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap();
+        // Hold the TLS peer socket open until the server's read deadline.
+        finished_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        server_thread.join().unwrap();
     }
 
     #[test]
