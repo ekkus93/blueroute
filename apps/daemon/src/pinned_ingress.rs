@@ -439,6 +439,40 @@ mod tests {
     }
 
     #[test]
+    fn pre_read_clock_check_never_renews_idle_and_expires_terminally() {
+        let (_root, trust) = setup();
+        futures_lite::future::block_on(trust.trust_peer(peer())).unwrap();
+        trust
+            .enroll_verified_key(network(), peer(), key(54), key(54))
+            .unwrap();
+
+        let mut pending = session(&trust, key(54)).unwrap();
+        assert_eq!(pending.expires_ms(), 30_003);
+        assert!(pending.check_before_read(30_002).is_ok());
+        assert_eq!(pending.expires_ms(), 30_003);
+        assert!(matches!(
+            pending.check_before_read(30_003),
+            Err(PinnedIngressError::Protocol(
+                InboundActivityError::Deadline(DeadlineError::Expired)
+            ))
+        ));
+        assert!(pending.is_terminal());
+
+        let mut regressed = session(&trust, key(54)).unwrap();
+        regressed
+            .receive_verified_plaintext(&frame(3, ControlMessage::Heartbeat, peer()), 20)
+            .unwrap();
+        assert_eq!(regressed.expires_ms(), 30_020);
+        assert!(matches!(
+            regressed.check_before_read(19),
+            Err(PinnedIngressError::Protocol(
+                InboundActivityError::Deadline(DeadlineError::ClockRegression)
+            ))
+        ));
+        assert!(regressed.is_terminal());
+    }
+
+    #[test]
     fn revocation_refuses_even_graceful_close_and_teardown_stays_terminal() {
         let (_root, trust) = setup();
         futures_lite::future::block_on(trust.trust_peer(peer())).unwrap();
