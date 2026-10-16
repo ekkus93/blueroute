@@ -1,7 +1,7 @@
-# P7-004: obsolete TLS owner I/O guard
+# P7-004 — Obsolete TLS owner I/O guard (2026-10-16)
 
-Status: design note, not implemented or qualified.
+**Status: PARTIAL, NOT INTEGRATED.** A protocol integration regression at `crates/blueroute-protocol/tests/registry_loss_replacement.rs` proves that a stale PAN loss/removal cannot retire a newly authenticated replacement registry generation. Exact-head [CI 38980903590](https://github.com/ekkus93/blueroute/actions/runs/38980903590) passed at `e6ab15c65706399c7f2fa5badef5a4fb2b180479`.
 
-The registry can mark a channel Lost/Reconnecting or replace its generation while the old TLS owner remains alive. Before sending a heartbeat/Goodbye or returning a received frame, the registered owner should require that its `(NetworkId, NodeId, exporter session ID)` still matches an `Active` registry entry. A blocked read must recheck after completion. Missing/poisoned entries must close the owned socket before exact-generation retirement. Stale callbacks must never close a replacement.
+An inactive, unreferenced predicate prototype exists at `apps/daemon/src/registered_transport/generation_guard.rs`. **It is not compiled into the daemon, called by the registered transport, or qualified as an I/O guard.** The source-edit safety boundary prevented updating the larger `registered_transport.rs` and rejected removal of the unused prototype.
 
-Acceptance requires real localhost mutual-TLS regressions for a replaced session and a loss during blocking read, plus exact-head CI. This does not replace live daemon PAN wiring or physical Bluetooth acceptance.
+Next: require active matching registry generation before/after TLS read/write and on approval recheck; close obsolete sockets before exact-generation retirement. Add real TLS read-race regression. Live daemon/PAN callbacks, independent enrollment, production JoinNetwork and physical Bluetooth acceptance remain open.
