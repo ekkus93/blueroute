@@ -21,8 +21,8 @@ use std::sync::{Arc, Mutex};
 
 pub use approved_transport::{
     ApprovedControlSetup, RegisteredControlSetupError, accept_approved_control_session,
-    accept_registered_control_session, connect_approved_control_session,
-    connect_registered_control_session,
+    accept_registered_control_session, accept_registered_from_durable_approval,
+    connect_approved_control_session, connect_registered_control_session,
 };
 pub use authorization::{
     CommandAuthorization, INTERNET_SHARING_ACTION_ID, MODIFY_ACTION_ID, command_authorization,

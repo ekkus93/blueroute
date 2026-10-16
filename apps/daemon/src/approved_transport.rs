@@ -178,6 +178,26 @@ pub fn accept_registered_control_session<'a>(
         .map_err(RegisteredControlSetupError::Admission)
 }
 
+/// Inbound daemon handler with no caller-supplied trusted identities: it
+/// derives the pin set atomically from current on-disk network approval and
+/// enrollment. Both the TLS handshake and active channel recheck durable pins
+/// after this snapshot is released.
+pub fn accept_registered_from_durable_approval<'a>(
+    socket: TcpStream,
+    local: &LocalControlTlsIdentity,
+    trust: &'a DurablePeerTrustOperations,
+    setup: ApprovedControlSetup,
+    registry: Arc<Mutex<ControlSessionRegistry>>,
+) -> Result<RegisteredControlSession<'a>, RegisteredControlSetupError> {
+    let allowed = match trust.approved_control_pins(setup.network) {
+        Ok(allowed) => allowed,
+        Err(error) => {
+            return Err(RegisteredControlSetupError::Control(deny(&socket, error)));
+        }
+    };
+    accept_registered_control_session(socket, local, &allowed, trust, setup, registry)
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;

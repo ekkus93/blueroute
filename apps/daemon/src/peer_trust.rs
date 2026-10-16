@@ -7,7 +7,7 @@ use blueroute_linux::{BluetoothBackend, BluezBackend, NetworkMembershipStore, Pe
 use blueroute_protocol::peer_pin::SpkiSha256;
 
 use crate::peer_pin_store::PeerPinFileLock;
-use crate::{PeerPinStore, current_network};
+use crate::{PeerPinStore, PinnedControlTlsPeer, current_network};
 
 pub type PeerTrustFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, CoreError>> + Send + 'a>>;
 
@@ -97,6 +97,52 @@ impl DurablePeerTrustOperations {
                 "BlueRoute peer has not been explicitly approved for this network",
             ))
         }
+    }
+
+    /// Read the inbound TLS allowlist directly from current, durable
+    /// P6-003 peer approvals intersected with independently enrolled SPKI
+    /// pins. A historical pin without current approval is never admitted.
+    /// This snapshot is only a pre-handshake filter: successful TLS activation
+    /// and every frame still recheck current approval.
+    pub fn approved_control_pins(
+        &self,
+        network: NetworkId,
+    ) -> Result<Vec<PinnedControlTlsPeer>, CoreError> {
+        let _guard = self.lock_state()?;
+        let registry = self.store.load()?;
+        if current_network(&registry)? != Some(network) {
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "requested TLS pin snapshot does not match the active network",
+            ));
+        }
+        let membership = registry.network(&network).ok_or_else(|| {
+            CoreError::new(
+                ErrorKind::InvalidState,
+                "active network is missing from durable member registry",
+            )
+        })?;
+        let pin_store = self.pin_store.as_ref().ok_or_else(|| {
+            CoreError::new(
+                ErrorKind::AuthenticationFailed,
+                "no enrolled TLS peer key store is configured",
+            )
+        })?;
+        let pins = pin_store.load()?;
+        let mut approved = Vec::new();
+        for (pin_network, node, fingerprint) in pins.entries() {
+            if pin_network != network || !membership.is_peer_trusted(&node) {
+                continue;
+            }
+            let pinned = PinnedControlTlsPeer::new(network, node, fingerprint).map_err(|_| {
+                CoreError::new(
+                    ErrorKind::AuthenticationFailed,
+                    "invalid enrolled TLS peer key in durable snapshot",
+                )
+            })?;
+            approved.push(pinned);
+        }
+        Ok(approved)
     }
 
     /// P7 key-binding gate over the existing durable P6-003 approval policy.
