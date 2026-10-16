@@ -10,8 +10,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use blueroute_core::{
-    DisplayName, MembershipRegistry, MembershipState, NetworkId, NetworkMembership, NodeCapabilities,
-    NodeId,
+    DisplayName, MembershipRegistry, MembershipState, NetworkId, NetworkMembership,
+    NodeCapabilities, NodeId,
 };
 use blueroute_daemon::{
     ApprovedControlSetup, DurablePeerTrustOperations, LocalControlTlsIdentity, PeerPinStore,
@@ -153,9 +153,11 @@ fn terminal_send_closes_tcp_and_retires_slot_without_waiting_for_owner_drop() {
         peer: node(2),
     };
     assert!(registry.lock().unwrap().get(key).is_some());
-    assert!(session
-        .send_heartbeat_until(Instant::now() - Duration::from_millis(1))
-        .is_err());
+    assert!(
+        session
+            .send_heartbeat_until(Instant::now() - Duration::from_millis(1))
+            .is_err()
+    );
     assert!(session.is_terminal());
     assert!(registry.lock().unwrap().get(key).is_none());
     assert!(server_thread.join().unwrap());
