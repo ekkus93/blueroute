@@ -106,6 +106,15 @@ fn socket_pair() -> (TcpStream, TcpStream) {
 
 #[test]
 fn terminal_send_closes_tcp_and_retires_slot_without_waiting_for_owner_drop() {
+    assert_terminal_teardown(false);
+}
+
+#[test]
+fn revoked_peer_send_closes_tcp_and_retires_slot_without_waiting_for_owner_drop() {
+    assert_terminal_teardown(true);
+}
+
+fn assert_terminal_teardown(revoke_peer: bool) {
     let client = LocalControlTlsIdentity::generate(node(1)).unwrap();
     let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
     let client_pin =
@@ -152,11 +161,15 @@ fn terminal_send_closes_tcp_and_retires_slot_without_waiting_for_owner_drop() {
         peer: node(2),
     };
     assert!(registry.lock().unwrap().get(key).is_some());
-    assert!(
-        session
-            .send_heartbeat_until(Instant::now() - Duration::from_millis(1))
-            .is_err()
-    );
+    if revoke_peer {
+        futures_lite::future::block_on(trust.forget_peer(node(2))).unwrap();
+    }
+    let deadline = if revoke_peer {
+        Instant::now() + Duration::from_secs(5)
+    } else {
+        Instant::now() - Duration::from_millis(1)
+    };
+    assert!(session.send_heartbeat_until(deadline).is_err());
     assert!(session.is_terminal());
     assert!(registry.lock().unwrap().get(key).is_none());
     assert!(server_thread.join().unwrap());
