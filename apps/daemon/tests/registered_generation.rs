@@ -1,9 +1,12 @@
-//! Generation-scoped cancellation API regression.
+//! Compile coverage for generation-scoped cancellation of authenticated sessions.
 
 use blueroute_daemon::RegisteredControlSession;
 
+fn cancel<'a>(session: &mut RegisteredControlSession<'a>, generation: [u8; 16]) -> bool {
+    session.cancel_if_current(generation)
+}
+
 #[test]
-fn cancellation_requires_an_exact_exporter_generation() {
-    let _cancel: for<'a> fn(&mut RegisteredControlSession<'a>, [u8; 16]) -> bool =
-        RegisteredControlSession::cancel_if_current;
+fn generation_scoped_cancel_is_exposed_to_daemon_runtime() {
+    let _callable = cancel;
 }
