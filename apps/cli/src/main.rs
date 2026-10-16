@@ -222,7 +222,10 @@ fn format_diagnostics(
             snapshot.health,
             snapshot.current_network,
             snapshot.visible_nodes,
-            snapshot.local_control_tls_spki_sha256.as_deref().unwrap_or("unavailable"),
+            snapshot
+                .local_control_tls_spki_sha256
+                .as_deref()
+                .unwrap_or("unavailable"),
             snapshot.system.as_ref().map_or_else(
                 || "platform details unavailable".to_owned(),
                 format_system_diagnostics,
