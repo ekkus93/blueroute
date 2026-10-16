@@ -128,6 +128,17 @@ impl<'a> RegisteredControlSession<'a> {
         result
     }
 
+    /// Recheck durable approval without transmitting or waiting for inbound
+    /// traffic. A revoked or terminal peer loses its owned socket before the
+    /// exact registry generation is retired. Unrelated peers remain intact.
+    pub fn revalidate_approval(&mut self) -> Result<(), ControlSessionError> {
+        let result = self.session.revalidate_approval();
+        if result.is_err() {
+            self.close_and_retire();
+        }
+        result
+    }
+
     /// Explicitly cancel a registered control transport on PAN/link loss,
     /// daemon shutdown or a reconnect-generation change. Shutdown happens
     /// before releasing the registry slot, and repeated cancellation cannot
