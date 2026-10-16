@@ -68,10 +68,20 @@ impl PendingHandshakeSockets {
         generation: [u8; 16],
         now_ms: u64,
     ) -> Result<WatchdogResult, ReconnectScheduleError> {
-        if !self
-            .scheduler
-            .take_expired_attempt(key, generation, now_ms)?
-        {
+        let expired = match self.scheduler.take_expired_attempt(key, generation, now_ms) {
+            Ok(expired) => expired,
+            Err(error) => {
+                // A regressed callback must not strand an unauthenticated
+                // socket or leave its retry generation stuck in flight.
+                // Preserve the error and never schedule another attempt.
+                // Both operations are generation-scoped so a stale watchdog
+                // cannot close or retire a newer peer session.
+                self.close_if_current(key, generation);
+                self.scheduler.cancel_if_current(key, generation);
+                return Err(error);
+            }
+        };
+        if !expired {
             return Ok(WatchdogResult::NotExpired);
         }
         // Only begin() can start an attempt; the generation must still match.
@@ -343,6 +353,54 @@ mod tests {
         drop(owner);
         assert_eq!(second_remote.read(&mut [0]).unwrap(), 0);
     }
+    #[test]
+    fn regressed_watchdog_clock_closes_socket_and_retires_only_matching_generation() {
+        let mut owner = PendingHandshakeSockets::new();
+        let peer = key(10);
+        let other_peer = key(11);
+        let old = [10; 16];
+        let other = [11; 16];
+        assert!(owner.schedule_loss(peer, old, 0).unwrap());
+        assert!(owner.schedule_loss(other_peer, other, 0).unwrap());
+        let (old_socket, mut old_remote) = pair();
+        let (other_socket, mut other_remote) = pair();
+        assert!(owner.begin(peer, old, 250, old_socket).unwrap());
+        assert!(owner.begin(other_peer, other, 250, other_socket).unwrap());
+
+        // Scheduler clock rejection cannot leave a connected unauthenticated
+        // socket behind. The other peer must remain independently healthy.
+        assert_eq!(
+            owner.watchdog(peer, old, 249),
+            Err(ReconnectScheduleError::ClockRegression)
+        );
+        assert_eq!(old_remote.read(&mut [0]).unwrap(), 0);
+        assert_eq!(owner.pending_len(), 1);
+        other_remote.write_all(b"still connected").unwrap();
+        assert_eq!(
+            owner.watchdog(peer, old, 20_250).unwrap(),
+            WatchdogResult::NotExpired
+        );
+        let (unused, _) = pair();
+        assert!(!owner.begin(peer, old, 20_250, unused).unwrap());
+
+        // A new generation is explicitly scheduled, never implicitly retried
+        // after a clock error. Old callbacks must not close its TCP socket.
+        let fresh = [12; 16];
+        assert!(owner.schedule_loss(peer, fresh, 300).unwrap());
+        let (new_socket, mut new_remote) = pair();
+        assert!(owner.begin(peer, fresh, 550, new_socket).unwrap());
+        assert_eq!(
+            owner.watchdog(peer, old, 20_550).unwrap(),
+            WatchdogResult::NotExpired
+        );
+        assert_eq!(owner.pending_len(), 2);
+        new_remote.write_all(b"new socket remains open").unwrap();
+        assert!(owner.cancel(peer, fresh));
+        assert_eq!(new_remote.read(&mut [0]).unwrap(), 0);
+        assert!(owner.cancel(other_peer, other));
+        assert_eq!(other_remote.read(&mut [0]).unwrap(), 0);
+    }
+
     #[test]
     fn regressed_failure_clock_closes_socket_and_retires_in_flight_generation() {
         let mut owner = PendingHandshakeSockets::new();
