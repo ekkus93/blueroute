@@ -6,17 +6,19 @@
 //! authorization. This is a reusable daemon transport seam, not a PAN socket
 //! listener, key-enrollment ceremony, or production JoinNetwork activation.
 
+use std::fmt;
 use std::net::{Shutdown, TcpStream};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use blueroute_core::{CoreError, ErrorKind, NetworkId};
 use blueroute_protocol::control::HelloFacts;
-use blueroute_protocol::session::ConnectionDeadline;
+use blueroute_protocol::session::{ConnectionDeadline, ControlSessionRegistry};
 
 use crate::{
     ActiveControlSession, ControlSessionError, DurablePeerTrustOperations, LocalControlTlsIdentity,
-    PinnedControlTlsPeer, PinnedIngressError, accept_pinned_control_tls,
-    connect_pinned_control_tls,
+    PinnedControlTlsPeer, PinnedIngressError, RegisteredControlSession, SessionAdmissionError,
+    accept_pinned_control_tls, connect_pinned_control_tls,
 };
 
 /// Caller-controlled stage deadlines and authenticated local capabilities.
@@ -121,6 +123,57 @@ pub fn accept_approved_control_session<'a>(
         )
         .map_err(ControlSessionError::Authentication)?;
     stream.activate(authenticated, local, trust, setup.active_deadline)
+}
+
+/// Distinguish a TLS/pin failure from registry admission rejection without
+/// treating either one as a usable transport or network membership.
+#[derive(Debug)]
+pub enum RegisteredControlSetupError {
+    Control(ControlSessionError),
+    Admission(SessionAdmissionError),
+}
+
+impl fmt::Display for RegisteredControlSetupError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Control(error) => write!(f, "authenticated control setup failed: {error}"),
+            Self::Admission(error) => write!(f, "authenticated control admission failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for RegisteredControlSetupError {}
+
+/// Preferred outbound daemon-runtime entry point: ownership is published to
+/// the peer registry only after mutual TLS, Hello/HelloAck and current durable
+/// approval. An admission failure drops the verified TCP/TLS stream closed.
+pub fn connect_registered_control_session<'a>(
+    socket: TcpStream,
+    local: &LocalControlTlsIdentity,
+    expected: PinnedControlTlsPeer,
+    trust: &'a DurablePeerTrustOperations,
+    setup: ApprovedControlSetup,
+    registry: Arc<Mutex<ControlSessionRegistry>>,
+) -> Result<RegisteredControlSession<'a>, RegisteredControlSetupError> {
+    let session = connect_approved_control_session(socket, local, expected, trust, setup)
+        .map_err(RegisteredControlSetupError::Control)?;
+    RegisteredControlSession::admit(session, registry).map_err(RegisteredControlSetupError::Admission)
+}
+
+/// Preferred inbound daemon-runtime entry point. Every candidate must be
+/// independently enrolled before TLS, and verified session admission is
+/// indivisible from the returned transport's ownership.
+pub fn accept_registered_control_session<'a>(
+    socket: TcpStream,
+    local: &LocalControlTlsIdentity,
+    allowed: &[PinnedControlTlsPeer],
+    trust: &'a DurablePeerTrustOperations,
+    setup: ApprovedControlSetup,
+    registry: Arc<Mutex<ControlSessionRegistry>>,
+) -> Result<RegisteredControlSession<'a>, RegisteredControlSetupError> {
+    let session = accept_approved_control_session(socket, local, allowed, trust, setup)
+        .map_err(RegisteredControlSetupError::Control)?;
+    RegisteredControlSession::admit(session, registry).map_err(RegisteredControlSetupError::Admission)
 }
 
 #[cfg(test)]
@@ -392,18 +445,17 @@ mod tests {
                 )
                 .unwrap();
             futures_lite::future::block_on(trust.forget_peer(revoked.node())).unwrap();
-            let session = accept_approved_control_session(
+            let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+            let mut session = accept_registered_control_session(
                 server_socket,
                 &server,
                 &[revoked_pin, client_pin],
                 &trust,
                 setup(),
+                Arc::clone(&registry),
             )
             .unwrap();
-            assert_eq!(session.peer().node(), node(1));
-            let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
-            let mut session =
-                RegisteredControlSession::admit(session, Arc::clone(&registry)).unwrap();
+            assert_eq!(session.peer(), node(1));
             let key = PeerSessionKey {
                 network: network(),
                 peer: node(1),
@@ -423,12 +475,17 @@ mod tests {
 
         let dir = TestDirectory::new();
         let trust = trust_for(&dir.0, server_pin.node(), server_pin.fingerprint(), true);
-        let session =
-            connect_approved_control_session(client_socket, &client, server_pin, &trust, setup())
-                .unwrap();
-        assert_eq!(session.peer().node(), node(2));
         let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
-        let mut session = RegisteredControlSession::admit(session, Arc::clone(&registry)).unwrap();
+        let mut session = connect_registered_control_session(
+            client_socket,
+            &client,
+            server_pin,
+            &trust,
+            setup(),
+            Arc::clone(&registry),
+        )
+        .unwrap();
+        assert_eq!(session.peer(), node(2));
         let key = PeerSessionKey {
             network: network(),
             peer: node(2),
@@ -438,10 +495,3 @@ mod tests {
             *session.session_id()
         );
         session
-            .send_heartbeat_until(Instant::now() + Duration::from_secs(5))
-            .unwrap();
-        server_thread.join().unwrap();
-        drop(session);
-        assert!(registry.lock().unwrap().get(key).is_none());
-    }
-}
