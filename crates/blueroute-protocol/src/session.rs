@@ -620,8 +620,14 @@ mod tests {
             scheduler.take_expired_attempt(peer, active, 249),
             Err(ReconnectScheduleError::ClockRegression)
         );
-        assert_eq!(scheduler.take_expired_attempt(peer, active, 20_250), Ok(true));
-        assert_eq!(scheduler.attempt_failed(peer, active, 20_250), Ok(Some(20_750)));
+        assert_eq!(
+            scheduler.take_expired_attempt(peer, active, 20_250),
+            Ok(true)
+        );
+        assert_eq!(
+            scheduler.attempt_failed(peer, active, 20_250),
+            Ok(Some(20_750))
+        );
         assert_eq!(scheduler.take_due(peer, active, 20_749), Ok(false));
         assert_eq!(scheduler.take_due(peer, active, 20_750), Ok(true));
     }
