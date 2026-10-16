@@ -2,10 +2,10 @@
 
 // Prepared for the future authenticated transport runtime. Keep this
 // fail-closed socket owner compiled and tested without treating it as wired.
+mod approved_transport;
 #[allow(dead_code)]
 mod attempt_socket;
 mod authorization;
-mod approved_transport;
 mod control_tls;
 mod join_network;
 mod peer_pin_store;

@@ -82,11 +82,9 @@ pub fn accept_approved_control_session<'a>(
     setup: ApprovedControlSetup,
 ) -> Result<ActiveControlSession<'a>, ControlSessionError> {
     for peer in allowed {
-        if let Err(error) = trust.require_approved_pinned_tls_peer(
-            setup.network,
-            peer.node(),
-            peer.fingerprint(),
-        ) {
+        if let Err(error) =
+            trust.require_approved_pinned_tls_peer(setup.network, peer.node(), peer.fingerprint())
+        {
             return Err(deny(&socket, error));
         }
     }
@@ -129,8 +127,8 @@ mod tests {
     use blueroute_protocol::session::ConnectionStage;
 
     use super::*;
-    use crate::{PeerPinStore, PeerTrustOperations};
     use crate::control_tls::ControlSessionRead;
+    use crate::{PeerPinStore, PeerTrustOperations};
 
     static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
@@ -182,12 +180,7 @@ mod tests {
             // Synthetic approval is permitted only in this test; production
             // enrollment requires an independently confirmed TLS identity.
             trust
-                .enroll_verified_key(
-                    network(),
-                    remote,
-                    remote_fingerprint,
-                    remote_fingerprint,
-                )
+                .enroll_verified_key(network(), remote, remote_fingerprint, remote_fingerprint)
                 .unwrap();
         }
         trust
@@ -195,7 +188,9 @@ mod tests {
 
     fn setup() -> ApprovedControlSetup {
         let mut active_deadline = ConnectionDeadline::new(0);
-        active_deadline.advance(ConnectionStage::TlsHandshake, 1).unwrap();
+        active_deadline
+            .advance(ConnectionStage::TlsHandshake, 1)
+            .unwrap();
         active_deadline.advance(ConnectionStage::Hello, 2).unwrap();
         active_deadline.advance(ConnectionStage::Active, 3).unwrap();
         ApprovedControlSetup {
@@ -229,9 +224,13 @@ mod tests {
         let (socket, mut remote) = socket_pair();
         assert!(matches!(
             connect_approved_control_session(socket, &local, expected, &trust, setup()),
-            Err(ControlSessionError::Ingress(PinnedIngressError::Authorization(_)))
+            Err(ControlSessionError::Ingress(
+                PinnedIngressError::Authorization(_)
+            ))
         ));
-        remote.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        remote
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
         let mut byte = [0_u8; 1];
         assert_eq!(remote.read(&mut byte).unwrap(), 0);
     }
@@ -266,14 +265,9 @@ mod tests {
 
         let dir = TestDirectory::new();
         let trust = trust_for(&dir.0, server_pin.node(), server_pin.fingerprint(), true);
-        let mut session = connect_approved_control_session(
-            client_socket,
-            &client,
-            server_pin,
-            &trust,
-            setup(),
-        )
-        .unwrap();
+        let mut session =
+            connect_approved_control_session(client_socket, &client, server_pin, &trust, setup())
+                .unwrap();
         assert_eq!(session.peer().node(), node(2));
         session
             .send_heartbeat_until(Instant::now() + Duration::from_secs(5))
