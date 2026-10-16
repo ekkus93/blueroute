@@ -112,15 +112,26 @@ fn stale_loss_generation_preserves_authenticated_tls_and_current_loss_closes_it(
         let trust = trust_for(&dir.0, client_pin.node(), client_pin.fingerprint());
         let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
         let mut session = accept_registered_from_durable_approval(
-            server_socket, &server, &trust, setup(), Arc::clone(&registry),
-        ).unwrap();
-        let key = PeerSessionKey { network: network(), peer: client_pin.node() };
+            server_socket,
+            &server,
+            &trust,
+            setup(),
+            Arc::clone(&registry),
+        )
+        .unwrap();
+        let key = PeerSessionKey {
+            network: network(),
+            peer: client_pin.node(),
+        };
         let current = *session.session_id();
         let mut stale = current;
         stale[0] ^= 0x80;
         assert!(!session.cancel_if_current(stale));
         assert!(!session.is_terminal());
-        assert_eq!(registry.lock().unwrap().get(key).unwrap().session_id, current);
+        assert_eq!(
+            registry.lock().unwrap().get(key).unwrap().session_id,
+            current
+        );
 
         // The live TLS session still processes an authenticated frame after
         // the stale callback, proving it was not merely left in the registry.
