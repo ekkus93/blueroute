@@ -422,6 +422,12 @@ impl ReconnectScheduler {
             return Ok(false);
         }
         if let Some(existing) = self.slots.get(&key) {
+            // A superseded generation is inert even if its callback carries
+            // an older timestamp. Only the current generation may advance or
+            // regress the slot's clock.
+            if existing.session_id != session_id {
+                return Ok(false);
+            }
             if now_ms < existing.last_ms {
                 return Err(ReconnectScheduleError::ClockRegression);
             }
@@ -601,6 +607,11 @@ mod tests {
         let stale = [4; 16];
         assert!(scheduler.schedule_loss(peer, active, 0).unwrap());
         assert_eq!(scheduler.take_due(peer, active, 250), Ok(true));
+        assert_eq!(scheduler.schedule_loss(peer, stale, 1), Ok(false));
+        assert_eq!(
+            scheduler.schedule_loss(peer, active, 249),
+            Err(ReconnectScheduleError::ClockRegression)
+        );
         assert_eq!(scheduler.take_due(peer, stale, 1), Ok(false));
         assert_eq!(scheduler.take_expired_attempt(peer, stale, 1), Ok(false));
         assert_eq!(scheduler.attempt_failed(peer, stale, 1), Ok(None));
