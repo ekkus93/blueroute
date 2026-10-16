@@ -398,6 +398,7 @@ mod tests {
             ))
         ));
         peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+
         assert_eq!(peer.read(&mut [0_u8; 1]).unwrap(), 0);
         assert!(registry.lock().unwrap().is_empty());
     }
@@ -544,6 +545,8 @@ mod tests {
         let server_pin =
             PinnedControlTlsPeer::new(network(), server.node(), server.fingerprint()).unwrap();
         let (client_socket, server_socket) = socket_pair();
+        let (cancelled_tx, cancelled_rx) = std::sync::mpsc::channel();
+        let (checked_tx, checked_rx) = std::sync::mpsc::channel();
         let server_thread = thread::spawn(move || {
             let dir = TestDirectory::new();
             let trust = trust_for(&dir.0, client_pin.node(), client_pin.fingerprint(), true);
@@ -589,6 +592,15 @@ mod tests {
                 ControlSessionRead::Frames(frames)
                     if frames.len() == 1 && frames[0].message == ControlMessage::Heartbeat
             ));
+            // Simulate a daemon-requested PAN/link cancellation. The owner
+            // stays alive until the peer observes socket closure, so this
+            // cannot pass merely because Drop eventually tears it down.
+            session.cancel();
+            assert!(session.is_terminal());
+            assert!(registry.lock().unwrap().get(key).is_none());
+            session.cancel();
+            cancelled_tx.send(()).unwrap();
+            checked_rx.recv_timeout(Duration::from_secs(5)).unwrap();
             drop(session);
             assert!(registry.lock().unwrap().get(key).is_none());
         });
@@ -617,6 +629,10 @@ mod tests {
         session
             .send_heartbeat_until(Instant::now() + Duration::from_secs(5))
             .unwrap();
+        cancelled_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        // An unannounced TCP shutdown is not a protocol Goodbye.
+        assert!(session.receive_next_at(11).is_err());
+        checked_tx.send(()).unwrap();
         server_thread.join().unwrap();
         drop(session);
         assert!(registry.lock().unwrap().get(key).is_none());

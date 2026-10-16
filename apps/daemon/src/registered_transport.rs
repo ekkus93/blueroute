@@ -128,6 +128,14 @@ impl<'a> RegisteredControlSession<'a> {
         result
     }
 
+    /// Explicitly cancel a registered control transport on PAN/link loss,
+    /// daemon shutdown or a reconnect-generation change. Shutdown happens
+    /// before releasing the registry slot, and repeated cancellation cannot
+    /// retire a replacement generation. This never authorizes membership.
+    pub fn cancel(&mut self) {
+        self.close_and_retire();
+    }
+
     /// Always close TCP before releasing the session registry slot.
     fn close_and_retire(&mut self) {
         self.session.close_owned_socket();
