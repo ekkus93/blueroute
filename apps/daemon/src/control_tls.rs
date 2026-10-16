@@ -975,13 +975,32 @@ impl ControlTlsStream {
         let _ = self.socket.shutdown(Shutdown::Both);
     }
 
-    fn send_close_notify(&mut self) -> io::Result<()> {
+    /// Bound TLS close-notify by the *same absolute deadline* as Goodbye.
+    /// The frame writer restores socket timeouts, so without this guard a
+    /// blocked close-notify flush could exceed the caller's shutdown budget.
+    /// On error the owning active session closes the entire socket.
+    fn send_close_notify_until(&mut self, deadline: Instant) -> io::Result<()> {
+        let expired = || io::Error::new(io::ErrorKind::TimedOut, "TLS close-notify deadline expired");
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(expired());
+        }
+        let original_timeout = self.socket.write_timeout()?;
+        self.socket.set_write_timeout(Some(remaining))?;
         match &mut self.connection {
             rustls::Connection::Client(connection) => connection.send_close_notify(),
             rustls::Connection::Server(connection) => connection.send_close_notify(),
         }
         self.flush()?;
-        self.socket.shutdown(Shutdown::Write)
+        if Instant::now() >= deadline {
+            return Err(expired());
+        }
+        self.socket.shutdown(Shutdown::Write)?;
+        self.socket.set_write_timeout(original_timeout)?;
+        if Instant::now() >= deadline {
+            return Err(expired());
+        }
+        Ok(())
     }
 }
 
@@ -1116,7 +1135,7 @@ impl ActiveControlSession<'_> {
             .writer
             .write_goodbye_with_deadline(&mut self.stream, deadline)
             .is_err()
-            || self.stream.send_close_notify().is_err()
+            || self.stream.send_close_notify_until(deadline).is_err()
         {
             self.terminal = true;
             self.stream.close();
@@ -2144,6 +2163,32 @@ mod tests {
         );
         let mut byte = [0_u8; 1];
         assert_eq!(server_socket.read(&mut byte).unwrap(), 0);
+    }
+
+    #[test]
+    fn expired_close_notify_budget_rejects_before_flushing_and_preserves_timeout() {
+        let (client, server) = make_tls_pair();
+        let pinned_server = PinnedControlTlsCertificate::new(
+            network(9),
+            server.node(),
+            server.certificate().clone(),
+            server.fingerprint(),
+        )
+        .unwrap();
+        let (config, server_name) = client.client_config(network(9), &pinned_server).unwrap();
+        let (socket, mut peer) = stream_pair();
+        let mut stream = ControlTlsStream::client(
+            rustls::ClientConnection::new(config, server_name).unwrap(),
+            socket,
+        );
+        let original_timeout = Some(Duration::from_secs(7));
+        stream.socket.set_write_timeout(original_timeout).unwrap();
+        let error = stream.send_close_notify_until(Instant::now()).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert_eq!(stream.socket.write_timeout().unwrap(), original_timeout);
+        stream.close();
+        peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        assert_eq!(peer.read(&mut [0_u8; 1]).unwrap(), 0);
     }
 
     #[test]
