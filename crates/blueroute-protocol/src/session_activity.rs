@@ -52,6 +52,20 @@ impl AuthenticatedInboundActivity {
         })
     }
 
+    /// Validate the trusted monotonic clock before a blocking transport read
+    /// without feeding parser bytes or renewing liveness. This also remains
+    /// valid after Goodbye, when a clean EOF still needs to be consumed.
+    pub fn check_before_read(&mut self, now_ms: u64) -> Result<(), InboundActivityError> {
+        if self.terminal {
+            return Err(InboundActivityError::Terminal);
+        }
+        if let Err(error) = self.deadline.check(now_ms) {
+            self.terminal = true;
+            return Err(InboundActivityError::Deadline(error));
+        }
+        Ok(())
+    }
+
     /// Accept plaintext only *after* external mutual-TLS processing. The
     /// monotonic instant is supplied by the trusted local clock, not a peer.
     /// Scope/replay validation always precedes idle-deadline renewal.
@@ -257,6 +271,28 @@ mod tests {
                 DeadlineError::ClockRegression
             ))
         );
+    }
+
+    #[test]
+    fn pre_read_clock_check_preserves_goodbye_eof_and_rejects_regression() {
+        let mut closing = activity();
+        closing
+            .feed_verified_plaintext(&wire(peer(), 3, ControlMessage::Goodbye), 10)
+            .unwrap();
+        assert_eq!(closing.check_before_read(11), Ok(()));
+        assert_eq!(closing.finish_at(11), Ok(()));
+
+        let mut regressed = activity();
+        regressed
+            .feed_verified_plaintext(&wire(peer(), 3, ControlMessage::Heartbeat), 20)
+            .unwrap();
+        assert_eq!(
+            regressed.check_before_read(19),
+            Err(InboundActivityError::Deadline(
+                DeadlineError::ClockRegression
+            ))
+        );
+        assert!(regressed.is_terminal());
     }
 
     #[test]
