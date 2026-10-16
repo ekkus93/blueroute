@@ -2127,19 +2127,23 @@ mod tests {
                 frame.message,
                 ControlMessage::Heartbeat | ControlMessage::Goodbye
             )));
-            if !goodbye_already_received {
+            let goodbye_at = if goodbye_already_received {
+                // Heartbeat and Goodbye may be coalesced in one TLS read.
+                10
+            } else {
                 assert!(matches!(
                     active.receive_next_at(10_000).unwrap(),
                     ControlSessionRead::Frames(frames)
                         if frames.len() == 1
                             && frames[0].message == ControlMessage::Goodbye
                 ));
-            }
+                10_000
+            };
             active
                 .send_goodbye_until(Instant::now() + Duration::from_secs(5))
                 .unwrap();
             assert_eq!(
-                active.receive_next_at(20_000).unwrap(),
+                active.receive_next_at(goodbye_at + 1_000).unwrap(),
                 ControlSessionRead::Closed
             );
         });
@@ -2177,7 +2181,7 @@ mod tests {
                 if frames.len() == 1 && frames[0].message == ControlMessage::Goodbye
         ));
         assert_eq!(
-            active.receive_next_at(20_000).unwrap(),
+            active.receive_next_at(11_000).unwrap(),
             ControlSessionRead::Closed
         );
         server_thread.join().unwrap();
