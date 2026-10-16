@@ -32,7 +32,8 @@ impl TestDirectory {
     fn new() -> Self {
         let id = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
-            "blueroute-generation-cancel-{}-{id}", std::process::id()
+            "blueroute-generation-cancel-{}-{id}",
+            std::process::id()
         ));
         fs::create_dir(&path).unwrap();
         Self(path)
@@ -75,7 +76,9 @@ fn trust_for(path: &Path, peer: NodeId, fingerprint: SpkiSha256) -> DurablePeerT
 
 fn setup() -> ApprovedControlSetup {
     let mut active_deadline = ConnectionDeadline::new(0);
-    active_deadline.advance(ConnectionStage::TlsHandshake, 1).unwrap();
+    active_deadline
+        .advance(ConnectionStage::TlsHandshake, 1)
+        .unwrap();
     active_deadline.advance(ConnectionStage::Hello, 2).unwrap();
     active_deadline.advance(ConnectionStage::Active, 3).unwrap();
     ApprovedControlSetup {
