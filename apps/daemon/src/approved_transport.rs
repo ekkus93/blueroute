@@ -379,8 +379,7 @@ mod tests {
                 ControlSessionError::Ingress(PinnedIngressError::Authorization(_))
             ))
         ));
-        peer.set_read_timeout(Some(Duration::from_secs(1)))
-            .unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
         assert_eq!(peer.read(&mut [0_u8; 1]).unwrap(), 0);
 
         let (socket, mut peer) = socket_pair();
@@ -398,8 +397,7 @@ mod tests {
                 ControlSessionError::Ingress(PinnedIngressError::Authorization(_))
             ))
         ));
-        peer.set_read_timeout(Some(Duration::from_secs(1)))
-            .unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
         assert_eq!(peer.read(&mut [0_u8; 1]).unwrap(), 0);
         assert!(registry.lock().unwrap().is_empty());
     }
