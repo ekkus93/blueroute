@@ -175,3 +175,109 @@ fn assert_terminal_teardown(revoke_peer: bool) {
     assert!(server_thread.join().unwrap());
     drop(session);
 }
+
+#[test]
+fn stale_cancel_does_not_close_replacement_tls_generation() {
+    let client = LocalControlTlsIdentity::generate(node(1)).unwrap();
+    let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
+    let client_pin =
+        PinnedControlTlsPeer::new(network(), client.node(), client.fingerprint()).unwrap();
+    let server_pin =
+        PinnedControlTlsPeer::new(network(), server.node(), server.fingerprint()).unwrap();
+    let (first_client_socket, first_server_socket) = socket_pair();
+    let (second_client_socket, second_server_socket) = socket_pair();
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+
+    let server_thread = thread::spawn(move || {
+        let dir = TestDirectory::new();
+        let trust = trust_for(&dir.0, client_pin.node(), client_pin.fingerprint());
+        let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+        let mut first = accept_registered_control_session(
+            first_server_socket,
+            &server,
+            &[client_pin],
+            &trust,
+            setup(),
+            Arc::clone(&registry),
+        )
+        .unwrap();
+        ready_tx.send(()).unwrap();
+        assert!(first.receive_next_at(10).is_err());
+        assert!(registry.lock().unwrap().is_empty());
+
+        let mut second = accept_registered_control_session(
+            second_server_socket,
+            &server,
+            &[client_pin],
+            &trust,
+            setup(),
+            Arc::clone(&registry),
+        )
+        .unwrap();
+        ready_tx.send(()).unwrap();
+        // A valid heartbeat must still cross the replacement authenticated
+        // channel after the client receives a stale disconnect callback.
+        assert!(second.receive_next_at(10).is_ok());
+        assert!(second.receive_next_at(11).is_err());
+        assert!(registry.lock().unwrap().is_empty());
+    });
+
+    let dir = TestDirectory::new();
+    let trust = trust_for(&dir.0, server_pin.node(), server_pin.fingerprint());
+    let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+    let key = PeerSessionKey {
+        network: network(),
+        peer: node(2),
+    };
+
+    let mut first = connect_registered_control_session(
+        first_client_socket,
+        &client,
+        server_pin,
+        &trust,
+        setup(),
+        Arc::clone(&registry),
+    )
+    .unwrap();
+    ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let old_generation = *first.session_id();
+    assert!(!first.cancel_if_current([0; 16]));
+    assert!(!first.is_terminal());
+    assert_eq!(
+        registry.lock().unwrap().get(key).unwrap().session_id,
+        old_generation
+    );
+    assert!(first.cancel_if_current(old_generation));
+    assert!(first.is_terminal());
+    assert!(registry.lock().unwrap().get(key).is_none());
+
+    // Keep the old owner alive while a new independently authenticated TLS
+    // session takes its registry slot.
+    let mut second = connect_registered_control_session(
+        second_client_socket,
+        &client,
+        server_pin,
+        &trust,
+        setup(),
+        Arc::clone(&registry),
+    )
+    .unwrap();
+    ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let new_generation = *second.session_id();
+    assert_ne!(old_generation, new_generation);
+    assert!(!second.cancel_if_current(old_generation));
+    assert!(!second.is_terminal());
+    assert_eq!(
+        registry.lock().unwrap().get(key).unwrap().session_id,
+        new_generation
+    );
+    second
+        .send_heartbeat_until(Instant::now() + Duration::from_secs(5))
+        .unwrap();
+    assert!(second.cancel_if_current(new_generation));
+    assert!(second.is_terminal());
+    assert!(registry.lock().unwrap().get(key).is_none());
+    server_thread.join().unwrap();
+    drop(first);
+    drop(second);
+}
