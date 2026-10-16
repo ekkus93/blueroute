@@ -198,7 +198,6 @@ fn parse(args: &[String]) -> Result<Operation, String> {
 
 fn format_status(status: &DaemonStatus, json: bool) -> Result<String, serde_json::Error> {
     if json {
-
         serde_json::to_string_pretty(status)
     } else {
         Ok(format!(
@@ -221,83 +220,25 @@ fn format_diagnostics(
     json: bool,
 ) -> Result<String, serde_json::Error> {
     if json {
-        return serde_json::to_string_pretty(snapshot);
-    }
-
-    let mut output = format!(
-        "API: {}\nHealth: {:?}\nNetwork: {:?}\nReported nodes: {} (local-only until peer authentication)\nLocal control TLS SPKI SHA-256: {}\nSystem: {}\nCapabilities:\n{:#?}",
-        snapshot.api_version,
-        snapshot.health,
-        snapshot.current_network,
-        snapshot.visible_nodes,
-        snapshot
-            .local_control_tls_spki_sha256
-            .as_deref()
-            .unwrap_or("unavailable"),
-        snapshot.system.as_ref().map_or_else(
-            || "platform details unavailable".to_owned(),
-            format_system_diagnostics,
-        ),
-        snapshot.capabilities
-    );
-
-    for section in [
-        format_diagnostic_items("Observed peers", snapshot.observed_peers.as_deref()),
-        format_diagnostic_items("Interfaces", snapshot.interfaces.as_deref()),
-        format_diagnostic_items("Routes", snapshot.routes.as_deref()),
-    ] {
-        output.push('\n');
-        output.push_str(&section);
-    }
-
-    match &snapshot.topology {
-        None => output.push_str("\nTopology: unavailable"),
-        Some(topology) => {
-            output.push_str(&format!(
-                "\nTopology: {} nodes, {} links",
-                topology.nodes.len(),
-                topology.links.len()
-            ));
-            for node in &topology.nodes {
-                output.push_str(&format!("\n  node {node:?}"));
-            }
-            for link in &topology.links {
-                output.push_str(&format!("\n  link {link:?}"));
-            }
-        }
-    }
-    if snapshot.recent_errors.is_empty() {
-        output.push_str("\nRecent API failures: none");
+        serde_json::to_string_pretty(snapshot)
     } else {
-        output.push_str(&format!(
-            "\nRecent API failures ({}):",
-            snapshot.recent_errors.len()
-        ));
-        for failure in &snapshot.recent_errors {
-            // Debug escaping prevents daemon-supplied diagnostic strings from
-            // injecting terminal control sequences into a CLI session.
-            output.push_str(&format!(
-                "\n  timestamp_ms={} operation={:?} class={:?}",
-                failure.timestamp_unix_ms, failure.operation, failure.failure_class
-            ));
-        }
-    }
-    Ok(output)
-}
-
-/// Distinguish data not collected from an explicitly observed empty set.
-/// Debug-escape daemon-supplied fields rather than printing control bytes.
-fn format_diagnostic_items<T: std::fmt::Debug>(label: &str, items: Option<&[T]>) -> String {
-    match items {
-        None => format!("{label}: unavailable"),
-        Some([]) => format!("{label}: none observed"),
-        Some(items) => {
-            let mut output = format!("{label} ({}):", items.len());
-            for item in items {
-                output.push_str(&format!("\n  {item:?}"));
-            }
-            output
-        }
+        Ok(format!(
+            "API: {}\nHealth: {:?}\nNetwork: {:?}\nReported nodes: {} (local-only until peer authentication)\nLocal control TLS SPKI SHA-256: {}\nSystem: {}\nRecent API failures: {}\nCapabilities:\n{:#?}",
+            snapshot.api_version,
+            snapshot.health,
+            snapshot.current_network,
+            snapshot.visible_nodes,
+            snapshot
+                .local_control_tls_spki_sha256
+                .as_deref()
+                .unwrap_or("unavailable"),
+            snapshot.system.as_ref().map_or_else(
+                || "platform details unavailable".to_owned(),
+                format_system_diagnostics,
+            ),
+            snapshot.recent_errors.len(),
+            snapshot.capabilities
+        ))
     }
 }
 
@@ -326,22 +267,15 @@ fn format_local_key(
 }
 
 fn format_system_diagnostics(system: &SystemDiagnosticMetadata) -> String {
-    let mut output = format!(
-        "platform={:?} daemon={:?} kernel={:?} BlueZ={:?} network-backend={:?} adapters={}",
+    format!(
+        "platform={} daemon={} kernel={:?} BlueZ={:?} network-backend={:?} adapters={}",
         system.platform,
         system.daemon_version,
         system.kernel_release,
         system.bluez_version,
         system.network_backend_version,
         system.adapters.len()
-    );
-    for adapter in &system.adapters {
-        output.push_str(&format!(
-            "\n  adapter id={:?} powered={} address={:?} driver={:?}",
-            adapter.id, adapter.powered, adapter.address, adapter.driver
-        ));
-    }
-    output
+    )
 }
 
 fn format_networks(networks: &[NetworkSummary], json: bool) -> Result<String, serde_json::Error> {
@@ -464,7 +398,6 @@ fn run(args: &[String]) -> i32 {
         _ => {}
     }
     // This uses the shared system D-Bus API only; there are no direct
-
     // BlueZ, NetworkManager or privileged networking calls in the CLI.
     let client = match futures_lite::future::block_on(BlueRouteClient::connect()) {
         Ok(client) => client,
@@ -665,7 +598,6 @@ mod tests {
         assert_eq!(
             parse(&args(&["node", "list", "--json"])),
             Ok(Operation::NodeList { json: true })
-
         );
         assert!(parse(&args(&["node", "show"])).is_err());
         assert!(parse(&args(&["node", "show", "bluetooth-address"])).is_err());
@@ -768,74 +700,11 @@ mod tests {
         assert!(output.contains(&"ab".repeat(32)));
         assert!(output.contains("Health: Degraded"));
         assert!(output.contains("local-only until peer authentication"));
-        assert!(output.contains("daemon=\"0.1.0\""));
+        assert!(output.contains("daemon=0.1.0"));
         assert!(!output.contains("verified remote peers"));
         let json = format_diagnostics(&snapshot, true).unwrap();
         let decoded: DiagnosticSnapshot = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, snapshot);
-    }
-
-    #[test]
-    fn diagnostics_distinguish_unavailable_empty_and_observed_state_and_escape_text() {
-        use blueroute_protocol::{
-            DiagnosticAdapter, DiagnosticFailure, DiagnosticInterface, DiagnosticTopology,
-        };
-        let mut snapshot = DiagnosticSnapshot {
-            api_version: ApiVersion::CURRENT,
-            health: HealthLevel::Degraded,
-            current_network: None,
-            visible_nodes: 1,
-            capabilities: NodeCapabilities::default(),
-            local_control_tls_spki_sha256: None,
-            system: Some(SystemDiagnosticMetadata {
-                daemon_version: "0.1.0".into(),
-                platform: "Linux".into(),
-                kernel_release: None,
-                bluez_version: None,
-                network_backend_version: None,
-                adapters: vec![DiagnosticAdapter {
-                    id: "hci0".into(),
-                    powered: false,
-                    address: None,
-                    driver: Some("driver\\u{1b}[31m".into()),
-                }],
-            }),
-            observed_peers: Some(Vec::new()),
-            interfaces: Some(vec![DiagnosticInterface {
-                name: "bnep0".into(),
-                addresses: vec!["10.0.0.1/24".into()],
-            }]),
-            routes: Some(Vec::new()),
-            topology: Some(DiagnosticTopology {
-                nodes: Vec::new(),
-                links: Vec::new(),
-            }),
-            recent_errors: vec![DiagnosticFailure {
-                timestamp_unix_ms: 1234,
-                operation: "join\\u{1b}[31m".into(),
-                failure_class: "denied".into(),
-            }],
-        };
-        let output = format_diagnostics(&snapshot, false).unwrap();
-        assert!(output.contains("Observed peers: none observed"));
-        assert!(output.contains("Interfaces (1):"));
-        assert!(output.contains("bnep0"));
-        assert!(output.contains("Routes: none observed"));
-        assert!(output.contains("Topology: 0 nodes, 0 links"));
-        assert!(output.contains("Recent API failures (1):"));
-        assert!(output.contains("adapter id=\\\"hci0\\\""));
-        assert!(!output.contains('\\u{1b}'));
-        let json = format_diagnostics(&snapshot, true).unwrap();
-        let restored: DiagnosticSnapshot = serde_json::from_str(&json).unwrap();
-        assert_eq!(restored, snapshot);
-
-        snapshot.interfaces = None;
-        snapshot.topology = None;
-        snapshot.recent_errors.clear();
-        let missing = format_diagnostics(&snapshot, false).unwrap();
-        assert!(missing.contains("Interfaces: unavailable"));
-        assert!(missing.contains("Topology: unavailable"));
-        assert!(missing.contains("Recent API failures: none"));
     }
 
     #[test]
