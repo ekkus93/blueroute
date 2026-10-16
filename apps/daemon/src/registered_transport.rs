@@ -147,6 +147,18 @@ impl<'a> RegisteredControlSession<'a> {
         true
     }
 
+    /// Ignore callbacks from a different logical peer or TLS generation.
+    pub fn cancel_if_current_for_peer(
+        &mut self,
+        expected_key: PeerSessionKey,
+        expected_session_id: [u8; 16],
+    ) -> bool {
+        if self.key != expected_key {
+            return false;
+        }
+        self.cancel_if_current(expected_session_id)
+    }
+
     /// Always close TCP before releasing the session registry slot.
     fn close_and_retire(&mut self) {
         self.session.close_owned_socket();
