@@ -20,6 +20,7 @@ use blueroute_daemon::{
 };
 use blueroute_linux::NetworkMembershipStore;
 use blueroute_protocol::control::HelloFacts;
+use blueroute_protocol::peer_pin::PeerKeyPins;
 use blueroute_protocol::session::{
     ConnectionDeadline, ConnectionStage, ControlSessionRegistry, PeerSessionKey,
 };
@@ -66,15 +67,12 @@ fn trust_for(
     let mut registry = MembershipRegistry::default();
     registry.remember_network(membership);
     membership_store.save(&registry).unwrap();
-    let trust = DurablePeerTrustOperations::with_peer_pin_store(
-        membership_store,
-        PeerPinStore::new(path.join("peer-pins")),
-    );
+    let pin_store = PeerPinStore::new(path.join("peer-pins"));
+    let mut pins = PeerKeyPins::new();
+    pins.enroll_verified(network(), remote, fingerprint).unwrap();
+    pin_store.save(&pins).unwrap();
+    let trust = DurablePeerTrustOperations::with_peer_pin_store(membership_store, pin_store);
     futures_lite::future::block_on(trust.trust_peer(remote)).unwrap();
-    // Synthetic independent fingerprint confirmation is test-only.
-    trust
-        .enroll_verified_key(network(), remote, fingerprint, fingerprint)
-        .unwrap();
     trust
 }
 
