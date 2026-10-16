@@ -45,6 +45,8 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 
 ## Software-only control-session evidence (through 2026-10-16)
 
+- **P7-004 bounded authenticated Goodbye TLS close-notify (software only, 2026-10-16):** The registered/active control transport now carries the caller's absolute Goodbye deadline into the TLS close-notify flush, rejecting expired budgets instead of silently blocking under a restored socket timeout. An expired-deadline socket regression and existing mutual-TLS/Goodbye tests passed [exact-head CI 38974842950](https://github.com/ekkus93/blueroute/actions/runs/38974842950) at `f9e75e4302cd3e3df0b0c9f977086ceb36e1ae9d`. See [evidence](P7-004-CLOSE-NOTIFY-DEADLINE-EVIDENCE-2026-10-16.md). This is **not** a live PAN daemon listener, independently approved key enrollment, production JoinNetwork, or physical Bluetooth acceptance.
+
 - **P7-004 idle authenticated TLS revocation recheck (software only, 2026-10-16):** A registered control-session owner can now explicitly revalidate its current durable peer approval without sending a frame or waiting for inbound traffic. A revoked peer's owned TLS/TCP socket closes before its exact registry generation is retired; a localhost mutual-TLS regression verifies the remote detects the closure while the server owner is still alive. Implementation commits `bdd749f5`, `e8365c27`, test `5d9c14d6`, formatting `20dcb3a0`; [exact-head CI 38968361333](https://github.com/ekkus93/blueroute/actions/runs/38968361333) passed. This is an **explicit recheck seam**, not a wired daemon trust-change notification, PAN listener, independent enrollment UX, production JoinNetwork or physical Bluetooth acceptance. See [evidence](P7-004-IDLE-REVOCATION-RECHECK-EVIDENCE-2026-10-16.md).
 
 
