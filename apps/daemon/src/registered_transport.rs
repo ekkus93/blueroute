@@ -153,7 +153,7 @@ impl<'a> RegisteredControlSession<'a> {
         expected_key: PeerSessionKey,
         expected_session_id: [u8; 16],
     ) -> bool {
-        if self.key != expected_key {
+        if !callback_matches(self.key, self.session_id, expected_key, expected_session_id) {
             return false;
         }
         self.cancel_if_current(expected_session_id)
@@ -182,5 +182,39 @@ impl Drop for RegisteredControlSession<'_> {
         // Shutdown must precede slot removal: otherwise a new authenticated
         // generation could enter while this generation still owns TCP I/O.
         self.close_and_retire();
+    }
+}
+
+fn callback_matches(
+    current_key: PeerSessionKey,
+    current_session_id: [u8; 16],
+    expected_key: PeerSessionKey,
+    expected_session_id: [u8; 16],
+) -> bool {
+    current_key == expected_key && current_session_id == expected_session_id
+}
+
+#[cfg(test)]
+mod callback_tests {
+    use super::*;
+
+    #[test]
+    fn cancellation_callback_requires_both_peer_scope_and_tls_generation() {
+        let current = PeerSessionKey {
+            network: NetworkId::from_bytes([1; 16]),
+            peer: NodeId::from_bytes([2; 16]),
+        };
+        let wrong_network = PeerSessionKey {
+            network: NetworkId::from_bytes([3; 16]),
+            peer: current.peer,
+        };
+        let wrong_peer = PeerSessionKey {
+            network: current.network,
+            peer: NodeId::from_bytes([4; 16]),
+        };
+        assert!(callback_matches(current, [5; 16], current, [5; 16]));
+        assert!(!callback_matches(current, [5; 16], wrong_network, [5; 16]));
+        assert!(!callback_matches(current, [5; 16], wrong_peer, [5; 16]));
+        assert!(!callback_matches(current, [5; 16], current, [6; 16]));
     }
 }
