@@ -1207,7 +1207,10 @@ impl ActiveControlSession<'_> {
                     io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
                 ) =>
             {
-                match self.ingress.receive_verified_plaintext(&[], observed_now_ms) {
+                match self
+                    .ingress
+                    .receive_verified_plaintext(&[], observed_now_ms)
+                {
                     Ok(_) => Ok(ControlSessionRead::Idle),
                     Err(error) => {
                         self.terminal = true;
@@ -1223,7 +1226,8 @@ impl ActiveControlSession<'_> {
                 Err(ControlSessionError::Transport(error))
             }
         }
-    }}
+    }
+}
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ControlSessionRead {
