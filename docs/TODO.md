@@ -29,7 +29,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 
 **Ralph Loop procedure — at startup and after every successful merge:**
 
-1. Read the current `master` TODO, `docs/HARDWARE_ACCEPTANCE_BACKLOG.md`, exact head, relevant active branches/PRs and CI through ordinary Git/GitHub tools, and reconcile already-written work before implementing more. Do not use Ralph Bridge.
+1. Read the current `master` TODO, `docs/HARDWARE_ACCEPTANCE_BACKLOG.md`, exact head, relevant active branches/PRs and CI through Ralph Bridge exclusively; never use the default GitHub tool. Reconcile already-written work before implementing more.
 2. Prioritize reviewing and qualifying existing [PR #41](https://github.com/ekkus93/blueroute/pull/41). Avoid per-task branches/PRs; use small, cohesive direct-to-`master` commits when repository permissions allow. Never bypass branch protection.
 3. Validate against the exact commit: format, Clippy, unit/protocol tests, fake BlueZ/NetworkManager, real-broker daemon tests, negative-authentication tests and simulated Linux network namespaces/veth when runner privileges permit. Offer unprivileged deterministic substitutes in CI. Use fault injection for restart/loss/rollback; virtual Ethernet cannot prove Bluetooth radio operation.
 4. Diagnose ordinary CI failures and continue useful tasks during bounded CI waits; a timeout, lint failure or transient error does not itself require user help.
@@ -956,6 +956,8 @@ This is the first complete product slice.
 **P7/P14 wire-identity hardening (software-only, 2026-10-14):** The common control-frame encoder/decoder and verified-session replay context reject zero `NetworkId` or sender `NodeId`; claimed Hello neighbors reject zero `NodeId` even if otherwise syntactically valid. Deterministic hostile raw-wire and valid Heartbeat tests passed in [CI 38687746163](https://github.com/ekkus93/blueroute/actions/runs/38687746163) at `cd4498d26444e0b4f9e2d97d19bf50a2cbebac09`. These checks harden unauthenticated input only; they do not establish peer identity, mutual TLS, session enrollment, or PAN acceptance.
 
 **Additional P7-003/P7-004 exporter preflight hardening (software only, 2026-10-14):** Exporter context construction rejects zero `NetworkId` or `NodeId` inputs and the claim-only Hello/HelloAck helper now rejects zero network/local/remote identities before sending even a single byte. A mock transport verifies no read/write timeouts or outbound bytes for invalid requests; [exact-head CI 38690485129](https://github.com/ekkus93/blueroute/actions/runs/38690485129) passed at `091d94e8c796dfff85596b455e5aafa667e66f68`. This does **not** authenticate any TLS connection, verify key possession, implement an independently approved enrollment UI, or enable production JoinNetwork.
+
+**P7-004 watchdog clock-regression teardown (software-only, 2026-10-16):** The pending-handshake socket owner now closes an unauthenticated TCP socket and retires only its matching retry generation when the watchdog receives a regressed scheduler clock. A deterministic localhost regression proves actual EOF, independent second-peer survival and stale-generation isolation. Exact-head CI [38878330621](https://github.com/ekkus93/blueroute/actions/runs/38878330621) passed at `ce593ca07e4e70ee3811f0df41aaa35977cd67cf`. See [evidence](P7-004-WATCHDOG-CLOCK-REGRESSION-EVIDENCE-2026-10-16.md). This remains a software-only pending-socket primitive, not live mutual TLS, independently approved enrollment, authenticated daemon transport, production JoinNetwork or physical Bluetooth acceptance. Keep P7-003/P7-004 and P6-004 open.
 
 ## P7-005 — Fuzz/property-test parser
 
@@ -2120,7 +2122,7 @@ For every networking feature:
 
 # Current dependency-first execution order
 
-**Effective October 13, 2026.** Keep P0–P19 identifiers stable; completed tasks stay completed, and hardware acceptance remains open. Before each task, reconcile exact current `master`, existing PRs/branches and software evidence using ordinary Git/GitHub tools; do not use Ralph Bridge. Do not create a branch/PR per task.
+**Effective October 13, 2026.** Keep P0–P19 identifiers stable; completed tasks stay completed, and hardware acceptance remains open. Before each task, reconcile exact current `master`, existing PRs/branches and software evidence using Ralph Bridge exclusively; do not use the default GitHub tool. Do not create a branch/PR per task.
 
 1. **Reconcile TODO and evidence:** P6-004 partial, P6-005 complete, P6-006 software changes reconciled to master at `eca4a3b`, P1 and later hardware requirements deferred. Do not redo completed P4/P5/P6 hardware work.
 2. **P6-006 software portion:** The acceptance tooling from PR #41 is already on master at `eca4a3b`; its fixtures and runbook match master. PR #41 remains open but is 254 commits behind and conflicts with newer master changes, including the UDP sender-isolation fix. Do not merge the stale branch over master. Physical ping/SSH/TCP/UDP/DNS/cleanup checks remain deferred, not passed.
