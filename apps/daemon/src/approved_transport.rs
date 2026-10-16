@@ -9,7 +9,7 @@
 use std::net::{Shutdown, TcpStream};
 use std::time::Instant;
 
-use blueroute_core::NetworkId;
+use blueroute_core::{CoreError, ErrorKind, NetworkId};
 use blueroute_protocol::control::HelloFacts;
 use blueroute_protocol::session::ConnectionDeadline;
 
@@ -71,9 +71,10 @@ pub fn connect_approved_control_session<'a>(
 }
 
 /// Accept one inbound peer from a snapshot of independently enrolled pins.
-/// Every supplied pin must still be authorized on disk before opening the
-/// TLS handshake. Revocation is checked again when the session activates
-/// and during every subsequent inbound/outbound frame operation.
+/// Only pins still authorized on disk are passed to the TLS handshake.
+/// Revoked entries in an older snapshot cannot prevent other approved peers
+/// from connecting; durable-state/locking failures still reject the entire
+/// attempt. Revocation is checked again on activation and each frame.
 pub fn accept_approved_control_session<'a>(
     socket: TcpStream,
     local: &LocalControlTlsIdentity,
@@ -81,18 +82,35 @@ pub fn accept_approved_control_session<'a>(
     trust: &'a DurablePeerTrustOperations,
     setup: ApprovedControlSetup,
 ) -> Result<ActiveControlSession<'a>, ControlSessionError> {
+    let mut approved = Vec::with_capacity(allowed.len());
     for peer in allowed {
-        if let Err(error) =
-            trust.require_approved_pinned_tls_peer(setup.network, peer.node(), peer.fingerprint())
-        {
-            return Err(deny(&socket, error));
+        match trust.require_approved_pinned_tls_peer(
+            setup.network,
+            peer.node(),
+            peer.fingerprint(),
+        ) {
+            Ok(()) => approved.push(*peer),
+            // A stale revoked pin must not deny service to unrelated peers.
+            Err(error) if error.kind() == ErrorKind::AuthenticationFailed => {}
+            // Never ignore malformed durable state, wrong-network ownership,
+            // poisoned locks or cross-process lock contention.
+            Err(error) => return Err(deny(&socket, error)),
         }
+    }
+    if approved.is_empty() {
+        return Err(deny(
+            &socket,
+            CoreError::new(
+                ErrorKind::AuthenticationFailed,
+                "no currently approved control TLS peer is available",
+            ),
+        ));
     }
     let (mut stream, certificate) = accept_pinned_control_tls(
         socket,
         local,
         setup.network,
-        allowed,
+        &approved,
         setup.handshake_deadline,
     )
     .map_err(ControlSessionError::Authentication)?;
@@ -236,6 +254,37 @@ mod tests {
     }
 
     #[test]
+    fn inbound_only_stale_pins_close_socket_before_tls() {
+        let local = LocalControlTlsIdentity::generate(node(1)).unwrap();
+        let remote_identity = LocalControlTlsIdentity::generate(node(2)).unwrap();
+        let dir = TestDirectory::new();
+        let trust = trust_for(
+            &dir.0,
+            remote_identity.node(),
+            remote_identity.fingerprint(),
+            false,
+        );
+        let stale = PinnedControlTlsPeer::new(
+            network(),
+            remote_identity.node(),
+            remote_identity.fingerprint(),
+        )
+        .unwrap();
+        let (socket, mut remote) = socket_pair();
+        assert!(matches!(
+            accept_approved_control_session(socket, &local, &[stale], &trust, setup()),
+            Err(ControlSessionError::Ingress(
+                PinnedIngressError::Authorization(_)
+            ))
+        ));
+        remote
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let mut byte = [0_u8; 1];
+        assert_eq!(remote.read(&mut byte).unwrap(), 0);
+    }
+
+    #[test]
     fn approved_peers_exchange_authenticated_frames_over_owned_tcp() {
         let client = LocalControlTlsIdentity::generate(node(1)).unwrap();
         let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
@@ -247,10 +296,27 @@ mod tests {
         let server_thread = thread::spawn(move || {
             let dir = TestDirectory::new();
             let trust = trust_for(&dir.0, client_pin.node(), client_pin.fingerprint(), true);
+            // The listener may retain an earlier pin snapshot after revocation.
+            // This stale entry must neither authorize the revoked peer nor
+            // prevent a still-approved peer from completing mutual TLS.
+            let revoked = LocalControlTlsIdentity::generate(node(3)).unwrap();
+            let revoked_pin =
+                PinnedControlTlsPeer::new(network(), revoked.node(), revoked.fingerprint())
+                    .unwrap();
+            futures_lite::future::block_on(trust.trust_peer(revoked.node())).unwrap();
+            trust
+                .enroll_verified_key(
+                    network(),
+                    revoked.node(),
+                    revoked.fingerprint(),
+                    revoked.fingerprint(),
+                )
+                .unwrap();
+            futures_lite::future::block_on(trust.forget_peer(revoked.node())).unwrap();
             let mut session = accept_approved_control_session(
                 server_socket,
                 &server,
-                &[client_pin],
+                &[revoked_pin, client_pin],
                 &trust,
                 setup(),
             )
