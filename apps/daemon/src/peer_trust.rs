@@ -630,8 +630,10 @@ mod tests {
         // Simulate a historical/orphaned enrollment record: possession of a
         // persisted pin must not imply current approval or network membership.
         let mut pins = PeerKeyPins::new();
-        pins.enroll_verified(network, approved, approved_key).unwrap();
-        pins.enroll_verified(network, unapproved, stale_key).unwrap();
+        pins.enroll_verified(network, approved, approved_key)
+            .unwrap();
+        pins.enroll_verified(network, unapproved, stale_key)
+            .unwrap();
         pins.enroll_verified(foreign_network, foreign_node, foreign_key)
             .unwrap();
         trust.pin_store.as_ref().unwrap().save(&pins).unwrap();
@@ -640,7 +642,10 @@ mod tests {
             vec![PinnedControlTlsPeer::new(network, approved, approved_key).unwrap()]
         );
         assert_eq!(
-            trust.approved_control_pins(foreign_network).unwrap_err().kind(),
+            trust
+                .approved_control_pins(foreign_network)
+                .unwrap_err()
+                .kind(),
             ErrorKind::InvalidState
         );
 
@@ -652,7 +657,11 @@ mod tests {
 
         // Corrupt durable key material is an error, never an empty allowlist
         // that a caller could confuse with a successful authorization read.
-        fs::write(root.join("peer-keys/peer-key-pins-v1"), b"invalid pin state").unwrap();
+        fs::write(
+            root.join("peer-keys/peer-key-pins-v1"),
+            b"invalid pin state",
+        )
+        .unwrap();
         assert!(trust.approved_control_pins(network).is_err());
         fs::remove_dir_all(root).unwrap();
     }
