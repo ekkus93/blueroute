@@ -59,7 +59,9 @@ impl<'a> RegisteredControlSession<'a> {
         };
         let session_id = *session.session_id();
         {
-            let mut registry_guard = registry.lock().map_err(|_| SessionAdmissionError::LockPoisoned)?;
+            let mut registry_guard = registry
+                .lock()
+                .map_err(|_| SessionAdmissionError::LockPoisoned)?;
             match registry_guard.activate_after_authentication(key, session_id) {
                 // An already-active registration is not a second transport:
                 // allowing its duplicate handle would create two owners.
@@ -104,7 +106,7 @@ impl<'a> RegisteredControlSession<'a> {
         now_ms: u64,
     ) -> Result<ControlSessionRead, ControlSessionError> {
         let result = self.session.receive_next_at(now_ms);
-        if result.is_err() || matches!(result, Ok(ControlSessionRead::Closed)) {
+        if result.is_err() || matches!(&result, Ok(ControlSessionRead::Closed)) {
             self.retire();
         }
         result

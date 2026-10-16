@@ -130,6 +130,7 @@ mod tests {
     use std::net::TcpListener;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
 
@@ -139,11 +140,11 @@ mod tests {
     use blueroute_linux::NetworkMembershipStore;
     use blueroute_protocol::control::ControlMessage;
     use blueroute_protocol::peer_pin::SpkiSha256;
-    use blueroute_protocol::session::ConnectionStage;
+    use blueroute_protocol::session::{ConnectionStage, ControlSessionRegistry, PeerSessionKey};
 
     use super::*;
     use crate::control_tls::ControlSessionRead;
-    use crate::{PeerPinStore, PeerTrustOperations};
+    use crate::{PeerPinStore, PeerTrustOperations, RegisteredControlSession};
 
     static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
@@ -310,7 +311,7 @@ mod tests {
                 )
                 .unwrap();
             futures_lite::future::block_on(trust.forget_peer(revoked.node())).unwrap();
-            let mut session = accept_approved_control_session(
+            let session = accept_approved_control_session(
                 server_socket,
                 &server,
                 &[revoked_pin, client_pin],
@@ -319,22 +320,46 @@ mod tests {
             )
             .unwrap();
             assert_eq!(session.peer().node(), node(1));
+            let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+            let mut session = RegisteredControlSession::admit(session, Arc::clone(&registry)).unwrap();
+            let key = PeerSessionKey {
+                network: network(),
+                peer: node(1),
+            };
+            assert_eq!(
+                registry.lock().unwrap().get(key).unwrap().session_id,
+                *session.session_id()
+            );
             assert!(matches!(
                 session.receive_next_at(10).unwrap(),
                 ControlSessionRead::Frames(frames)
                     if frames.len() == 1 && frames[0].message == ControlMessage::Heartbeat
             ));
+            drop(session);
+            assert!(registry.lock().unwrap().get(key).is_none());
         });
 
         let dir = TestDirectory::new();
         let trust = trust_for(&dir.0, server_pin.node(), server_pin.fingerprint(), true);
-        let mut session =
+        let session =
             connect_approved_control_session(client_socket, &client, server_pin, &trust, setup())
                 .unwrap();
         assert_eq!(session.peer().node(), node(2));
+        let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+        let mut session = RegisteredControlSession::admit(session, Arc::clone(&registry)).unwrap();
+        let key = PeerSessionKey {
+            network: network(),
+            peer: node(2),
+        };
+        assert_eq!(
+            registry.lock().unwrap().get(key).unwrap().session_id,
+            *session.session_id()
+        );
         session
             .send_heartbeat_until(Instant::now() + Duration::from_secs(5))
             .unwrap();
         server_thread.join().unwrap();
+        drop(session);
+        assert!(registry.lock().unwrap().get(key).is_none());
     }
 }
