@@ -107,7 +107,7 @@ impl<'a> RegisteredControlSession<'a> {
     ) -> Result<ControlSessionRead, ControlSessionError> {
         let result = self.session.receive_next_at(now_ms);
         if result.is_err() || matches!(&result, Ok(ControlSessionRead::Closed)) {
-            self.retire();
+            self.close_and_retire();
         }
         result
     }
@@ -115,7 +115,7 @@ impl<'a> RegisteredControlSession<'a> {
     pub fn send_heartbeat_until(&mut self, deadline: Instant) -> Result<(), ControlSessionError> {
         let result = self.session.send_heartbeat_until(deadline);
         if result.is_err() {
-            self.retire();
+            self.close_and_retire();
         }
         result
     }
@@ -123,9 +123,15 @@ impl<'a> RegisteredControlSession<'a> {
     pub fn send_goodbye_until(&mut self, deadline: Instant) -> Result<(), ControlSessionError> {
         let result = self.session.send_goodbye_until(deadline);
         if result.is_err() {
-            self.retire();
+            self.close_and_retire();
         }
         result
+    }
+
+    /// Always close TCP before releasing the session registry slot.
+    fn close_and_retire(&mut self) {
+        self.session.close_owned_socket();
+        self.retire();
     }
 
     fn retire(&self) {
@@ -144,7 +150,6 @@ impl Drop for RegisteredControlSession<'_> {
     fn drop(&mut self) {
         // Shutdown must precede slot removal: otherwise a new authenticated
         // generation could enter while this generation still owns TCP I/O.
-        self.session.close_owned_socket();
-        self.retire();
+        self.close_and_retire();
     }
 }
