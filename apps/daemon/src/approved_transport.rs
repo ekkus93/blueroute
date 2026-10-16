@@ -495,3 +495,10 @@ mod tests {
             *session.session_id()
         );
         session
+            .send_heartbeat_until(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        server_thread.join().unwrap();
+        drop(session);
+        assert!(registry.lock().unwrap().get(key).is_none());
+    }
+}
