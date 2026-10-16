@@ -310,7 +310,10 @@ mod tests {
                 peer: client_pin.node(),
             };
             let first_id = *first.session_id();
-            assert_eq!(registry.lock().unwrap().get(key).unwrap().session_id, first_id);
+            assert_eq!(
+                registry.lock().unwrap().get(key).unwrap().session_id,
+                first_id
+            );
 
             // A second independently authenticated TLS channel from the
             // same approved NodeId is not allowed to replace an active owner.
@@ -329,7 +332,10 @@ mod tests {
                     blueroute_protocol::session::SessionRegistryError::DuplicateActiveSession
                 ))
             ));
-            assert_eq!(registry.lock().unwrap().get(key).unwrap().session_id, first_id);
+            assert_eq!(
+                registry.lock().unwrap().get(key).unwrap().session_id,
+                first_id
+            );
             drop(first);
             assert!(registry.lock().unwrap().get(key).is_none());
         });
