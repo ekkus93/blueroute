@@ -136,6 +136,17 @@ impl<'a> RegisteredControlSession<'a> {
         self.close_and_retire();
     }
 
+    /// Cancel only when the callback refers to this exact TLS exporter
+    /// generation. A delayed link-loss event for an old connection must not
+    /// shut down its authenticated replacement or retire its registry slot.
+    pub fn cancel_if_current(&mut self, expected_session_id: [u8; 16]) -> bool {
+        if self.session_id != expected_session_id {
+            return false;
+        }
+        self.close_and_retire();
+        true
+    }
+
     /// Always close TCP before releasing the session registry slot.
     fn close_and_retire(&mut self) {
         self.session.close_owned_socket();
