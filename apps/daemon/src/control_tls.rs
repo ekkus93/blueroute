@@ -1125,6 +1125,13 @@ impl ActiveControlSession<'_> {
         Ok(())
     }
 
+    /// Recheck durable approval without sending a frame. A daemon lifecycle
+    /// supervisor can use this after trust changes to close revoked channels
+    /// even when the peer is idle and no inbound frame is pending.
+    pub(crate) fn revalidate_approval(&mut self) -> Result<(), ControlSessionError> {
+        self.authorize_outbound()
+    }
+
     fn authorize_outbound(&mut self) -> Result<(), ControlSessionError> {
         if self.terminal {
             return Err(ControlSessionError::Ingress(
