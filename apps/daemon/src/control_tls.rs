@@ -1645,9 +1645,11 @@ mod tests {
         ));
 
         let distinct = LocalControlTlsIdentity::generate(node(5)).unwrap();
-        assert!(server
-            .server_config(network(9), &[first_pin, pin(&distinct)])
-            .is_ok());
+        assert!(
+            server
+                .server_config(network(9), &[first_pin, pin(&distinct)])
+                .is_ok()
+        );
     }
 
     #[test]
