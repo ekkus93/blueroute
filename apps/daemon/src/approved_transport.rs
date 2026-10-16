@@ -484,6 +484,59 @@ mod tests {
     }
 
     #[test]
+    fn stale_revoked_pin_cannot_deny_a_different_approved_tls_peer() {
+        let client = LocalControlTlsIdentity::generate(node(1)).unwrap();
+        let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
+        let revoked = LocalControlTlsIdentity::generate(node(3)).unwrap();
+        let client_pin =
+            PinnedControlTlsPeer::new(network(), client.node(), client.fingerprint()).unwrap();
+        let server_pin =
+            PinnedControlTlsPeer::new(network(), server.node(), server.fingerprint()).unwrap();
+        let (client_socket, server_socket) = socket_pair();
+        let server_thread = thread::spawn(move || {
+            let dir = TestDirectory::new();
+            let trust = trust_for(&dir.0, client_pin.node(), client_pin.fingerprint(), true);
+            futures_lite::future::block_on(trust.trust_peer(revoked.node())).unwrap();
+            trust
+                .enroll_verified_key(
+                    network(),
+                    revoked.node(),
+                    revoked.fingerprint(),
+                    revoked.fingerprint(),
+                )
+                .unwrap();
+            futures_lite::future::block_on(trust.forget_peer(revoked.node())).unwrap();
+            let stale =
+                PinnedControlTlsPeer::new(network(), revoked.node(), revoked.fingerprint())
+                    .unwrap();
+            // The snapshot may predate a revocation. The connection from the
+            // still-approved peer must succeed without restoring stale trust.
+            let session = accept_approved_control_session(
+                server_socket,
+                &server,
+                &[stale, client_pin],
+                &trust,
+                setup(),
+            )
+            .unwrap();
+            assert!(!session.is_terminal());
+            assert!(!trust.approved_control_pins(network()).unwrap().contains(&stale));
+        });
+        let dir = TestDirectory::new();
+        let trust = trust_for(&dir.0, server_pin.node(), server_pin.fingerprint(), true);
+        let session = connect_approved_control_session(
+            client_socket,
+            &client,
+            server_pin,
+            &trust,
+            setup(),
+        )
+        .unwrap();
+        assert!(!session.is_terminal());
+        server_thread.join().unwrap();
+    }
+
+    #[test]
     fn approved_peers_exchange_authenticated_frames_over_owned_tcp() {
         let client = LocalControlTlsIdentity::generate(node(1)).unwrap();
         let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
