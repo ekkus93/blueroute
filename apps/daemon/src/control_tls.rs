@@ -6,6 +6,7 @@
 //! prove possession of the matching private key. This module does not enroll
 //! peers or activate JoinNetwork.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpStream};
@@ -175,8 +176,16 @@ impl LocalControlTlsIdentity {
         {
             return Err(ControlTlsError::InvalidIdentity);
         }
+        // Reject ambiguous identity-to-key mappings before constructing a TLS
+        // verifier. A certificate may never authorize two logical peers, and
+        // one logical peer may never have two concurrently trusted keys.
+        let mut nodes = BTreeSet::new();
+        let mut fingerprints = BTreeSet::new();
         let mut roots = RootCertStore::empty();
         for peer in peers {
+            if !nodes.insert(peer.node) || !fingerprints.insert(peer.fingerprint) {
+                return Err(ControlTlsError::InvalidIdentity);
+            }
             roots
                 .add(peer.certificate.clone())
                 .map_err(|_| ControlTlsError::InvalidCertificate)?;
@@ -1577,6 +1586,68 @@ mod tests {
             ),
             Err(ControlTlsError::CertificateIdentityMismatch)
         ));
+    }
+
+    #[test]
+    fn server_config_rejects_duplicate_node_ids_and_public_keys() {
+        let server = LocalControlTlsIdentity::generate(node(1)).unwrap();
+        let first = LocalControlTlsIdentity::generate(node(2)).unwrap();
+        let rotated = LocalControlTlsIdentity::generate(node(2)).unwrap();
+        let pin = |identity: &LocalControlTlsIdentity| {
+            PinnedControlTlsCertificate::new(
+                network(9),
+                identity.node(),
+                identity.certificate().clone(),
+                identity.fingerprint(),
+            )
+            .unwrap()
+        };
+        let first_pin = pin(&first);
+        assert!(matches!(
+            server.server_config(network(9), &[first_pin.clone(), pin(&rotated)]),
+            Err(ControlTlsError::InvalidIdentity)
+        ));
+        assert!(matches!(
+            server.server_config(network(9), &[first_pin.clone(), first_pin.clone()]),
+            Err(ControlTlsError::InvalidIdentity)
+        ));
+
+        // Two valid, single-SAN certificates may use the same public key
+        // while claiming different NodeIds. They must not share an allowlist.
+        let key = KeyPair::generate().unwrap();
+        let certificate_for = |node_id| {
+            CertificateParams::new(vec![node_dns_name(node_id)])
+                .unwrap()
+                .self_signed(&key)
+                .unwrap()
+        };
+        let cert_a = certificate_for(node(3));
+        let cert_b = certificate_for(node(4));
+        let fingerprint = certificate_fingerprint(cert_a.der()).unwrap();
+        assert_eq!(fingerprint, certificate_fingerprint(cert_b.der()).unwrap());
+        let alias_a = PinnedControlTlsCertificate::new(
+            network(9),
+            node(3),
+            cert_a.der().clone(),
+            fingerprint,
+        )
+        .unwrap();
+        let alias_b = PinnedControlTlsCertificate::new(
+            network(9),
+            node(4),
+            cert_b.der().clone(),
+            fingerprint,
+        )
+        .unwrap();
+        assert!(matches!(
+            server.server_config(network(9), &[alias_a, alias_b]),
+            Err(ControlTlsError::InvalidIdentity)
+        ));
+
+        let distinct = LocalControlTlsIdentity::generate(node(5)).unwrap();
+        assert!(server
+            .server_config(network(9), &[first_pin, pin(&distinct)])
+            .is_ok());
     }
 
     #[test]
