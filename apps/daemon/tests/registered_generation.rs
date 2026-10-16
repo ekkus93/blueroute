@@ -9,7 +9,9 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use blueroute_core::{DisplayName, MembershipRegistry, MembershipState, NetworkId, NetworkMembership, NodeId};
+use blueroute_core::{
+    DisplayName, MembershipRegistry, MembershipState, NetworkId, NetworkMembership, NodeId,
+};
 use blueroute_daemon::{
     ApprovedControlSetup, DurablePeerTrustOperations, LocalControlTlsIdentity, PeerPinStore,
     PeerTrustOperations, PinnedControlTlsPeer, accept_registered_from_durable_approval,
