@@ -2,6 +2,7 @@
 
 use blueroute_client::{BlueRouteClient, ClientError, ClientErrorKind};
 use blueroute_core::{DisplayName, NetworkId, NodeCapabilities, NodeId};
+use blueroute_protocol::peer_pin::SpkiSha256;
 use blueroute_protocol::{
     Command, DaemonStatus, DiagnosticSnapshot, NetworkSummary, NodeSummary, Response,
     SystemDiagnosticMetadata,
@@ -68,6 +69,7 @@ enum NodeCommand {
 }
 #[derive(Debug, Subcommand)]
 enum PeerCommand {
+    LocalKey,
     Trust { node: String },
     Forget { node: String },
 }
@@ -84,6 +86,7 @@ enum Operation {
     Status { json: bool },
     Capabilities { json: bool },
     Diagnostics { json: bool },
+    LocalKey { json: bool },
     NetworkList { json: bool },
     NodeList { json: bool },
     NodeShow { node: NodeId, json: bool },
@@ -169,6 +172,9 @@ fn parse(args: &[String]) -> Result<Operation, String> {
             json,
         },
         Some(CliCommand::Peer {
+            command: PeerCommand::LocalKey,
+        }) => Operation::LocalKey { json },
+        Some(CliCommand::Peer {
             command: PeerCommand::Trust { node },
         }) => Operation::TrustPeer {
             node: parse_node_id(&node).map_err(str::to_owned)?,
@@ -232,6 +238,30 @@ fn format_diagnostics(
             ),
             snapshot.recent_errors.len(),
             snapshot.capabilities
+        ))
+    }
+}
+
+/// Public local identity for out-of-band comparison. It is neither a trust
+/// decision nor evidence of a remote certificate's private-key possession.
+fn format_local_key(
+    local_node: Option<NodeId>,
+    fingerprint: Option<&str>,
+    json: bool,
+) -> Result<String, &'static str> {
+    let node = local_node
+        .filter(|node| *node != NodeId::from_bytes([0; 16]))
+        .ok_or("daemon has no valid local NodeId")?;
+    let fingerprint = SpkiSha256::parse_canonical_hex(
+        fingerprint.ok_or("daemon has no local TLS public-key fingerprint")?,
+    )
+    .map_err(|_| "daemon supplied an invalid TLS public-key fingerprint")?
+    .to_canonical_hex();
+    if json {
+        Ok(serde_json::json!({ "local_node": node, "spki_sha256": fingerprint }).to_string())
+    } else {
+        Ok(format!(
+            "Local NodeId: {node}\nLocal control TLS SPKI SHA-256: {fingerprint}\nCompare these values through an independent channel. This does not enroll or authorize a peer."
         ))
     }
 }
@@ -393,6 +423,21 @@ fn run(args: &[String]) -> i32 {
                     _ => Err("daemon returned an unexpected diagnostics response".into()),
                 })
         }
+        Operation::LocalKey { json } => futures_lite::future::block_on(client.status())
+            .map_err(CliFailure::from)
+            .and_then(|status| {
+                futures_lite::future::block_on(client.request(&Command::GetDiagnostics))
+                    .map_err(CliFailure::from)
+                    .and_then(|response| match response {
+                        Response::Diagnostics(snapshot) => format_local_key(
+                            status.local_node,
+                            snapshot.local_control_tls_spki_sha256.as_deref(),
+                            json,
+                        )
+                        .map_err(CliFailure::from),
+                        _ => Err("daemon returned an unexpected local-key response".into()),
+                    })
+            }),
         Operation::NetworkList { json } => {
             futures_lite::future::block_on(client.request(&Command::ListNetworks))
                 .map_err(CliFailure::from)
@@ -578,6 +623,11 @@ mod tests {
         ] {
             assert!(parse(&command).is_err(), "zero NodeId must fail locally");
         }
+        assert_eq!(
+            parse(&args(&["peer", "local-key", "--json"])),
+            Ok(Operation::LocalKey { json: true })
+        );
+        assert!(parse(&args(&["peer", "local-key", "extra"])).is_err());
         assert!(parse(&args(&["peer", "trust"])).is_err());
         assert!(parse(&args(&["peer", "trust", "unknown-peer"])).is_err());
         assert!(parse(&args(&["peer", "forget", &id, "extra"])).is_err());
@@ -655,6 +705,26 @@ mod tests {
         let json = format_diagnostics(&snapshot, true).unwrap();
         let decoded: DiagnosticSnapshot = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, snapshot);
+    }
+
+    #[test]
+    fn local_key_display_requires_both_valid_daemon_values_and_never_enrolls() {
+        let node = NodeId::from_bytes([7; 16]);
+        let digest = "ab".repeat(32);
+        let human = format_local_key(Some(node), Some(&digest), false).unwrap();
+        assert!(human.contains(&node.to_string()));
+        assert!(human.contains(&digest));
+        assert!(human.contains("does not enroll or authorize"));
+        let encoded = format_local_key(Some(node), Some(&digest), true).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(parsed["local_node"], node.to_string());
+        assert_eq!(parsed["spki_sha256"], digest);
+        assert!(format_local_key(None, Some(&digest), false).is_err());
+        assert!(format_local_key(Some(NodeId::from_bytes([0; 16])), Some(&digest), false).is_err());
+        assert!(format_local_key(Some(node), None, true).is_err());
+        assert!(format_local_key(Some(node), Some(&"00".repeat(32)), true).is_err());
+        assert!(format_local_key(Some(node), Some(&"AB".repeat(32)), true).is_err());
+        assert!(format_local_key(Some(node), Some("invalid"), false).is_err());
     }
 
     #[test]
