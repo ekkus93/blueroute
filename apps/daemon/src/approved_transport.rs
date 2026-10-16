@@ -321,7 +321,8 @@ mod tests {
             .unwrap();
             assert_eq!(session.peer().node(), node(1));
             let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
-            let mut session = RegisteredControlSession::admit(session, Arc::clone(&registry)).unwrap();
+            let mut session =
+                RegisteredControlSession::admit(session, Arc::clone(&registry)).unwrap();
             let key = PeerSessionKey {
                 network: network(),
                 peer: node(1),
