@@ -2129,7 +2129,7 @@ mod tests {
             )));
             if !goodbye_already_received {
                 assert!(matches!(
-                    active.receive_next_at(11).unwrap(),
+                    active.receive_next_at(10_000).unwrap(),
                     ControlSessionRead::Frames(frames)
                         if frames.len() == 1
                             && frames[0].message == ControlMessage::Goodbye
@@ -2139,7 +2139,7 @@ mod tests {
                 .send_goodbye_until(Instant::now() + Duration::from_secs(5))
                 .unwrap();
             assert_eq!(
-                active.receive_next_at(12).unwrap(),
+                active.receive_next_at(20_000).unwrap(),
                 ControlSessionRead::Closed
             );
         });
@@ -2172,12 +2172,12 @@ mod tests {
             .send_goodbye_until(Instant::now() + Duration::from_secs(5))
             .unwrap();
         assert!(matches!(
-            active.receive_next_at(11).unwrap(),
+            active.receive_next_at(10_000).unwrap(),
             ControlSessionRead::Frames(frames)
                 if frames.len() == 1 && frames[0].message == ControlMessage::Goodbye
         ));
         assert_eq!(
-            active.receive_next_at(12).unwrap(),
+            active.receive_next_at(20_000).unwrap(),
             ControlSessionRead::Closed
         );
         server_thread.join().unwrap();
