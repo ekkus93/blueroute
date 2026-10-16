@@ -458,11 +458,13 @@ impl ReconnectScheduler {
         let Some(slot) = self.slots.get_mut(&key) else {
             return Ok(false);
         };
-        if now_ms < slot.last_ms {
-            return Err(ReconnectScheduleError::ClockRegression);
-        }
+        // Stale-generation events are inert, regardless of their timestamp.
+        // Only a matching generation may report clock regression.
         if slot.session_id != session_id {
             return Ok(false);
+        }
+        if now_ms < slot.last_ms {
+            return Err(ReconnectScheduleError::ClockRegression);
         }
         slot.last_ms = now_ms;
         if slot.in_flight || slot.next_attempt_ms.is_none_or(|due| now_ms < due) {
@@ -488,11 +490,13 @@ impl ReconnectScheduler {
         let Some(slot) = self.slots.get_mut(&key) else {
             return Ok(false);
         };
-        if now_ms < slot.last_ms {
-            return Err(ReconnectScheduleError::ClockRegression);
-        }
+        // Stale-generation events are inert, regardless of their timestamp.
+        // Only a matching generation may report clock regression.
         if slot.session_id != session_id {
             return Ok(false);
+        }
+        if now_ms < slot.last_ms {
+            return Err(ReconnectScheduleError::ClockRegression);
         }
         slot.last_ms = now_ms;
         let overdue = slot
@@ -516,10 +520,15 @@ impl ReconnectScheduler {
         let Some(slot) = self.slots.get_mut(&key) else {
             return Ok(None);
         };
+        // A stale callback must not affect the active generation, even if
+        // its timestamp predates the latest local scheduler observation.
+        if slot.session_id != session_id {
+            return Ok(None);
+        }
         if now_ms < slot.last_ms {
             return Err(ReconnectScheduleError::ClockRegression);
         }
-        if slot.session_id != session_id || !slot.in_flight {
+        if !slot.in_flight {
             return Ok(None);
         }
         slot.last_ms = now_ms;
@@ -582,6 +591,28 @@ mod tests {
         assert!(scheduler.cancel_if_current(peer, [3; 16]));
         assert!(!scheduler.cancel_if_current(peer, [3; 16]));
         assert_eq!(scheduler.len(), 0);
+    }
+
+    #[test]
+    fn stale_retry_generation_with_old_timestamp_cannot_poison_new_attempt() {
+        let mut scheduler = ReconnectScheduler::new();
+        let peer = key(5);
+        let active = [5; 16];
+        let stale = [4; 16];
+        assert!(scheduler.schedule_loss(peer, active, 0).unwrap());
+        assert_eq!(scheduler.take_due(peer, active, 250), Ok(true));
+        assert_eq!(scheduler.take_due(peer, stale, 1), Ok(false));
+        assert_eq!(scheduler.take_expired_attempt(peer, stale, 1), Ok(false));
+        assert_eq!(scheduler.attempt_failed(peer, stale, 1), Ok(None));
+        // A genuine regression for the current generation still fails closed.
+        assert_eq!(
+            scheduler.take_expired_attempt(peer, active, 249),
+            Err(ReconnectScheduleError::ClockRegression)
+        );
+        assert_eq!(scheduler.take_expired_attempt(peer, active, 20_250), Ok(true));
+        assert_eq!(scheduler.attempt_failed(peer, active, 20_250), Ok(Some(20_750)));
+        assert_eq!(scheduler.take_due(peer, active, 20_749), Ok(false));
+        assert_eq!(scheduler.take_due(peer, active, 20_750), Ok(true));
     }
 
     #[test]
