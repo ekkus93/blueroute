@@ -25,6 +25,7 @@ use blueroute_core::{
     CoreError, DisplayName, ErrorKind, HealthLevel, NetworkId, NodeCapabilities, NodeId,
     Reachability,
 };
+use blueroute_protocol::peer_pin::SpkiSha256;
 use blueroute_protocol::{
     ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, DiagnosticFailure,
     DiagnosticSnapshot, Event, NodeSummary, ProtocolCodecError, Response, SystemDiagnosticMetadata,
@@ -67,6 +68,7 @@ pub struct DaemonService {
     join_network_operations: Option<Arc<dyn JoinNetworkOperations>>,
     mutation_in_progress: Arc<AtomicBool>,
     system_diagnostics: Arc<Mutex<Option<SystemDiagnosticMetadata>>>,
+    local_control_tls_fingerprint: Option<SpkiSha256>,
     recent_errors: Arc<Mutex<Vec<DiagnosticFailure>>>,
 }
 
@@ -89,6 +91,7 @@ impl DaemonService {
             join_network_operations: None,
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
             system_diagnostics: Arc::new(Mutex::new(None)),
+            local_control_tls_fingerprint: None,
             recent_errors: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -104,6 +107,7 @@ impl DaemonService {
             join_network_operations: None,
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
             system_diagnostics: Arc::new(Mutex::new(None)),
+            local_control_tls_fingerprint: None,
             recent_errors: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -120,6 +124,7 @@ impl DaemonService {
             join_network_operations: None,
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
             system_diagnostics: Arc::new(Mutex::new(None)),
+            local_control_tls_fingerprint: None,
             recent_errors: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -134,6 +139,13 @@ impl DaemonService {
 
     pub fn with_system_diagnostics(mut self, diagnostics: SystemDiagnosticMetadata) -> Self {
         self.system_diagnostics = Arc::new(Mutex::new(Some(diagnostics)));
+        self
+    }
+
+    /// Expose only the daemon's persisted public-key fingerprint for
+    /// independent comparison; this does not grant peer authorization.
+    pub fn with_local_control_tls_fingerprint(mut self, fingerprint: SpkiSha256) -> Self {
+        self.local_control_tls_fingerprint = Some(fingerprint);
         self
     }
 
@@ -247,6 +259,9 @@ impl DaemonService {
             current_network: status.current_network,
             visible_nodes: u32::from(status.local_node.is_some()),
             capabilities: status.capabilities,
+            local_control_tls_spki_sha256: self
+                .local_control_tls_fingerprint
+                .map(SpkiSha256::to_canonical_hex),
             system,
             observed_peers: None,
             interfaces: None,
@@ -600,6 +615,26 @@ mod local_node_tests {
         assert_eq!(diagnostics.api_version, ApiVersion::CURRENT);
         assert_eq!(diagnostics.health, HealthLevel::Degraded);
         assert_eq!(diagnostics.current_network, None);
+    }
+
+    #[test]
+    fn diagnostics_can_display_local_tls_public_key_without_granting_remote_trust() {
+        let fingerprint = SpkiSha256::from_verified_certificate_digest([0xab; 32]).unwrap();
+        let daemon = DaemonService::new(
+            NodeId::from_bytes([7; 16]),
+            HealthLevel::Healthy,
+            NodeCapabilities::default(),
+        )
+        .with_local_control_tls_fingerprint(fingerprint);
+        let snapshot = daemon.diagnostics_snapshot().unwrap();
+        assert_eq!(
+            snapshot.local_control_tls_spki_sha256.as_deref(),
+            Some("abababababababababababababababababababababababababababababababab")
+        );
+        assert!(snapshot.observed_peers.is_none());
+        let encoded = serde_json::to_string(&snapshot).unwrap();
+        assert!(!encoded.contains("PRIVATE KEY"));
+        assert!(!encoded.contains("private_key"));
     }
 
     #[test]

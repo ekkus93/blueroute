@@ -31,7 +31,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|| PathBuf::from(DEFAULT_STATE_DIRECTORY));
     let identity_store = NodeIdentityStore::new(node_identity_path(&state_directory));
     let local_node = identity_store.load_or_create()?;
-    let _local_control_tls_identity =
+    let local_control_tls_identity =
         ControlTlsIdentityStore::new(control_tls_identity_path(&state_directory))
             .load_or_create(local_node)?;
 
@@ -110,7 +110,8 @@ async fn run() -> Result<(), Box<dyn Error>> {
     };
     let service = DaemonService::with_operations(status, network_operations, peer_trust_operations)
         .with_join_network_operations(join_network_operations)
-        .with_system_diagnostics(system_diagnostics);
+        .with_system_diagnostics(system_diagnostics)
+        .with_local_control_tls_fingerprint(local_control_tls_identity.fingerprint());
 
     let _connection = Builder::system()?
         .name(DBUS_SERVICE_NAME)?

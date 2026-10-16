@@ -106,6 +106,10 @@ pub struct DiagnosticSnapshot {
     pub current_network: Option<NetworkId>,
     pub visible_nodes: u32,
     pub capabilities: NodeCapabilities,
+    /// Public local TLS key fingerprint for independent out-of-band comparison.
+    /// This display-only value does not authorize a remote peer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_control_tls_spki_sha256: Option<String>,
     #[serde(default)]
     pub system: Option<SystemDiagnosticMetadata>,
     #[serde(default)]
@@ -473,6 +477,7 @@ mod tests {
             current_network: None,
             visible_nodes: 2,
             capabilities: capabilities(),
+            local_control_tls_spki_sha256: None,
             system: None,
             observed_peers: None,
             interfaces: None,
@@ -514,6 +519,7 @@ mod tests {
             current_network: None,
             visible_nodes: 1,
             capabilities: capabilities(),
+            local_control_tls_spki_sha256: None,
             system: None,
             observed_peers: None,
             interfaces: None,
@@ -523,6 +529,7 @@ mod tests {
         };
         let mut value = serde_json::to_value(&snapshot).unwrap();
         for field in [
+            "local_control_tls_spki_sha256",
             "system",
             "observed_peers",
             "interfaces",

@@ -217,11 +217,12 @@ fn format_diagnostics(
         serde_json::to_string_pretty(snapshot)
     } else {
         Ok(format!(
-            "API: {}\nHealth: {:?}\nNetwork: {:?}\nReported nodes: {} (local-only until peer authentication)\nSystem: {}\nRecent API failures: {}\nCapabilities:\n{:#?}",
+            "API: {}\nHealth: {:?}\nNetwork: {:?}\nReported nodes: {} (local-only until peer authentication)\nLocal control TLS SPKI SHA-256: {}\nSystem: {}\nRecent API failures: {}\nCapabilities:\n{:#?}",
             snapshot.api_version,
             snapshot.health,
             snapshot.current_network,
             snapshot.visible_nodes,
+            snapshot.local_control_tls_spki_sha256.as_deref().unwrap_or("unavailable"),
             snapshot.system.as_ref().map_or_else(
                 || "platform details unavailable".to_owned(),
                 format_system_diagnostics,
@@ -625,6 +626,7 @@ mod tests {
             current_network: None,
             visible_nodes: 1,
             capabilities: NodeCapabilities::default(),
+            local_control_tls_spki_sha256: None,
             system: None,
             observed_peers: None,
             interfaces: None,
@@ -640,7 +642,9 @@ mod tests {
             network_backend_version: None,
             adapters: Vec::new(),
         });
+        snapshot.local_control_tls_spki_sha256 = Some("ab".repeat(32));
         let output = format_diagnostics(&snapshot, false).unwrap();
+        assert!(output.contains(&"ab".repeat(32)));
         assert!(output.contains("Health: Degraded"));
         assert!(output.contains("local-only until peer authentication"));
         assert!(output.contains("daemon=0.1.0"));
