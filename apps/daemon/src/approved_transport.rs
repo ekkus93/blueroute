@@ -358,6 +358,53 @@ mod tests {
     }
 
     #[test]
+    fn derived_inbound_pins_refuse_trust_only_and_wrong_network_before_tls() {
+        let local = LocalControlTlsIdentity::generate(node(1)).unwrap();
+        let remote = LocalControlTlsIdentity::generate(node(2)).unwrap();
+        let dir = TestDirectory::new();
+        let trust = trust_for(&dir.0, remote.node(), remote.fingerprint(), false);
+        let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+        assert!(trust.approved_control_pins(network()).unwrap().is_empty());
+
+        let (socket, mut peer) = socket_pair();
+        assert!(matches!(
+            accept_registered_from_durable_approval(
+                socket,
+                &local,
+                &trust,
+                setup(),
+                Arc::clone(&registry)
+            ),
+            Err(RegisteredControlSetupError::Control(
+                ControlSessionError::Ingress(PinnedIngressError::Authorization(_))
+            ))
+        ));
+        peer.set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        assert_eq!(peer.read(&mut [0_u8; 1]).unwrap(), 0);
+
+        let (socket, mut peer) = socket_pair();
+        let mut wrong_network = setup();
+        wrong_network.network = NetworkId::from_bytes([8; 16]);
+        assert!(matches!(
+            accept_registered_from_durable_approval(
+                socket,
+                &local,
+                &trust,
+                wrong_network,
+                Arc::clone(&registry)
+            ),
+            Err(RegisteredControlSetupError::Control(
+                ControlSessionError::Ingress(PinnedIngressError::Authorization(_))
+            ))
+        ));
+        peer.set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        assert_eq!(peer.read(&mut [0_u8; 1]).unwrap(), 0);
+        assert!(registry.lock().unwrap().is_empty());
+    }
+
+    #[test]
     fn second_live_mutual_tls_session_cannot_replace_active_registered_peer() {
         let client = LocalControlTlsIdentity::generate(node(1)).unwrap();
         let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
@@ -450,9 +497,8 @@ mod tests {
         let server_thread = thread::spawn(move || {
             let dir = TestDirectory::new();
             let trust = trust_for(&dir.0, client_pin.node(), client_pin.fingerprint(), true);
-            // The listener may retain an earlier pin snapshot after revocation.
-            // This stale entry must neither authorize the revoked peer nor
-            // prevent a still-approved peer from completing mutual TLS.
+            // The on-disk allowlist must exclude revoked pins while still
+            // accepting independently approved and enrolled live peers.
             let revoked = LocalControlTlsIdentity::generate(node(3)).unwrap();
             let revoked_pin =
                 PinnedControlTlsPeer::new(network(), revoked.node(), revoked.fingerprint())
@@ -467,11 +513,13 @@ mod tests {
                 )
                 .unwrap();
             futures_lite::future::block_on(trust.forget_peer(revoked.node())).unwrap();
+            let allowed = trust.approved_control_pins(network()).unwrap();
+            assert_eq!(allowed, vec![client_pin]);
+            assert!(!allowed.contains(&revoked_pin));
             let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
-            let mut session = accept_registered_control_session(
+            let mut session = accept_registered_from_durable_approval(
                 server_socket,
                 &server,
-                &[revoked_pin, client_pin],
                 &trust,
                 setup(),
                 Arc::clone(&registry),
