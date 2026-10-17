@@ -126,8 +126,7 @@ mod tests {
         let new = route(1, 3, 4, 20);
         let stale = route(1, 5, 2, 10);
         let desired = [new.clone()];
-        let plan =
-            plan_route_reconciliation(network(1), &desired, &[old, stale.clone()]).unwrap();
+        let plan = plan_route_reconciliation(network(1), &desired, &[old, stale.clone()]).unwrap();
         assert_eq!(plan.upsert, vec![new.clone()]);
         assert_eq!(plan.remove, vec![stale]);
         assert_eq!(
