@@ -33,15 +33,13 @@ fn validate_desired(route: &Route, network: NetworkId) -> Result<(), CoreError> 
         return Err(invalid("route cost must be positive"));
     }
     match &route.destination {
-        RouteDestination::Internet => {
-            Err(invalid("default/Internet route is outside local LAN policy"))
-        }
+        RouteDestination::Internet => Err(invalid(
+            "default/Internet route is outside local LAN policy",
+        )),
         RouteDestination::Node(node) if node.as_bytes().iter().all(|byte| *byte == 0) => {
             Err(invalid("route destination has zero identity"))
         }
-        RouteDestination::Segment(segment)
-            if segment.as_bytes().iter().all(|byte| *byte == 0) =>
-        {
+        RouteDestination::Segment(segment) if segment.as_bytes().iter().all(|byte| *byte == 0) => {
             Err(invalid("route segment has zero identity"))
         }
         RouteDestination::Prefix(prefix) => {
@@ -72,7 +70,10 @@ pub fn plan_route_reconciliation(
     let mut wanted = BTreeMap::new();
     for route in desired {
         validate_desired(route, network)?;
-        if wanted.insert(route.destination.clone(), route.clone()).is_some() {
+        if wanted
+            .insert(route.destination.clone(), route.clone())
+            .is_some()
+        {
             return Err(invalid("duplicate desired route destination"));
         }
     }
@@ -81,7 +82,10 @@ pub fn plan_route_reconciliation(
         if route.owner != RouteOwner::BlueRouteNetwork(network) {
             continue;
         }
-        if existing.insert(route.destination.clone(), route.clone()).is_some() {
+        if existing
+            .insert(route.destination.clone(), route.clone())
+            .is_some()
+        {
             return Err(invalid("duplicate observed owned route destination"));
         }
     }
@@ -123,8 +127,8 @@ mod tests {
         let old = route(1, 3, 2, 10);
         let new = route(1, 3, 4, 20);
         let stale = route(1, 5, 2, 10);
-        let plan = plan_route_reconciliation(network(1), &[new.clone()], &[old, stale.clone()])
-            .unwrap();
+        let plan =
+            plan_route_reconciliation(network(1), &[new.clone()], &[old, stale.clone()]).unwrap();
         assert_eq!(plan.upsert, vec![new.clone()]);
         assert_eq!(plan.remove, vec![stale]);
         assert_eq!(
@@ -137,8 +141,7 @@ mod tests {
     fn foreign_network_routes_are_preserved() {
         let foreign = route(2, 3, 7, 10);
         let local = route(1, 3, 2, 10);
-        let plan = plan_route_reconciliation(network(1), &[local.clone()], &[foreign])
-            .unwrap();
+        let plan = plan_route_reconciliation(network(1), &[local.clone()], &[foreign]).unwrap();
         assert_eq!(plan.upsert, vec![local]);
         assert!(plan.remove.is_empty());
     }
@@ -158,8 +161,12 @@ mod tests {
         let valid = route(1, 3, 2, 10);
         assert!(plan_route_reconciliation(network(0), &[], &[]).is_err());
         assert!(plan_route_reconciliation(network(1), &[route(2, 3, 2, 10)], &[]).is_err());
-        assert!(plan_route_reconciliation(network(1), &[valid.clone(), valid.clone()], &[]).is_err());
-        assert!(plan_route_reconciliation(network(1), &[], &[valid.clone(), valid.clone()]).is_err());
+        assert!(
+            plan_route_reconciliation(network(1), &[valid.clone(), valid.clone()], &[]).is_err()
+        );
+        assert!(
+            plan_route_reconciliation(network(1), &[], &[valid.clone(), valid.clone()]).is_err()
+        );
         assert!(plan_route_reconciliation(network(1), &[route(1, 3, 0, 10)], &[]).is_err());
         assert!(plan_route_reconciliation(network(1), &[route(1, 3, 2, 0)], &[]).is_err());
         assert!(plan_route_reconciliation(network(1), &[route(1, 0, 2, 10)], &[]).is_err());
