@@ -175,3 +175,22 @@ fn unobserved_connect_success_does_not_remove_working_path() {
     assert_eq!(backend.links, BTreeSet::from([link(1, 2)]));
     assert!(!backend.events.contains(&"disconnect"));
 }
+
+#[test]
+fn route_failure_halts_teardown_and_replan_can_resume() {
+    let mut backend = Fake {
+        links: BTreeSet::from([link(1, 2)]),
+        fail_routes: true,
+        ..Fake::default()
+    };
+    let error = execute_nap_plan(&policy(), &plan(&[2]), &plan(&[3]), &mut backend).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::RouteFailure);
+    assert_eq!(backend.links, BTreeSet::from([link(1, 2), link(1, 3)]));
+    assert!(!backend.events.contains(&"disconnect"));
+
+    backend.fail_routes = false;
+    backend.events.clear();
+    let report = execute_nap_plan(&policy(), &plan(&[2, 3]), &plan(&[3]), &mut backend).unwrap();
+    assert_eq!(report.applied, [NapPlanStep::Disconnect(link(1, 2))]);
+    assert_eq!(report.observed, BTreeSet::from([link(1, 3)]));
+}
