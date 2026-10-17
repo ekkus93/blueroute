@@ -29,6 +29,51 @@ impl AuthenticatedNapTicket {
     }
 }
 
+/// Owns one capacity reservation until explicitly retired or dropped.
+/// The owner must keep this lease alive while the PANU is attached; losing
+/// the authenticated control owner should drop this lease and release its slot.
+#[derive(Debug)]
+pub struct AuthenticatedNapLease<'a> {
+    admission: &'a NetworkNapAdmission,
+    ticket: AuthenticatedNapTicket,
+}
+
+impl AuthenticatedNapLease<'_> {
+    pub fn ticket(&self) -> &AuthenticatedNapTicket {
+        &self.ticket
+    }
+
+    /// The daemon must independently observe the matching PANU attachment.
+    pub fn activate(
+        &self,
+        session: &mut RegisteredControlSession<'_>,
+    ) -> Result<bool, CoreError> {
+        activate_authenticated_nap(session, self.admission, &self.ticket)
+    }
+
+    pub fn retire(&self) -> Result<bool, CoreError> {
+        retire_authenticated_nap(self.admission, &self.ticket)
+    }
+}
+
+impl Drop for AuthenticatedNapLease<'_> {
+    fn drop(&mut self) {
+        // The ledger is generation-scoped. A stale lease can never remove
+        // a replacement; on poison, further admission is already denied.
+        let _ = self.retire();
+    }
+}
+
+/// Preferred reservation entry point. The lease releases capacity on every
+/// ordinary Rust unwind/drop path, including failed attachment and shutdown.
+pub fn reserve_authenticated_nap_lease<'a>(
+    session: &mut RegisteredControlSession<'_>,
+    admission: &'a NetworkNapAdmission,
+) -> Result<(AuthenticatedNapLease<'a>, NapAdmissionDecision), CoreError> {
+    let (ticket, decision) = reserve_authenticated_nap(session, admission)?;
+    Ok((AuthenticatedNapLease { admission, ticket }, decision))
+}
+
 fn same_session(
     network: NetworkId,
     peer: NodeId,
@@ -142,6 +187,35 @@ mod tests {
         assert!(!same_session(network(3), peer(2), [7; 16], &authenticated));
         assert!(retire_authenticated_nap(&admission, &authenticated).unwrap());
         assert!(!retire_authenticated_nap(&admission, &authenticated).unwrap());
+    }
+
+    #[test]
+    fn scoped_lease_drop_releases_pending_and_active_capacity() {
+        let admission = NetworkNapAdmission::new(network(1), capabilities()).unwrap();
+        let (pending, _) = admission.reserve(peer(2)).unwrap();
+        let lease = AuthenticatedNapLease {
+            admission: &admission,
+            ticket: AuthenticatedNapTicket {
+                ticket: pending,
+                session_id: [7; 16],
+            },
+        };
+        assert_eq!(admission.counts().unwrap(), (0, 1));
+        drop(lease);
+        assert_eq!(admission.counts().unwrap(), (0, 0));
+        let (active, _) = admission.reserve(peer(2)).unwrap();
+        assert!(admission.activate(&active).unwrap());
+        let lease = AuthenticatedNapLease {
+            admission: &admission,
+            ticket: AuthenticatedNapTicket {
+                ticket: active,
+                session_id: [8; 16],
+            },
+        };
+        assert_eq!(admission.counts().unwrap(), (1, 0));
+        assert!(lease.retire().unwrap());
+        drop(lease);
+        assert_eq!(admission.counts().unwrap(), (0, 0));
     }
 
     #[test]

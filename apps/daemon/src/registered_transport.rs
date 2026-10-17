@@ -17,7 +17,7 @@ use blueroute_protocol::session::{
 mod generation_guard;
 #[path = "nap_control_admission.rs"]
 mod nap_control_admission;
-pub use nap_control_admission::AuthenticatedNapTicket;
+pub use nap_control_admission::{AuthenticatedNapLease, AuthenticatedNapTicket};
 
 use crate::control_tls::ControlSessionRead;
 use crate::{ActiveControlSession, ControlSessionError};
@@ -51,6 +51,15 @@ pub struct RegisteredControlSession<'a> {
 }
 
 impl<'a> RegisteredControlSession<'a> {
+    /// Prefer an RAII reservation lease so failed attachment and shutdown
+    /// cannot strand pending NAP capacity. Keep the lease through PAN teardown.
+    pub fn reserve_nap_lease<'b>(
+        &mut self,
+        admission: &'b NetworkNapAdmission,
+    ) -> Result<(AuthenticatedNapLease<'b>, NapAdmissionDecision), CoreError> {
+        nap_control_admission::reserve_authenticated_nap_lease(self, admission)
+    }
+
     /// Reserve a NAP slot using this live, mutually authenticated and approved
     /// control session; this does not establish or observe a PANU attachment.
     pub fn reserve_nap(
