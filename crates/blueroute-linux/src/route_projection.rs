@@ -131,6 +131,12 @@ pub fn project_ipv4_route_intents(
             .get(&route.next_hop)
             .ok_or_else(|| invalid("unobserved next hop"))?;
         let via = if prefix.prefix_len == 32 && prefix.address == IpAddr::V4(hop.address) {
+            // A host route is on-link only when the destination is the
+            // authenticated first hop itself. A different logical node
+            // claiming that address must not be treated as directly reached.
+            if route.destination != RouteDestination::Node(route.next_hop) {
+                return Err(invalid("destination aliases another next-hop identity"));
+            }
             None
         } else {
             Some(IpAddr::V4(hop.address))
@@ -204,6 +210,23 @@ mod tests {
         assert_eq!(result[0].via, None);
         assert_eq!(result[1].via, Some(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 2))));
         assert!(result.iter().all(|route| route.owner == network(1)));
+    }
+
+    #[test]
+    fn unrelated_node_cannot_become_direct_by_aliasing_next_hop_address() {
+        let aliased = binding(3, [10, 20, 0, 2]);
+        assert!(
+            project_ipv4_route_intents(network(1), &[route(3)], &[aliased], &[hop()]).is_err()
+        );
+        let direct = project_ipv4_route_intents(
+            network(1),
+            &[route(2)],
+            &[binding(2, [10, 20, 0, 2])],
+            &[hop()],
+        )
+        .unwrap();
+        assert_eq!(direct.len(), 1);
+        assert_eq!(direct[0].via, None);
     }
 
     #[test]
