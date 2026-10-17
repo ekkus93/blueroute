@@ -9,9 +9,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use blueroute_core::{
-    CoreError, NapAdmissionDecision, NetworkId, NetworkNapAdmission, NodeId,
-};
+use blueroute_core::{CoreError, NapAdmissionDecision, NetworkId, NetworkNapAdmission, NodeId};
 use blueroute_protocol::session::{
     ControlSessionRegistry, PeerSessionKey, SessionRegistration, SessionRegistryError,
 };

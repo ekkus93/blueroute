@@ -6,8 +6,8 @@
 //! recheck approval; the daemon must separately observe the actual PANU
 //! attachment before activating. This module does not run a PAN listener.
 use blueroute_core::{
-    CoreError, ErrorKind, NapAdmissionDecision, NetworkNapAdmission, NetworkNapTicket,
-    NetworkId, NodeId,
+    CoreError, ErrorKind, NapAdmissionDecision, NetworkId, NetworkNapAdmission, NetworkNapTicket,
+    NodeId,
 };
 
 use crate::RegisteredControlSession;
@@ -149,7 +149,10 @@ mod tests {
         let old = NetworkNapAdmission::new(network(1), capabilities()).unwrap();
         let new = NetworkNapAdmission::new(network(1), capabilities()).unwrap();
         let (ticket, _) = old.reserve(peer(2)).unwrap();
-        let old_ticket = AuthenticatedNapTicket { ticket, session_id: [7; 16] };
+        let old_ticket = AuthenticatedNapTicket {
+            ticket,
+            session_id: [7; 16],
+        };
         let (fresh, _) = new.reserve(peer(2)).unwrap();
         assert!(!retire_authenticated_nap(&new, &old_ticket).unwrap());
         assert!(new.activate(&fresh).unwrap());
