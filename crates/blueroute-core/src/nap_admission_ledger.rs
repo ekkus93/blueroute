@@ -9,8 +9,7 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use crate::{
-    CoreError, ErrorKind, NapAdmissionDecision, NodeCapabilities, NodeId,
-    plan_nap_client_admission,
+    CoreError, ErrorKind, NapAdmissionDecision, NodeCapabilities, NodeId, plan_nap_client_admission,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -51,7 +50,10 @@ impl NapAdmissionLedger {
         candidate: NodeId,
     ) -> Result<(NapAdmissionTicket, NapAdmissionDecision), CoreError> {
         let mut state = self.state.lock().map_err(|_| {
-            CoreError::new(ErrorKind::InvalidState, "NAP admission ledger lock poisoned")
+            CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP admission ledger lock poisoned",
+            )
         })?;
         if state.pending.contains_key(&candidate) {
             return Err(CoreError::new(
@@ -68,17 +70,26 @@ impl NapAdmissionLedger {
         let decision = plan_nap_client_admission(&self.host, &observed, candidate)?;
         if let Some(&generation) = state.active.get(&candidate) {
             return Ok((
-                NapAdmissionTicket { candidate, generation },
+                NapAdmissionTicket {
+                    candidate,
+                    generation,
+                },
                 decision,
             ));
         }
         let generation = state.next_generation.checked_add(1).ok_or_else(|| {
-            CoreError::new(ErrorKind::InvalidState, "NAP admission generation exhausted")
+            CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP admission generation exhausted",
+            )
         })?;
         state.next_generation = generation;
         state.pending.insert(candidate, generation);
         Ok((
-            NapAdmissionTicket { candidate, generation },
+            NapAdmissionTicket {
+                    candidate,
+                    generation,
+                },
             decision,
         ))
     }
@@ -87,7 +98,10 @@ impl NapAdmissionLedger {
     /// and attachment succeed. A repeated confirmation is idempotent.
     pub fn activate(&self, ticket: NapAdmissionTicket) -> Result<bool, CoreError> {
         let mut state = self.state.lock().map_err(|_| {
-            CoreError::new(ErrorKind::InvalidState, "NAP admission ledger lock poisoned")
+            CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP admission ledger lock poisoned",
+            )
         })?;
         if state.active.get(&ticket.candidate) == Some(&ticket.generation) {
             return Ok(false);
@@ -106,7 +120,10 @@ impl NapAdmissionLedger {
     /// Retire an exact pending/active generation; stale callbacks are harmless.
     pub fn retire(&self, ticket: NapAdmissionTicket) -> Result<bool, CoreError> {
         let mut state = self.state.lock().map_err(|_| {
-            CoreError::new(ErrorKind::InvalidState, "NAP admission ledger lock poisoned")
+            CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP admission ledger lock poisoned",
+            )
         })?;
         if state.pending.get(&ticket.candidate) == Some(&ticket.generation) {
             state.pending.remove(&ticket.candidate);
@@ -122,7 +139,10 @@ impl NapAdmissionLedger {
     /// In-process counts, not observations of live Bluetooth attachments.
     pub fn counts(&self) -> Result<(usize, usize), CoreError> {
         let state = self.state.lock().map_err(|_| {
-            CoreError::new(ErrorKind::InvalidState, "NAP admission ledger lock poisoned")
+            CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP admission ledger lock poisoned",
+            )
         })?;
         Ok((state.active.len(), state.pending.len()))
     }
@@ -183,7 +203,10 @@ mod tests {
         let (new, _) = ledger.reserve(peer(1)).unwrap();
         assert_ne!(old.generation, new.generation);
         assert!(!ledger.retire(old).unwrap());
-        assert_eq!(ledger.activate(old).unwrap_err().kind(), ErrorKind::InvalidState);
+        assert_eq!(
+            ledger.activate(old).unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
         assert!(ledger.activate(new).unwrap());
         assert!(!ledger.retire(old).unwrap());
         assert_eq!(ledger.counts().unwrap(), (1, 0));

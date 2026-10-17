@@ -349,6 +349,7 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 - Parsing/serialization tests exist.
 
 
+
 ## P2-002 — Define node capability model
 
 - [x] Bluetooth adapter usability.
@@ -698,6 +699,7 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 - [x] version negotiation.
 - [x] typed requests.
 - [x] events.
+
 - [x] reconnect after daemon restart.
 
 
@@ -825,7 +827,9 @@ This is the first complete product slice.
 - Stable multi-client star works at documented count for tested adapter.
 - Count is not treated as universal.
 
-**P6-007 concurrent reservation model (software-only, 2026-10-17):** A generation-scoped, mutex-serialized NAP admission ledger now counts in-flight reservations alongside active modeled clients, rejects duplicate pending attempts and overbooking, promotes only matching generations and ignores stale teardown callbacks. Four deterministic tests include a 16-thread/three-slot race, stale-generation retirement, idempotent activation and unknown-capability denial. This is **in-process policy only**: it is not wired to daemon PANU admission, independently authenticated attachment observations, actual radio client counts or concurrent physical traffic. Exact-head CI qualification is pending.\n\n**P6-007 NAP admission planner (software-only, 2026-10-17):** `blueroute_core::plan_nap_client_admission` evaluates a caller-supplied list of already authenticated active PANU NodeIds against explicit locally sourced adapter/NAP capabilities and `connection_policy_ceiling`. It refuses unknown/zero ceilings, duplicate/zero identities, impossible over-capacity observations and a new client at capacity, while allowing a repeat admission of an existing peer without consuming another slot. Five negative/positive deterministic tests passed [exact-head CI 39064441580](https://github.com/ekkus93/blueroute/actions/runs/39064441580) at `42cede7a93b5bd5fe8e1abbbd06fbc6d48f518dd`. The planner does **not** authenticate peers, serialize concurrent admission in the daemon, attach PANU hardware, send TCP/UDP traffic, or establish a device's real simultaneous-link ceiling. P6-007 remains IN PROGRESS; all three original checkboxes remain open for end-to-end completion. See [evidence](P6-007-MULTICLIENT-ADMISSION-POLICY-2026-10-17.md).
+**P6-007 concurrent reservation model (software-only, 2026-10-17):** A generation-scoped, mutex-serialized NAP admission ledger now counts in-flight reservations alongside active modeled clients, rejects duplicate pending attempts and overbooking, promotes only matching generations and ignores stale teardown callbacks. Four deterministic tests include a 16-thread/three-slot race, stale-generation retirement, idempotent activation and unknown-capability denial. This is **in-process policy only**: it is not wired to daemon PANU admission, independently authenticated attachment observations, actual radio client counts or concurrent physical traffic. Exact-head CI qualification is pending.
+
+**P6-007 NAP admission planner (software-only, 2026-10-17):** `blueroute_core::plan_nap_client_admission` evaluates a caller-supplied list of already authenticated active PANU NodeIds against explicit locally sourced adapter/NAP capabilities and `connection_policy_ceiling`. It refuses unknown/zero ceilings, duplicate/zero identities, impossible over-capacity observations and a new client at capacity, while allowing a repeat admission of an existing peer without consuming another slot. Five negative/positive deterministic tests passed [exact-head CI 39064441580](https://github.com/ekkus93/blueroute/actions/runs/39064441580) at `42cede7a93b5bd5fe8e1abbbd06fbc6d48f518dd`. The planner does **not** authenticate peers, serialize concurrent admission in the daemon, attach PANU hardware, send TCP/UDP traffic, or establish a device's real simultaneous-link ceiling. P6-007 remains IN PROGRESS; all three original checkboxes remain open for end-to-end completion. See [evidence](P6-007-MULTICLIENT-ADMISSION-POLICY-2026-10-17.md).
 
 **P6-007 capacity CLI diagnostics (software-only, 2026-10-17):** `blueroute capability show` now prints a source-labeled NAP policy ceiling and explicitly marks active attached PANU count unavailable; `--json` retains the original typed response. This avoids inferring measured controller capacity or live client state from a conservative default. Formatter/JSON tests passed [exact-head CI 39064822988](https://github.com/ekkus93/blueroute/actions/runs/39064822988) at `c29f09760a82e57ec07e92031ef1995a4c89a238`. Runtime peer-count diagnostics and physical acceptance remain OPEN. See [evidence](P6-007-MULTICLIENT-ADMISSION-POLICY-2026-10-17.md).
 
@@ -1048,6 +1052,7 @@ This is the first complete product slice.
 **Acceptance**
 
 - Routing node forwards BlueRoute traffic between test PAN segments.
+
 
 ## P8-004 — Implement route computation v1
 
@@ -1398,6 +1403,7 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 - [ ] Tauri 2.
 - [ ] TypeScript frontend.
+
 - [ ] React preferred unless ADR changes it.
 - [ ] formatting/type-check/tests.
 
@@ -1749,6 +1755,7 @@ Cover:
 
 **Acceptance**
 
+
 - Package installs on clean supported Debian baseline on more than one compatible computer model when available.
 
 **SOFTWARE BUILD COMPLETE / HARDWARE DEFERRED:** `packaging/debian/build-package.sh` produced `target/debian/blueroute_0.1.0_amd64.deb` and verified the extracted file list and dependency fields. Clean Debian install and multi-model qualification remain outstanding.
@@ -2098,6 +2105,7 @@ client -> routing node -> gateway -> Internet
 - [ ] firewall exposure.
 - [ ] malicious clients/gateways.
 - [ ] DNS trust.
+
 - [ ] route injection.
 - [ ] accidental uplink exposure.
 
