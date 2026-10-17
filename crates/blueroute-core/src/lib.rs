@@ -10,6 +10,7 @@ mod id;
 mod membership;
 mod neighbor;
 mod route;
+mod route_executor;
 mod route_planner;
 mod route_reconciliation;
 mod secret;
@@ -40,6 +41,7 @@ pub use neighbor::{
     NeighborObservations,
 };
 pub use route::{IpPrefix, Route, RouteDestination, RouteOwner};
+pub use route_executor::{OwnedRouteOperator, RouteChange, RouteExecutionReport, execute_route_reconciliation};
 pub use route_planner::{DEGRADED_LINK_COST_PENALTY, desired_node_routes};
 pub use route_reconciliation::{RouteReconciliationPlan, plan_route_reconciliation};
 pub use secret::Secret;
