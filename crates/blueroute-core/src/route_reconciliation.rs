@@ -297,7 +297,9 @@ mod tests {
         foreign.destination = RouteDestination::Prefix(
             IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 77)), 24).unwrap(),
         );
-        assert!(plan_route_reconciliation(network(1), &[desired.clone()], &[foreign.clone()]).is_err());
+        assert!(
+            plan_route_reconciliation(network(1), &[desired.clone()], &[foreign.clone()]).is_err()
+        );
 
         foreign.destination = RouteDestination::Prefix(
             IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 21, 0, 77)), 24).unwrap(),
@@ -316,13 +318,19 @@ mod tests {
 
         let mut desired = route(1, 3, 2, 10);
         desired.destination = RouteDestination::Prefix(
-            IpPrefix::new(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 1, 0, 0, 0, 0)), 64)
-                .unwrap(),
+            IpPrefix::new(
+                IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 1, 0, 0, 0, 0)),
+                64,
+            )
+            .unwrap(),
         );
         let mut foreign = route(2, 4, 7, 10);
         foreign.destination = RouteDestination::Prefix(
-            IpPrefix::new(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 1, 0, 0, 0, 9)), 64)
-                .unwrap(),
+            IpPrefix::new(
+                IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 1, 0, 0, 0, 9)),
+                64,
+            )
+            .unwrap(),
         );
         assert!(plan_route_reconciliation(network(1), &[desired], &[foreign]).is_err());
     }
