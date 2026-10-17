@@ -181,6 +181,10 @@ mod tests {
             address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0)),
             prefix_len: 33,
         });
+        assert!(plan_route_reconciliation(network(1), &[bad.clone()], &[]).is_err());
+        if let RouteDestination::Prefix(prefix) = &mut bad.destination {
+            prefix.prefix_len = 0;
+        }
         assert!(plan_route_reconciliation(network(1), &[bad], &[]).is_err());
     }
 }
