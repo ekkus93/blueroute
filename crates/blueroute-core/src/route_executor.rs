@@ -5,9 +5,7 @@
 //! against the supplied previous value before replacing or deleting anything.
 //! An authenticated per-network owner must serialize callers, and must not
 //! pass unauthenticated topology claims to this executor.
-use crate::{
-    CoreError, ErrorKind, NetworkId, Route, RouteOwner, plan_route_reconciliation,
-};
+use crate::{CoreError, ErrorKind, NetworkId, Route, RouteOwner, plan_route_reconciliation};
 
 /// Observations must reflect kernel state, not cached successful requests.
 /// The backend guarantees atomic ownership checks *at the mutation itself*;
@@ -71,9 +69,7 @@ pub fn execute_route_reconciliation(
             .find(|route| route.owner == owner && route.destination == new.destination);
         operator.replace_owned_route(previous, &new)?;
         let mut expected = observed.clone();
-        expected.retain(|route| {
-            !(route.owner == owner && route.destination == new.destination)
-        });
+        expected.retain(|route| !(route.owner == owner && route.destination == new.destination));
         expected.push(new.clone());
         expected.sort();
         let mut post = operator.observe_routes()?;
@@ -181,12 +177,16 @@ mod tests {
                 ));
             }
             if !self.ignore_write {
-                self.routes.retain(|route| route.destination != replacement.destination);
+                self.routes
+                    .retain(|route| route.destination != replacement.destination);
                 self.routes.push(replacement.clone());
             }
             self.writes.push(RouteChange::Upsert(replacement.clone()));
             if self.fail_after_write {
-                return Err(CoreError::new(ErrorKind::RouteFailure, "injected route write failure"));
+                return Err(CoreError::new(
+                    ErrorKind::RouteFailure,
+                    "injected route write failure",
+                ));
             }
             Ok(())
         }
@@ -203,7 +203,10 @@ mod tests {
             }
             self.writes.push(RouteChange::Remove(previous.clone()));
             if self.fail_after_write {
-                return Err(CoreError::new(ErrorKind::RouteFailure, "injected route removal failure"));
+                return Err(CoreError::new(
+                    ErrorKind::RouteFailure,
+                    "injected route removal failure",
+                ));
             }
             Ok(())
         }
@@ -216,19 +219,25 @@ mod tests {
         let obsolete = route(1, 5, 4);
         let desired = route(1, 3, 7);
         let mut fake = FakeRoutes::new(vec![foreign.clone(), old, obsolete.clone()]);
-        let result = execute_route_reconciliation(network(1), &[desired.clone()], &mut fake).unwrap();
+        let result =
+            execute_route_reconciliation(network(1), &[desired.clone()], &mut fake).unwrap();
         assert_eq!(
             result.applied,
-            vec![RouteChange::Upsert(desired.clone()), RouteChange::Remove(obsolete)]
+            vec![
+                RouteChange::Upsert(desired.clone()),
+                RouteChange::Remove(obsolete)
+            ]
         );
         assert_eq!(
             result.observed.into_iter().collect::<BTreeSet<_>>(),
             BTreeSet::from([foreign, desired])
         );
-        assert!(execute_route_reconciliation(network(1), &[route(1, 3, 7)], &mut fake)
-            .unwrap()
-            .applied
-            .is_empty());
+        assert!(
+            execute_route_reconciliation(network(1), &[route(1, 3, 7)], &mut fake)
+                .unwrap()
+                .applied
+                .is_empty()
+        );
         assert_eq!(fake.writes.len(), 2);
     }
 
@@ -251,8 +260,8 @@ mod tests {
         let foreign = route(2, 90, 91);
         let mut fake = FakeRoutes::new(vec![]);
         fake.mutate_on_observe = Some((2, foreign.clone()));
-        let error = execute_route_reconciliation(network(1), &[route(1, 3, 7)], &mut fake)
-            .unwrap_err();
+        let error =
+            execute_route_reconciliation(network(1), &[route(1, 3, 7)], &mut fake).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidState);
         assert_eq!(fake.routes, vec![foreign]);
         assert!(fake.writes.is_empty());
@@ -270,8 +279,8 @@ mod tests {
         );
         assert_eq!(fake.routes, vec![desired.clone()]);
         fake.fail_after_write = false;
-        let retry =
-            execute_route_reconciliation(network(1), &[desired, second.clone()], &mut fake).unwrap();
+        let retry = execute_route_reconciliation(network(1), &[desired, second.clone()], &mut fake)
+            .unwrap();
         assert_eq!(retry.applied, vec![RouteChange::Upsert(second)]);
     }
 
@@ -279,8 +288,8 @@ mod tests {
     fn success_without_kernel_effect_is_detected_and_stops() {
         let mut fake = FakeRoutes::new(vec![]);
         fake.ignore_write = true;
-        let error = execute_route_reconciliation(network(1), &[route(1, 3, 7)], &mut fake)
-            .unwrap_err();
+        let error =
+            execute_route_reconciliation(network(1), &[route(1, 3, 7)], &mut fake).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::RouteFailure);
         assert_eq!(fake.writes.len(), 1);
     }
