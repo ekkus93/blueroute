@@ -170,7 +170,7 @@ mod tests {
         let foreign = route(2, [10, 30, 0, 3], None);
         let desired = route(1, [10, 20, 0, 3], Some([10, 20, 0, 2]));
         let plan =
-            plan_linux_route_reconciliation(network(1), &[desired.clone()], &[foreign]).unwrap();
+            plan_linux_route_reconciliation(network(1), std::slice::from_ref(&desired), &[foreign]).unwrap();
         assert_eq!(plan.upsert, vec![desired]);
         assert!(plan.remove.is_empty());
     }
@@ -180,7 +180,7 @@ mod tests {
         let desired = route(1, [10, 20, 0, 3], Some([10, 20, 0, 2]));
         let foreign = route(2, [10, 20, 0, 3], None);
         assert!(
-            plan_linux_route_reconciliation(network(1), &[desired.clone()], &[foreign]).is_err()
+            plan_linux_route_reconciliation(network(1), std::slice::from_ref(&desired), &[foreign]).is_err()
         );
         assert!(
             plan_linux_route_reconciliation(network(1), &[desired.clone(), desired.clone()], &[])
