@@ -81,6 +81,11 @@ pub fn plan_route_reconciliation(
     let mut existing = BTreeMap::new();
     for route in observed {
         if route.owner != RouteOwner::BlueRouteNetwork(network) {
+            // A backend must never replace a route owned by another network.
+            // Refuse an ambiguous destination before generating any upsert.
+            if wanted.contains_key(&route.destination) {
+                return Err(invalid("desired destination conflicts with foreign route"));
+            }
             continue;
         }
         if existing
@@ -140,12 +145,19 @@ mod tests {
 
     #[test]
     fn foreign_network_routes_are_preserved() {
-        let foreign = route(2, 3, 7, 10);
+        let foreign = route(2, 4, 7, 10);
         let local = route(1, 3, 2, 10);
         let desired = [local.clone()];
         let plan = plan_route_reconciliation(network(1), &desired, &[foreign]).unwrap();
         assert_eq!(plan.upsert, vec![local]);
         assert!(plan.remove.is_empty());
+    }
+
+    #[test]
+    fn foreign_route_collision_fails_closed_without_planning_replacement() {
+        let foreign = route(2, 3, 7, 10);
+        let desired = route(1, 3, 2, 10);
+        assert!(plan_route_reconciliation(network(1), &[desired], &[foreign]).is_err());
     }
 
     #[test]
