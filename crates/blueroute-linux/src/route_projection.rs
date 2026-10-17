@@ -1,7 +1,7 @@
 //! P8-005: project logical route intents into Linux IPv4 route descriptions.
 //! This does not authenticate peers, mutate routes, or confer kernel ownership.
 //! Callers must supply bindings from verified live PAN and membership state.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr};
 
 use blueroute_core::{
@@ -82,6 +82,7 @@ pub fn project_ipv4_route_intents(
         return Err(invalid("zero network identity"));
     }
     let mut destination_map = BTreeMap::new();
+    let mut destination_prefixes = BTreeSet::new();
     for binding in destinations {
         if binding.network != network {
             return Err(invalid("foreign destination binding"));
@@ -98,6 +99,12 @@ pub fn project_ipv4_route_intents(
         {
             return Err(invalid("prefix binding mismatch"));
         }
+        // Unused bindings are still untrusted: two logical destinations
+        // may not claim the same kernel prefix, even if only one route is
+        // currently requested.
+        if !destination_prefixes.insert(binding.prefix) {
+            return Err(invalid("duplicate destination IPv4 prefix binding"));
+        }
         if destination_map
             .insert(binding.destination.clone(), binding.prefix)
             .is_some()
@@ -106,11 +113,18 @@ pub fn project_ipv4_route_intents(
         }
     }
     let mut hop_map = BTreeMap::new();
+    let mut hop_addresses = BTreeSet::new();
     for binding in next_hops {
         if binding.network != network || !nonzero(binding.node.as_bytes()) {
             return Err(invalid("foreign or zero next-hop binding"));
         }
         private_prefix(IpPrefix::new(IpAddr::V4(binding.address), 32)?)?;
+        // Duplicate address claims by distinct peers are ambiguous,
+        // including across interfaces: the trusted runtime must resolve
+        // the identity/address mapping before accepting route intents.
+        if !hop_addresses.insert(binding.address) {
+            return Err(invalid("duplicate next-hop IPv4 address binding"));
+        }
         if hop_map.insert(binding.node, binding).is_some() {
             return Err(invalid("duplicate next-hop binding"));
         }
@@ -249,6 +263,42 @@ mod tests {
             project_ipv4_route_intents(network(1), &[route(3)], &[destination], &[foreign_hop])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn different_destinations_cannot_claim_the_same_kernel_host_prefix() {
+        let primary = binding(3, [10, 20, 0, 3]);
+        let alias = binding(4, [10, 20, 0, 3]);
+        let result = project_ipv4_route_intents(
+            network(1),
+            &[route(3)],
+            &[primary, alias],
+            &[hop()],
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn two_peer_identities_cannot_share_one_next_hop_ipv4_address() {
+        let mut alias = hop();
+        alias.node = node(4);
+        let destination = binding(3, [10, 20, 0, 3]);
+        let result = project_ipv4_route_intents(
+            network(1),
+            &[route(3)],
+            std::slice::from_ref(&destination),
+            &[hop(), alias.clone()],
+        );
+        assert!(result.is_err());
+
+        alias.address = Ipv4Addr::new(10, 21, 0, 4);
+        let valid = project_ipv4_route_intents(
+            network(1),
+            &[route(3)],
+            &[destination],
+            &[hop(), alias],
+        );
+        assert!(valid.is_ok());
     }
 
     #[test]
