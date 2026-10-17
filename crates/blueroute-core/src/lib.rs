@@ -13,6 +13,7 @@ mod route;
 mod route_executor;
 mod route_planner;
 mod route_reconciliation;
+mod route_recovery;
 mod secret;
 mod segment_allocator;
 mod topology;
@@ -46,6 +47,7 @@ pub use route_executor::{
 };
 pub use route_planner::{DEGRADED_LINK_COST_PENALTY, desired_node_routes};
 pub use route_reconciliation::{RouteReconciliationPlan, plan_route_reconciliation};
+pub use route_recovery::reconcile_observed_topology_routes;
 pub use secret::Secret;
 pub use segment_allocator::{MAX_PREFIX_PROBES, MAX_RESERVED_PAN_SEGMENTS, SegmentIpv4Allocator};
 pub use topology::{LinkHealth, LinkState, PanLink, PanSegment, Reachability, TopologyGraph};
