@@ -9,12 +9,17 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use blueroute_core::{NetworkId, NodeId};
+use blueroute_core::{
+    CoreError, NapAdmissionDecision, NetworkId, NetworkNapAdmission, NodeId,
+};
 use blueroute_protocol::session::{
     ControlSessionRegistry, PeerSessionKey, SessionRegistration, SessionRegistryError,
 };
 
 mod generation_guard;
+#[path = "nap_control_admission.rs"]
+mod nap_control_admission;
+pub use nap_control_admission::AuthenticatedNapTicket;
 
 use crate::control_tls::ControlSessionRead;
 use crate::{ActiveControlSession, ControlSessionError};
@@ -48,6 +53,32 @@ pub struct RegisteredControlSession<'a> {
 }
 
 impl<'a> RegisteredControlSession<'a> {
+    /// Reserve a NAP slot using this live, mutually authenticated and approved
+    /// control session; this does not establish or observe a PANU attachment.
+    pub fn reserve_nap(
+        &mut self,
+        admission: &NetworkNapAdmission,
+    ) -> Result<(AuthenticatedNapTicket, NapAdmissionDecision), CoreError> {
+        nap_control_admission::reserve_authenticated_nap(self, admission)
+    }
+
+    /// Call only after independently observing the matching PANU attachment.
+    pub fn activate_nap(
+        &mut self,
+        admission: &NetworkNapAdmission,
+        ticket: &AuthenticatedNapTicket,
+    ) -> Result<bool, CoreError> {
+        nap_control_admission::activate_authenticated_nap(self, admission, ticket)
+    }
+
+    /// Retire an exact reservation even after its TLS stream is gone.
+    pub fn retire_nap(
+        admission: &NetworkNapAdmission,
+        ticket: &AuthenticatedNapTicket,
+    ) -> Result<bool, CoreError> {
+        nap_control_admission::retire_authenticated_nap(admission, ticket)
+    }
+
     /// Fail closed on poisoned registry state, capacity exhaustion, replay or
     /// another concurrently active session for this logical peer. The session
     /// is dropped (closing its owned socket) on any failure.
