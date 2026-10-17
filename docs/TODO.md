@@ -1069,6 +1069,8 @@ This is the first complete product slice.
 
 **SOFTWARE PARTIAL (2026-10-17):** `crates/blueroute-core/src/route_reconciliation.rs` adds a deterministic desired/observed route-intent diff scoped to one nonzero `NetworkId`. It plans atomic upserts and stale owned-route removals, preserves other networks, refuses foreign desired routes and exact destination collisions with foreign observed routes, duplicate owned destinations, invalid identities/prefixes and implicit Internet routes, and includes idempotence/negative tests. The zero-length prefix guard also rejects default routes encoded as prefixes; [exact-head CI 39017388224](https://github.com/ekkus93/blueroute/actions/runs/39017388224) passed at `135e41b636a7f7269b54cada0130932eff9ff294` (initial route-diff CI 39017121040 passed). **No authenticated remote route distribution, Linux kernel route application, active PAN integration, or physical multi-hop acceptance is implied.** All P8-005 acceptance checkboxes remain open until the privileged runtime is wired and qualified.
 
+**P8-005 observed route executor (software-only, 2026-10-17):** `OwnedRouteOperator` and `execute_route_reconciliation` now apply route-intent plans using fresh pre/post observations and backend atomic ownership/previous-state preconditions; foreign routes are preserved and partial failures require re-observation. Six fake-backend regressions passed [exact-head CI 39021539274](https://github.com/ekkus93/blueroute/actions/runs/39021539274) at `5da26e4861cbcfcc502bd308b5ac84f94ea4dafe`. Privileged Linux backend, authenticated route distribution and physical acceptance remain OPEN. See [evidence](P8-005-P8-008-ROUTE-RECONCILIATION-2026-10-17.md).
+
 ## P8-006 — Prove two-hop TCP/IP
 
 ```text
@@ -1108,6 +1110,8 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 **Acceptance**
 
 - Redundant physical topology survives router removal where alternate links exist.
+
+**P8-008 simulated routing failover (software-only, 2026-10-17):** `reconcile_observed_topology_routes` connects active-topology route planning to ownership-gated reconciliation. Tests cover primary path failure, backup next-hop selection, partition withdrawal, restoration, foreign ownership and partial-write retry. [Exact-head CI 39021827816](https://github.com/ekkus93/blueroute/actions/runs/39021827816) passed at `252eb27db6b1da479e9664881384942a2d3f2c32`. Live daemon/PAN, Linux route acceptance and real Bluetooth remain OPEN. See [evidence](P8-005-P8-008-ROUTE-RECONCILIATION-2026-10-17.md).
 
 ## P8-009 — Evaluate dynamic routing protocol option
 
