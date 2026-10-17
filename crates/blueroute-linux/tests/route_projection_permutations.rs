@@ -123,3 +123,36 @@ fn distinct_peer_addresses_allow_direct_and_transit_paths() {
         Some(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 2)))
     );
 }
+
+
+#[test]
+fn unused_observed_peer_binding_must_match_observed_next_hop_address() {
+    // Peer 4 is observed at .4; the unneeded destination binding claims .99.
+    // Neither its position nor which next hop is selected can legalize it.
+    let mut alternate = destination(4);
+    alternate.prefix = IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 99)), 32).unwrap();
+    for destinations in [
+        [destination(5), alternate.clone()],
+        [alternate.clone(), destination(5)],
+    ] {
+        for next_hops in [[hop(2), hop(4)], [hop(4), hop(2)]] {
+            assert!(
+                project_ipv4_route_intents(network(), &[route(5, 2)], &destinations, &next_hops)
+                    .is_err()
+            );
+        }
+    }
+    // A direct peer and a distinct routed destination remain valid.
+    let valid = project_ipv4_route_intents(
+        network(),
+        &[route(5, 2)],
+        &[destination(5), destination(4)],
+        &[hop(2), hop(4)],
+    )
+    .unwrap();
+    assert_eq!(valid.len(), 1);
+    assert_eq!(
+        valid[0].via,
+        Some(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 2)))
+    );
+}

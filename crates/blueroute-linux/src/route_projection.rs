@@ -136,6 +136,16 @@ pub fn project_ipv4_route_intents(
     // address unless both bindings identify the same peer. Check even unused
     // destination bindings, and regardless of which hop a route selects.
     for binding in destinations {
+        // Even an unused destination binding for a directly observed peer
+        // must agree with that peer's address. An alternate address would
+        // require an independently verified multi-address membership model.
+        if let RouteDestination::Node(node) = &binding.destination
+            && hop_map
+                .get(node)
+                .is_some_and(|hop| binding.prefix.address != IpAddr::V4(hop.address))
+        {
+            return Err(invalid("observed peer destination disagrees with next-hop IPv4"));
+        }
         if let RouteDestination::Node(node) = &binding.destination
             && let IpAddr::V4(address) = binding.prefix.address
             && hop_addresses
