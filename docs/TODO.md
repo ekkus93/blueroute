@@ -1186,6 +1186,8 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 - Physical test recovers where radio/capability graph permits.
 
+**P9-005/P9-006 confirmed hub-loss retry integration (software only, 2026-10-17):** `HubRecoveryRetryState` and `execute_confirmed_hub_loss_recovery_with_backoff` add explicit bounded exponential retry gating around the P9-005 observation-verified recovery planner/executor. Hub-loss observations continue while retries are deferred, and no route/link mutations occur during backoff. Recovery success or the original hub's return clears retry history; stale timestamps and invalid policy fail closed. Software regression tests and locked workspace CI passed at `2e2876517dc4570a2f2303747351ca8919f8a0f9`, [exact-head CI 39013976520](https://github.com/ekkus93/blueroute/actions/runs/39013976520). **NOT live BlueZ/PAN daemon integration, authenticated peer enrollment, production JoinNetwork or physical radio acceptance**; P9-005/P9-006 remain open pending those runtime and hardware gates.
+
 ## P9-006 — Add topology anti-flap policy
 
 - [ ] hysteresis/stability thresholds.
