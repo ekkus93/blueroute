@@ -30,10 +30,7 @@ fn policy() -> TopologyPolicyInputs {
                     adapter_usable: Some(Sourced::new(true, CapabilitySource::Measured)),
                     nap: Some(Sourced::new(n <= 2, CapabilitySource::Measured)),
                     panu: Some(Sourced::new(n >= 3, CapabilitySource::Measured)),
-                    connection_policy_ceiling: Some(Sourced::new(
-                        2,
-                        CapabilitySource::Measured,
-                    )),
+                    connection_policy_ceiling: Some(Sourced::new(2, CapabilitySource::Measured)),
                     ..NodeCapabilities::default()
                 },
                 neighbors: BTreeMap::new(),
@@ -78,7 +75,10 @@ impl NapTopologyOperator for FakePan {
 
     fn connect_link(&mut self, link: NapLink) -> Result<(), CoreError> {
         if self.failed_connect == Some(link) {
-            return Err(CoreError::new(ErrorKind::PanFailure, "injected link failure"));
+            return Err(CoreError::new(
+                ErrorKind::PanFailure,
+                "injected link failure",
+            ));
         }
         self.links.insert(link);
         Ok(())
