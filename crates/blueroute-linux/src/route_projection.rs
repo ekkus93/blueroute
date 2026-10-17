@@ -206,7 +206,7 @@ mod tests {
         let destination = binding(3, [10, 20, 0, 3]);
         assert!(project_ipv4_route_intents(network(1), &[route(3)], &[], &[hop()]).is_err());
         assert!(
-            project_ipv4_route_intents(network(1), &[route(3)], &[destination.clone()], &[])
+            project_ipv4_route_intents(network(1), &[route(3)], std::slice::from_ref(&destination), &[])
                 .is_err()
         );
         let mut foreign = destination.clone();
