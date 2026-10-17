@@ -211,7 +211,16 @@ fn format_capabilities(caps: &NodeCapabilities, json: bool) -> Result<String, se
     if json {
         serde_json::to_string_pretty(caps)
     } else {
-        Ok(format!("BlueRoute capabilities:\n{caps:#?}"))
+        let ceiling = match &caps.connection_policy_ceiling {
+            Some(value) => format!(
+                "{} (source: {:?}; policy ceiling, not a verified controller maximum)",
+                value.value, value.source
+            ),
+            None => "unknown (new NAP admissions must fail closed)".to_owned(),
+        };
+        Ok(format!(
+            "BlueRoute capabilities:\nNAP client policy ceiling: {ceiling}\nActive PANU count: unavailable (not reported by daemon)\n{caps:#?}"
+        ))
     }
 }
 
@@ -669,6 +678,28 @@ mod tests {
         let caps_json = format_capabilities(&caps, true).unwrap();
         let parsed: NodeCapabilities = serde_json::from_str(&caps_json).unwrap();
         assert_eq!(parsed, caps);
+    }
+
+    #[test]
+    fn nap_capacity_diagnostics_keep_policy_provenance_and_unknown_activity_distinct() {
+        use blueroute_core::{CapabilitySource, Sourced};
+
+        let mut caps = NodeCapabilities::default();
+        let unknown = format_capabilities(&caps, false).unwrap();
+        assert!(unknown.contains("NAP client policy ceiling: unknown"));
+        assert!(unknown.contains("Active PANU count: unavailable"));
+
+        caps.connection_policy_ceiling =
+            Some(Sourced::new(4, CapabilitySource::ConservativeDefault));
+        let human = format_capabilities(&caps, false).unwrap();
+        assert!(human.contains("NAP client policy ceiling: 4"));
+        assert!(human.contains("ConservativeDefault"));
+        assert!(human.contains("not a verified controller maximum"));
+        assert!(human.contains("Active PANU count: unavailable"));
+
+        let json = format_capabilities(&caps, true).unwrap();
+        let decoded: NodeCapabilities = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, caps);
     }
 
     #[test]
