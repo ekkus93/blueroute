@@ -63,7 +63,6 @@ fn invalid(message: &'static str) -> CoreError {
     CoreError::new(ErrorKind::InvalidInput, message)
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NapAssignment {
     pub hub: NodeId,
@@ -96,23 +95,35 @@ pub fn select_nap_hubs(inputs: &TopologyPolicyInputs) -> Result<NapSelection, Co
         for (id, candidate) in &inputs.candidates {
             if selected_hubs.contains(id)
                 || candidate.capabilities.can_host_pan() != Some(true)
-                || candidate.capabilities.adapter_usable.as_ref().map(|v| v.value) != Some(true)
+                || candidate
+                    .capabilities
+                    .adapter_usable
+                    .as_ref()
+                    .map(|v| v.value)
+                    != Some(true)
             {
                 continue;
             }
-            let Some(capacity) = candidate.capabilities.connection_policy_ceiling.as_ref()
-                .map(|ceiling| usize::from(ceiling.value)) else {
+            let Some(capacity) = candidate
+                .capabilities
+                .connection_policy_ceiling
+                .as_ref()
+                .map(|ceiling| usize::from(ceiling.value))
+            else {
                 continue;
             };
             if capacity == 0 {
                 continue;
             }
-            let mut clients: Vec<(NodeId, CandidateLink)> = candidate.neighbors.iter()
+            let mut clients: Vec<(NodeId, CandidateLink)> = candidate
+                .neighbors
+                .iter()
                 .filter_map(|(peer, link)| {
                     let remote = inputs.candidates.get(peer)?;
                     if !unserved.contains(peer)
                         || remote.capabilities.can_join_pan() != Some(true)
-                        || remote.capabilities.adapter_usable.as_ref().map(|v| v.value) != Some(true)
+                        || remote.capabilities.adapter_usable.as_ref().map(|v| v.value)
+                            != Some(true)
                         || !remote.neighbors.contains_key(id)
                     {
                         return None;
@@ -120,19 +131,27 @@ pub fn select_nap_hubs(inputs: &TopologyPolicyInputs) -> Result<NapSelection, Co
                     Some((*peer, *link))
                 })
                 .collect();
-            clients.sort_by_key(|(peer, link)| (
-                Reverse(link.stable),
-                Reverse(link.quality.map(|quality| quality.score).unwrap_or(0)),
-                link.path_cost,
-                *peer,
-            ));
+            clients.sort_by_key(|(peer, link)| {
+                (
+                    Reverse(link.stable),
+                    Reverse(link.quality.map(|quality| quality.score).unwrap_or(0)),
+                    link.path_cost,
+                    *peer,
+                )
+            });
             clients.truncate(capacity);
             if clients.is_empty() {
                 continue;
             }
             let stable = clients.iter().filter(|(_, link)| link.stable).count();
-            let cost: u64 = clients.iter().map(|(_, link)| u64::from(link.path_cost)).sum();
-            let ac_power = candidate.capabilities.power_state.as_ref()
+            let cost: u64 = clients
+                .iter()
+                .map(|(_, link)| u64::from(link.path_cost))
+                .sum();
+            let ac_power = candidate
+                .capabilities
+                .power_state
+                .as_ref()
                 .is_some_and(|power| matches!(power.value, PowerState::AcPowered));
             let score = (
                 clients.len(),
@@ -143,7 +162,10 @@ pub fn select_nap_hubs(inputs: &TopologyPolicyInputs) -> Result<NapSelection, Co
                 Reverse(cost),
                 Reverse(*id),
             );
-            if best.as_ref().is_none_or(|(_, _, previous)| score > *previous) {
+            if best
+                .as_ref()
+                .is_none_or(|(_, _, previous)| score > *previous)
+            {
                 best = Some((*id, clients, score));
             }
         }
@@ -152,10 +174,13 @@ pub fn select_nap_hubs(inputs: &TopologyPolicyInputs) -> Result<NapSelection, Co
         };
         selected_hubs.insert(hub);
         unserved.remove(&hub);
-        let clients: Vec<NodeId> = clients.into_iter().map(|(node, _)| {
-            unserved.remove(&node);
-            node
-        }).collect();
+        let clients: Vec<NodeId> = clients
+            .into_iter()
+            .map(|(node, _)| {
+                unserved.remove(&node);
+                node
+            })
+            .collect();
         stars.push(NapAssignment { hub, clients });
     }
     Ok(NapSelection { stars, unserved })
@@ -259,7 +284,8 @@ mod tests {
                 adapter_usable: Some(Sourced::new(true, CapabilitySource::Measured)),
                 nap: Some(Sourced::new(nap, CapabilitySource::Measured)),
                 panu: Some(Sourced::new(panu, CapabilitySource::Measured)),
-                connection_policy_ceiling: capacity.map(|n| Sourced::new(n, CapabilitySource::Measured)),
+                connection_policy_ceiling: capacity
+                    .map(|n| Sourced::new(n, CapabilitySource::Measured)),
                 ..NodeCapabilities::default()
             },
             neighbors: BTreeMap::new(),
@@ -269,9 +295,23 @@ mod tests {
     }
 
     fn connect(inputs: &mut TopologyPolicyInputs, a: u8, b: u8, cost: u32) {
-        let link = CandidateLink { path_cost: cost, quality: None, stable: true };
-        inputs.candidates.get_mut(&node(a)).unwrap().neighbors.insert(node(b), link);
-        inputs.candidates.get_mut(&node(b)).unwrap().neighbors.insert(node(a), link);
+        let link = CandidateLink {
+            path_cost: cost,
+            quality: None,
+            stable: true,
+        };
+        inputs
+            .candidates
+            .get_mut(&node(a))
+            .unwrap()
+            .neighbors
+            .insert(node(b), link);
+        inputs
+            .candidates
+            .get_mut(&node(b))
+            .unwrap()
+            .neighbors
+            .insert(node(a), link);
     }
 
     #[test]
@@ -284,7 +324,9 @@ mod tests {
                 (node(4), candidate(4, false, true, None)),
             ]),
         };
-        for peer in [2, 3, 4] { connect(&mut inputs, 1, peer, 1); }
+        for peer in [2, 3, 4] {
+            connect(&mut inputs, 1, peer, 1);
+        }
         let selected = select_nap_hubs(&inputs).unwrap();
         assert_eq!(selected.stars.len(), 1);
         assert_eq!(selected.stars[0].hub, node(1));
@@ -304,14 +346,22 @@ mod tests {
         connect(&mut inputs, 1, 2, 1);
         connect(&mut inputs, 1, 3, 2);
         assert!(select_nap_hubs(&inputs).unwrap().stars.is_empty());
-        inputs.candidates.get_mut(&node(1)).unwrap().capabilities
+        inputs
+            .candidates
+            .get_mut(&node(1))
+            .unwrap()
+            .capabilities
             .connection_policy_ceiling = Some(Sourced::new(1, CapabilitySource::Measured));
-        inputs.candidates.get_mut(&node(3)).unwrap().neighbors.remove(&node(1));
+        inputs
+            .candidates
+            .get_mut(&node(3))
+            .unwrap()
+            .neighbors
+            .remove(&node(1));
         let selected = select_nap_hubs(&inputs).unwrap();
         assert_eq!(selected.stars.len(), 1);
         assert_eq!(selected.stars[0].clients, vec![node(2)]);
         assert!(selected.unserved.contains(&node(3)));
         assert!(!selected.unserved.contains(&node(1)));
     }
-
 }
