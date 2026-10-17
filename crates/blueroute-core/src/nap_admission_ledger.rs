@@ -87,9 +87,9 @@ impl NapAdmissionLedger {
         state.pending.insert(candidate, generation);
         Ok((
             NapAdmissionTicket {
-                    candidate,
-                    generation,
-                },
+                candidate,
+                generation,
+            },
             decision,
         ))
     }
