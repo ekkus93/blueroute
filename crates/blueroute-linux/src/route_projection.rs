@@ -205,13 +205,19 @@ mod tests {
     fn unknown_or_foreign_bindings_do_not_project_routes() {
         let destination = binding(3, [10, 20, 0, 3]);
         assert!(project_ipv4_route_intents(network(1), &[route(3)], &[], &[hop()]).is_err());
-        assert!(project_ipv4_route_intents(network(1), &[route(3)], &[destination.clone()], &[]).is_err());
+        assert!(
+            project_ipv4_route_intents(network(1), &[route(3)], &[destination.clone()], &[])
+                .is_err()
+        );
         let mut foreign = destination.clone();
         foreign.network = network(2);
         assert!(project_ipv4_route_intents(network(1), &[route(3)], &[foreign], &[hop()]).is_err());
         let mut foreign_hop = hop();
         foreign_hop.network = network(2);
-        assert!(project_ipv4_route_intents(network(1), &[route(3)], &[destination], &[foreign_hop]).is_err());
+        assert!(
+            project_ipv4_route_intents(network(1), &[route(3)], &[destination], &[foreign_hop])
+                .is_err()
+        );
     }
 
     #[test]
@@ -225,22 +231,35 @@ mod tests {
         ] {
             let mut destination = binding(3, [10, 20, 0, 3]);
             destination.prefix = unsafe_prefix;
-            assert!(project_ipv4_route_intents(network(1), &[route(3)], &[destination], &[hop()]).is_err());
+            assert!(
+                project_ipv4_route_intents(network(1), &[route(3)], &[destination], &[hop()])
+                    .is_err()
+            );
         }
         let mut bad_hop = hop();
         bad_hop.address = Ipv4Addr::new(8, 8, 8, 8);
-        assert!(project_ipv4_route_intents(network(1), &[route(3)], &[binding(3, [10, 20, 0, 3])], &[bad_hop]).is_err());
+        assert!(
+            project_ipv4_route_intents(
+                network(1),
+                &[route(3)],
+                &[binding(3, [10, 20, 0, 3])],
+                &[bad_hop]
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn duplicate_kernel_destinations_and_default_route_fail_closed() {
-        assert!(project_ipv4_route_intents(
-            network(1),
-            &[route(2), route(3)],
-            &[binding(2, [10, 20, 0, 3]), binding(3, [10, 20, 0, 3])],
-            &[hop()],
-        )
-        .is_err());
+        assert!(
+            project_ipv4_route_intents(
+                network(1),
+                &[route(2), route(3)],
+                &[binding(2, [10, 20, 0, 3]), binding(3, [10, 20, 0, 3])],
+                &[hop()],
+            )
+            .is_err()
+        );
         let mut internet = route(3);
         internet.destination = RouteDestination::Internet;
         assert!(project_ipv4_route_intents(network(1), &[internet], &[], &[hop()]).is_err());
