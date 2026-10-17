@@ -6,14 +6,17 @@ impl RegisteredControlSession<'_> {
     /// Fail closed if this exact generation was replaced, lost, or removed.
     /// Release the mutex before shutting down the socket.
     pub(super) fn ensure_current_registration(&mut self) -> Result<(), ControlSessionError> {
-        let active = self.registry.lock().is_ok_and(|registry| {
-            registration_is_active(&registry, self.key, self.session_id)
-        });
+        let active = self
+            .registry
+            .lock()
+            .is_ok_and(|registry| registration_is_active(&registry, self.key, self.session_id));
         if active {
             return Ok(());
         }
         self.close_and_retire();
-        Err(ControlSessionError::Ingress(crate::PinnedIngressError::Terminal))
+        Err(ControlSessionError::Ingress(
+            crate::PinnedIngressError::Terminal,
+        ))
     }
 
     pub(super) fn ensure_active_registration(&mut self) -> Result<(), ControlSessionError> {
@@ -33,9 +36,9 @@ fn registration_is_active(
     key: PeerSessionKey,
     session_id: [u8; 16],
 ) -> bool {
-    registry.get(key).is_some_and(|entry| {
-        entry.session_id == session_id && entry.phase == SessionPhase::Active
-    })
+    registry
+        .get(key)
+        .is_some_and(|entry| entry.session_id == session_id && entry.phase == SessionPhase::Active)
 }
 
 #[cfg(test)]
@@ -54,14 +57,18 @@ mod tests {
         };
         let mut registry = ControlSessionRegistry::new();
         assert!(!registration_is_active(&registry, key, [4; 16]));
-        registry.activate_after_authentication(key, [4; 16]).unwrap();
+        registry
+            .activate_after_authentication(key, [4; 16])
+            .unwrap();
         assert!(registration_is_active(&registry, key, [4; 16]));
         assert!(!registration_is_active(&registry, key, [5; 16]));
         assert!(!registration_is_active(&registry, other, [4; 16]));
         assert!(registry.mark_lost(key, [4; 16]));
         assert!(!registration_is_active(&registry, key, [4; 16]));
         assert!(registry.mark_reconnecting(key, [4; 16]));
-        registry.activate_after_authentication(key, [5; 16]).unwrap();
+        registry
+            .activate_after_authentication(key, [5; 16])
+            .unwrap();
         assert!(!registration_is_active(&registry, key, [4; 16]));
         assert!(registration_is_active(&registry, key, [5; 16]));
         assert!(!registry.remove_if_current(key, [4; 16]));
