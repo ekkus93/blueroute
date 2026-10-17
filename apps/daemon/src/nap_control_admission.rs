@@ -44,10 +44,7 @@ impl AuthenticatedNapLease<'_> {
     }
 
     /// The daemon must independently observe the matching PANU attachment.
-    pub fn activate(
-        &self,
-        session: &mut RegisteredControlSession<'_>,
-    ) -> Result<bool, CoreError> {
+    pub fn activate(&self, session: &mut RegisteredControlSession<'_>) -> Result<bool, CoreError> {
         activate_authenticated_nap(session, self.admission, &self.ticket)
     }
 
