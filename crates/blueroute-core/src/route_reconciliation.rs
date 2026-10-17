@@ -4,7 +4,7 @@
 //! distribution protocol. Callers must independently authenticate topology,
 //! map logical destinations to owned Linux prefixes/interfaces, and reobserve
 //! the kernel before each privileged operation.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{CoreError, ErrorKind, NetworkId, Route, RouteDestination, RouteOwner};
 
@@ -126,6 +126,7 @@ pub fn plan_route_reconciliation(
         }
     }
     let mut existing = BTreeMap::new();
+    let mut foreign_destinations = BTreeSet::new();
     for route in observed {
         // The kernel may report a route with its network address normalized,
         // while an observation adapter could preserve host bits. Compare the
@@ -137,6 +138,7 @@ pub fn plan_route_reconciliation(
             if wanted.contains_key(&destination) {
                 return Err(invalid("desired destination conflicts with foreign route"));
             }
+            foreign_destinations.insert(destination);
             continue;
         }
         // Never infer ownership of a different canonical route from a
@@ -147,6 +149,12 @@ pub fn plan_route_reconciliation(
         if existing.insert(destination, route.clone()).is_some() {
             return Err(invalid("duplicate observed owned route destination"));
         }
+    }
+    // A stale owned route is not safe to delete when a foreign observation
+    // aliases the same effective kernel destination. Validate independently
+    // of observation order, including when no desired route remains.
+    if existing.keys().any(|key| foreign_destinations.contains(key)) {
+        return Err(invalid("owned destination conflicts with foreign route"));
     }
     let mut plan = RouteReconciliationPlan::default();
     for (destination, route) in &wanted {
@@ -298,6 +306,7 @@ mod tests {
             IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 77)), 24).unwrap(),
         );
         assert!(
+
             plan_route_reconciliation(network(1), &[desired.clone()], &[foreign.clone()]).is_err()
         );
 
@@ -333,6 +342,35 @@ mod tests {
             .unwrap(),
         );
         assert!(plan_route_reconciliation(network(1), &[desired], &[foreign]).is_err());
+    }
+
+    #[test]
+    fn stale_owned_prefix_cannot_be_removed_under_foreign_alias() {
+        let mut owned = route(1, 3, 2, 10);
+        owned.destination = RouteDestination::Prefix(
+            IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 0)), 24).unwrap(),
+        );
+        let mut foreign = route(2, 4, 7, 10);
+        foreign.destination = RouteDestination::Prefix(
+            IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 77)), 24).unwrap(),
+        );
+        // Neither observation order may authorize removal of an ambiguous
+        // kernel prefix, even though the desired route set is empty.
+        for observations in [
+            [owned.clone(), foreign.clone()],
+            [foreign.clone(), owned.clone()],
+        ] {
+            assert!(plan_route_reconciliation(network(1), &[], &observations).is_err());
+        }
+        foreign.destination = RouteDestination::Prefix(
+            IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 21, 0, 77)), 24).unwrap(),
+        );
+        assert_eq!(
+            plan_route_reconciliation(network(1), &[], &[owned.clone(), foreign])
+                .unwrap()
+                .remove,
+            vec![owned]
+        );
     }
 
     #[test]
