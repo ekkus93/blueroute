@@ -11,8 +11,9 @@ performing privileged mutations. Caller-provided destination and first-hop
 bindings are checked for network scope, identity, canonical private IPv4
 prefixes, duplicate kernel destinations and missing observations. Direct
 host destinations use on-link routes; routed hosts use a first-hop gateway.
-Four deterministic regression tests cover normal mapping, foreign or absent
-bindings, unsafe prefixes and duplicate kernel destinations.
+Five deterministic regression tests cover normal mapping, foreign or absent
+bindings, unsafe prefixes, duplicate kernel destinations and the node /32
+host-prefix requirement.
 
 These bindings are **not proof of authentication or kernel ownership**.
 The daemon must supply verified current membership/PAN/interface observations.
@@ -20,3 +21,5 @@ A privileged backend must independently reobserve and atomically check kernel
 ownership at the actual write site. Authenticated distribution, runtime
 integration, Linux namespace qualification and real Bluetooth multi-hop
 acceptance remain open. P8-005 is still software-partial.
+
+The node host-prefix guard passed [CI 39049814583](https://github.com/ekkus93/blueroute/actions/runs/39049814583) at `a42f660`.
