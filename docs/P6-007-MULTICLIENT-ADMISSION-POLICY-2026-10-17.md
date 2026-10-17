@@ -51,3 +51,34 @@ This is read-only reporting of configured/runtime policy inputs, not
 authenticated peer inventory, actual multi-client session counts or proof
 of controller concurrency. P6-007 still requires live runtime admission,
 real concurrent connections/traffic, and hardware acceptance.
+
+## Generation-scoped admission reservations (2026-10-17)
+
+`crates/blueroute-core/src/nap_admission_ledger.rs` now serializes
+in-process reservations and active modeled PANU slots with a mutex. Only
+independently authenticated, network-approved NodeIds may be supplied by
+a future daemon integration. Reservations consume capacity before attachment;
+duplicate pending attempts and excess slots fail closed. A matching ticket
+promotes to active, and exact-generation retirement ignores stale callbacks.
+Four deterministic tests, including a 16-thread race for three slots,
+passed [exact-head CI 39066719628](https://github.com/ekkus93/blueroute/actions/runs/39066719628)
+at `7e56fb825040de1316846210851ae64ab0c5db57`.
+
+## Capability-change admission refresh (2026-10-17)
+
+`NapAdmissionLedger::update_capabilities` now atomically replaces the
+sourced local adapter/NAP/client-ceiling policy under the *same mutex* as
+reservation decisions. After a downgrade below existing occupancy, new
+reservations are rejected without erasing active or pending generation
+tickets; unknown capacity denies new reservations. Once old tickets are
+retired, a valid lower ceiling can admit only its remaining slots. Tests
+cover downgrade, pending and active preservation, unknown-policy denial,
+retirement and recovery. [Exact-head CI 39070085859](https://github.com/ekkus93/blueroute/actions/runs/39070085859)
+passed at `520d1dcc5bb48707a69ae5b5c672427f0a4e5ee8`.
+
+**Unwired limitation:** The production daemon does not yet own this ledger
+or call its policy-refresh method. The runtime must independently authenticate
+PANU peers, cancel/reconcile actual in-flight attempts after capability loss,
+observe attachments and release tickets on real teardown. This is not a
+measured radio limit, physical multi-client test or proof of concurrent
+TCP/UDP traffic. Keep all three original P6-007 subtasks open.
