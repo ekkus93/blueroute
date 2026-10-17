@@ -215,9 +215,7 @@ mod tests {
     #[test]
     fn unrelated_node_cannot_become_direct_by_aliasing_next_hop_address() {
         let aliased = binding(3, [10, 20, 0, 2]);
-        assert!(
-            project_ipv4_route_intents(network(1), &[route(3)], &[aliased], &[hop()]).is_err()
-        );
+        assert!(project_ipv4_route_intents(network(1), &[route(3)], &[aliased], &[hop()]).is_err());
         let direct = project_ipv4_route_intents(
             network(1),
             &[route(2)],
