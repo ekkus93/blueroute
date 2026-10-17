@@ -209,16 +209,16 @@ mod tests {
         use std::net::Ipv6Addr;
 
         let mut desired = route(1, 3, 2, 10);
-        desired.destination = RouteDestination::Prefix(IpPrefix::new(
-            IpAddr::V4(Ipv4Addr::new(10, 20, 0, 1)),
-            24,
-        ).unwrap());
-        assert!(plan_route_reconciliation(network(1), std::slice::from_ref(&desired), &[]).is_err());
+        desired.destination = RouteDestination::Prefix(
+            IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 1)), 24).unwrap(),
+        );
+        assert!(
+            plan_route_reconciliation(network(1), std::slice::from_ref(&desired), &[]).is_err()
+        );
 
-        desired.destination = RouteDestination::Prefix(IpPrefix::new(
-            IpAddr::V4(Ipv4Addr::new(10, 20, 0, 0)),
-            24,
-        ).unwrap());
+        desired.destination = RouteDestination::Prefix(
+            IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 0)), 24).unwrap(),
+        );
         assert_eq!(
             plan_route_reconciliation(network(1), std::slice::from_ref(&desired), &[])
                 .unwrap()
@@ -226,16 +226,24 @@ mod tests {
             vec![desired.clone()]
         );
 
-        desired.destination = RouteDestination::Prefix(IpPrefix::new(
-            IpAddr::V6(Ipv6Addr::new(0x2001, 0x0db8, 0, 1, 0, 0, 0, 1)),
-            64,
-        ).unwrap());
-        assert!(plan_route_reconciliation(network(1), std::slice::from_ref(&desired), &[]).is_err());
+        desired.destination = RouteDestination::Prefix(
+            IpPrefix::new(
+                IpAddr::V6(Ipv6Addr::new(0x2001, 0x0db8, 0, 1, 0, 0, 0, 1)),
+                64,
+            )
+            .unwrap(),
+        );
+        assert!(
+            plan_route_reconciliation(network(1), std::slice::from_ref(&desired), &[]).is_err()
+        );
 
-        desired.destination = RouteDestination::Prefix(IpPrefix::new(
-            IpAddr::V6(Ipv6Addr::new(0x2001, 0x0db8, 0, 1, 0, 0, 0, 0)),
-            64,
-        ).unwrap());
+        desired.destination = RouteDestination::Prefix(
+            IpPrefix::new(
+                IpAddr::V6(Ipv6Addr::new(0x2001, 0x0db8, 0, 1, 0, 0, 0, 0)),
+                64,
+            )
+            .unwrap(),
+        );
         assert_eq!(
             plan_route_reconciliation(network(1), std::slice::from_ref(&desired), &[])
                 .unwrap()
