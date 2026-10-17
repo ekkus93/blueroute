@@ -124,7 +124,6 @@ fn distinct_peer_addresses_allow_direct_and_transit_paths() {
     );
 }
 
-
 #[test]
 fn unused_observed_peer_binding_must_match_observed_next_hop_address() {
     // Peer 4 is observed at .4; the unneeded destination binding claims .99.
@@ -151,8 +150,5 @@ fn unused_observed_peer_binding_must_match_observed_next_hop_address() {
     )
     .unwrap();
     assert_eq!(valid.len(), 1);
-    assert_eq!(
-        valid[0].via,
-        Some(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 2)))
-    );
+    assert_eq!(valid[0].via, Some(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 2))));
 }

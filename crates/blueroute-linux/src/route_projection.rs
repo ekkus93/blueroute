@@ -144,7 +144,9 @@ pub fn project_ipv4_route_intents(
                 .get(node)
                 .is_some_and(|hop| binding.prefix.address != IpAddr::V4(hop.address))
         {
-            return Err(invalid("observed peer destination disagrees with next-hop IPv4"));
+            return Err(invalid(
+                "observed peer destination disagrees with next-hop IPv4",
+            ));
         }
         if let RouteDestination::Node(node) = &binding.destination
             && let IpAddr::V4(address) = binding.prefix.address
