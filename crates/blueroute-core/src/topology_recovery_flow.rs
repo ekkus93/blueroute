@@ -574,6 +574,84 @@ mod tests {
     }
 
     #[test]
+    fn repeated_hub_recovery_failures_exponentially_back_off_and_cap() {
+        let inputs = policy();
+        let mut tracker = HubLossTracker::new(10).unwrap();
+        let mut retry = HubRecoveryRetryState::new(retry_policy()).unwrap();
+        let mut pan = FakePan::hosted();
+        execute_confirmed_hub_loss_recovery_with_backoff(
+            &inputs,
+            &mut tracker,
+            &mut retry,
+            0,
+            &mut pan,
+        )
+        .unwrap();
+        pan.links.clear();
+        execute_confirmed_hub_loss_recovery_with_backoff(
+            &inputs,
+            &mut tracker,
+            &mut retry,
+            1,
+            &mut pan,
+        )
+        .unwrap();
+        pan.fail_connect = Some(link(2, 3));
+
+        // First retry is 100ms, then 200ms, and subsequent retries are
+        // capped at 400ms rather than growing indefinitely.
+        for (fail_number, (attempt_ms, before_due_ms)) in [
+            (11, 110),
+            (111, 310),
+            (311, 710),
+            (711, 1110),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert!(
+                execute_confirmed_hub_loss_recovery_with_backoff(
+                    &inputs,
+                    &mut tracker,
+                    &mut retry,
+                    attempt_ms,
+                    &mut pan,
+                )
+                .is_err()
+            );
+            assert_eq!(retry.consecutive_failures(), fail_number as u32 + 1);
+            assert_eq!(retry.last_failure_ms(), Some(attempt_ms));
+            let observations_before = pan.observe_count;
+            assert!(
+                execute_confirmed_hub_loss_recovery_with_backoff(
+                    &inputs,
+                    &mut tracker,
+                    &mut retry,
+                    before_due_ms,
+                    &mut pan,
+                )
+                .unwrap()
+                .is_none()
+            );
+            assert_eq!(pan.observe_count, observations_before + 1);
+            assert!(pan.operations.is_empty());
+        }
+
+        pan.fail_connect = None;
+        let recovered = execute_confirmed_hub_loss_recovery_with_backoff(
+            &inputs,
+            &mut tracker,
+            &mut retry,
+            1111,
+            &mut pan,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(recovered.execution.observed, BTreeSet::from([link(2, 3), link(2, 4)]));
+        assert_eq!(retry.consecutive_failures(), 0);
+    }
+
+    #[test]
     fn invalid_retry_policy_is_rejected_before_observation() {
         let mut bad = retry_policy();
         bad.retry_base_ms = 0;
@@ -598,9 +676,3 @@ mod tests {
         );
         assert!(
             execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, 10, &mut pan)
-                .unwrap()
-                .is_none()
-        );
-        assert!(pan.operations.is_empty());
-    }
-}
