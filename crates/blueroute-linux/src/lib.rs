@@ -12,6 +12,7 @@ mod networkmanager;
 mod pan;
 mod route_projection;
 mod route_reconciliation;
+mod route_executor;
 mod secret_store;
 
 pub use bluez::BluezBackend;
@@ -28,6 +29,10 @@ pub use route_projection::{
     RouteDestinationBinding, RouteNextHopBinding, project_ipv4_route_intents,
 };
 pub use route_reconciliation::{LinuxRouteReconciliationPlan, plan_linux_route_reconciliation};
+pub use route_executor::{
+    LinuxRouteChange, LinuxRouteExecutionReport, LinuxOwnedRouteOperator,
+    execute_linux_route_reconciliation,
+};
 pub use secret_store::SecretFileStore;
 
 use std::future::Future;
