@@ -1123,38 +1123,44 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P9-001 — Define topology policy inputs
 
-- [ ] connection capacity/capabilities.
-- [ ] direct-neighbor availability.
-- [ ] link quality/stability where portable.
-- [ ] hop/path cost.
-- [ ] topology stability.
-- [ ] battery/power placeholder.
-- [ ] future gateway preference.
+- [x] connection capacity/capabilities.
+- [x] direct-neighbor availability.
+- [x] link quality/stability where portable.
+- [x] hop/path cost.
+- [x] topology stability.
+- [x] battery/power placeholder.
+- [x] future gateway preference.
 
 **Acceptance**
 
 - Inputs are explicit/testable and do not include hard-coded product models.
 
+**SOFTWARE COMPLETE (2026-10-16):** `crates/blueroute-core/src/topology_policy.rs` defines explicit heterogeneous capability, neighbor, link, stability, power and gateway inputs with validation. These are untrusted policy inputs until the daemon authenticates their origin; no hardware capability is inferred.
+
 ## P9-002 — Implement NAP role selection v1
 
-- [ ] choose capable hub nodes automatically.
-- [ ] respect per-node capacity.
-- [ ] avoid unnecessary hubs.
-- [ ] permit client-only nodes.
+- [x] choose capable hub nodes automatically.
+- [x] respect per-node capacity.
+- [x] avoid unnecessary hubs.
+- [x] permit client-only nodes.
 
 **Acceptance**
 
 - Deterministic tests produce expected assignments across heterogeneous capabilities.
 
+**SOFTWARE COMPLETE (2026-10-16):** `select_nap_hubs` produces deterministic capacity-bounded proposals, denies unknown support, and reports unserved nodes. This is not live BlueZ NAP role assignment.
+
 ## P9-003 — Implement topology plan diff
 
-- [ ] desired vs active topology.
-- [ ] minimal ordered changes.
-- [ ] keep working path until replacement exists where possible.
+- [x] desired vs active topology.
+- [x] minimal ordered changes.
+- [x] keep working path until replacement exists where possible.
 
 **Acceptance**
 
 - Small metric changes do not rebuild whole network.
+
+**SOFTWARE COMPLETE (2026-10-16):** `diff_nap_topology` preserves unchanged links, plans independent make-before-break, reports interrupting client migrations, and respects host capacity. Five deterministic regressions and exact-head CI [38998276234](https://github.com/ekkus93/blueroute/actions/runs/38998276234) passed. No live Bluetooth topology change is implied.
 
 ## P9-004 — Implement topology executor
 
@@ -1166,6 +1172,8 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 **Acceptance**
 
 - Injected failure leaves daemon able to recover to valid state.
+
+**SOFTWARE PARTIAL (2026-10-16):** `NapTopologyOperator` and `execute_nap_plan` define an observation-gated backend-neutral executor with ordered link intents, route reconciliation, stale-state rejection and failure-stop/replan behavior. Fake-backend tests pass exact-head CI [38998619932](https://github.com/ekkus93/blueroute/actions/runs/38998619932); production BlueZ, authenticated membership, live Linux routes and daemon lifecycle integration remain open. See [evidence](P9-003-P9-004-TOPOLOGY-RECONCILIATION-2026-10-16.md).
 
 ## P9-005 — Implement hub-loss reformation
 
