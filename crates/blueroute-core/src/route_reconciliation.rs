@@ -20,6 +20,35 @@ fn invalid(message: &'static str) -> CoreError {
     CoreError::new(ErrorKind::InvalidInput, message)
 }
 
+/// Normalize the key that a Linux route backend would use when comparing
+/// observed prefixes. This does not authorize a kernel mutation.
+fn canonical_observed_destination(
+    destination: &RouteDestination,
+) -> Result<RouteDestination, CoreError> {
+    let RouteDestination::Prefix(prefix) = destination else {
+        return Ok(destination.clone());
+    };
+    crate::IpPrefix::new(prefix.address, prefix.prefix_len)?;
+    let address = match prefix.address {
+        std::net::IpAddr::V4(address) => {
+            let mask = u32::MAX
+                .checked_shl(u32::from(32 - prefix.prefix_len))
+                .unwrap_or(0);
+            std::net::IpAddr::V4(std::net::Ipv4Addr::from(u32::from(address) & mask))
+        }
+        std::net::IpAddr::V6(address) => {
+            let mask = u128::MAX
+                .checked_shl(u32::from(128 - prefix.prefix_len))
+                .unwrap_or(0);
+            std::net::IpAddr::V6(std::net::Ipv6Addr::from(u128::from(address) & mask))
+        }
+    };
+    Ok(RouteDestination::Prefix(crate::IpPrefix::new(
+        address,
+        prefix.prefix_len,
+    )?))
+}
+
 fn validate_desired(route: &Route, network: NetworkId) -> Result<(), CoreError> {
     if route.owner != RouteOwner::BlueRouteNetwork(network) {
         return Err(invalid("desired route belongs to another network"));
@@ -98,18 +127,24 @@ pub fn plan_route_reconciliation(
     }
     let mut existing = BTreeMap::new();
     for route in observed {
+        // The kernel may report a route with its network address normalized,
+        // while an observation adapter could preserve host bits. Compare the
+        // effective destination rather than the unchecked text representation.
+        let destination = canonical_observed_destination(&route.destination)?;
         if route.owner != RouteOwner::BlueRouteNetwork(network) {
-            // A backend must never replace a route owned by another network.
-            // Refuse an ambiguous destination before generating any upsert.
-            if wanted.contains_key(&route.destination) {
+            // A backend must never replace a route owned by another network,
+            // including a noncanonical alias for the same kernel prefix.
+            if wanted.contains_key(&destination) {
                 return Err(invalid("desired destination conflicts with foreign route"));
             }
             continue;
         }
-        if existing
-            .insert(route.destination.clone(), route.clone())
-            .is_some()
-        {
+        // Never infer ownership of a different canonical route from a
+        // malformed owned observation.
+        if destination != route.destination {
+            return Err(invalid("observed owned route has noncanonical prefix"));
+        }
+        if existing.insert(destination, route.clone()).is_some() {
             return Err(invalid("duplicate observed owned route destination"));
         }
     }
@@ -250,6 +285,59 @@ mod tests {
                 .upsert,
             vec![desired]
         );
+    }
+
+    #[test]
+    fn foreign_noncanonical_ipv4_prefix_cannot_hide_kernel_collision() {
+        let mut desired = route(1, 3, 2, 10);
+        desired.destination = RouteDestination::Prefix(
+            IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 0)), 24).unwrap(),
+        );
+        let mut foreign = route(2, 4, 7, 10);
+        foreign.destination = RouteDestination::Prefix(
+            IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 77)), 24).unwrap(),
+        );
+        assert!(plan_route_reconciliation(network(1), &[desired.clone()], &[foreign.clone()]).is_err());
+
+        foreign.destination = RouteDestination::Prefix(
+            IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 21, 0, 77)), 24).unwrap(),
+        );
+        assert_eq!(
+            plan_route_reconciliation(network(1), &[desired.clone()], &[foreign])
+                .unwrap()
+                .upsert,
+            vec![desired]
+        );
+    }
+
+    #[test]
+    fn foreign_noncanonical_ipv6_prefix_cannot_hide_kernel_collision() {
+        use std::net::Ipv6Addr;
+
+        let mut desired = route(1, 3, 2, 10);
+        desired.destination = RouteDestination::Prefix(
+            IpPrefix::new(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 1, 0, 0, 0, 0)), 64)
+                .unwrap(),
+        );
+        let mut foreign = route(2, 4, 7, 10);
+        foreign.destination = RouteDestination::Prefix(
+            IpPrefix::new(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 1, 0, 0, 0, 9)), 64)
+                .unwrap(),
+        );
+        assert!(plan_route_reconciliation(network(1), &[desired], &[foreign]).is_err());
+    }
+
+    #[test]
+    fn malformed_owned_observation_cannot_authorize_mutation() {
+        let mut owned = route(1, 3, 2, 10);
+        owned.destination = RouteDestination::Prefix(
+            IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 77)), 24).unwrap(),
+        );
+        assert!(plan_route_reconciliation(network(1), &[], &[owned.clone()]).is_err());
+        if let RouteDestination::Prefix(prefix) = &mut owned.destination {
+            prefix.prefix_len = 33;
+        }
+        assert!(plan_route_reconciliation(network(1), &[], &[owned]).is_err());
     }
 
     #[test]
