@@ -350,6 +350,7 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 
 
+
 ## P2-002 — Define node capability model
 
 - [x] Bluetooth adapter usability.
@@ -698,6 +699,7 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 - [x] connect.
 - [x] version negotiation.
 - [x] typed requests.
+
 - [x] events.
 
 - [x] reconnect after daemon restart.
@@ -827,7 +829,7 @@ This is the first complete product slice.
 - Stable multi-client star works at documented count for tested adapter.
 - Count is not treated as universal.
 
-**P6-007 concurrent reservation model (software-only, 2026-10-17):** A generation-scoped, mutex-serialized NAP admission ledger now counts in-flight reservations alongside active modeled clients, rejects duplicate pending attempts and overbooking, promotes only matching generations and ignores stale teardown callbacks. Four deterministic tests include a 16-thread/three-slot race, stale-generation retirement, idempotent activation and unknown-capability denial. This is **in-process policy only**: it is not wired to daemon PANU admission, independently authenticated attachment observations, actual radio client counts or concurrent physical traffic. Exact-head CI qualification is pending.
+**P6-007 concurrent reservation model (software-only, 2026-10-17):** A generation-scoped, mutex-serialized NAP admission ledger now counts in-flight reservations alongside active modeled clients, rejects duplicate pending attempts and overbooking, promotes only matching generations and ignores stale teardown callbacks. Four deterministic tests include a 16-thread/three-slot race, stale-generation retirement, idempotent activation and unknown-capability denial. This is **in-process policy only**: it is not wired to daemon PANU admission, independently authenticated attachment observations, actual radio client counts or concurrent physical traffic. Four ledger tests and locked workspace checks passed [exact-head CI 39066719628](https://github.com/ekkus93/blueroute/actions/runs/39066719628) at `7e56fb825040de1316846210851ae64ab0c5db57`.
 
 **P6-007 NAP admission planner (software-only, 2026-10-17):** `blueroute_core::plan_nap_client_admission` evaluates a caller-supplied list of already authenticated active PANU NodeIds against explicit locally sourced adapter/NAP capabilities and `connection_policy_ceiling`. It refuses unknown/zero ceilings, duplicate/zero identities, impossible over-capacity observations and a new client at capacity, while allowing a repeat admission of an existing peer without consuming another slot. Five negative/positive deterministic tests passed [exact-head CI 39064441580](https://github.com/ekkus93/blueroute/actions/runs/39064441580) at `42cede7a93b5bd5fe8e1abbbd06fbc6d48f518dd`. The planner does **not** authenticate peers, serialize concurrent admission in the daemon, attach PANU hardware, send TCP/UDP traffic, or establish a device's real simultaneous-link ceiling. P6-007 remains IN PROGRESS; all three original checkboxes remain open for end-to-end completion. See [evidence](P6-007-MULTICLIENT-ADMISSION-POLICY-2026-10-17.md).
 
@@ -1048,6 +1050,7 @@ This is the first complete product slice.
 - [ ] cleanup when unnecessary; qualify simulated topology loss/recovery and Linux namespaces where available.
 
 **Software model qualified:** `crates/blueroute-core/src/forwarding_policy.rs` passed [exact-head CI 38478135480](https://github.com/ekkus93/blueroute/actions/runs/38478135480) at `167221e`. Unknown routing capability denies forwarding, a single L2 PAN star does not request global IPv4 forwarding, and disconnected/failed links cannot sustain forwarding intent. This is not a kernel/sysctl integration or real Bluetooth acceptance.
+
 
 **Acceptance**
 
@@ -1399,6 +1402,7 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 # P12 — Tauri desktop application
 
+
 ## P12-001 — Bootstrap Tauri desktop app
 
 - [ ] Tauri 2.
@@ -1749,6 +1753,7 @@ Cover:
 
 ## P15-002 — Build Debian package
 
+
 - [x] automated locked release build in `packaging/debian/build-package.sh`.
 - [x] declare and validate runtime dependencies.
 - [x] install binaries and service policy into standard Debian locations; verify exact package file list against P15-001.
@@ -2097,6 +2102,7 @@ client -> routing node -> gateway -> Internet
 - [ ] low-level details only in advanced view.
 
 **Acceptance**
+
 
 - Non-technical user can enable/disable and understand state.
 
