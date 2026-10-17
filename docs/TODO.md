@@ -1196,6 +1196,8 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 - Noisy metrics do not trigger continuous rebuild.
 
+**SOFTWARE PARTIAL (2026-10-16):** `topology_stability.rs` provides deterministic cost-improvement hysteresis, minimum dwell, bounded failure backoff and clock-regression rejection. Tests passed [CI 38999358388](https://github.com/ekkus93/blueroute/actions/runs/38999358388). Daemon integration and physical acceptance remain open.
+
 ---
 
 # P10 — CLI
