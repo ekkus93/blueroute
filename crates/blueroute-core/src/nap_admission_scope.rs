@@ -6,8 +6,8 @@
 use std::sync::Arc;
 
 use crate::{
-    CoreError, ErrorKind, NapAdmissionDecision, NapAdmissionLedger, NapAdmissionTicket,
-    NetworkId, NodeCapabilities, NodeId,
+    CoreError, ErrorKind, NapAdmissionDecision, NapAdmissionLedger, NapAdmissionTicket, NetworkId,
+    NodeCapabilities, NodeId,
 };
 
 /// Opaque reservation tied to exactly one NAP owner, even across restarts.
@@ -126,10 +126,7 @@ mod tests {
         NodeCapabilities {
             adapter_usable: Some(Sourced::new(true, CapabilitySource::Discovered)),
             nap: Some(Sourced::new(true, CapabilitySource::Measured)),
-            connection_policy_ceiling: Some(Sourced::new(
-                ceiling,
-                CapabilitySource::Configured,
-            )),
+            connection_policy_ceiling: Some(Sourced::new(ceiling, CapabilitySource::Configured)),
             ..NodeCapabilities::default()
         }
     }
@@ -145,9 +142,15 @@ mod tests {
         assert_eq!(old.generation(), new.generation());
         assert_eq!(old.candidate(), node(3));
         assert_eq!(old.network(), network(1));
-        assert_eq!(restarted.activate(&old).unwrap_err().kind(), ErrorKind::InvalidState);
+        assert_eq!(
+            restarted.activate(&old).unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
         assert!(!restarted.retire(&old).unwrap());
-        assert_eq!(other.activate(&old).unwrap_err().kind(), ErrorKind::InvalidState);
+        assert_eq!(
+            other.activate(&old).unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
         assert!(!other.retire(&old).unwrap());
         assert!(!original.retire(&foreign).unwrap());
         assert_eq!(restarted.counts().unwrap(), (0, 1));
