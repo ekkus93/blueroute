@@ -220,7 +220,7 @@ mod tests {
         let desired = route(1, 3, 7);
         let mut fake = FakeRoutes::new(vec![foreign.clone(), old, obsolete.clone()]);
         let result =
-            execute_route_reconciliation(network(1), &[desired.clone()], &mut fake).unwrap();
+            execute_route_reconciliation(network(1), std::slice::from_ref(&desired), &mut fake).unwrap();
         assert_eq!(
             result.applied,
             vec![
