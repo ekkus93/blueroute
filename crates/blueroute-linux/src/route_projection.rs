@@ -167,7 +167,9 @@ pub fn project_ipv4_route_intents(
         if route.destination == RouteDestination::Node(route.next_hop)
             && prefix.address != IpAddr::V4(hop.address)
         {
-            return Err(invalid("direct peer route disagrees with observed IPv4 address"));
+            return Err(invalid(
+                "direct peer route disagrees with observed IPv4 address",
+            ));
         }
         let via = if prefix.prefix_len == 32 && prefix.address == IpAddr::V4(hop.address) {
             // A host route is on-link only when the destination is the
