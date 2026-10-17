@@ -34,3 +34,20 @@ parallel multi-client connections using one NAP, tested traffic between
 clients, capacity/diagnostics through the daemon CLI and frontends, and
 documented measured per-adapter limits when physical testing resumes.
 All three P6-007 acceptance subtasks remain unchecked.
+
+## Read-only capacity diagnostics (2026-10-17)
+
+The `blueroute capability show` human-readable CLI output now explicitly
+labels the effective NAP policy ceiling and its provenance, including whether
+it is only a conservative default rather than a controller measurement.
+It also states that the *live attached PANU count is unavailable* instead of
+presenting a guessed zero. `--json` preserves the existing typed capability
+response without inventing new daemon fields. Unknown ceilings remain
+unknown. A deterministic formatter/JSON round-trip test passed [exact-head
+CI 39064822988](https://github.com/ekkus93/blueroute/actions/runs/39064822988)
+at `c29f09760a82e57ec07e92031ef1995a4c89a238`.
+
+This is read-only reporting of configured/runtime policy inputs, not
+authenticated peer inventory, actual multi-client session counts or proof
+of controller concurrency. P6-007 still requires live runtime admission,
+real concurrent connections/traffic, and hardware acceptance.
