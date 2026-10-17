@@ -1077,6 +1077,8 @@ This is the first complete product slice.
 
 **P8-005 Linux desired/observed route planning (software-only, 2026-10-17):** `plan_linux_route_reconciliation` computes deterministic per-network Linux-route upsert and stale-owned-removal intents using canonical observed prefix keys. It rejects invalid owned routes, aliases of foreign destinations, duplicate owned destinations, unsafe gateways and default routes; unrelated foreign routes remain untouched. Five focused regressions passed [exact-head CI 39051662010](https://github.com/ekkus93/blueroute/actions/runs/39051662010) at `c6e0c9f85089577a179e8abb82641e19d2fb37be`. This planner does not mutate kernel routes or authenticate peer/binding observations: full kernel route table visibility, privilege-site ownership compare-and-swap, PAN/runtime integration and physical acceptance remain open. See [evidence](P8-005-LINUX-ROUTE-RECONCILIATION-2026-10-17.md).
 
+**P8-005 stale-route removal foreign-alias safeguard (software-only, 2026-10-17):** Before generating any removal intent, the Linux planner checks all owned observed destinations against all foreign observed destination keys after canonicalization, regardless of arrival order. This prevents treating a stale owned route as exclusively owned when a foreign route aliases its kernel prefix. Both observation orders are covered by a new regression, passed [exact-head CI 39052205507](https://github.com/ekkus93/blueroute/actions/runs/39052205507) at `23e4f17`. This does not replace privileged backend ownership verification.
+
 ## P8-006 — Prove two-hop TCP/IP
 
 ```text
