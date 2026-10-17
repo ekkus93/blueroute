@@ -14,8 +14,8 @@ mod route_planner;
 mod secret;
 mod segment_allocator;
 mod topology;
-mod topology_policy;
 mod topology_plan;
+mod topology_policy;
 
 pub use addressing::{Ipv4StarAddressPlan, ensure_ipv4_segment_available, normalized_ipv4_prefix};
 pub use capability::{
