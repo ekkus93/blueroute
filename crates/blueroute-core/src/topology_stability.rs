@@ -62,18 +62,18 @@ pub fn decide_topology_change(
             return Ok(TopologyChangeDecision::KeepCurrent);
         }
     }
-    if let Some(last_failure) = observation.last_failure_ms {
-        if observation.consecutive_failures > 0 {
-            let exponent = observation.consecutive_failures.saturating_sub(1).min(63);
-            let factor = 1_u64.checked_shl(exponent).unwrap_or(u64::MAX);
-            let delay = policy
-                .retry_base_ms
-                .saturating_mul(factor)
-                .min(policy.retry_max_ms);
-            let deadline = last_failure.saturating_add(delay);
-            if observation.now_ms < deadline {
-                return Ok(TopologyChangeDecision::DeferUntil(deadline));
-            }
+    if let Some(last_failure) = observation.last_failure_ms
+        && observation.consecutive_failures > 0
+    {
+        let exponent = observation.consecutive_failures.saturating_sub(1).min(63);
+        let factor = 1_u64.checked_shl(exponent).unwrap_or(u64::MAX);
+        let delay = policy
+            .retry_base_ms
+            .saturating_mul(factor)
+            .min(policy.retry_max_ms);
+        let deadline = last_failure.saturating_add(delay);
+        if observation.now_ms < deadline {
+            return Ok(TopologyChangeDecision::DeferUntil(deadline));
         }
     }
     if observation.current_viable {
