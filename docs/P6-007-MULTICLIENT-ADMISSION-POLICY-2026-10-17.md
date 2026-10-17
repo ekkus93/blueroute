@@ -82,3 +82,20 @@ PANU peers, cancel/reconcile actual in-flight attempts after capability loss,
 observe attachments and release tickets on real teardown. This is not a
 measured radio limit, physical multi-client test or proof of concurrent
 TCP/UDP traffic. Keep all three original P6-007 subtasks open.
+
+## Post-reservation capability revalidation (2026-10-17)
+
+A previously issued pending ticket must now pass the *current* sourced
+adapter/NAP/ceiling policy at activation, under the same ledger mutex. This
+closes the downgrade race in which a ticket reserved before adapter loss or
+capacity reduction could otherwise promote despite the new policy. A
+downgrade below active-plus-pending occupancy refuses activation until the
+owner retires excess pending tickets; an unknown ceiling also refuses it.
+Failed promotion preserves the ticket for explicit cancellation/reconciliation
+rather than silently claiming the physical connection disappeared. A new
+deterministic regression covers both failure paths and recovery.
+
+[Exact-head CI 39070431318](https://github.com/ekkus93/blueroute/actions/runs/39070431318)
+passed at `081b15915daa189b59a0ea09ab34f6c354deb892`.
+The daemon still needs to wire actual authenticated attachment observation,
+capability-change cancellation, socket teardown and multi-client traffic.
