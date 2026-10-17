@@ -23,3 +23,7 @@ integration, Linux namespace qualification and real Bluetooth multi-hop
 acceptance remain open. P8-005 is still software-partial.
 
 The node host-prefix guard passed [CI 39049814583](https://github.com/ekkus93/blueroute/actions/runs/39049814583) at `a42f660`.
+
+## Direct host address/identity binding (2026-10-17)
+
+A logical node whose bound IPv4 `/32` equals the first-hop address may not be projected as an on-link direct destination unless its NodeId is the first-hop NodeId itself. Otherwise the projection fails closed rather than silently redirecting an unrelated identity. The negative and matching-neighbor positive regression passed [exact-head CI 39053134616](https://github.com/ekkus93/blueroute/actions/runs/39053134616) at `34d9288193e67440dd3e8cc71bd2eae699bdce5b`. This does not authenticate caller-provided node-to-IP bindings or demonstrate kernel/Bluetooth behavior.

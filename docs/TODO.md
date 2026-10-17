@@ -1079,6 +1079,8 @@ This is the first complete product slice.
 
 **P8-005 stale-route removal foreign-alias safeguard (software-only, 2026-10-17):** Before generating any removal intent, the Linux planner checks all owned observed destinations against all foreign observed destination keys after canonicalization, regardless of arrival order. This prevents treating a stale owned route as exclusively owned when a foreign route aliases its kernel prefix. Both observation orders are covered by a new regression, passed [exact-head CI 39052205507](https://github.com/ekkus93/blueroute/actions/runs/39052205507) at `23e4f17`. This does not replace privileged backend ownership verification.
 
+**P8-005 direct-host next-hop identity gate (software-only, 2026-10-17):** The IPv4 projection now rejects an on-link `/32` whose destination NodeId differs from the observed first-hop NodeId despite sharing its address, rather than treating a foreign logical node as directly reachable. A positive real first-hop case remains valid. [Exact-head CI 39053134616](https://github.com/ekkus93/blueroute/actions/runs/39053134616) passed at `34d9288`, including this correction and the core stale-prefix ownership regression. This is not a verified PAN binding or actual kernel route test. See [projection evidence](P8-005-LINUX-IPV4-ROUTE-PROJECTION-2026-10-17.md).
+
 ## P8-006 — Prove two-hop TCP/IP
 
 ```text
