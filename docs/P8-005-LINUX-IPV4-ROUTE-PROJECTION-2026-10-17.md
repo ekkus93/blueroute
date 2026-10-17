@@ -27,3 +27,7 @@ The node host-prefix guard passed [CI 39049814583](https://github.com/ekkus93/bl
 ## Direct host address/identity binding (2026-10-17)
 
 A logical node whose bound IPv4 `/32` equals the first-hop address may not be projected as an on-link direct destination unless its NodeId is the first-hop NodeId itself. Otherwise the projection fails closed rather than silently redirecting an unrelated identity. The negative and matching-neighbor positive regression passed [exact-head CI 39053134616](https://github.com/ekkus93/blueroute/actions/runs/39053134616) at `34d9288193e67440dd3e8cc71bd2eae699bdce5b`. This does not authenticate caller-provided node-to-IP bindings or demonstrate kernel/Bluetooth behavior.
+
+## Unique peer-to-address bindings (2026-10-17)
+
+Untrusted caller-supplied route binding arrays now reject duplicate IPv4 destination prefixes across distinct logical destinations and duplicate next-hop IPv4 addresses across distinct NodeIds, regardless of which routes are currently requested. Two new deterministic regression tests also confirm valid distinct next-hop address inputs remain accepted. [Exact-head CI 39055838456](https://github.com/ekkus93/blueroute/actions/runs/39055838456) passed at `942f8ea85a7301dd68784e497438a77218029fa3`. This is **not** verified peer/address mapping, authenticated distribution, privilege-site route ownership or physical PAN evidence.
