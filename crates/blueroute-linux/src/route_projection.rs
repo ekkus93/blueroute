@@ -88,6 +88,9 @@ pub fn project_ipv4_route_intents(
         }
         destination_valid(&binding.destination)?;
         private_prefix(binding.prefix)?;
+        if matches!(binding.destination, RouteDestination::Node(_)) && binding.prefix.prefix_len != 32 {
+            return Err(invalid("node route requires an IPv4 host prefix"));
+        }
         if let RouteDestination::Prefix(prefix) = binding.destination
             && prefix != binding.prefix
         {
@@ -252,6 +255,13 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn node_binding_cannot_claim_an_entire_private_subnet() {
+        let mut destination = binding(3, [10, 20, 0, 3]);
+        destination.prefix = prefix([10, 20, 0, 0], 24);
+        assert!(project_ipv4_route_intents(network(1), &[route(3)], &[destination], &[hop()]).is_err());
     }
 
     #[test]
