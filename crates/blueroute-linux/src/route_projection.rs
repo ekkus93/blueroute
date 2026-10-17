@@ -136,15 +136,13 @@ pub fn project_ipv4_route_intents(
     // address unless both bindings identify the same peer. Check even unused
     // destination bindings, and regardless of which hop a route selects.
     for binding in destinations {
-        if let RouteDestination::Node(node) = &binding.destination {
-            if let IpAddr::V4(address) = binding.prefix.address {
-                if hop_addresses
-                    .get(&address)
-                    .is_some_and(|observed_node| observed_node != node)
-                {
-                    return Err(invalid("destination aliases another next-hop identity"));
-                }
-            }
+        if let RouteDestination::Node(node) = &binding.destination
+            && let IpAddr::V4(address) = binding.prefix.address
+            && hop_addresses
+                .get(&address)
+                .is_some_and(|observed_node| observed_node != node)
+        {
+            return Err(invalid("destination aliases another next-hop identity"));
         }
     }
     let mut output = BTreeMap::new();
