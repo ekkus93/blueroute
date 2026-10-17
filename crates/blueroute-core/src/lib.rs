@@ -51,9 +51,7 @@ pub use topology_policy::{
     select_nap_hubs,
 };
 pub use topology_recovery::{HubLossRecoveryPlan, plan_hub_loss_recovery};
-pub use topology_recovery_flow::{
-    HubLossRecoveryExecution, execute_confirmed_hub_loss_recovery,
-};
+pub use topology_recovery_flow::{HubLossRecoveryExecution, execute_confirmed_hub_loss_recovery};
 pub use topology_stability::{
     TopologyChangeDecision, TopologyChangeObservation, TopologyStabilityPolicy,
     decide_topology_change,

@@ -182,15 +182,19 @@ mod tests {
         let inputs = policy();
         let mut tracker = HubLossTracker::new(10).unwrap();
         let mut pan = FakePan::hosted();
-        assert!(execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, 0, &mut pan)
-            .unwrap()
-            .is_none());
+        assert!(
+            execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, 0, &mut pan)
+                .unwrap()
+                .is_none()
+        );
 
         pan.links.clear(); // Independent simulated PAN observation, not a requested disconnect.
         for now in [1, 10] {
-            assert!(execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, now, &mut pan)
-                .unwrap()
-                .is_none());
+            assert!(
+                execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, now, &mut pan)
+                    .unwrap()
+                    .is_none()
+            );
         }
         assert!(pan.operations.is_empty());
         let result = execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, 11, &mut pan)
@@ -226,8 +230,7 @@ mod tests {
         pan.links.clear();
         execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, 1, &mut pan).unwrap();
         pan.fail_connect = Some(link(2, 4));
-        assert!(execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, 11, &mut pan)
-            .is_err());
+        assert!(execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, 11, &mut pan).is_err());
         assert_eq!(pan.links, BTreeSet::from([link(2, 3)]));
         assert_eq!(pan.routes, pan.links);
 
@@ -235,7 +238,10 @@ mod tests {
         let retry = execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, 12, &mut pan)
             .unwrap()
             .unwrap();
-        assert_eq!(retry.execution.applied, vec![NapPlanStep::Connect(link(2, 4))]);
+        assert_eq!(
+            retry.execution.applied,
+            vec![NapPlanStep::Connect(link(2, 4))]
+        );
         assert_eq!(pan.routes, BTreeSet::from([link(2, 3), link(2, 4)]));
         assert_eq!(pan.operations.len(), 2);
     }
@@ -248,12 +254,16 @@ mod tests {
         execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, 0, &mut pan).unwrap();
         tracker.forget_hub(id(1));
         pan.links.clear();
-        assert!(execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, 1, &mut pan)
-            .unwrap()
-            .is_none());
-        assert!(execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, 10, &mut pan)
-            .unwrap()
-            .is_none());
+        assert!(
+            execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, 1, &mut pan)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, 10, &mut pan)
+                .unwrap()
+                .is_none()
+        );
         assert!(pan.operations.is_empty());
     }
 }
