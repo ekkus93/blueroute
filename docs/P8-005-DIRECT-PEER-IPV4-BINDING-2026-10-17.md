@@ -15,7 +15,7 @@ RouteNextHopBinding model. A future authenticated multi-address design must
 carry separate evidence and explicitly revise this restriction; it must not
 infer extra peer addresses from untrusted route destinations.
 
-**Qualification:** pending exact-head CI for the implementation commit.
+**Qualification:** exact-head CI [39062070393](https://github.com/ekkus93/blueroute/actions/runs/39062070393) passed at `6398702fc339c4739fc488f7df3ceebdfbcdc0ed` after the formatting repair (initial implementation `85eb555269c43fb39b664068eb1fe9af8b6032ec`).
 **Still open:** independently authenticated PAN/IP observations, privileged
 kernel route mutation, daemon lifecycle integration, production JoinNetwork,
 and real Bluetooth/multi-hop acceptance. This does not prove physical behavior.
