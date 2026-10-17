@@ -15,6 +15,10 @@
 
 CI covered formatting, locked workspace, Clippy, tests and standard repository integration gates. Earlier format/lint failures were fixed, not waived.
 
+## Additional P8-005 destination-prefix hardening
+
+`route_reconciliation.rs` now rejects noncanonical IPv4 and IPv6 prefix intents (host bits set) so a future kernel backend cannot accidentally treat two textual encodings of one route destination as different owned records. Canonical prefixes are accepted. [CI 39022369709](https://github.com/ekkus93/blueroute/actions/runs/39022369709) passed at `3baa6030d8035e6d079ed6615873eb8ea21de49e`. The kernel backend must still independently canonicalize, match and enforce exact route ownership.
+
 ## Not yet accepted
 
 Neither module authenticates peers, owns a Linux route table, mutates kernel routes or knows whether remote topology is trustworthy. The privileged backend must independently enforce atomic ownership checks at the mutation site and map verified logical routes to owned local interfaces and nondefault IP prefixes. Daemon integration must serialize per-network operations, confirm fresh verified PAN/session/membership observations, handle revocation and service restart, and preserve unrelated routing state. Linux namespace/veth, multi-hop and real Bluetooth acceptance remain outstanding. P8-005/P8-008 stay open.

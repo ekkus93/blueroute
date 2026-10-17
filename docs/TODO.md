@@ -1071,6 +1071,8 @@ This is the first complete product slice.
 
 **P8-005 observed route executor (software-only, 2026-10-17):** `OwnedRouteOperator` and `execute_route_reconciliation` now apply route-intent plans using fresh pre/post observations and backend atomic ownership/previous-state preconditions; foreign routes are preserved and partial failures require re-observation. Six fake-backend regressions passed [exact-head CI 39021539274](https://github.com/ekkus93/blueroute/actions/runs/39021539274) at `5da26e4861cbcfcc502bd308b5ac84f94ea4dafe`. Privileged Linux backend, authenticated route distribution and physical acceptance remain OPEN. See [evidence](P8-005-P8-008-ROUTE-RECONCILIATION-2026-10-17.md).
 
+**P8-005 canonical route-prefix guard (2026-10-17):** Desired IPv4 and IPv6 prefix destinations with nonzero host bits now fail validation, preventing alternate encodings of the same kernel route from becoming independent logical ownership intents. Canonical positive and host-bit negative tests passed [exact-head CI 39022369709](https://github.com/ekkus93/blueroute/actions/runs/39022369709) at `3baa6030d8035e6d079ed6615873eb8ea21de49e`. The privileged backend and authenticated distribution remain OPEN.
+
 ## P8-006 — Prove two-hop TCP/IP
 
 ```text
