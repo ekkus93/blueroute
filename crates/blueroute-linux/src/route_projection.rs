@@ -264,8 +264,7 @@ mod tests {
         let mut destination = binding(3, [10, 20, 0, 3]);
         destination.prefix = prefix([10, 20, 0, 0], 24);
         assert!(
-            project_ipv4_route_intents(network(1), &[route(3)], &[destination], &[hop()])
-                .is_err()
+            project_ipv4_route_intents(network(1), &[route(3)], &[destination], &[hop()]).is_err()
         );
     }
 
