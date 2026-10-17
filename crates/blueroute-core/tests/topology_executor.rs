@@ -162,3 +162,16 @@ fn no_link_changes_still_reconcile_routes() {
     assert!(report.applied.is_empty());
     assert_eq!(backend.events, ["observe", "routes"]);
 }
+
+#[test]
+fn unobserved_connect_success_does_not_remove_working_path() {
+    let mut backend = Fake {
+        links: BTreeSet::from([link(1, 2)]),
+        ignore_connect: true,
+        ..Fake::default()
+    };
+    let error = execute_nap_plan(&policy(), &plan(&[2]), &plan(&[3]), &mut backend).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::TopologyFailure);
+    assert_eq!(backend.links, BTreeSet::from([link(1, 2)]));
+    assert!(!backend.events.contains(&"disconnect"));
+}
