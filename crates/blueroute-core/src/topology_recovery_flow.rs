@@ -647,7 +647,10 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert_eq!(recovered.execution.observed, BTreeSet::from([link(2, 3), link(2, 4)]));
+        assert_eq!(
+            recovered.execution.observed,
+            BTreeSet::from([link(2, 3), link(2, 4)])
+        );
         assert_eq!(retry.consecutive_failures(), 0);
     }
 
@@ -676,3 +679,9 @@ mod tests {
         );
         assert!(
             execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, 10, &mut pan)
+                .unwrap()
+                .is_none()
+        );
+        assert!(pan.operations.is_empty());
+    }
+}
