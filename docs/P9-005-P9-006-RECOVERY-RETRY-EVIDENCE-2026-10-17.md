@@ -20,6 +20,7 @@ On an eligible retry, the original recovery path enforces stale-snapshot validat
 - Recovery success clears failures; original hub restoration also clears failures.
 - Repeated observation at the same timestamp cannot advance retry state.
 - An invalid anti-flap policy is rejected before use.
+- Four consecutive synthetic failures drive the configured 100 ms, 200 ms, 400 ms and capped 400 ms retry delays. Samples just before each deadline perform no mutations, and a later successful retry clears the failure count. The dedicated integration regression was qualified at `def00e88758796d1ff8d4d73ed610a4769129672`, [exact-head CI 39014507855](https://github.com/ekkus93/blueroute/actions/runs/39014507855) (passed).
 
 The CI run includes Rust formatting, locked workspace compile/Clippy/tests and the repository's integration/package gates.
 
