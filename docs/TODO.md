@@ -110,6 +110,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P8-002 | `[-]` | **IN PROGRESS:** deterministic non-overlapping multi-segment private IPv4 allocation, host-prefix collision checks and owner-scoped *reservation* release passed [CI 38470193934](https://github.com/ekkus93/blueroute/actions/runs/38470193934) at `2c2c108`. A regression fix now revalidates newly observed foreign routes before reusing an existing reservation; exact-head CI 38477587852 passed at `ed628447`. Live kernel route/address ownership teardown and actual PAN segment integration remain; no physical hardware claim. |
 | P8-003 | `[-]` | **IN PROGRESS:** deterministic fail-closed multi-PAN forwarding intent requires explicitly routing-capable local node and active links in at least two distinct PAN segments; [CI 38478135480](https://github.com/ekkus93/blueroute/actions/runs/38478135480) passed at `167221e`. Actual privileged forwarding reconciliation, owner-scoped lease and kernel network namespace qualification remain. |
 | P8-004 | `[x]` | **SOFTWARE COMPLETE (desired-route calculation):** deterministic weighted node routes over active PAN graph respect explicitly routing-capable transit nodes, stable healthy paths and partitions; [CI 38471055209](https://github.com/ekkus93/blueroute/actions/runs/38471055209) passed at `32d4954`. Applying/distributing privileged routes remains P8-005 and physical multi-hop tests remain deferred. |
+| P8-009 | `[x]` | **DESIGN COMPLETE:** Protocol comparison and initial defer-Babel decision in `docs/P8-009-DYNAMIC-ROUTING-ADR.md`; live authenticated routing and physical acceptance remain P7/P8/P9 work. |
 | P14-004 | `[-]` | **IN PROGRESS:** shared `DisplayName` rejects control/escape and Unicode bidirectional-override characters while preserving printable international names; unit tests pass [CI 38467939586](https://github.com/ekkus93/blueroute/actions/runs/38467939586) at `939935e`. Full peer-field limits, unsupported messages and fuzz/domain conversion review still outstanding. |
 | P10-003 | `[-]` | **IN PROGRESS:** network creation and discovery start/stop delegate to PolicyKit-protected typed daemon API; parsing/validation tests pass [CI 38466994092](https://github.com/ekkus93/blueroute/actions/runs/38466994092) at `c786f77`. CLI `network join NETWORK_ID` now sends the typed join request and reports the daemon's fail-closed unsupported result; `network leave` invokes local-host teardown, but restart recovery and client leave are pending. Production join and full end-to-end lifecycle remain. |
 | P10-004 | `[-]` | **IN PROGRESS:** explicit full-NodeId `peer trust`/`peer forget` invoke existing PolicyKit-protected D-Bus commands; tests and [CI 38466585585](https://github.com/ekkus93/blueroute/actions/runs/38466585585) at `8183225` passed. Pending requests/authenticated-join UX remain; trust is **not** TLS enrollment or membership. |
@@ -1107,13 +1108,15 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P8-009 — Evaluate dynamic routing protocol option
 
-- [ ] compare BlueRoute orchestration with Babel or other mature option.
-- [ ] evaluate convergence, security, observability, complexity, portability.
-- [ ] ADR adopt/reject.
+- [x] compare BlueRoute orchestration with Babel or other mature option.
+- [x] evaluate convergence, security, observability, complexity, portability.
+- [x] ADR adopt/reject.
 
 **Acceptance**
 
 - Decision is evidence-based.
+
+**DESIGN COMPLETE (2026-10-17):** [P8-009 dynamic-routing ADR](P8-009-DYNAMIC-ROUTING-ADR.md) compares daemon-owned route reconciliation against Babel (RFC 8966/8967/8968) and alternatives. Retain BlueRoute-authenticated route ownership for the initial routed LAN; revisit Babel only with measured convergence, security and overhead. This design decision does **not** implement P8-005/P8-008, authenticated route distribution or physical Bluetooth acceptance.
 
 ---
 
