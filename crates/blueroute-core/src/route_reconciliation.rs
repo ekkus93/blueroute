@@ -125,12 +125,13 @@ mod tests {
         let old = route(1, 3, 2, 10);
         let new = route(1, 3, 4, 20);
         let stale = route(1, 5, 2, 10);
+        let desired = [new.clone()];
         let plan =
-            plan_route_reconciliation(network(1), &[new.clone()], &[old, stale.clone()]).unwrap();
+            plan_route_reconciliation(network(1), &desired, &[old, stale.clone()]).unwrap();
         assert_eq!(plan.upsert, vec![new.clone()]);
         assert_eq!(plan.remove, vec![stale]);
         assert_eq!(
-            plan_route_reconciliation(network(1), &[new.clone()], &[new]).unwrap(),
+            plan_route_reconciliation(network(1), &desired, &[new]).unwrap(),
             RouteReconciliationPlan::default()
         );
     }
@@ -139,7 +140,8 @@ mod tests {
     fn foreign_network_routes_are_preserved() {
         let foreign = route(2, 3, 7, 10);
         let local = route(1, 3, 2, 10);
-        let plan = plan_route_reconciliation(network(1), &[local.clone()], &[foreign]).unwrap();
+        let desired = [local.clone()];
+        let plan = plan_route_reconciliation(network(1), &desired, &[foreign]).unwrap();
         assert_eq!(plan.upsert, vec![local]);
         assert!(plan.remove.is_empty());
     }
