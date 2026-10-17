@@ -4,7 +4,7 @@
 //! independently prove table, prefix and interface ownership at the instant
 //! of each atomic replace/remove. Its observation must include foreign routes,
 //! not only the owned-route projection from `IpNetworkBackend::routes`.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 
 use blueroute_core::{CoreError, ErrorKind, IpPrefix, NetworkId};
@@ -83,12 +83,14 @@ pub fn plan_linux_route_reconciliation(
     }
 
     let mut existing = BTreeMap::new();
+    let mut foreign_destinations = BTreeSet::new();
     for route in observed {
         let key = canonical(route.destination)?;
         if route.owner != network {
             if wanted.contains_key(&key) {
                 return Err(invalid("desired Linux route collides with foreign route"));
             }
+            foreign_destinations.insert(key);
             continue;
         }
         validate_owned(route, network)?;
@@ -98,6 +100,12 @@ pub fn plan_linux_route_reconciliation(
         if existing.insert(key, route.clone()).is_some() {
             return Err(invalid("duplicate observed owned Linux route destination"));
         }
+    }
+
+    // Refuse stale-route removal if an observed foreign route shares the
+    // same effective destination, regardless of observation ordering.
+    if existing.keys().any(|destination| foreign_destinations.contains(destination)) {
+        return Err(invalid("owned Linux route collides with foreign route"));
     }
 
     let mut plan = LinuxRouteReconciliationPlan::default();
@@ -196,6 +204,28 @@ mod tests {
         let mut bad = desired;
         bad.destination = IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 7)), 24).unwrap();
         assert!(plan_linux_route_reconciliation(network(1), &[], &[bad]).is_err());
+    }
+
+    #[test]
+    fn stale_owned_route_collision_refuses_removal_in_either_order() {
+        let mut stale = route(1, [10, 20, 0, 0], None);
+        stale.destination =
+            IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 0)), 24).unwrap();
+        let mut foreign = route(2, [10, 20, 0, 77], None);
+        foreign.destination =
+            IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 77)), 24).unwrap();
+
+        assert!(
+            plan_linux_route_reconciliation(
+                network(1),
+                &[],
+                &[stale.clone(), foreign.clone()],
+            )
+            .is_err()
+        );
+        assert!(
+            plan_linux_route_reconciliation(network(1), &[], &[foreign, stale]).is_err()
+        );
     }
 
     #[test]
