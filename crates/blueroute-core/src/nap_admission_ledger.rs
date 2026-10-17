@@ -18,8 +18,9 @@ pub struct NapAdmissionTicket {
     pub generation: u64,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct State {
+    host: NodeCapabilities,
     active: BTreeMap<NodeId, u64>,
     pending: BTreeMap<NodeId, u64>,
     next_generation: u64,
@@ -29,16 +30,35 @@ struct State {
 /// Tickets prevent delayed teardown from retiring a replacement connection.
 #[derive(Debug)]
 pub struct NapAdmissionLedger {
-    host: NodeCapabilities,
     state: Mutex<State>,
 }
 
 impl NapAdmissionLedger {
     pub fn new(host: NodeCapabilities) -> Self {
         Self {
-            host,
-            state: Mutex::new(State::default()),
+            state: Mutex::new(State {
+                host,
+                active: BTreeMap::new(),
+                pending: BTreeMap::new(),
+                next_generation: 0,
+            }),
         }
+    }
+
+    /// Atomically replace the sourced local adapter/NAP policy under the same
+    /// lock as reservations. Existing tickets are retained, even if a new
+    /// ceiling is below current occupancy: the owner must separately cancel
+    /// or reconcile real connections. No new slot is granted while the
+    /// observed reservation count violates the updated policy.
+    pub fn update_capabilities(&self, host: NodeCapabilities) -> Result<(), CoreError> {
+        let mut state = self.state.lock().map_err(|_| {
+            CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP admission ledger lock poisoned",
+            )
+        })?;
+        state.host = host;
+        Ok(())
     }
 
     /// Atomically reserve one slot against active *and pending* peers.
@@ -67,7 +87,7 @@ impl NapAdmissionLedger {
             .chain(state.pending.keys())
             .copied()
             .collect();
-        let decision = plan_nap_client_admission(&self.host, &observed, candidate)?;
+        let decision = plan_nap_client_admission(&state.host, &observed, candidate)?;
         if let Some(&generation) = state.active.get(&candidate) {
             return Ok((
                 NapAdmissionTicket {
@@ -237,6 +257,36 @@ mod tests {
             assert!(ledger.activate(ticket).unwrap());
         }
         assert_eq!(ledger.counts().unwrap(), (3, 0));
+    }
+
+    #[test]
+    fn live_policy_downgrade_is_atomic_and_preserves_existing_tickets() {
+        let ledger = NapAdmissionLedger::new(host(Some(2)));
+        let (active, _) = ledger.reserve(peer(1)).unwrap();
+        assert!(ledger.activate(active).unwrap());
+        let (pending, _) = ledger.reserve(peer(2)).unwrap();
+
+        ledger.update_capabilities(host(Some(1))).unwrap();
+        assert_eq!(ledger.counts().unwrap(), (1, 1));
+        assert_eq!(
+            ledger.reserve(peer(3)).unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
+        assert!(ledger.retire(pending).unwrap());
+        assert_eq!(
+            ledger.reserve(peer(3)).unwrap_err().kind(),
+            ErrorKind::CapabilityUnavailable
+        );
+        assert!(ledger.retire(active).unwrap());
+
+        let (fresh, _) = ledger.reserve(peer(3)).unwrap();
+        assert!(ledger.activate(fresh).unwrap());
+        ledger.update_capabilities(host(None)).unwrap();
+        assert!(ledger.reserve(peer(4)).is_err());
+        assert_eq!(ledger.counts().unwrap(), (1, 0));
+        assert!(ledger.retire(fresh).unwrap());
+        ledger.update_capabilities(host(Some(2))).unwrap();
+        assert!(ledger.reserve(peer(4)).is_ok());
     }
 
     #[test]
