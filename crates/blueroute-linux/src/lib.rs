@@ -10,6 +10,7 @@ mod membership_store;
 mod network_discovery;
 mod networkmanager;
 mod pan;
+mod route_projection;
 mod secret_store;
 
 pub use bluez::BluezBackend;
@@ -23,6 +24,9 @@ pub use membership_store::NetworkMembershipStore;
 pub use network_discovery::NetworkAdvertisement;
 pub use networkmanager::NetworkManagerBackend;
 pub use secret_store::SecretFileStore;
+pub use route_projection::{
+    RouteDestinationBinding, RouteNextHopBinding, project_ipv4_route_intents,
+};
 
 use std::future::Future;
 use std::net::IpAddr;
