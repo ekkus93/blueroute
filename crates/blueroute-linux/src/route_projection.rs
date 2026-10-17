@@ -160,6 +160,15 @@ pub fn project_ipv4_route_intents(
         let hop = hop_map
             .get(&route.next_hop)
             .ok_or_else(|| invalid("unobserved next hop"))?;
+        // A route to the first-hop NodeId is direct only when its /32
+        // matches the observed peer address. An alternate address needs
+        // separate verified ownership evidence; do not silently route it
+        // through a claimed address for the same logical identity.
+        if route.destination == RouteDestination::Node(route.next_hop)
+            && prefix.address != IpAddr::V4(hop.address)
+        {
+            return Err(invalid("direct peer route disagrees with observed IPv4 address"));
+        }
         let via = if prefix.prefix_len == 32 && prefix.address == IpAddr::V4(hop.address) {
             // A host route is on-link only when the destination is the
             // authenticated first hop itself. A different logical node
@@ -246,6 +255,30 @@ mod tests {
     fn unrelated_node_cannot_become_direct_by_aliasing_next_hop_address() {
         let aliased = binding(3, [10, 20, 0, 2]);
         assert!(project_ipv4_route_intents(network(1), &[route(3)], &[aliased], &[hop()]).is_err());
+        let direct = project_ipv4_route_intents(
+            network(1),
+            &[route(2)],
+            &[binding(2, [10, 20, 0, 2])],
+            &[hop()],
+        )
+        .unwrap();
+        assert_eq!(direct.len(), 1);
+        assert_eq!(direct[0].via, None);
+    }
+
+    #[test]
+    fn direct_peer_route_cannot_use_an_unverified_alternate_address() {
+        // Node 2 is observed on 10.20.0.2, not 10.20.0.99.
+        // A route to Node 2 via itself must not invent a second address.
+        assert!(
+            project_ipv4_route_intents(
+                network(1),
+                &[route(2)],
+                &[binding(2, [10, 20, 0, 99])],
+                &[hop()],
+            )
+            .is_err()
+        );
         let direct = project_ipv4_route_intents(
             network(1),
             &[route(2)],
