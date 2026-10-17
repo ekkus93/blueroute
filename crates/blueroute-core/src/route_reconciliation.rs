@@ -309,7 +309,6 @@ mod tests {
             IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 77)), 24).unwrap(),
         );
         assert!(
-
             plan_route_reconciliation(network(1), &[desired.clone()], &[foreign.clone()]).is_err()
         );
 
