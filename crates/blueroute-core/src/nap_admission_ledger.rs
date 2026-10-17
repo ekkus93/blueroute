@@ -132,6 +132,16 @@ impl NapAdmissionLedger {
                 "NAP admission ticket is stale or unknown",
             ));
         }
+        // A reservation may have been issued before an adapter loss or a
+        // policy downgrade. Revalidate under the same lock immediately before
+        // promotion; a stale capability snapshot must not authorize activation.
+        let observed: Vec<NodeId> = state
+            .active
+            .keys()
+            .chain(state.pending.keys())
+            .copied()
+            .collect();
+        plan_nap_client_admission(&state.host, &observed, ticket.candidate)?;
         state.pending.remove(&ticket.candidate);
         state.active.insert(ticket.candidate, ticket.generation);
         Ok(true)
@@ -287,6 +297,36 @@ mod tests {
         assert!(ledger.retire(fresh).unwrap());
         ledger.update_capabilities(host(Some(2))).unwrap();
         assert!(ledger.reserve(peer(4)).is_ok());
+    }
+
+    #[test]
+    fn pending_activation_revalidates_capabilities_after_reservation() {
+        let ledger = NapAdmissionLedger::new(host(Some(2)));
+        let (first, _) = ledger.reserve(peer(1)).unwrap();
+        let (second, _) = ledger.reserve(peer(2)).unwrap();
+
+        ledger.update_capabilities(host(Some(1))).unwrap();
+        assert_eq!(
+            ledger.activate(first).unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
+        assert_eq!(ledger.counts().unwrap(), (0, 2));
+        assert!(ledger.retire(second).unwrap());
+        assert!(ledger.activate(first).unwrap());
+
+        let (third, _) = {
+            ledger.update_capabilities(host(Some(2))).unwrap();
+            ledger.reserve(peer(3)).unwrap()
+        };
+        ledger.update_capabilities(host(None)).unwrap();
+        assert_eq!(
+            ledger.activate(third).unwrap_err().kind(),
+            ErrorKind::CapabilityUnavailable
+        );
+        assert_eq!(ledger.counts().unwrap(), (1, 1));
+        ledger.update_capabilities(host(Some(2))).unwrap();
+        assert!(ledger.activate(third).unwrap());
+        assert_eq!(ledger.counts().unwrap(), (2, 0));
     }
 
     #[test]
