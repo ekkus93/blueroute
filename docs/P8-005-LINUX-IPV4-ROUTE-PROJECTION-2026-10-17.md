@@ -31,3 +31,14 @@ A logical node whose bound IPv4 `/32` equals the first-hop address may not be pr
 ## Unique peer-to-address bindings (2026-10-17)
 
 Untrusted caller-supplied route binding arrays now reject duplicate IPv4 destination prefixes across distinct logical destinations and duplicate next-hop IPv4 addresses across distinct NodeIds, regardless of which routes are currently requested. Two new deterministic regression tests also confirm valid distinct next-hop address inputs remain accepted. [Exact-head CI 39055838456](https://github.com/ekkus93/blueroute/actions/runs/39055838456) passed at `942f8ea85a7301dd68784e497438a77218029fa3`. This is **not** verified peer/address mapping, authenticated distribution, privilege-site route ownership or physical PAN evidence.
+
+## Cross-peer destination/observed next-hop identity aliasing (2026-10-17)
+
+A NodeId destination may not claim an IPv4 /32 address observed for a
+different next-hop NodeId, even if the suspicious destination binding is
+unused by the current routes. Checks occur before route projection and do
+not depend on destination or hop input order. The previously ignored
+regression was enabled and positive direct/transit coverage added.
+[Exact-head CI 39060062626](https://github.com/ekkus93/blueroute/actions/runs/39060062626)
+passed at `f148037eabeb87b99858324de58962bd851de633`.
+The privilege-site kernel state and true PAN peer identity are still not verified.
