@@ -47,7 +47,10 @@ pub use topology_policy::{
     select_nap_hubs,
 };
 
-/// The human-readable project name.
-pub use topology_stability::{decide_topology_change, TopologyChangeDecision, TopologyChangeObservation, TopologyStabilityPolicy};
+pub use topology_stability::{
+    TopologyChangeDecision, TopologyChangeObservation, TopologyStabilityPolicy,
+    decide_topology_change,
+};
 
+/// The human-readable project name.
 pub const PROJECT_NAME: &str = "BlueRoute";
