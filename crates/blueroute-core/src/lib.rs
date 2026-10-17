@@ -15,6 +15,7 @@ mod secret;
 mod segment_allocator;
 mod topology;
 mod topology_policy;
+mod topology_plan;
 
 pub use addressing::{Ipv4StarAddressPlan, ensure_ipv4_segment_available, normalized_ipv4_prefix};
 pub use capability::{
@@ -37,6 +38,7 @@ pub use route_planner::{DEGRADED_LINK_COST_PENALTY, desired_node_routes};
 pub use secret::Secret;
 pub use segment_allocator::{MAX_PREFIX_PROBES, MAX_RESERVED_PAN_SEGMENTS, SegmentIpv4Allocator};
 pub use topology::{LinkHealth, LinkState, PanLink, PanSegment, Reachability, TopologyGraph};
+pub use topology_plan::{NapLink, NapPlanDiff, NapPlanStep, diff_nap_topology};
 pub use topology_policy::{
     CandidateLink, NapAssignment, NapSelection, TopologyCandidate, TopologyPolicyInputs,
     select_nap_hubs,
