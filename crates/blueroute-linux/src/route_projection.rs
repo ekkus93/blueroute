@@ -113,7 +113,7 @@ pub fn project_ipv4_route_intents(
         }
     }
     let mut hop_map = BTreeMap::new();
-    let mut hop_addresses = BTreeSet::new();
+    let mut hop_addresses = BTreeMap::new();
     for binding in next_hops {
         if binding.network != network || !nonzero(binding.node.as_bytes()) {
             return Err(invalid("foreign or zero next-hop binding"));
@@ -122,11 +122,26 @@ pub fn project_ipv4_route_intents(
         // Duplicate address claims by distinct peers are ambiguous,
         // including across interfaces: the trusted runtime must resolve
         // the identity/address mapping before accepting route intents.
-        if !hop_addresses.insert(binding.address) {
+        if hop_addresses.insert(binding.address, binding.node).is_some() {
             return Err(invalid("duplicate next-hop IPv4 address binding"));
         }
         if hop_map.insert(binding.node, binding).is_some() {
             return Err(invalid("duplicate next-hop binding"));
+        }
+    }
+    // A destination NodeId must not claim any observed next-hop peer's
+    // address unless both bindings identify the same peer. Check even unused
+    // destination bindings, and regardless of which hop a route selects.
+    for binding in destinations {
+        if let RouteDestination::Node(node) = &binding.destination {
+            if let IpAddr::V4(address) = binding.prefix.address {
+                if hop_addresses
+                    .get(&address)
+                    .is_some_and(|observed_node| observed_node != node)
+                {
+                    return Err(invalid("destination aliases another next-hop identity"));
+                }
+            }
         }
     }
     let mut output = BTreeMap::new();

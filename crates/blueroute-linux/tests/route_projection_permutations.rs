@@ -70,7 +70,6 @@ fn unused_duplicate_peer_address_binding_is_rejected() {
 }
 
 #[test]
-#[ignore = "P8-005: cross-peer destination alias guard still needs implementation"]
 fn destination_cannot_alias_another_observed_next_hop_even_if_unused() {
     let mut aliased = destination(3);
     aliased.prefix = IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 4)), 32).unwrap();
@@ -83,4 +82,36 @@ fn destination_cannot_alias_another_observed_next_hop_even_if_unused() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn cross_peer_alias_rejection_is_independent_of_input_order_and_route_selection() {
+    let mut aliased = destination(3);
+    aliased.prefix = IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 4)), 32).unwrap();
+    for destinations in [
+        [destination(5), aliased.clone()],
+        [aliased.clone(), destination(5)],
+    ] {
+        for next_hops in [[hop(2), hop(4)], [hop(4), hop(2)]] {
+            // A route via peer 2 cannot legitimize node 3 claiming peer 4's address.
+            assert!(project_ipv4_route_intents(
+                network(), &[route(5, 2)], &destinations, &next_hops
+            ).is_err());
+        }
+    }
+}
+
+#[test]
+fn distinct_peer_addresses_allow_direct_and_transit_paths() {
+    let projected = project_ipv4_route_intents(
+        network(),
+        &[route(4, 4), route(5, 4), route(6, 2)],
+        &[destination(4), destination(5), destination(6)],
+        &[hop(2), hop(4)],
+    ).unwrap();
+    assert_eq!(projected.len(), 3);
+    assert_eq!(projected[0].destination, destination(4).prefix);
+    assert_eq!(projected[0].via, None);
+    assert_eq!(projected[1].via, Some(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 4))));
+    assert_eq!(projected[2].via, Some(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 2))));
 }
