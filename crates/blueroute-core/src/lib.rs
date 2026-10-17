@@ -14,6 +14,7 @@ mod route_planner;
 mod secret;
 mod segment_allocator;
 mod topology;
+mod topology_executor;
 mod topology_plan;
 mod topology_policy;
 
@@ -38,6 +39,7 @@ pub use route_planner::{DEGRADED_LINK_COST_PENALTY, desired_node_routes};
 pub use secret::Secret;
 pub use segment_allocator::{MAX_PREFIX_PROBES, MAX_RESERVED_PAN_SEGMENTS, SegmentIpv4Allocator};
 pub use topology::{LinkHealth, LinkState, PanLink, PanSegment, Reachability, TopologyGraph};
+pub use topology_executor::{NapExecutionReport, NapTopologyOperator, execute_nap_plan};
 pub use topology_plan::{NapLink, NapPlanDiff, NapPlanStep, diff_nap_topology};
 pub use topology_policy::{
     CandidateLink, NapAssignment, NapSelection, TopologyCandidate, TopologyPolicyInputs,
