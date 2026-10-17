@@ -53,7 +53,10 @@ impl NapAdmissionLedger {
     /// after this call returns. This does not disconnect physical PAN clients.
     pub fn close(&self) -> Result<(), CoreError> {
         let mut state = self.state.lock().map_err(|_| {
-            CoreError::new(ErrorKind::InvalidState, "NAP admission ledger lock poisoned")
+            CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP admission ledger lock poisoned",
+            )
         })?;
         state.closed = true;
         state.active.clear();
@@ -74,7 +77,10 @@ impl NapAdmissionLedger {
             )
         })?;
         if state.closed {
-            return Err(CoreError::new(ErrorKind::InvalidState, "NAP admission owner is closed"));
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP admission owner is closed",
+            ));
         }
         state.host = host;
         Ok(())
@@ -95,7 +101,10 @@ impl NapAdmissionLedger {
             )
         })?;
         if state.closed {
-            return Err(CoreError::new(ErrorKind::InvalidState, "NAP admission owner is closed"));
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP admission owner is closed",
+            ));
         }
         if state.pending.contains_key(&candidate) {
             return Err(CoreError::new(
@@ -146,7 +155,10 @@ impl NapAdmissionLedger {
             )
         })?;
         if state.closed {
-            return Err(CoreError::new(ErrorKind::InvalidState, "NAP admission owner is closed"));
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP admission owner is closed",
+            ));
         }
         if state.active.get(&ticket.candidate) == Some(&ticket.generation) {
             return Ok(false);
@@ -366,10 +378,22 @@ mod tests {
         assert!(!ledger.retire(active).unwrap());
         assert!(!ledger.retire(pending).unwrap());
         for ticket in [active, pending] {
-            assert_eq!(ledger.activate(ticket).unwrap_err().kind(), ErrorKind::InvalidState);
+            assert_eq!(
+                ledger.activate(ticket).unwrap_err().kind(),
+                ErrorKind::InvalidState
+            );
         }
-        assert_eq!(ledger.reserve(peer(3)).unwrap_err().kind(), ErrorKind::InvalidState);
-        assert_eq!(ledger.update_capabilities(host(Some(3))).unwrap_err().kind(), ErrorKind::InvalidState);
+        assert_eq!(
+            ledger.reserve(peer(3)).unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
+        assert_eq!(
+            ledger
+                .update_capabilities(host(Some(3)))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidState
+        );
     }
 
     #[test]
@@ -377,19 +401,23 @@ mod tests {
         const WORKERS: usize = 16;
         let ledger = Arc::new(NapAdmissionLedger::new(host(Some(WORKERS as u16))));
         let barrier = Arc::new(Barrier::new(WORKERS + 1));
-        let handles: Vec<_> = (1..=WORKERS).map(|index| {
-            let ledger = Arc::clone(&ledger);
-            let barrier = Arc::clone(&barrier);
-            thread::spawn(move || {
-                barrier.wait();
-                if let Ok((ticket, _)) = ledger.reserve(peer(index as u8)) {
-                    let _ = ledger.activate(ticket);
-                }
+        let handles: Vec<_> = (1..=WORKERS)
+            .map(|index| {
+                let ledger = Arc::clone(&ledger);
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    barrier.wait();
+                    if let Ok((ticket, _)) = ledger.reserve(peer(index as u8)) {
+                        let _ = ledger.activate(ticket);
+                    }
+                })
             })
-        }).collect();
+            .collect();
         barrier.wait();
         ledger.close().unwrap();
-        for handle in handles { handle.join().unwrap(); }
+        for handle in handles {
+            handle.join().unwrap();
+        }
         assert_eq!(ledger.counts().unwrap(), (0, 0));
         assert!(ledger.reserve(peer(20)).is_err());
     }

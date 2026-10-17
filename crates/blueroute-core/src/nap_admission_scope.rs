@@ -186,7 +186,10 @@ mod tests {
         let (old, _) = original.reserve(node(3)).unwrap();
         original.close().unwrap();
         assert_eq!(original.counts().unwrap(), (0, 0));
-        assert_eq!(original.activate(&old).unwrap_err().kind(), ErrorKind::InvalidState);
+        assert_eq!(
+            original.activate(&old).unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
         assert!(!original.retire(&old).unwrap());
         assert!(original.reserve(node(4)).is_err());
         assert!(original.update_capabilities(capabilities(2)).is_err());
