@@ -408,7 +408,6 @@ mod tests {
         assert_eq!(pan.routes, BTreeSet::from([link(2, 3), link(2, 4)]));
     }
 
-
     fn retry_policy() -> TopologyStabilityPolicy {
         TopologyStabilityPolicy {
             min_dwell_ms: 1_000,
@@ -425,18 +424,30 @@ mod tests {
         let mut retry = HubRecoveryRetryState::new(retry_policy()).unwrap();
         let mut pan = FakePan::hosted();
         execute_confirmed_hub_loss_recovery_with_backoff(
-            &inputs, &mut tracker, &mut retry, 0, &mut pan,
+            &inputs,
+            &mut tracker,
+            &mut retry,
+            0,
+            &mut pan,
         )
         .unwrap();
         pan.links.clear();
         execute_confirmed_hub_loss_recovery_with_backoff(
-            &inputs, &mut tracker, &mut retry, 1, &mut pan,
+            &inputs,
+            &mut tracker,
+            &mut retry,
+            1,
+            &mut pan,
         )
         .unwrap();
         pan.fail_connect = Some(link(2, 4));
         assert!(
             execute_confirmed_hub_loss_recovery_with_backoff(
-                &inputs, &mut tracker, &mut retry, 11, &mut pan,
+                &inputs,
+                &mut tracker,
+                &mut retry,
+                11,
+                &mut pan,
             )
             .is_err()
         );
@@ -448,7 +459,11 @@ mod tests {
         pan.fail_connect = None;
         assert!(
             execute_confirmed_hub_loss_recovery_with_backoff(
-                &inputs, &mut tracker, &mut retry, 110, &mut pan,
+                &inputs,
+                &mut tracker,
+                &mut retry,
+                110,
+                &mut pan,
             )
             .unwrap()
             .is_none()
@@ -457,11 +472,18 @@ mod tests {
         assert_eq!(pan.routes, routes_before);
         assert_eq!(pan.operations, operations_before);
         let result = execute_confirmed_hub_loss_recovery_with_backoff(
-            &inputs, &mut tracker, &mut retry, 111, &mut pan,
+            &inputs,
+            &mut tracker,
+            &mut retry,
+            111,
+            &mut pan,
         )
         .unwrap()
         .unwrap();
-        assert_eq!(result.execution.applied, vec![NapPlanStep::Connect(link(2, 4))]);
+        assert_eq!(
+            result.execution.applied,
+            vec![NapPlanStep::Connect(link(2, 4))]
+        );
         assert_eq!(pan.routes, BTreeSet::from([link(2, 3), link(2, 4)]));
         assert_eq!(retry.consecutive_failures(), 0);
         assert_eq!(retry.last_failure_ms(), None);
@@ -474,25 +496,41 @@ mod tests {
         let mut retry = HubRecoveryRetryState::new(retry_policy()).unwrap();
         let mut pan = FakePan::hosted();
         execute_confirmed_hub_loss_recovery_with_backoff(
-            &inputs, &mut tracker, &mut retry, 0, &mut pan,
+            &inputs,
+            &mut tracker,
+            &mut retry,
+            0,
+            &mut pan,
         )
         .unwrap();
         pan.links.clear();
         execute_confirmed_hub_loss_recovery_with_backoff(
-            &inputs, &mut tracker, &mut retry, 1, &mut pan,
+            &inputs,
+            &mut tracker,
+            &mut retry,
+            1,
+            &mut pan,
         )
         .unwrap();
         pan.fail_connect = Some(link(2, 3));
         assert!(
             execute_confirmed_hub_loss_recovery_with_backoff(
-                &inputs, &mut tracker, &mut retry, 11, &mut pan,
+                &inputs,
+                &mut tracker,
+                &mut retry,
+                11,
+                &mut pan,
             )
             .is_err()
         );
         assert_eq!(retry.consecutive_failures(), 1);
         assert!(
             execute_confirmed_hub_loss_recovery_with_backoff(
-                &inputs, &mut tracker, &mut retry, 11, &mut pan,
+                &inputs,
+                &mut tracker,
+                &mut retry,
+                11,
+                &mut pan,
             )
             .is_err()
         );
@@ -502,7 +540,11 @@ mod tests {
         pan.links = BTreeSet::from([link(1, 3), link(1, 4)]);
         assert!(
             execute_confirmed_hub_loss_recovery_with_backoff(
-                &inputs, &mut tracker, &mut retry, 12, &mut pan,
+                &inputs,
+                &mut tracker,
+                &mut retry,
+                12,
+                &mut pan,
             )
             .unwrap()
             .is_none()
@@ -510,13 +552,21 @@ mod tests {
         assert_eq!(retry.consecutive_failures(), 0);
         pan.links.clear();
         execute_confirmed_hub_loss_recovery_with_backoff(
-            &inputs, &mut tracker, &mut retry, 13, &mut pan,
+            &inputs,
+            &mut tracker,
+            &mut retry,
+            13,
+            &mut pan,
         )
         .unwrap();
         pan.fail_connect = None;
         assert!(
             execute_confirmed_hub_loss_recovery_with_backoff(
-                &inputs, &mut tracker, &mut retry, 23, &mut pan,
+                &inputs,
+                &mut tracker,
+                &mut retry,
+                23,
+                &mut pan,
             )
             .unwrap()
             .is_some()
