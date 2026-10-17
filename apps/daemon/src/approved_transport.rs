@@ -697,4 +697,78 @@ mod tests {
         observed_tx.send(()).unwrap();
         server_thread.join().unwrap();
     }
+
+    #[test]
+    fn obsolete_registered_owner_cannot_deliver_frames_after_generation_replacement() {
+        let client = LocalControlTlsIdentity::generate(node(1)).unwrap();
+        let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
+        let client_pin =
+            PinnedControlTlsPeer::new(network(), client.node(), client.fingerprint()).unwrap();
+        let server_pin =
+            PinnedControlTlsPeer::new(network(), server.node(), server.fingerprint()).unwrap();
+        let (client_socket, server_socket) = socket_pair();
+        let server_registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+        let thread_registry = Arc::clone(&server_registry);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let server_thread = thread::spawn(move || {
+            let dir = TestDirectory::new();
+            let trust = trust_for(&dir.0, client_pin.node(), client_pin.fingerprint(), true);
+            let mut session = accept_registered_control_session(
+                server_socket,
+                &server,
+                &[client_pin],
+                &trust,
+                setup(),
+                Arc::clone(&thread_registry),
+            )
+            .unwrap();
+            ready_tx.send(*session.session_id()).unwrap();
+            // A concurrent loss/replacement can happen before or during
+            // the blocking TLS read. Neither ordering may deliver old frames.
+            assert!(matches!(
+                session.receive_next_at(10),
+                Err(ControlSessionError::Ingress(PinnedIngressError::Terminal))
+                    | Err(ControlSessionError::Transport(_))
+            ));
+            assert!(session.is_terminal());
+            drop(session);
+        });
+
+        let dir = TestDirectory::new();
+        let trust = trust_for(&dir.0, server_pin.node(), server_pin.fingerprint(), true);
+        let client_registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+        let mut client_session = connect_registered_control_session(
+            client_socket,
+            &client,
+            server_pin,
+            &trust,
+            setup(),
+            client_registry,
+        )
+        .unwrap();
+        let old_id = ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let replacement_id = old_id.map(|byte| byte ^ 0xff);
+        let key = PeerSessionKey {
+            network: network(),
+            peer: node(1),
+        };
+        {
+            let mut registry = server_registry.lock().unwrap();
+            assert!(registry.mark_lost(key, old_id));
+            assert!(registry.mark_reconnecting(key, old_id));
+            registry
+                .activate_after_authentication(key, replacement_id)
+                .unwrap();
+        }
+        // The socket is a real mutually authenticated TLS connection.
+        // The registry replacement is deliberately synthetic: it tests the
+        // ownership fence, not production reconnect or enrollment.
+        let _ = client_session.send_heartbeat_until(Instant::now() + Duration::from_secs(5));
+        drop(client_session);
+        server_thread.join().unwrap();
+        assert_eq!(
+            server_registry.lock().unwrap().get(key).unwrap().session_id,
+            replacement_id
+        );
+    }
 }
