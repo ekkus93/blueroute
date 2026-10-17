@@ -88,10 +88,10 @@ pub fn project_ipv4_route_intents(
         }
         destination_valid(&binding.destination)?;
         private_prefix(binding.prefix)?;
-        if let RouteDestination::Prefix(prefix) = binding.destination {
-            if prefix != binding.prefix {
-                return Err(invalid("prefix binding mismatch"));
-            }
+        if let RouteDestination::Prefix(prefix) = binding.destination
+            && prefix != binding.prefix
+        {
+            return Err(invalid("prefix binding mismatch"));
         }
         if destination_map
             .insert(binding.destination.clone(), binding.prefix)
