@@ -4,9 +4,7 @@
 //! establishes routes, or assumes that a proposed link is already connected.
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{
-    CoreError, ErrorKind, NapSelection, NodeId, TopologyPolicyInputs,
-};
+use crate::{CoreError, ErrorKind, NapSelection, NodeId, TopologyPolicyInputs};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct NapLink {
@@ -96,7 +94,11 @@ fn link_set(
         let known: BTreeSet<_> = inputs.candidates.keys().copied().collect();
         if !plan.unserved.is_disjoint(&served)
             || !plan.unserved.is_subset(&known)
-            || served.union(&plan.unserved).copied().collect::<BTreeSet<_>>() != known
+            || served
+                .union(&plan.unserved)
+                .copied()
+                .collect::<BTreeSet<_>>()
+                != known
         {
             return Err(invalid("desired topology has inconsistent unserved nodes"));
         }
@@ -208,7 +210,10 @@ mod tests {
                         nap: Some(Sourced::new(n <= 2, CapabilitySource::Measured)),
                         panu: Some(Sourced::new(true, CapabilitySource::Measured)),
                         adapter_usable: Some(Sourced::new(true, CapabilitySource::Measured)),
-                        connection_policy_ceiling: Some(Sourced::new(2, CapabilitySource::Measured)),
+                        connection_policy_ceiling: Some(Sourced::new(
+                            2,
+                            CapabilitySource::Measured,
+                        )),
                         ..NodeCapabilities::default()
                     },
                     neighbors,
@@ -234,7 +239,10 @@ mod tests {
             .collect();
         NapSelection {
             stars: assignments,
-            unserved: (1..=5).map(id).filter(|node| !served.contains(node)).collect(),
+            unserved: (1..=5)
+                .map(id)
+                .filter(|node| !served.contains(node))
+                .collect(),
         }
     }
 
@@ -249,19 +257,32 @@ mod tests {
     fn stable_plan_and_metric_only_changes_have_no_operations() {
         let mut policy = inputs();
         let active = plan(&[(1, &[3, 4])]);
-        assert!(diff_nap_topology(&policy, &active, &active).unwrap().steps.is_empty());
-        policy.candidates.get_mut(&id(1)).unwrap().neighbors.get_mut(&id(3)).unwrap().path_cost = 50;
-        assert!(diff_nap_topology(&policy, &active, &active).unwrap().steps.is_empty());
+        assert!(
+            diff_nap_topology(&policy, &active, &active)
+                .unwrap()
+                .steps
+                .is_empty()
+        );
+        policy
+            .candidates
+            .get_mut(&id(1))
+            .unwrap()
+            .neighbors
+            .get_mut(&id(3))
+            .unwrap()
+            .path_cost = 50;
+        assert!(
+            diff_nap_topology(&policy, &active, &active)
+                .unwrap()
+                .steps
+                .is_empty()
+        );
     }
 
     #[test]
     fn independent_replacement_is_connected_before_obsolete_link_is_removed() {
-        let result = diff_nap_topology(
-            &inputs(),
-            &plan(&[(1, &[3])]),
-            &plan(&[(1, &[4])]),
-        )
-        .unwrap();
+        let result =
+            diff_nap_topology(&inputs(), &plan(&[(1, &[3])]), &plan(&[(1, &[4])])).unwrap();
         assert_eq!(
             result.steps,
             vec![
@@ -274,12 +295,8 @@ mod tests {
 
     #[test]
     fn moving_client_is_break_before_make_and_explicitly_reported() {
-        let result = diff_nap_topology(
-            &inputs(),
-            &plan(&[(1, &[3])]),
-            &plan(&[(2, &[3])]),
-        )
-        .unwrap();
+        let result =
+            diff_nap_topology(&inputs(), &plan(&[(1, &[3])]), &plan(&[(2, &[3])])).unwrap();
         assert_eq!(
             result.steps,
             vec![
@@ -292,12 +309,8 @@ mod tests {
 
     #[test]
     fn full_hub_releases_only_obsolete_slot_before_connecting() {
-        let result = diff_nap_topology(
-            &inputs(),
-            &plan(&[(1, &[3, 4])]),
-            &plan(&[(1, &[3, 5])]),
-        )
-        .unwrap();
+        let result =
+            diff_nap_topology(&inputs(), &plan(&[(1, &[3, 4])]), &plan(&[(1, &[3, 5])])).unwrap();
         assert_eq!(
             result.steps,
             vec![
