@@ -19,3 +19,23 @@ infer extra peer addresses from untrusted route destinations.
 **Still open:** independently authenticated PAN/IP observations, privileged
 kernel route mutation, daemon lifecycle integration, production JoinNetwork,
 and real Bluetooth/multi-hop acceptance. This does not prove physical behavior.
+
+## Unused destination versus observed peer address (2026-10-17)
+
+A direct peer represented by an observed `RouteNextHopBinding` must also
+have its NodeId destination /32 bound to the **same** IPv4 address, even if
+that destination is not needed by the selected routes. Previously, an
+unused `RouteDestinationBinding` could quietly claim an unverified second
+address for a directly observed peer, contradicting the one-address model.
+
+The projector now rejects this mismatch before returning any route intent.
+The new integration test covers both destination orders and both observed
+next-hop orders, while retaining a positive distinct transit-destination
+case. The software change and formatting repair passed [exact-head CI
+39063939963](https://github.com/ekkus93/blueroute/actions/runs/39063939963)
+at `b618fefd78f5b01c381b723ff027c236ae282faf`.
+
+This check does not establish peer authentication or verified IP ownership:
+the next-hop observations remain caller-supplied. No privileged route
+mutation, authenticated distribution, production JoinNetwork, or physical
+Bluetooth acceptance is claimed. P8-005 stays **SOFTWARE PARTIAL**.
