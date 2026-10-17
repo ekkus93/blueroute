@@ -46,6 +46,24 @@ fn validate_desired(route: &Route, network: NetworkId) -> Result<(), CoreError> 
             if prefix.prefix_len == 0 {
                 return Err(invalid("zero-length prefix is not a local route"));
             }
+            // The Linux kernel canonicalizes destination prefixes. Reject
+            // host bits instead of treating different encodings of the same
+            // destination as independently owned routes.
+            let canonical = match prefix.address {
+                std::net::IpAddr::V4(address) => {
+                    let host_bits = 32 - u32::from(prefix.prefix_len);
+                    let bits = u32::from(address);
+                    bits & (u32::MAX << host_bits) == bits
+                }
+                std::net::IpAddr::V6(address) => {
+                    let host_bits = 128 - u32::from(prefix.prefix_len);
+                    let bits = u128::from(address);
+                    bits & (u128::MAX << host_bits) == bits
+                }
+            };
+            if !canonical {
+                return Err(invalid("route prefix contains noncanonical host bits"));
+            }
             Ok(())
         }
         _ => Ok(()),
@@ -184,6 +202,46 @@ mod tests {
         assert!(plan_route_reconciliation(network(1), &[route(1, 3, 0, 10)], &[]).is_err());
         assert!(plan_route_reconciliation(network(1), &[route(1, 3, 2, 0)], &[]).is_err());
         assert!(plan_route_reconciliation(network(1), &[route(1, 0, 2, 10)], &[]).is_err());
+    }
+
+    #[test]
+    fn noncanonical_prefixes_cannot_alias_kernel_destinations() {
+        use std::net::Ipv6Addr;
+
+        let mut desired = route(1, 3, 2, 10);
+        desired.destination = RouteDestination::Prefix(IpPrefix::new(
+            IpAddr::V4(Ipv4Addr::new(10, 20, 0, 1)),
+            24,
+        ).unwrap());
+        assert!(plan_route_reconciliation(network(1), std::slice::from_ref(&desired), &[]).is_err());
+
+        desired.destination = RouteDestination::Prefix(IpPrefix::new(
+            IpAddr::V4(Ipv4Addr::new(10, 20, 0, 0)),
+            24,
+        ).unwrap());
+        assert_eq!(
+            plan_route_reconciliation(network(1), std::slice::from_ref(&desired), &[])
+                .unwrap()
+                .upsert,
+            vec![desired.clone()]
+        );
+
+        desired.destination = RouteDestination::Prefix(IpPrefix::new(
+            IpAddr::V6(Ipv6Addr::new(0x2001, 0x0db8, 0, 1, 0, 0, 0, 1)),
+            64,
+        ).unwrap());
+        assert!(plan_route_reconciliation(network(1), std::slice::from_ref(&desired), &[]).is_err());
+
+        desired.destination = RouteDestination::Prefix(IpPrefix::new(
+            IpAddr::V6(Ipv6Addr::new(0x2001, 0x0db8, 0, 1, 0, 0, 0, 0)),
+            64,
+        ).unwrap());
+        assert_eq!(
+            plan_route_reconciliation(network(1), std::slice::from_ref(&desired), &[])
+                .unwrap()
+                .upsert,
+            vec![desired]
+        );
     }
 
     #[test]
