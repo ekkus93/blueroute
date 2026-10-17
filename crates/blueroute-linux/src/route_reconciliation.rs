@@ -104,7 +104,10 @@ pub fn plan_linux_route_reconciliation(
 
     // Refuse stale-route removal if an observed foreign route shares the
     // same effective destination, regardless of observation ordering.
-    if existing.keys().any(|destination| foreign_destinations.contains(destination)) {
+    if existing
+        .keys()
+        .any(|destination| foreign_destinations.contains(destination))
+    {
         return Err(invalid("owned Linux route collides with foreign route"));
     }
 
@@ -209,23 +212,15 @@ mod tests {
     #[test]
     fn stale_owned_route_collision_refuses_removal_in_either_order() {
         let mut stale = route(1, [10, 20, 0, 0], None);
-        stale.destination =
-            IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 0)), 24).unwrap();
+        stale.destination = IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 0)), 24).unwrap();
         let mut foreign = route(2, [10, 20, 0, 77], None);
-        foreign.destination =
-            IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 77)), 24).unwrap();
+        foreign.destination = IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 77)), 24).unwrap();
 
         assert!(
-            plan_linux_route_reconciliation(
-                network(1),
-                &[],
-                &[stale.clone(), foreign.clone()],
-            )
-            .is_err()
+            plan_linux_route_reconciliation(network(1), &[], &[stale.clone(), foreign.clone()],)
+                .is_err()
         );
-        assert!(
-            plan_linux_route_reconciliation(network(1), &[], &[foreign, stale]).is_err()
-        );
+        assert!(plan_linux_route_reconciliation(network(1), &[], &[foreign, stale]).is_err());
     }
 
     #[test]
