@@ -38,9 +38,7 @@ pub fn plan_hub_loss_recovery(
     lost_hubs: &BTreeSet<NodeId>,
 ) -> Result<HubLossRecoveryPlan, CoreError> {
     inputs.validate()?;
-    if lost_hubs.is_empty()
-        || !lost_hubs.is_subset(&inputs.candidates.keys().copied().collect())
-    {
+    if lost_hubs.is_empty() || !lost_hubs.is_subset(&inputs.candidates.keys().copied().collect()) {
         return Err(invalid("hub loss requires known failed node identities"));
     }
 
@@ -71,7 +69,9 @@ pub fn plan_hub_loss_recovery(
     let mut available = inputs.clone();
     available.candidates.retain(|id, _| !lost_hubs.contains(id));
     for (id, candidate) in &mut available.candidates {
-        candidate.neighbors.retain(|peer, _| !lost_hubs.contains(peer));
+        candidate
+            .neighbors
+            .retain(|peer, _| !lost_hubs.contains(peer));
         candidate.currently_hosting = observed_links.iter().any(|link| link.hub == *id);
     }
     let mut desired = select_nap_hubs(&available)?;
@@ -89,8 +89,7 @@ pub fn plan_hub_loss_recovery(
 mod tests {
     use super::*;
     use crate::{
-        CandidateLink, CapabilitySource, NapPlanStep, NodeCapabilities, Sourced,
-        TopologyCandidate,
+        CandidateLink, CapabilitySource, NapPlanStep, NodeCapabilities, Sourced, TopologyCandidate,
     };
 
     fn id(value: u8) -> NodeId {
@@ -154,12 +153,9 @@ mod tests {
 
     #[test]
     fn alternate_capable_hub_restores_two_disconnected_clients() {
-        let plan = plan_hub_loss_recovery(
-            &fixture(true),
-            &BTreeSet::new(),
-            &BTreeSet::from([id(1)]),
-        )
-        .unwrap();
+        let plan =
+            plan_hub_loss_recovery(&fixture(true), &BTreeSet::new(), &BTreeSet::from([id(1)]))
+                .unwrap();
         assert_eq!(plan.desired.stars.len(), 1);
         assert_eq!(plan.desired.stars[0].hub, id(2));
         assert_eq!(plan.desired.stars[0].clients, vec![id(3), id(4)]);
@@ -175,15 +171,15 @@ mod tests {
 
     #[test]
     fn no_capable_alternative_reports_unserved_without_fabricated_links() {
-        let plan = plan_hub_loss_recovery(
-            &fixture(false),
-            &BTreeSet::new(),
-            &BTreeSet::from([id(1)]),
-        )
-        .unwrap();
+        let plan =
+            plan_hub_loss_recovery(&fixture(false), &BTreeSet::new(), &BTreeSet::from([id(1)]))
+                .unwrap();
         assert!(plan.desired.stars.is_empty());
         assert!(plan.transition.steps.is_empty());
-        assert_eq!(plan.unavailable, BTreeSet::from([id(1), id(2), id(3), id(4)]));
+        assert_eq!(
+            plan.unavailable,
+            BTreeSet::from([id(1), id(2), id(3), id(4)])
+        );
     }
 
     #[test]
@@ -204,29 +200,30 @@ mod tests {
     #[test]
     fn stale_lost_hub_link_and_unknown_loss_fail_closed() {
         let inputs = fixture(true);
-        assert!(plan_hub_loss_recovery(
-            &inputs,
-            &BTreeSet::from([link(1, 3)]),
-            &BTreeSet::from([id(1)]),
-        )
-        .is_err());
-        assert!(plan_hub_loss_recovery(
-            &inputs,
-            &BTreeSet::new(),
-            &BTreeSet::from([id(9)]),
-        )
-        .is_err());
+        assert!(
+            plan_hub_loss_recovery(
+                &inputs,
+                &BTreeSet::from([link(1, 3)]),
+                &BTreeSet::from([id(1)]),
+            )
+            .is_err()
+        );
+        assert!(
+            plan_hub_loss_recovery(&inputs, &BTreeSet::new(), &BTreeSet::from([id(9)]),).is_err()
+        );
         assert!(plan_hub_loss_recovery(&inputs, &BTreeSet::new(), &BTreeSet::new()).is_err());
     }
 
     #[test]
     fn conflicting_surviving_clients_fail_closed() {
         let inputs = fixture(true);
-        assert!(plan_hub_loss_recovery(
-            &inputs,
-            &BTreeSet::from([link(1, 3), link(2, 3)]),
-            &BTreeSet::from([id(4)]),
-        )
-        .is_err());
+        assert!(
+            plan_hub_loss_recovery(
+                &inputs,
+                &BTreeSet::from([link(1, 3), link(2, 3)]),
+                &BTreeSet::from([id(4)]),
+            )
+            .is_err()
+        );
     }
 }
