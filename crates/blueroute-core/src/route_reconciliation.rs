@@ -153,7 +153,10 @@ pub fn plan_route_reconciliation(
     // A stale owned route is not safe to delete when a foreign observation
     // aliases the same effective kernel destination. Validate independently
     // of observation order, including when no desired route remains.
-    if existing.keys().any(|key| foreign_destinations.contains(key)) {
+    if existing
+        .keys()
+        .any(|key| foreign_destinations.contains(key))
+    {
         return Err(invalid("owned destination conflicts with foreign route"));
     }
     let mut plan = RouteReconciliationPlan::default();
