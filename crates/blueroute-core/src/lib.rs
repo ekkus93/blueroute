@@ -37,7 +37,10 @@ pub use route_planner::{DEGRADED_LINK_COST_PENALTY, desired_node_routes};
 pub use secret::Secret;
 pub use segment_allocator::{MAX_PREFIX_PROBES, MAX_RESERVED_PAN_SEGMENTS, SegmentIpv4Allocator};
 pub use topology::{LinkHealth, LinkState, PanLink, PanSegment, Reachability, TopologyGraph};
-pub use topology_policy::{CandidateLink, TopologyCandidate, TopologyPolicyInputs};
+pub use topology_policy::{
+    CandidateLink, NapAssignment, NapSelection, TopologyCandidate, TopologyPolicyInputs,
+    select_nap_hubs,
+};
 
 /// The human-readable project name.
 pub const PROJECT_NAME: &str = "BlueRoute";
