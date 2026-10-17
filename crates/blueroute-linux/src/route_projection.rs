@@ -122,7 +122,10 @@ pub fn project_ipv4_route_intents(
         // Duplicate address claims by distinct peers are ambiguous,
         // including across interfaces: the trusted runtime must resolve
         // the identity/address mapping before accepting route intents.
-        if hop_addresses.insert(binding.address, binding.node).is_some() {
+        if hop_addresses
+            .insert(binding.address, binding.node)
+            .is_some()
+        {
             return Err(invalid("duplicate next-hop IPv4 address binding"));
         }
         if hop_map.insert(binding.node, binding).is_some() {

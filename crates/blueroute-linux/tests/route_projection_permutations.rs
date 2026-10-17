@@ -94,9 +94,10 @@ fn cross_peer_alias_rejection_is_independent_of_input_order_and_route_selection(
     ] {
         for next_hops in [[hop(2), hop(4)], [hop(4), hop(2)]] {
             // A route via peer 2 cannot legitimize node 3 claiming peer 4's address.
-            assert!(project_ipv4_route_intents(
-                network(), &[route(5, 2)], &destinations, &next_hops
-            ).is_err());
+            assert!(
+                project_ipv4_route_intents(network(), &[route(5, 2)], &destinations, &next_hops)
+                    .is_err()
+            );
         }
     }
 }
@@ -108,10 +109,17 @@ fn distinct_peer_addresses_allow_direct_and_transit_paths() {
         &[route(4, 4), route(5, 4), route(6, 2)],
         &[destination(4), destination(5), destination(6)],
         &[hop(2), hop(4)],
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(projected.len(), 3);
     assert_eq!(projected[0].destination, destination(4).prefix);
     assert_eq!(projected[0].via, None);
-    assert_eq!(projected[1].via, Some(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 4))));
-    assert_eq!(projected[2].via, Some(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 2))));
+    assert_eq!(
+        projected[1].via,
+        Some(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 4)))
+    );
+    assert_eq!(
+        projected[2].via,
+        Some(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 2)))
+    );
 }
