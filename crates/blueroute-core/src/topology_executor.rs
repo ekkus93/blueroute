@@ -59,13 +59,19 @@ pub fn execute_nap_plan(
         let operation = match step {
             NapPlanStep::Connect(link) => {
                 if !expected.insert(link) {
-                    return Err(CoreError::new(ErrorKind::InvalidState, "duplicate PAN connect"));
+                    return Err(CoreError::new(
+                        ErrorKind::InvalidState,
+                        "duplicate PAN connect",
+                    ));
                 }
                 operator.connect_link(link)
             }
             NapPlanStep::Disconnect(link) => {
                 if !expected.remove(&link) {
-                    return Err(CoreError::new(ErrorKind::InvalidState, "missing PAN disconnect"));
+                    return Err(CoreError::new(
+                        ErrorKind::InvalidState,
+                        "missing PAN disconnect",
+                    ));
                 }
                 operator.disconnect_link(link)
             }
