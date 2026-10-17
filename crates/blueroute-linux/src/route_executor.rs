@@ -97,9 +97,7 @@ pub fn execute_linux_route_reconciliation(
         backend.replace_if_current(previous, &next)?;
 
         let mut expected = observed.clone();
-        expected.retain(|route| {
-            !(route.owner == network && route.destination == next.destination)
-        });
+        expected.retain(|route| !(route.owner == network && route.destination == next.destination));
         expected.push(next.clone());
         snapshot_sort(&mut expected);
         let mut post = backend.observe_all_routes()?;
@@ -153,11 +151,8 @@ mod tests {
 
     fn route(owner: u8, destination: u8, next_hop: u8) -> LinuxRoute {
         LinuxRoute {
-            destination: IpPrefix::new(
-                IpAddr::V4(Ipv4Addr::new(10, 20, 0, destination)),
-                32,
-            )
-            .unwrap(),
+            destination: IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, destination)), 32)
+                .unwrap(),
             via: Some(IpAddr::V4(Ipv4Addr::new(10, 20, 0, next_hop))),
             interface: NetworkInterfaceHandle::new("bnep0").unwrap(),
             metric: 10,
@@ -192,7 +187,11 @@ mod tests {
     impl LinuxOwnedRouteOperator for FakeKernel {
         fn observe_all_routes(&mut self) -> Result<Vec<LinuxRoute>, CoreError> {
             self.reads += 1;
-            if self.inject_on_read.as_ref().is_some_and(|(at, _)| *at == self.reads) {
+            if self
+                .inject_on_read
+                .as_ref()
+                .is_some_and(|(at, _)| *at == self.reads)
+            {
                 self.routes.push(self.inject_on_read.take().unwrap().1);
             }
             Ok(self.routes.clone())
@@ -210,16 +209,22 @@ mod tests {
                 .routes
                 .iter()
                 .find(|route| route.destination == replacement.destination);
-            if actual != previous || previous.is_some_and(|route| route.owner != replacement.owner) {
+            if actual != previous || previous.is_some_and(|route| route.owner != replacement.owner)
+            {
                 return Err(stale());
             }
             if !self.ignore_write {
-                self.routes.retain(|route| route.destination != replacement.destination);
+                self.routes
+                    .retain(|route| route.destination != replacement.destination);
                 self.routes.push(replacement.clone());
             }
-            self.writes.push(LinuxRouteChange::Upsert(replacement.clone()));
+            self.writes
+                .push(LinuxRouteChange::Upsert(replacement.clone()));
             if self.fail_after_write {
-                return Err(CoreError::new(ErrorKind::RouteFailure, "injected failure after write"));
+                return Err(CoreError::new(
+                    ErrorKind::RouteFailure,
+                    "injected failure after write",
+                ));
             }
             Ok(())
         }
@@ -227,9 +232,10 @@ mod tests {
         fn remove_if_current(&mut self, previous: &LinuxRoute) -> Result<(), CoreError> {
             if self.race_before_write
                 || !self.routes.contains(previous)
-                || self.routes.iter().any(|route| {
-                    route.destination == previous.destination && route != previous
-                })
+                || self
+                    .routes
+                    .iter()
+                    .any(|route| route.destination == previous.destination && route != previous)
             {
                 return Err(stale());
             }
@@ -238,7 +244,10 @@ mod tests {
             }
             self.writes.push(LinuxRouteChange::Remove(previous.clone()));
             if self.fail_after_write {
-                return Err(CoreError::new(ErrorKind::RouteFailure, "injected failure after write"));
+                return Err(CoreError::new(
+                    ErrorKind::RouteFailure,
+                    "injected failure after write",
+                ));
             }
             Ok(())
         }
@@ -359,16 +368,15 @@ mod tests {
         let mut backend = FakeKernel::new(vec![]);
         backend.inject_on_read = Some((4, unexpected.clone()));
         assert_eq!(
-            execute_linux_route_reconciliation(
-                network(1),
-                &[first.clone(), second],
-                &mut backend,
-            )
-            .unwrap_err()
-            .kind(),
+            execute_linux_route_reconciliation(network(1), &[first.clone(), second], &mut backend,)
+                .unwrap_err()
+                .kind(),
             ErrorKind::InvalidState
         );
-        assert_eq!(backend.writes, vec![LinuxRouteChange::Upsert(first.clone())]);
+        assert_eq!(
+            backend.writes,
+            vec![LinuxRouteChange::Upsert(first.clone())]
+        );
         assert!(backend.routes.contains(&unexpected));
         assert!(backend.routes.contains(&first));
     }

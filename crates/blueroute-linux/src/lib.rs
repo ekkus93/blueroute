@@ -10,9 +10,9 @@ mod membership_store;
 mod network_discovery;
 mod networkmanager;
 mod pan;
+mod route_executor;
 mod route_projection;
 mod route_reconciliation;
-mod route_executor;
 mod secret_store;
 
 pub use bluez::BluezBackend;
@@ -25,14 +25,14 @@ pub use kernel_address::{KernelAddressBackend, KernelAddressLease};
 pub use membership_store::NetworkMembershipStore;
 pub use network_discovery::NetworkAdvertisement;
 pub use networkmanager::NetworkManagerBackend;
+pub use route_executor::{
+    LinuxOwnedRouteOperator, LinuxRouteChange, LinuxRouteExecutionReport,
+    execute_linux_route_reconciliation,
+};
 pub use route_projection::{
     RouteDestinationBinding, RouteNextHopBinding, project_ipv4_route_intents,
 };
 pub use route_reconciliation::{LinuxRouteReconciliationPlan, plan_linux_route_reconciliation};
-pub use route_executor::{
-    LinuxRouteChange, LinuxRouteExecutionReport, LinuxOwnedRouteOperator,
-    execute_linux_route_reconciliation,
-};
 pub use secret_store::SecretFileStore;
 
 use std::future::Future;
