@@ -1,0 +1,158 @@
+//! P6-007 admission seam requiring an owned, mutually authenticated control session.
+//!
+//! A caller cannot supply a claimed NodeId to these public functions. The
+//! registered session already proved TLS key possession, pinned identity,
+//! exporter-bound Hello, and durable approval. Both reservation and activation
+//! recheck approval; the daemon must separately observe the actual PANU
+//! attachment before activating. This module does not run a PAN listener.
+use blueroute_core::{
+    CoreError, ErrorKind, NapAdmissionDecision, NetworkNapAdmission, NetworkNapTicket,
+    NetworkId, NodeId,
+};
+
+use crate::RegisteredControlSession;
+
+/// A NAP reservation bound to the exact TLS exporter session generation.
+#[derive(Clone, Debug)]
+pub struct AuthenticatedNapTicket {
+    ticket: NetworkNapTicket,
+    session_id: [u8; 16],
+}
+
+impl AuthenticatedNapTicket {
+    pub const fn network(&self) -> NetworkId {
+        self.ticket.network()
+    }
+
+    pub const fn candidate(&self) -> NodeId {
+        self.ticket.candidate()
+    }
+}
+
+fn same_session(
+    network: NetworkId,
+    peer: NodeId,
+    session_id: [u8; 16],
+    ticket: &AuthenticatedNapTicket,
+) -> bool {
+    network == ticket.ticket.network()
+        && peer == ticket.ticket.candidate()
+        && session_id == ticket.session_id
+}
+
+fn recheck(session: &mut RegisteredControlSession<'_>) -> Result<(), CoreError> {
+    session.revalidate_approval().map_err(|error| {
+        CoreError::with_diagnostic(
+            ErrorKind::AuthenticationFailed,
+            "NAP admission requires a currently approved authenticated control session",
+            error.to_string(),
+        )
+    })
+}
+
+/// Reserve only for a live, registered, approved TLS/Hello peer on this NAP.
+/// Capacity reservation is not a PAN attachment or durable membership.
+pub fn reserve_authenticated_nap(
+    session: &mut RegisteredControlSession<'_>,
+    admission: &NetworkNapAdmission,
+) -> Result<(AuthenticatedNapTicket, NapAdmissionDecision), CoreError> {
+    if session.network() != admission.network() {
+        return Err(CoreError::new(
+            ErrorKind::InvalidState,
+            "authenticated control session belongs to a different NAP network",
+        ));
+    }
+    recheck(session)?;
+    let (ticket, decision) = admission.reserve(session.peer())?;
+    Ok((
+        AuthenticatedNapTicket {
+            ticket,
+            session_id: *session.session_id(),
+        },
+        decision,
+    ))
+}
+
+/// Activate only after the daemon independently observes the physical PANU
+/// attachment and calls this with the *same* still-approved TLS generation.
+/// A replacement session cannot activate a predecessor's reservation.
+pub fn activate_authenticated_nap(
+    session: &mut RegisteredControlSession<'_>,
+    admission: &NetworkNapAdmission,
+    ticket: &AuthenticatedNapTicket,
+) -> Result<bool, CoreError> {
+    if !same_session(
+        session.network(),
+        session.peer(),
+        *session.session_id(),
+        ticket,
+    ) {
+        return Err(CoreError::new(
+            ErrorKind::AuthenticationFailed,
+            "NAP reservation belongs to a different authenticated session",
+        ));
+    }
+    recheck(session)?;
+    admission.activate(&ticket.ticket)
+}
+
+/// Teardown callbacks do not require a live TLS stream. Exact NAP owner and
+/// reservation generation checks prevent a stale callback from retiring a
+/// replacement. This never disconnects the underlying PANU socket.
+pub fn retire_authenticated_nap(
+    admission: &NetworkNapAdmission,
+    ticket: &AuthenticatedNapTicket,
+) -> Result<bool, CoreError> {
+    admission.retire(&ticket.ticket)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blueroute_core::{CapabilitySource, NodeCapabilities, Sourced};
+
+    fn network(value: u8) -> NetworkId {
+        NetworkId::from_bytes([value; 16])
+    }
+
+    fn peer(value: u8) -> NodeId {
+        NodeId::from_bytes([value; 16])
+    }
+
+    fn capabilities() -> NodeCapabilities {
+        NodeCapabilities {
+            adapter_usable: Some(Sourced::new(true, CapabilitySource::Discovered)),
+            nap: Some(Sourced::new(true, CapabilitySource::Measured)),
+            connection_policy_ceiling: Some(Sourced::new(2, CapabilitySource::Configured)),
+            ..NodeCapabilities::default()
+        }
+    }
+
+    #[test]
+    fn tls_generation_and_peer_scope_cannot_be_substituted() {
+        let admission = NetworkNapAdmission::new(network(1), capabilities()).unwrap();
+        let (ticket, _) = admission.reserve(peer(2)).unwrap();
+        let authenticated = AuthenticatedNapTicket {
+            ticket,
+            session_id: [7; 16],
+        };
+        assert!(same_session(network(1), peer(2), [7; 16], &authenticated));
+        assert!(!same_session(network(1), peer(2), [8; 16], &authenticated));
+        assert!(!same_session(network(1), peer(3), [7; 16], &authenticated));
+        assert!(!same_session(network(3), peer(2), [7; 16], &authenticated));
+        assert!(retire_authenticated_nap(&admission, &authenticated).unwrap());
+        assert!(!retire_authenticated_nap(&admission, &authenticated).unwrap());
+    }
+
+    #[test]
+    fn old_owner_cannot_retire_restarted_nap_ticket() {
+        let old = NetworkNapAdmission::new(network(1), capabilities()).unwrap();
+        let new = NetworkNapAdmission::new(network(1), capabilities()).unwrap();
+        let (ticket, _) = old.reserve(peer(2)).unwrap();
+        let old_ticket = AuthenticatedNapTicket { ticket, session_id: [7; 16] };
+        let (fresh, _) = new.reserve(peer(2)).unwrap();
+        assert!(!retire_authenticated_nap(&new, &old_ticket).unwrap());
+        assert!(new.activate(&fresh).unwrap());
+        assert_eq!(new.counts().unwrap(), (1, 0));
+    }
+}
