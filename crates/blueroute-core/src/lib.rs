@@ -9,6 +9,7 @@ mod health;
 mod id;
 mod membership;
 mod nap_admission;
+mod nap_admission_ledger;
 mod neighbor;
 mod route;
 mod route_executor;
@@ -39,6 +40,7 @@ pub use health::{HealthComponent, HealthLevel, NodeHealth};
 pub use id::{DisplayName, LinkId, NetworkId, NodeId, SegmentId};
 pub use membership::{MembershipRegistry, MembershipState, NetworkMembership, PeerMembership};
 pub use nap_admission::{NapAdmissionDecision, plan_nap_client_admission};
+pub use nap_admission_ledger::{NapAdmissionLedger, NapAdmissionTicket};
 pub use neighbor::{
     CANDIDATE_LIFETIME_MS, CandidateObservation, CandidateSource, MAX_CANDIDATES,
     NeighborObservations,
