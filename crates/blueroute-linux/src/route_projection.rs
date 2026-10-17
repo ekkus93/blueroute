@@ -269,12 +269,8 @@ mod tests {
     fn different_destinations_cannot_claim_the_same_kernel_host_prefix() {
         let primary = binding(3, [10, 20, 0, 3]);
         let alias = binding(4, [10, 20, 0, 3]);
-        let result = project_ipv4_route_intents(
-            network(1),
-            &[route(3)],
-            &[primary, alias],
-            &[hop()],
-        );
+        let result =
+            project_ipv4_route_intents(network(1), &[route(3)], &[primary, alias], &[hop()]);
         assert!(result.is_err());
     }
 
@@ -292,12 +288,8 @@ mod tests {
         assert!(result.is_err());
 
         alias.address = Ipv4Addr::new(10, 21, 0, 4);
-        let valid = project_ipv4_route_intents(
-            network(1),
-            &[route(3)],
-            &[destination],
-            &[hop(), alias],
-        );
+        let valid =
+            project_ipv4_route_intents(network(1), &[route(3)], &[destination], &[hop(), alias]);
         assert!(valid.is_ok());
     }
 
