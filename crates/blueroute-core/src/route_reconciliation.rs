@@ -43,6 +43,9 @@ fn validate_desired(route: &Route, network: NetworkId) -> Result<(), CoreError> 
         RouteDestination::Prefix(prefix) => {
             // IpPrefix has public fields; reject unchecked malformed values.
             crate::IpPrefix::new(prefix.address, prefix.prefix_len)?;
+            if prefix.prefix_len == 0 {
+                return Err(invalid("zero-length prefix is not a local route"));
+            }
             Ok(())
         }
         _ => Ok(()),
