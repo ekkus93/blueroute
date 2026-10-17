@@ -41,12 +41,9 @@ impl TopologyPolicyInputs {
             {
                 return Err(invalid("zero NAP connection ceiling"));
             }
-            if candidate
-                .capabilities
-                .power_state
-                .as_ref()
-                .is_some_and(|power| matches!(power.value, PowerState::Battery { percent } if percent > 100))
-            {
+            if candidate.capabilities.power_state.as_ref().is_some_and(
+                |power| matches!(power.value, PowerState::Battery { percent } if percent > 100),
+            ) {
                 return Err(invalid("battery percentage exceeds 100"));
             }
             for (neighbor, link) in &candidate.neighbors {
@@ -82,12 +79,20 @@ mod tests {
             capabilities: NodeCapabilities {
                 nap: Some(Sourced::new(true, CapabilitySource::Measured)),
                 connection_policy_ceiling: Some(Sourced::new(3, CapabilitySource::Measured)),
-                power_state: Some(Sourced::new(PowerState::AcPowered, CapabilitySource::Measured)),
+                power_state: Some(Sourced::new(
+                    PowerState::AcPowered,
+                    CapabilitySource::Measured,
+                )),
                 ..NodeCapabilities::default()
             },
-            neighbors: BTreeMap::from([(node(2), CandidateLink {
-                path_cost: 7, quality: None, stable: true,
-            })]),
+            neighbors: BTreeMap::from([(
+                node(2),
+                CandidateLink {
+                    path_cost: 7,
+                    quality: None,
+                    stable: true,
+                },
+            )]),
             currently_hosting: true,
             gateway_preferred: false,
         };
@@ -106,17 +111,47 @@ mod tests {
             candidates: BTreeMap::from([(node(1), hub), (node(2), client)]),
         };
         assert!(inputs.validate().is_ok());
-        inputs.candidates.get_mut(&node(1)).unwrap().neighbors
-            .get_mut(&node(2)).unwrap().path_cost = 0;
+        inputs
+            .candidates
+            .get_mut(&node(1))
+            .unwrap()
+            .neighbors
+            .get_mut(&node(2))
+            .unwrap()
+            .path_cost = 0;
         assert!(inputs.validate().is_err());
-        inputs.candidates.get_mut(&node(1)).unwrap().neighbors
-            .get_mut(&node(2)).unwrap().path_cost = 1;
-        inputs.candidates.get_mut(&node(1)).unwrap().neighbors
-            .get_mut(&node(2)).unwrap().quality = Some(LinkQuality::new(101));
+        inputs
+            .candidates
+            .get_mut(&node(1))
+            .unwrap()
+            .neighbors
+            .get_mut(&node(2))
+            .unwrap()
+            .path_cost = 1;
+        inputs
+            .candidates
+            .get_mut(&node(1))
+            .unwrap()
+            .neighbors
+            .get_mut(&node(2))
+            .unwrap()
+            .quality = Some(LinkQuality::new(101));
         assert!(inputs.validate().is_err());
-        inputs.candidates.get_mut(&node(1)).unwrap().neighbors.clear();
-        inputs.candidates.get_mut(&node(1)).unwrap().capabilities
-            .connection_policy_ceiling.as_mut().unwrap().value = 0;
+        inputs
+            .candidates
+            .get_mut(&node(1))
+            .unwrap()
+            .neighbors
+            .clear();
+        inputs
+            .candidates
+            .get_mut(&node(1))
+            .unwrap()
+            .capabilities
+            .connection_policy_ceiling
+            .as_mut()
+            .unwrap()
+            .value = 0;
         assert!(inputs.validate().is_err());
     }
 }
