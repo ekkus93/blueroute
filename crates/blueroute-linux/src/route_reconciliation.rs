@@ -9,8 +9,8 @@ use std::net::IpAddr;
 
 use blueroute_core::{CoreError, ErrorKind, IpPrefix, NetworkId};
 
-use crate::route_projection::private_prefix;
 use crate::LinuxRoute;
+use crate::route_projection::private_prefix;
 
 /// Atomic replacement intents and stale owner-scoped removal intents.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -70,7 +70,9 @@ pub fn plan_linux_route_reconciliation(
     observed: &[LinuxRoute],
 ) -> Result<LinuxRouteReconciliationPlan, CoreError> {
     if network.as_bytes().iter().all(|byte| *byte == 0) {
-        return Err(invalid("Linux route reconciliation requires a network identity"));
+        return Err(invalid(
+            "Linux route reconciliation requires a network identity",
+        ));
     }
     let mut wanted = BTreeMap::new();
     for route in desired {
@@ -115,8 +117,8 @@ pub fn plan_linux_route_reconciliation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::Ipv4Addr;
     use crate::NetworkInterfaceHandle;
+    use std::net::Ipv4Addr;
 
     fn network(n: u8) -> NetworkId {
         NetworkId::from_bytes([n; 16])
@@ -140,13 +142,15 @@ mod tests {
         let stale = route(1, [10, 20, 0, 9], None);
         let foreign = route(2, [10, 30, 0, 3], None);
         let plan = plan_linux_route_reconciliation(
-            network(1), &[desired.clone()], &[old, stale.clone(), foreign],
-        ).unwrap();
+            network(1),
+            &[desired.clone()],
+            &[old, stale.clone(), foreign],
+        )
+        .unwrap();
         assert_eq!(plan.upsert, vec![desired.clone()]);
         assert_eq!(plan.remove, vec![stale]);
         assert_eq!(
-            plan_linux_route_reconciliation(network(1), &[desired.clone()], &[desired])
-                .unwrap(),
+            plan_linux_route_reconciliation(network(1), &[desired.clone()], &[desired]).unwrap(),
             LinuxRouteReconciliationPlan::default()
         );
     }
@@ -155,13 +159,9 @@ mod tests {
     fn foreign_observed_kernel_alias_blocks_replacement() {
         let desired = route(1, [10, 20, 0, 0], Some([10, 30, 0, 2]));
         let mut desired = desired;
-        desired.destination = IpPrefix::new(
-            IpAddr::V4(Ipv4Addr::new(10, 20, 0, 0)), 24
-        ).unwrap();
+        desired.destination = IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 0)), 24).unwrap();
         let mut foreign = route(2, [10, 20, 0, 77], None);
-        foreign.destination = IpPrefix::new(
-            IpAddr::V4(Ipv4Addr::new(10, 20, 0, 77)), 24
-        ).unwrap();
+        foreign.destination = IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 77)), 24).unwrap();
         assert!(plan_linux_route_reconciliation(network(1), &[desired], &[foreign]).is_err());
     }
 
@@ -169,8 +169,8 @@ mod tests {
     fn foreign_unrelated_routes_are_unchanged_and_not_removed() {
         let foreign = route(2, [10, 30, 0, 3], None);
         let desired = route(1, [10, 20, 0, 3], Some([10, 20, 0, 2]));
-        let plan = plan_linux_route_reconciliation(network(1), &[desired.clone()], &[foreign])
-            .unwrap();
+        let plan =
+            plan_linux_route_reconciliation(network(1), &[desired.clone()], &[foreign]).unwrap();
         assert_eq!(plan.upsert, vec![desired]);
         assert!(plan.remove.is_empty());
     }
@@ -179,9 +179,17 @@ mod tests {
     fn invalid_ownership_and_ambiguous_observations_fail_closed() {
         let desired = route(1, [10, 20, 0, 3], Some([10, 20, 0, 2]));
         let foreign = route(2, [10, 20, 0, 3], None);
-        assert!(plan_linux_route_reconciliation(network(1), &[desired.clone()], &[foreign]).is_err());
-        assert!(plan_linux_route_reconciliation(network(1), &[desired.clone(), desired.clone()], &[]).is_err());
-        assert!(plan_linux_route_reconciliation(network(1), &[], &[desired.clone(), desired.clone()]).is_err());
+        assert!(
+            plan_linux_route_reconciliation(network(1), &[desired.clone()], &[foreign]).is_err()
+        );
+        assert!(
+            plan_linux_route_reconciliation(network(1), &[desired.clone(), desired.clone()], &[])
+                .is_err()
+        );
+        assert!(
+            plan_linux_route_reconciliation(network(1), &[], &[desired.clone(), desired.clone()])
+                .is_err()
+        );
         assert!(plan_linux_route_reconciliation(network(0), &[], &[]).is_err());
         let mut bad = desired;
         bad.destination = IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 20, 0, 7)), 24).unwrap();
