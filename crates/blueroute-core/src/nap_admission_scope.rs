@@ -96,6 +96,12 @@ impl NetworkNapAdmission {
         self.ledger.retire(ticket.inner)
     }
 
+    /// Permanently close this NAP owner and invalidate its tickets. Create a
+    /// new scoped owner for a subsequent NAP instance; never reuse this one.
+    pub fn close(&self) -> Result<(), CoreError> {
+        self.ledger.close()
+    }
+
     pub fn update_capabilities(&self, host: NodeCapabilities) -> Result<(), CoreError> {
         self.ledger.update_capabilities(host)
     }
@@ -172,6 +178,23 @@ mod tests {
         assert_ne!(first.generation(), second.generation());
         assert!(!admission.retire(&first).unwrap());
         assert!(admission.activate(&second).unwrap());
+    }
+
+    #[test]
+    fn closed_owner_cannot_reopen_or_retire_replacement_owner() {
+        let original = NetworkNapAdmission::new(network(1), capabilities(2)).unwrap();
+        let (old, _) = original.reserve(node(3)).unwrap();
+        original.close().unwrap();
+        assert_eq!(original.counts().unwrap(), (0, 0));
+        assert_eq!(original.activate(&old).unwrap_err().kind(), ErrorKind::InvalidState);
+        assert!(!original.retire(&old).unwrap());
+        assert!(original.reserve(node(4)).is_err());
+        assert!(original.update_capabilities(capabilities(2)).is_err());
+        let replacement = NetworkNapAdmission::new(network(1), capabilities(2)).unwrap();
+        let (fresh, _) = replacement.reserve(node(3)).unwrap();
+        assert!(!replacement.retire(&old).unwrap());
+        assert!(replacement.activate(&fresh).unwrap());
+        assert_eq!(replacement.counts().unwrap(), (1, 0));
     }
 
     #[test]

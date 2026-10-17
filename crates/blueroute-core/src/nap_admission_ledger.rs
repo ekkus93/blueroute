@@ -24,6 +24,7 @@ struct State {
     active: BTreeMap<NodeId, u64>,
     pending: BTreeMap<NodeId, u64>,
     next_generation: u64,
+    closed: bool,
 }
 
 /// A local reservation ledger that serializes competing PANU admissions.
@@ -41,8 +42,23 @@ impl NapAdmissionLedger {
                 active: BTreeMap::new(),
                 pending: BTreeMap::new(),
                 next_generation: 0,
+                closed: false,
             }),
         }
+    }
+
+    /// Permanently retire this NAP instance. A restarted NAP must construct a
+    /// fresh ledger; old callbacks cannot resurrect reservations. Closing is
+    /// serialized with admission and activation, so no new admission can win
+    /// after this call returns. This does not disconnect physical PAN clients.
+    pub fn close(&self) -> Result<(), CoreError> {
+        let mut state = self.state.lock().map_err(|_| {
+            CoreError::new(ErrorKind::InvalidState, "NAP admission ledger lock poisoned")
+        })?;
+        state.closed = true;
+        state.active.clear();
+        state.pending.clear();
+        Ok(())
     }
 
     /// Atomically replace the sourced local adapter/NAP policy under the same
@@ -57,6 +73,9 @@ impl NapAdmissionLedger {
                 "NAP admission ledger lock poisoned",
             )
         })?;
+        if state.closed {
+            return Err(CoreError::new(ErrorKind::InvalidState, "NAP admission owner is closed"));
+        }
         state.host = host;
         Ok(())
     }
@@ -75,6 +94,9 @@ impl NapAdmissionLedger {
                 "NAP admission ledger lock poisoned",
             )
         })?;
+        if state.closed {
+            return Err(CoreError::new(ErrorKind::InvalidState, "NAP admission owner is closed"));
+        }
         if state.pending.contains_key(&candidate) {
             return Err(CoreError::new(
                 ErrorKind::InvalidState,
@@ -123,6 +145,9 @@ impl NapAdmissionLedger {
                 "NAP admission ledger lock poisoned",
             )
         })?;
+        if state.closed {
+            return Err(CoreError::new(ErrorKind::InvalidState, "NAP admission owner is closed"));
+        }
         if state.active.get(&ticket.candidate) == Some(&ticket.generation) {
             return Ok(false);
         }
@@ -327,6 +352,46 @@ mod tests {
         ledger.update_capabilities(host(Some(2))).unwrap();
         assert!(ledger.activate(third).unwrap());
         assert_eq!(ledger.counts().unwrap(), (2, 0));
+    }
+
+    #[test]
+    fn close_is_terminal_and_invalidates_all_pending_and_active_tickets() {
+        let ledger = NapAdmissionLedger::new(host(Some(3)));
+        let (active, _) = ledger.reserve(peer(1)).unwrap();
+        assert!(ledger.activate(active).unwrap());
+        let (pending, _) = ledger.reserve(peer(2)).unwrap();
+        ledger.close().unwrap();
+        ledger.close().unwrap();
+        assert_eq!(ledger.counts().unwrap(), (0, 0));
+        assert!(!ledger.retire(active).unwrap());
+        assert!(!ledger.retire(pending).unwrap());
+        for ticket in [active, pending] {
+            assert_eq!(ledger.activate(ticket).unwrap_err().kind(), ErrorKind::InvalidState);
+        }
+        assert_eq!(ledger.reserve(peer(3)).unwrap_err().kind(), ErrorKind::InvalidState);
+        assert_eq!(ledger.update_capabilities(host(Some(3))).unwrap_err().kind(), ErrorKind::InvalidState);
+    }
+
+    #[test]
+    fn concurrent_close_cannot_be_undone_by_admission_or_activation() {
+        const WORKERS: usize = 16;
+        let ledger = Arc::new(NapAdmissionLedger::new(host(Some(WORKERS as u16))));
+        let barrier = Arc::new(Barrier::new(WORKERS + 1));
+        let handles: Vec<_> = (1..=WORKERS).map(|index| {
+            let ledger = Arc::clone(&ledger);
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                barrier.wait();
+                if let Ok((ticket, _)) = ledger.reserve(peer(index as u8)) {
+                    let _ = ledger.activate(ticket);
+                }
+            })
+        }).collect();
+        barrier.wait();
+        ledger.close().unwrap();
+        for handle in handles { handle.join().unwrap(); }
+        assert_eq!(ledger.counts().unwrap(), (0, 0));
+        assert!(ledger.reserve(peer(20)).is_err());
     }
 
     #[test]
