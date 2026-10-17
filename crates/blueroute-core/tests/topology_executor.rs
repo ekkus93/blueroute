@@ -154,3 +154,11 @@ fn failed_connect_preserves_working_link() {
     assert_eq!(backend.links, BTreeSet::from([link(1, 2)]));
     assert_eq!(backend.events, ["observe", "connect", "observe", "routes"]);
 }
+
+#[test]
+fn no_link_changes_still_reconcile_routes() {
+    let mut backend = Fake::default();
+    let report = execute_nap_plan(&policy(), &plan(&[]), &plan(&[]), &mut backend).unwrap();
+    assert!(report.applied.is_empty());
+    assert_eq!(backend.events, ["observe", "routes"]);
+}
