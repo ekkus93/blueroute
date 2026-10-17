@@ -52,7 +52,10 @@ impl HubLossTracker {
         now_ms: u64,
         observed_links: &BTreeSet<NapLink>,
     ) -> Result<BTreeSet<NodeId>, CoreError> {
-        if self.last_sample_ms.is_some_and(|previous| now_ms <= previous) {
+        if self
+            .last_sample_ms
+            .is_some_and(|previous| now_ms <= previous)
+        {
             return Err(CoreError::new(
                 ErrorKind::InvalidState,
                 "stale or regressed hub-loss observation timestamp",
@@ -128,11 +131,22 @@ mod tests {
         let mut tracker = HubLossTracker::new(100).unwrap();
         let empty = BTreeSet::new();
         assert!(tracker.observe(0, &empty).unwrap().is_empty());
-        assert!(tracker.observe(1, &BTreeSet::from([link(1, 3)])).unwrap().is_empty());
+        assert!(
+            tracker
+                .observe(1, &BTreeSet::from([link(1, 3)]))
+                .unwrap()
+                .is_empty()
+        );
         assert!(tracker.observe(2, &empty).unwrap().is_empty());
         assert!(tracker.observe(101, &empty).unwrap().is_empty());
-        assert_eq!(tracker.observe(102, &empty).unwrap(), BTreeSet::from([id(1)]));
-        assert_eq!(tracker.observe(103, &empty).unwrap(), BTreeSet::from([id(1)]));
+        assert_eq!(
+            tracker.observe(102, &empty).unwrap(),
+            BTreeSet::from([id(1)])
+        );
+        assert_eq!(
+            tracker.observe(103, &empty).unwrap(),
+            BTreeSet::from([id(1)])
+        );
     }
 
     #[test]
@@ -141,11 +155,24 @@ mod tests {
         let full = BTreeSet::from([link(1, 3), link(1, 4)]);
         assert!(tracker.observe(0, &full).unwrap().is_empty());
         assert!(tracker.observe(1, &BTreeSet::new()).unwrap().is_empty());
-        assert!(tracker.observe(2, &BTreeSet::from([link(1, 4)])).unwrap().is_empty());
-        assert!(tracker.observe(100, &BTreeSet::from([link(1, 4)])).unwrap().is_empty());
+        assert!(
+            tracker
+                .observe(2, &BTreeSet::from([link(1, 4)]))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            tracker
+                .observe(100, &BTreeSet::from([link(1, 4)]))
+                .unwrap()
+                .is_empty()
+        );
         assert!(tracker.observe(101, &BTreeSet::new()).unwrap().is_empty());
         assert!(tracker.observe(110, &BTreeSet::new()).unwrap().is_empty());
-        assert_eq!(tracker.observe(111, &BTreeSet::new()).unwrap(), BTreeSet::from([id(1)]));
+        assert_eq!(
+            tracker.observe(111, &BTreeSet::new()).unwrap(),
+            BTreeSet::from([id(1)])
+        );
         assert!(tracker.observe(112, &full).unwrap().is_empty());
         assert!(tracker.observe(113, &BTreeSet::new()).unwrap().is_empty());
     }
@@ -154,27 +181,53 @@ mod tests {
     fn bad_observations_and_stale_clocks_cannot_advance_loss() {
         let mut tracker = HubLossTracker::new(10).unwrap();
         tracker.observe(100, &BTreeSet::from([link(1, 3)])).unwrap();
-        assert_eq!(tracker.observe(100, &BTreeSet::new()).unwrap_err().kind(), ErrorKind::InvalidState);
-        assert_eq!(tracker.observe(99, &BTreeSet::new()).unwrap_err().kind(), ErrorKind::InvalidState);
+        assert_eq!(
+            tracker.observe(100, &BTreeSet::new()).unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
+        assert_eq!(
+            tracker.observe(99, &BTreeSet::new()).unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
         assert!(tracker.observe(101, &BTreeSet::new()).unwrap().is_empty());
-        assert!(tracker.observe(102, &BTreeSet::from([link(1, 3), link(2, 3)])).is_err());
+        assert!(
+            tracker
+                .observe(102, &BTreeSet::from([link(1, 3), link(2, 3)]))
+                .is_err()
+        );
         assert!(tracker.observe(103, &BTreeSet::from([link(0, 3)])).is_err());
         assert!(tracker.observe(104, &BTreeSet::from([link(3, 3)])).is_err());
-        assert_eq!(tracker.observe(111, &BTreeSet::new()).unwrap(), BTreeSet::from([id(1)]));
+        assert_eq!(
+            tracker.observe(111, &BTreeSet::new()).unwrap(),
+            BTreeSet::from([id(1)])
+        );
     }
 
     #[test]
     fn unrelated_hub_remains_healthy_and_deliberate_removal_is_not_loss() {
         let mut tracker = HubLossTracker::new(5).unwrap();
-        tracker.observe(1, &BTreeSet::from([link(1, 3), link(2, 4)])).unwrap();
+        tracker
+            .observe(1, &BTreeSet::from([link(1, 3), link(2, 4)]))
+            .unwrap();
         tracker.forget_hub(id(2));
         assert!(tracker.observe(2, &BTreeSet::new()).unwrap().is_empty());
-        assert_eq!(tracker.observe(7, &BTreeSet::new()).unwrap(), BTreeSet::from([id(1)]));
-        assert!(tracker.observe(8, &BTreeSet::from([link(1, 3)])).unwrap().is_empty());
+        assert_eq!(
+            tracker.observe(7, &BTreeSet::new()).unwrap(),
+            BTreeSet::from([id(1)])
+        );
+        assert!(
+            tracker
+                .observe(8, &BTreeSet::from([link(1, 3)]))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
     fn zero_confirmation_interval_is_rejected() {
-        assert_eq!(HubLossTracker::new(0).unwrap_err().kind(), ErrorKind::InvalidInput);
+        assert_eq!(
+            HubLossTracker::new(0).unwrap_err().kind(),
+            ErrorKind::InvalidInput
+        );
     }
 }
