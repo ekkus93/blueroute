@@ -6,9 +6,7 @@
 //! the kernel before each privileged operation.
 use std::collections::BTreeMap;
 
-use crate::{
-    CoreError, ErrorKind, NetworkId, Route, RouteDestination, RouteOwner,
-};
+use crate::{CoreError, ErrorKind, NetworkId, Route, RouteDestination, RouteOwner};
 
 /// A replacement of an existing destination is one upsert intent: the Linux
 /// backend must use an ownership-checked atomic replace, not delete-then-add.
