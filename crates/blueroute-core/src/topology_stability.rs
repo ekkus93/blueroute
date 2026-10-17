@@ -82,3 +82,82 @@ pub fn decide_topology_change(
     }
     Ok(TopologyChangeDecision::Apply)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn policy() -> TopologyStabilityPolicy {
+        TopologyStabilityPolicy {
+            min_dwell_ms: 1_000,
+            min_cost_improvement: 5,
+            retry_base_ms: 100,
+            retry_max_ms: 800,
+        }
+    }
+
+    fn observation() -> TopologyChangeObservation {
+        TopologyChangeObservation {
+            now_ms: 2_000,
+            last_change_ms: 0,
+            current_viable: true,
+            proposed_viable: true,
+            current_cost: 100,
+            proposed_cost: 96,
+            consecutive_failures: 0,
+            last_failure_ms: None,
+        }
+    }
+
+    #[test]
+    fn small_metric_changes_preserve_known_good_topology() {
+        assert_eq!(
+            decide_topology_change(policy(), observation()).unwrap(),
+            TopologyChangeDecision::KeepCurrent
+        );
+        let mut state = observation();
+        state.proposed_cost = 90;
+        state.last_change_ms = 1_500;
+        assert_eq!(
+            decide_topology_change(policy(), state).unwrap(),
+            TopologyChangeDecision::DeferUntil(2_500)
+        );
+        state.now_ms = 2_500;
+        assert_eq!(
+            decide_topology_change(policy(), state).unwrap(),
+            TopologyChangeDecision::Apply
+        );
+    }
+
+    #[test]
+    fn failed_current_path_bypasses_dwell_but_respects_retry() {
+        let mut state = observation();
+        state.current_viable = false;
+        state.last_change_ms = 1_999;
+        assert_eq!(
+            decide_topology_change(policy(), state).unwrap(),
+            TopologyChangeDecision::Apply
+        );
+        state.consecutive_failures = 4;
+        state.last_failure_ms = Some(1_900);
+        assert_eq!(
+            decide_topology_change(policy(), state).unwrap(),
+            TopologyChangeDecision::DeferUntil(2_700)
+        );
+        state.now_ms = 2_700;
+        assert_eq!(
+            decide_topology_change(policy(), state).unwrap(),
+            TopologyChangeDecision::Apply
+        );
+    }
+
+    #[test]
+    fn invalid_clocks_and_missing_failure_history_fail_closed() {
+        let mut state = observation();
+        state.last_change_ms = 2_001;
+        assert!(decide_topology_change(policy(), state).is_err());
+        state.last_change_ms = 0;
+        state.consecutive_failures = 1;
+        assert!(decide_topology_change(policy(), state).is_err());
+    }
+}
