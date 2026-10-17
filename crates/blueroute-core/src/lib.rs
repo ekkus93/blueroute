@@ -17,6 +17,7 @@ mod topology;
 mod topology_executor;
 mod topology_plan;
 mod topology_policy;
+mod topology_recovery;
 mod topology_stability;
 
 pub use addressing::{Ipv4StarAddressPlan, ensure_ipv4_segment_available, normalized_ipv4_prefix};
@@ -46,7 +47,7 @@ pub use topology_policy::{
     CandidateLink, NapAssignment, NapSelection, TopologyCandidate, TopologyPolicyInputs,
     select_nap_hubs,
 };
-
+pub use topology_recovery::{HubLossRecoveryPlan, plan_hub_loss_recovery};
 pub use topology_stability::{
     TopologyChangeDecision, TopologyChangeObservation, TopologyStabilityPolicy,
     decide_topology_change,
