@@ -17,6 +17,7 @@ mod topology;
 mod topology_executor;
 mod topology_plan;
 mod topology_policy;
+mod topology_stability;
 
 pub use addressing::{Ipv4StarAddressPlan, ensure_ipv4_segment_available, normalized_ipv4_prefix};
 pub use capability::{
@@ -47,4 +48,6 @@ pub use topology_policy::{
 };
 
 /// The human-readable project name.
+pub use topology_stability::{decide_topology_change, TopologyChangeDecision, TopologyChangeObservation, TopologyStabilityPolicy};
+
 pub const PROJECT_NAME: &str = "BlueRoute";
