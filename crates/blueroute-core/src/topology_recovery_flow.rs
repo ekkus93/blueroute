@@ -600,14 +600,10 @@ mod tests {
 
         // First retry is 100ms, then 200ms, and subsequent retries are
         // capped at 400ms rather than growing indefinitely.
-        for (fail_number, (attempt_ms, before_due_ms)) in [
-            (11, 110),
-            (111, 310),
-            (311, 710),
-            (711, 1110),
-        ]
-        .into_iter()
-        .enumerate()
+        for (fail_number, (attempt_ms, before_due_ms)) in
+            [(11, 110), (111, 310), (311, 710), (711, 1110)]
+                .into_iter()
+                .enumerate()
         {
             assert!(
                 execute_confirmed_hub_loss_recovery_with_backoff(
