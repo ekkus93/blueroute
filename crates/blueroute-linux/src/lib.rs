@@ -23,10 +23,10 @@ pub use kernel_address::{KernelAddressBackend, KernelAddressLease};
 pub use membership_store::NetworkMembershipStore;
 pub use network_discovery::NetworkAdvertisement;
 pub use networkmanager::NetworkManagerBackend;
-pub use secret_store::SecretFileStore;
 pub use route_projection::{
     RouteDestinationBinding, RouteNextHopBinding, project_ipv4_route_intents,
 };
+pub use secret_store::SecretFileStore;
 
 use std::future::Future;
 use std::net::IpAddr;
