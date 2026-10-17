@@ -33,7 +33,7 @@ fn nonzero(bytes: &[u8]) -> bool {
     bytes.iter().any(|byte| *byte != 0)
 }
 
-fn private_prefix(prefix: IpPrefix) -> Result<(), CoreError> {
+pub(super) fn private_prefix(prefix: IpPrefix) -> Result<(), CoreError> {
     let IpAddr::V4(address) = prefix.address else {
         return Err(invalid("IPv6 routing is not enabled"));
     };
