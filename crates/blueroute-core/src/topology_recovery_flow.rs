@@ -55,8 +55,18 @@ pub fn execute_confirmed_hub_loss_recovery(
 
     // Validate observations and policy before touching routes or links.
     let plan = plan_hub_loss_recovery(inputs, &observed, &confirmed_lost)?;
-    operator.reconcile_routes(&observed)?;
-    let active = observed_selection(&observed);
+    // Planning and the first observation are not an atomic PAN snapshot.
+    // A link can appear or disappear while selecting the replacement hubs.
+    // Never reconcile routes against an already-obsolete observation.
+    let current = operator.observe_links()?;
+    if current != observed {
+        return Err(CoreError::new(
+            crate::ErrorKind::InvalidState,
+            "PAN observations changed before route reconciliation; replan",
+        ));
+    }
+    operator.reconcile_routes(&current)?;
+    let active = observed_selection(&current);
     let execution = execute_nap_plan(inputs, &active, &plan.desired, operator)?;
     Ok(Some(HubLossRecoveryExecution {
         confirmed_lost,
@@ -134,6 +144,8 @@ mod tests {
         routes: BTreeSet<NapLink>,
         operations: Vec<NapPlanStep>,
         fail_connect: Option<NapLink>,
+        observe_count: usize,
+        observe_change: Option<(usize, BTreeSet<NapLink>)>,
     }
 
     impl FakePan {
@@ -144,12 +156,22 @@ mod tests {
                 links,
                 operations: Vec::new(),
                 fail_connect: None,
+                observe_count: 0,
+                observe_change: None,
             }
         }
     }
 
     impl NapTopologyOperator for FakePan {
         fn observe_links(&mut self) -> Result<BTreeSet<NapLink>, CoreError> {
+            self.observe_count += 1;
+            if self
+                .observe_change
+                .as_ref()
+                .is_some_and(|(at, _)| *at == self.observe_count)
+            {
+                self.links = self.observe_change.take().unwrap().1;
+            }
             Ok(self.links.clone())
         }
 
@@ -244,6 +266,38 @@ mod tests {
         );
         assert_eq!(pan.routes, BTreeSet::from([link(2, 3), link(2, 4)]));
         assert_eq!(pan.operations.len(), 2);
+    }
+
+    #[test]
+    fn changed_pan_snapshot_blocks_stale_route_reconciliation_and_replans() {
+        let inputs = policy();
+        let mut tracker = HubLossTracker::new(10).unwrap();
+        let mut pan = FakePan::hosted();
+        execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, 0, &mut pan).unwrap();
+        pan.links.clear();
+        execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, 1, &mut pan).unwrap();
+
+        let stale_routes = pan.routes.clone();
+        // A replacement PAN link appears after planning but before routes
+        // would be reconciled. No link mutation or stale route write is safe.
+        pan.observe_change = Some((pan.observe_count + 2, BTreeSet::from([link(2, 3)])));
+        let error =
+            execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, 11, &mut pan).unwrap_err();
+        assert!(error.to_string().contains("PAN observations changed"));
+        assert_eq!(pan.routes, stale_routes);
+        assert!(pan.operations.is_empty());
+        assert_eq!(pan.links, BTreeSet::from([link(2, 3)]));
+
+        // A later observation must repair routes and complete the missing
+        // connection from the actual PAN state, not the obsolete snapshot.
+        let retry = execute_confirmed_hub_loss_recovery(&inputs, &mut tracker, 12, &mut pan)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            retry.execution.applied,
+            vec![NapPlanStep::Connect(link(2, 4))]
+        );
+        assert_eq!(pan.routes, BTreeSet::from([link(2, 3), link(2, 4)]));
     }
 
     #[test]
