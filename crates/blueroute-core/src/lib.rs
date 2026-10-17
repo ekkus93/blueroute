@@ -19,6 +19,7 @@ mod topology_loss;
 mod topology_plan;
 mod topology_policy;
 mod topology_recovery;
+mod topology_recovery_flow;
 mod topology_stability;
 
 pub use addressing::{Ipv4StarAddressPlan, ensure_ipv4_segment_available, normalized_ipv4_prefix};
@@ -50,6 +51,9 @@ pub use topology_policy::{
     select_nap_hubs,
 };
 pub use topology_recovery::{HubLossRecoveryPlan, plan_hub_loss_recovery};
+pub use topology_recovery_flow::{
+    HubLossRecoveryExecution, execute_confirmed_hub_loss_recovery,
+};
 pub use topology_stability::{
     TopologyChangeDecision, TopologyChangeObservation, TopologyStabilityPolicy,
     decide_topology_change,
