@@ -14,6 +14,8 @@ use blueroute_protocol::session::{
     ControlSessionRegistry, PeerSessionKey, SessionRegistration, SessionRegistryError,
 };
 
+mod generation_guard;
+
 use crate::control_tls::ControlSessionRead;
 use crate::{ActiveControlSession, ControlSessionError};
 
@@ -105,25 +107,38 @@ impl<'a> RegisteredControlSession<'a> {
         &mut self,
         now_ms: u64,
     ) -> Result<ControlSessionRead, ControlSessionError> {
+        self.ensure_active_registration()?;
         let result = self.session.receive_next_at(now_ms);
         if result.is_err() || matches!(&result, Ok(ControlSessionRead::Closed)) {
             self.close_and_retire();
+        } else {
+            // A replacement can be admitted while a read is in flight.
+            // Never deliver its predecessor's buffered frames to the daemon.
+            self.ensure_active_registration()?;
         }
         result
     }
 
     pub fn send_heartbeat_until(&mut self, deadline: Instant) -> Result<(), ControlSessionError> {
+        self.ensure_active_registration()?;
         let result = self.session.send_heartbeat_until(deadline);
         if result.is_err() {
             self.close_and_retire();
+        } else {
+            self.ensure_active_registration()?;
         }
         result
     }
 
     pub fn send_goodbye_until(&mut self, deadline: Instant) -> Result<(), ControlSessionError> {
+        self.ensure_active_registration()?;
         let result = self.session.send_goodbye_until(deadline);
         if result.is_err() {
             self.close_and_retire();
+        } else {
+            // Goodbye makes the stream terminal; only the registry identity
+            // (not the stream's terminal bit) is checked after sending.
+            self.ensure_current_registration()?;
         }
         result
     }
@@ -132,9 +147,12 @@ impl<'a> RegisteredControlSession<'a> {
     /// traffic. A revoked or terminal peer loses its owned socket before the
     /// exact registry generation is retired. Unrelated peers remain intact.
     pub fn revalidate_approval(&mut self) -> Result<(), ControlSessionError> {
+        self.ensure_active_registration()?;
         let result = self.session.revalidate_approval();
         if result.is_err() {
             self.close_and_retire();
+        } else {
+            self.ensure_active_registration()?;
         }
         result
     }
