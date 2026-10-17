@@ -45,12 +45,16 @@ pub fn plan_nap_client_admission(
     candidate: NodeId,
 ) -> Result<NapAdmissionDecision, CoreError> {
     if !valid_id(candidate) {
-        return Err(invalid("NAP admission requires a nonzero candidate identity"));
+        return Err(invalid(
+            "NAP admission requires a nonzero candidate identity",
+        ));
     }
     if host.adapter_usable.as_ref().map(|value| value.value) != Some(true)
         || host.can_host_pan() != Some(true)
     {
-        return Err(unavailable("local adapter or NAP capability is unavailable"));
+        return Err(unavailable(
+            "local adapter or NAP capability is unavailable",
+        ));
     }
     let policy_ceiling = host
         .connection_policy_ceiling
@@ -162,9 +166,7 @@ mod tests {
     fn corrupt_duplicate_and_zero_id_observations_are_rejected() {
         let capabilities = host(Some(3));
         assert!(plan_nap_client_admission(&capabilities, &[], peer(0)).is_err());
-        assert!(
-            plan_nap_client_admission(&capabilities, &[peer(2), peer(2)], peer(3)).is_err()
-        );
+        assert!(plan_nap_client_admission(&capabilities, &[peer(2), peer(2)], peer(3)).is_err());
         assert!(plan_nap_client_admission(&capabilities, &[peer(0)], peer(3)).is_err());
         assert_eq!(
             plan_nap_client_admission(&host(Some(1)), &[peer(2), peer(3)], peer(2))
@@ -177,18 +179,10 @@ mod tests {
     #[test]
     fn order_does_not_change_capacity_or_idempotence() {
         let capabilities = host(Some(4));
-        let forward = plan_nap_client_admission(
-            &capabilities,
-            &[peer(2), peer(3)],
-            peer(3),
-        )
-        .unwrap();
-        let reversed = plan_nap_client_admission(
-            &capabilities,
-            &[peer(3), peer(2)],
-            peer(3),
-        )
-        .unwrap();
+        let forward =
+            plan_nap_client_admission(&capabilities, &[peer(2), peer(3)], peer(3)).unwrap();
+        let reversed =
+            plan_nap_client_admission(&capabilities, &[peer(3), peer(2)], peer(3)).unwrap();
         assert_eq!(forward, reversed);
         assert_eq!(forward.remaining_after, 2);
     }
