@@ -55,7 +55,9 @@ pub fn decide_topology_change(
         return Ok(TopologyChangeDecision::NoViableProposal);
     }
     if observation.current_viable {
-        let gain = observation.current_cost.saturating_sub(observation.proposed_cost);
+        let gain = observation
+            .current_cost
+            .saturating_sub(observation.proposed_cost);
         if gain < policy.min_cost_improvement {
             return Ok(TopologyChangeDecision::KeepCurrent);
         }
@@ -75,7 +77,9 @@ pub fn decide_topology_change(
         }
     }
     if observation.current_viable {
-        let deadline = observation.last_change_ms.saturating_add(policy.min_dwell_ms);
+        let deadline = observation
+            .last_change_ms
+            .saturating_add(policy.min_dwell_ms);
         if observation.now_ms < deadline {
             return Ok(TopologyChangeDecision::DeferUntil(deadline));
         }
