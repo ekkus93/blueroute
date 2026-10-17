@@ -108,7 +108,10 @@ mod tests {
                 .find(|route| route.destination == replacement.destination)
                 != previous
             {
-                return Err(CoreError::new(ErrorKind::InvalidState, "changed route owner"));
+                return Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "changed route owner",
+                ));
             }
             self.routes
                 .retain(|route| route.destination != replacement.destination);
@@ -116,14 +119,20 @@ mod tests {
             self.operations += 1;
             if self.fail_once_after_write {
                 self.fail_once_after_write = false;
-                return Err(CoreError::new(ErrorKind::RouteFailure, "injected partial write"));
+                return Err(CoreError::new(
+                    ErrorKind::RouteFailure,
+                    "injected partial write",
+                ));
             }
             Ok(())
         }
 
         fn remove_owned_route(&mut self, previous: &Route) -> Result<(), CoreError> {
             if !self.routes.contains(previous) {
-                return Err(CoreError::new(ErrorKind::InvalidState, "changed route owner"));
+                return Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "changed route owner",
+                ));
             }
             self.routes.retain(|route| route != previous);
             self.operations += 1;
@@ -145,10 +154,8 @@ mod tests {
     fn primary_loss_falls_back_then_partition_removes_and_restore_recovers() {
         let mut graph = topology();
         let mut backend = ObservedRoutes::new(Vec::new());
-        let first = reconcile_observed_topology_routes(
-            &graph, id(1), network(9), &mut backend,
-        )
-        .unwrap();
+        let first =
+            reconcile_observed_topology_routes(&graph, id(1), network(9), &mut backend).unwrap();
         assert_eq!(next_hop(&first.observed, 4), Some(id(2)));
         assert_eq!(first.observed.len(), 3);
         let initial_writes = backend.operations;
@@ -162,27 +169,21 @@ mod tests {
 
         // Lose the primary second hop: the surviving higher-cost route wins.
         graph.remove_link(&LinkId::from_bytes([2; 16])).unwrap();
-        let alternative = reconcile_observed_topology_routes(
-            &graph, id(1), network(9), &mut backend,
-        )
-        .unwrap();
+        let alternative =
+            reconcile_observed_topology_routes(&graph, id(1), network(9), &mut backend).unwrap();
         assert_eq!(next_hop(&alternative.observed, 4), Some(id(3)));
 
         // The backup fails too: no invented reachability to node 4.
         graph.remove_link(&LinkId::from_bytes([4; 16])).unwrap();
-        let partition = reconcile_observed_topology_routes(
-            &graph, id(1), network(9), &mut backend,
-        )
-        .unwrap();
+        let partition =
+            reconcile_observed_topology_routes(&graph, id(1), network(9), &mut backend).unwrap();
         assert_eq!(next_hop(&partition.observed, 4), None);
         assert_eq!(partition.observed.len(), 2);
 
         // The primary returns: reinstallation comes from the actual graph.
         add_link(&mut graph, 2, 2, 4, 1);
-        let restored = reconcile_observed_topology_routes(
-            &graph, id(1), network(9), &mut backend,
-        )
-        .unwrap();
+        let restored =
+            reconcile_observed_topology_routes(&graph, id(1), network(9), &mut backend).unwrap();
         assert_eq!(next_hop(&restored.observed, 4), Some(id(2)));
         assert_eq!(restored.observed.len(), 3);
     }
@@ -198,20 +199,20 @@ mod tests {
         };
         let mut backend = ObservedRoutes::new(vec![foreign.clone()]);
         backend.fail_once_after_write = true;
-        let failed = reconcile_observed_topology_routes(
-            &graph, id(1), network(9), &mut backend,
-        );
+        let failed = reconcile_observed_topology_routes(&graph, id(1), network(9), &mut backend);
         assert_eq!(failed.unwrap_err().kind(), ErrorKind::RouteFailure);
         assert!(backend.routes.contains(&foreign));
         assert_eq!(backend.routes.len(), 2);
 
-        let recovered = reconcile_observed_topology_routes(
-            &graph, id(1), network(9), &mut backend,
-        )
-        .unwrap();
+        let recovered =
+            reconcile_observed_topology_routes(&graph, id(1), network(9), &mut backend).unwrap();
         assert!(recovered.observed.contains(&foreign));
         assert_eq!(
-            recovered.observed.into_iter().collect::<BTreeSet<_>>().len(),
+            recovered
+                .observed
+                .into_iter()
+                .collect::<BTreeSet<_>>()
+                .len(),
             4
         );
         assert_eq!(backend.operations, 3);
@@ -234,8 +235,7 @@ mod tests {
             ErrorKind::InvalidInput
         );
         assert!(
-            reconcile_observed_topology_routes(&graph, id(0), network(9), &mut backend)
-                .is_err()
+            reconcile_observed_topology_routes(&graph, id(0), network(9), &mut backend).is_err()
         );
         assert_eq!(backend.operations, 0);
         assert_eq!(backend.routes, vec![foreign]);
