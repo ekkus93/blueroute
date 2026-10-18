@@ -32,7 +32,9 @@ pub trait NetworkOperations: Send + Sync {
     /// Only return independently observed backend-owned interface addresses.
     /// None means no observation provider is available; it is not an empty
     /// interface inventory. No peer identity is inferred from an IP address.
-    fn diagnostic_interfaces(&self) -> NetworkOperationFuture<'_, Option<Vec<DiagnosticInterface>>> {
+    fn diagnostic_interfaces(
+        &self,
+    ) -> NetworkOperationFuture<'_, Option<Vec<DiagnosticInterface>>> {
         Box::pin(async { Ok(None) })
     }
     fn start_discovery(&self) -> NetworkOperationFuture<'_, ()>;
@@ -68,7 +70,9 @@ impl NetworkIdGenerator for SystemNetworkIdGenerator {
 }
 
 pub trait StarHostRuntime: Send + Sync {
-    fn diagnostic_interfaces(&self) -> NetworkOperationFuture<'_, Option<Vec<DiagnosticInterface>>> {
+    fn diagnostic_interfaces(
+        &self,
+    ) -> NetworkOperationFuture<'_, Option<Vec<DiagnosticInterface>>> {
         Box::pin(async { Ok(None) })
     }
 
@@ -105,7 +109,9 @@ struct ActiveLinuxStarHost {
 }
 
 impl StarHostRuntime for LinuxStarHostRuntime {
-    fn diagnostic_interfaces(&self) -> NetworkOperationFuture<'_, Option<Vec<DiagnosticInterface>>> {
+    fn diagnostic_interfaces(
+        &self,
+    ) -> NetworkOperationFuture<'_, Option<Vec<DiagnosticInterface>>> {
         Box::pin(async move {
             let active = self.active.lock().map_err(lock_error)?.clone();
             // An idle daemon cannot report host runtime observations; it
@@ -114,7 +120,10 @@ impl StarHostRuntime for LinuxStarHostRuntime {
                 return Ok(None);
             };
             let addresses = active.network_backend.addresses().await?;
-            Ok(Some(owned_interface_diagnostics(active.network, &addresses)))
+            Ok(Some(owned_interface_diagnostics(
+                active.network,
+                &addresses,
+            )))
         })
     }
 
@@ -429,7 +438,9 @@ where
     R: StarHostRuntime,
     G: NetworkIdGenerator,
 {
-    fn diagnostic_interfaces(&self) -> NetworkOperationFuture<'_, Option<Vec<DiagnosticInterface>>> {
+    fn diagnostic_interfaces(
+        &self,
+    ) -> NetworkOperationFuture<'_, Option<Vec<DiagnosticInterface>>> {
         self.runtime.diagnostic_interfaces()
     }
 
@@ -1059,9 +1070,11 @@ mod tests {
                 addresses: vec!["10.72.0.1/24".into()],
             }]
         );
-        assert!(owned_interface_diagnostics(foreign, &entries)
-            .iter()
-            .all(|item| item.name != "brb-host"));
+        assert!(
+            owned_interface_diagnostics(foreign, &entries)
+                .iter()
+                .all(|item| item.name != "brb-host")
+        );
         assert!(owned_interface_diagnostics(NetworkId::from_bytes([3; 16]), &entries).is_empty());
     }
 
