@@ -485,7 +485,8 @@ where
     G: NetworkIdGenerator,
 {
     fn bind_owned_control_listener(&self) -> NetworkOperationFuture<'_, Option<TcpListener>> {
-        self.runtime.bind_owned_control_listener(self.config.clone())
+        self.runtime
+            .bind_owned_control_listener(self.config.clone())
     }
 
     fn diagnostic_interfaces(
@@ -1132,11 +1133,13 @@ mod tests {
     fn idle_host_cannot_bind_control_listener_through_runtime_or_operations() {
         futures_lite::future::block_on(async {
             let empty_runtime = LinuxStarHostRuntime::default();
-            assert!(empty_runtime
-                .bind_owned_control_listener(DaemonConfig::default())
-                .await
-                .unwrap()
-                .is_none());
+            assert!(
+                empty_runtime
+                    .bind_owned_control_listener(DaemonConfig::default())
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
 
             let (root, store) = temp_store("idle-control-listener");
             let operations = SingleStarNetworkOperations::with_runtime_and_generator(
@@ -1146,11 +1149,13 @@ mod tests {
                 FakeRuntime::default(),
                 SequenceGenerator::new([]),
             );
-            assert!(operations
-                .bind_owned_control_listener()
-                .await
-                .unwrap()
-                .is_none());
+            assert!(
+                operations
+                    .bind_owned_control_listener()
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
             fs::remove_dir_all(root).unwrap();
         });
     }
