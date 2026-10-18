@@ -676,10 +676,9 @@ mod tests {
         let (root, store) = temp_store("zero-network");
         let operations =
             TransactionalJoinNetworkOperations::with_runtime(store, FakeRuntime::successful());
-        let error = futures_lite::future::block_on(
-            operations.join_network(NetworkId::from_bytes([0; 16])),
-        )
-        .unwrap_err();
+        let error =
+            futures_lite::future::block_on(operations.join_network(NetworkId::from_bytes([0; 16])))
+                .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidState);
         assert!(error.message().contains("zero NetworkId"));
         assert!(operations.runtime.steps().is_empty());
@@ -690,7 +689,13 @@ mod tests {
         futures_lite::future::block_on(operations.join_network(valid)).unwrap();
         assert_eq!(operations.runtime.steps().len(), 4);
         assert_eq!(
-            operations.store.load().unwrap().network(&valid).unwrap().state,
+            operations
+                .store
+                .load()
+                .unwrap()
+                .network(&valid)
+                .unwrap()
+                .state,
             MembershipState::Member
         );
         fs::remove_dir_all(root).unwrap();
