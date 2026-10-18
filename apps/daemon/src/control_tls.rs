@@ -2139,6 +2139,140 @@ mod tests {
     }
 
     #[test]
+    fn malformed_post_hello_frames_on_mutual_tls_fail_closed_without_reusing_session() {
+        use blueroute_protocol::control::{
+            CONTROL_VERSION, ControlEnvelope, encode_control_frame,
+        };
+
+        // All inputs traverse real TLS 1.3 mutual certificate checks, exporter
+        // bound Hello/HelloAck, and durable approved-key ingress. Untrusted
+        // application frames are injected only after those security gates.
+        // Each new connection gets its own authorization and TLS exporter.
+        for attack in 0..7 {
+            let (client, server) = make_tls_pair();
+            let pinned_client = PinnedControlTlsCertificate::new(
+                network(9),
+                client.node(),
+                client.certificate().clone(),
+                client.fingerprint(),
+            )
+            .unwrap();
+            let pinned_server = PinnedControlTlsCertificate::new(
+                network(9),
+                server.node(),
+                server.certificate().clone(),
+                server.fingerprint(),
+            )
+            .unwrap();
+            let (client_config, server_name) =
+                client.client_config(network(9), &pinned_server).unwrap();
+            let server_config = server
+                .server_config(network(9), std::slice::from_ref(&pinned_client))
+                .unwrap();
+            let (client_socket, server_socket) = stream_pair();
+            let server_thread = thread::spawn(move || {
+                let mut stream = ControlTlsStream::server(
+                    rustls::ServerConnection::new(server_config).unwrap(),
+                    server_socket,
+                );
+                stream
+                    .complete_handshake_until(Instant::now() + Duration::from_secs(5))
+                    .unwrap();
+                let authenticated = stream
+                    .exchange_authenticated_hello(
+                        network(9),
+                        &server,
+                        &pinned_client,
+                        hello_facts("server-test"),
+                        Instant::now() + Duration::from_secs(5),
+                    )
+                    .unwrap();
+                let dir = TempDirectory::new();
+                let trust = trust_for_peer(&dir.0, authenticated.peer());
+                let mut active = stream
+                    .activate(authenticated, &server, &trust, active_deadline())
+                    .unwrap();
+                assert!(
+                    active.receive_next_at(10).is_err(),
+                    "hostile TLS plaintext was accepted, case {attack}"
+                );
+                assert!(active.is_terminal(), "session survived case {attack}");
+                assert!(
+                    active.receive_next_at(11).is_err(),
+                    "terminated session was reusable, case {attack}"
+                );
+            });
+
+            let mut stream = ControlTlsStream::client(
+                rustls::ClientConnection::new(client_config, server_name).unwrap(),
+                client_socket,
+            );
+            stream
+                .complete_handshake_until(Instant::now() + Duration::from_secs(5))
+                .unwrap();
+            let authenticated = stream
+                .exchange_authenticated_hello(
+                    network(9),
+                    &client,
+                    &pinned_server,
+                    hello_facts("client-test"),
+                    Instant::now() + Duration::from_secs(5),
+                )
+                .unwrap();
+            let mut frame = ControlEnvelope {
+                version: CONTROL_VERSION,
+                network: network(9),
+                sender: client.node(),
+                session_id: *authenticated.session_id(),
+                sequence: 3,
+                message: ControlMessage::Heartbeat,
+            };
+            let hostile = match attack {
+                0 => {
+                    frame.network = network(8);
+                    encode_control_frame(&frame).unwrap()
+                }
+                1 => {
+                    frame.sender = node(3);
+                    encode_control_frame(&frame).unwrap()
+                }
+                2 => {
+                    frame.session_id = [0x7f; 16];
+                    encode_control_frame(&frame).unwrap()
+                }
+                3 => {
+                    frame.sequence = 2; // Replay a completed Hello/Ack slot.
+                    encode_control_frame(&frame).unwrap()
+                }
+                4 => {
+                    frame.message = ControlMessage::Hello {
+                        challenge: [7; 16],
+                        facts: hello_facts("replayed-hello"),
+                    };
+                    encode_control_frame(&frame).unwrap()
+                }
+                5 => {
+                    let valid = encode_control_frame(&frame).unwrap();
+                    let mut payload: serde_json::Value =
+                        serde_json::from_slice(&valid[4..]).unwrap();
+                    payload["critical_unknown"] = serde_json::json!(true);
+                    let raw = serde_json::to_vec(&payload).unwrap();
+                    let mut data = u32::try_from(raw.len()).unwrap().to_be_bytes().to_vec();
+                    data.extend_from_slice(&raw);
+                    data
+                }
+                6 => vec![0xff, 0xff, 0xff, 0xff],
+                _ => unreachable!(),
+            };
+            stream
+                .write_all(&hostile)
+                .unwrap_or_else(|error| panic!("TLS write case {attack}: {error}"));
+            stream.flush().unwrap();
+            server_thread.join().unwrap();
+        }
+    }
+
+    #[test]
     fn expired_tls_handshake_deadline_closes_its_socket() {
         let (client, server) = make_tls_pair();
         let pinned_server = PinnedControlTlsCertificate::new(
