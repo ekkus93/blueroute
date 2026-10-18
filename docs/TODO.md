@@ -1337,6 +1337,22 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 - Diagnostics expose enough system/PAN/route/capability state to troubleshoot heterogeneous hardware.
 
+**P10-005 sourced human-readable diagnostics expansion (software-only, 2026-10-17):**
+The `blueroute diagnostics show` human formatter now renders the daemon's
+typed Bluetooth-adapter metadata, observed-peer inventory, interface addresses,
+routes, and topology nodes/links when present. It clearly distinguishes
+`None` (not reported) from `Some([])` (reported empty), explicitly avoids
+equating daemon-observed peers with authenticated remote membership, escapes
+interface labels, and bounds human inventory output to 32 items per section.
+The `--json` response is unchanged. Two tests cover missing/empty/available
+fields, hostile control characters, truncation, and JSON round-trip.
+[Exact-head CI 39095206735](https://github.com/ekkus93/blueroute/actions/runs/39095206735)
+passed at `b9016c7ca1677528f9b18b3e7703bea4e8e63bef`.
+**Remaining:** The production daemon still lacks independently authenticated
+remote inventory, detailed live interface/route/topology observations and full
+troubleshooting coverage. This is display of explicitly supplied snapshot
+fields only; it is not PAN/radio or physical acceptance. P10-005 stays OPEN.
+
 ## P10-006 — Define exit-code contract
 
 - [x] success (0).
