@@ -55,7 +55,9 @@ pub use peer_trust::{
     DurablePeerTrustOperations, PeerTrustFuture, PeerTrustOperations, pair_and_trust_bluetooth_peer,
 };
 pub use pinned_ingress::{PinnedIngressError, PinnedSessionIngress, VerifiedTlsIdentity};
-pub use registered_transport::{RegisteredControlSession, SessionAdmissionError};
+pub use registered_transport::{
+    RegisteredControlSession, RegisteredNapControlOwner, SessionAdmissionError,
+};
 pub use single_star::{
     LinuxStarHostRuntime, NetworkIdGenerator, NetworkOperationFuture, NetworkOperations,
     SingleStarNetworkOperations, StarHostRuntime, SystemNetworkIdGenerator, current_network,
