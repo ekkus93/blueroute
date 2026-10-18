@@ -240,21 +240,14 @@ impl<'session, 'nap> RegisteredNapControlOwner<'session, 'nap> {
                 "NAP reservation was already retired",
             ));
         };
-        if self.attached {
-            self.session.revalidate_approval().map_err(|error| {
-                CoreError::with_diagnostic(
-                    ErrorKind::AuthenticationFailed,
-                    "NAP control session is no longer approved",
-                    error.to_string(),
-                )
-            })?;
-            return Ok(());
-        }
+        // The PANU is already independently observed by the caller. Even
+        // if policy revalidation or ledger activation now fails, its radio
+        // slot cannot be freed until detach is independently confirmed.
+        // Repeated calls must retry activation, not mistake this observation
+        // for a successfully activated ledger ticket.
+        self.attached = true;
         match lease.activate(&mut self.session) {
-            Ok(true) => {
-                self.attached = true;
-                Ok(())
-            }
+            Ok(true) => Ok(())
             Ok(false) => {
                 self.on_transport_loss();
                 Err(CoreError::new(
@@ -506,6 +499,30 @@ mod tests {
         assert!(!retire_authenticated_nap(&admission, &authenticated).unwrap());
         assert_eq!(admission.counts().unwrap(), (0, 1));
         assert!(admission.retire(&replacement).unwrap());
+    }
+
+    #[test]
+    fn observed_panu_with_failed_activation_keeps_pending_slot_until_detach() {
+        let admission = NetworkNapAdmission::new(network(1), capabilities()).unwrap();
+        let (ticket, _) = admission.reserve(peer(2)).unwrap();
+        let authenticated = AuthenticatedNapTicket {
+            ticket,
+            session_id: [7; 16],
+        };
+        let mut lease = Some(AuthenticatedNapLease {
+            admission: &admission,
+            ticket: authenticated.clone(),
+            release_on_drop: true,
+        });
+        // A physical attachment was observed before the policy gate failed.
+        // TLS loss cannot prove that the PANU disappeared.
+        release_pending_on_transport_loss(&mut lease, true);
+        assert_eq!(admission.counts().unwrap(), (0, 1));
+        preserve_attached_capacity_on_owner_drop(&mut lease, true);
+        drop(lease);
+        assert_eq!(admission.counts().unwrap(), (0, 1));
+        assert!(retire_authenticated_nap(&admission, &authenticated).unwrap());
+        assert_eq!(admission.counts().unwrap(), (0, 0));
     }
 
     #[test]
