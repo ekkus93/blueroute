@@ -118,7 +118,7 @@ mod tests {
         let owner = network(7);
         let owned = address(owner);
         let result =
-            owned_nap_control_address(owner, &DaemonConfig::default(), &[owned.clone()]).unwrap();
+            owned_nap_control_address(owner, &DaemonConfig::default(), std::slice::from_ref(&owned)).unwrap();
         assert_eq!(result.port(), CONTROL_TCP_PORT);
         assert_eq!(IpAddr::V4(*result.ip()), owned.prefix.address);
         assert!(!result.ip().is_unspecified());
