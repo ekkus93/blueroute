@@ -2190,7 +2190,7 @@ mod tests {
                 let active = stream
                     .activate(authenticated, &server, &trust, active_deadline())
                     .unwrap();
-                let registry = Arc::new(Mutex::new(
+                let registry = Arc::new(std::sync::Mutex::new(
                     blueroute_protocol::session::ControlSessionRegistry::new(),
                 ));
                 let key = blueroute_protocol::session::PeerSessionKey {
