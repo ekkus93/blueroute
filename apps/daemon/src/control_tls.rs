@@ -2187,17 +2187,39 @@ mod tests {
                     .unwrap();
                 let dir = TempDirectory::new();
                 let trust = trust_for_peer(&dir.0, authenticated.peer());
-                let mut active = stream
+                let active = stream
                     .activate(authenticated, &server, &trust, active_deadline())
                     .unwrap();
+                let registry = Arc::new(Mutex::new(
+                    blueroute_protocol::session::ControlSessionRegistry::new(),
+                ));
+                let key = blueroute_protocol::session::PeerSessionKey {
+                    network: network(9),
+                    peer: node(1),
+                };
+                let mut registered = crate::RegisteredControlSession::admit(
+                    active,
+                    Arc::clone(&registry),
+                )
+                .unwrap();
+                assert!(registry.lock().unwrap().get(key).is_some());
                 assert!(
-                    active.receive_next_at(10).is_err(),
+                    registered.receive_next_at(10).is_err(),
                     "hostile TLS plaintext was accepted, case {attack}"
                 );
-                assert!(active.is_terminal(), "session survived case {attack}");
+                assert!(registered.is_terminal(), "session survived case {attack}");
                 assert!(
-                    active.receive_next_at(11).is_err(),
+                    registry.lock().unwrap().get(key).is_none(),
+                    "malformed input retained registry slot, case {attack}"
+                );
+                assert!(
+                    registered.receive_next_at(11).is_err(),
                     "terminated session was reusable, case {attack}"
+                );
+                drop(registered);
+                assert!(
+                    registry.lock().unwrap().get(key).is_none(),
+                    "stale owner drop resurrected a slot, case {attack}"
                 );
             });
 
