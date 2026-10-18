@@ -365,11 +365,28 @@ fn format_local_key(
     }
 }
 
+/// Escape terminal controls and bidirectional formatting markers in externally
+/// supplied diagnostic text. These fields are display-only and must never
+/// inject new terminal lines or control sequences into CLI output.
+fn safe_diagnostic_field(value: &str) -> String {
+    let mut safe = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch.is_control()
+            || matches!(ch, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        {
+            safe.push_str(&format!("\\u{{{:x}}}", ch as u32));
+        } else {
+            safe.push(ch);
+        }
+    }
+    safe
+}
+
 fn format_system_diagnostics(system: &SystemDiagnosticMetadata) -> String {
     format!(
         "platform={} daemon={} kernel={:?} BlueZ={:?} network-backend={:?} adapters={}",
-        system.platform,
-        system.daemon_version,
+        safe_diagnostic_field(&system.platform),
+        safe_diagnostic_field(&system.daemon_version),
         system.kernel_release,
         system.bluez_version,
         system.network_backend_version,
@@ -649,6 +666,25 @@ mod tests {
 
     fn args(items: &[&str]) -> Vec<String> {
         items.iter().map(|item| (*item).into()).collect()
+    }
+
+    #[test]
+    fn system_diagnostics_escape_terminal_and_direction_controls() {
+        let system = SystemDiagnosticMetadata {
+            daemon_version: "1.0\nspoofed".to_owned(),
+            platform: "Linux\u{1b}[31m\u{202e}".to_owned(),
+            kernel_release: None,
+            bluez_version: None,
+            network_backend_version: None,
+            adapters: Vec::new(),
+        };
+        let rendered = format_system_diagnostics(&system);
+        assert!(rendered.contains("platform=Linux\\u{1b}[31m\\u{202e}"));
+        assert!(rendered.contains("daemon=1.0\\u{a}spoofed"));
+        assert!(!rendered.contains('\u{1b}'));
+        assert!(!rendered.contains('\u{202e}'));
+        assert!(!rendered.contains('\n'));
+        assert_eq!(safe_diagnostic_field("plain Linux"), "plain Linux");
     }
 
     #[test]
