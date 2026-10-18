@@ -197,3 +197,23 @@ at `7324f11e058650ab8ed43ce178b03d870b6981f2`.
 This is **not** a trusted Bluetooth event source, daemon dispatch wiring,
 real PANU attachment/detach detection, authenticated user enrollment or
 physical multi-client acceptance. P6-007 remains IN PROGRESS.
+
+## Concurrent same-peer retire/reconnect race (software-only, 2026-10-17)
+
+The NAP admission ledger now has an additional 48-round, synchronized
+two-thread regression that races exact-generation retirement of an attached
+peer against a fresh admission for that same peer. Regardless of which
+operation wins, an admitted successor gets a distinct generation; a stale
+retirement cannot free its pending or active capacity. Every round checks
+capacity accounting through activation and explicit cleanup.
+
+The 44-line test is the only effective source change across the three
+direct-to-master commits ending at
+`192d7755783029e205f767b564036c91feb9264c`.
+An intermediate formatting-only CI failure was corrected, and
+[exact-head CI 39094475449](https://github.com/ekkus93/blueroute/actions/runs/39094475449)
+passed. This is a concurrency test of in-process reservation policy, **not**
+live BlueZ detachment correlation, independently approved enrollment,
+production PANU/session lifecycle integration, simultaneous Bluetooth
+traffic or measured hardware capacity. All three original P6-007 acceptance
+checkboxes remain open.
