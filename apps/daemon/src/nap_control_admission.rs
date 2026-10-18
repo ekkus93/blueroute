@@ -138,6 +138,173 @@ pub fn activate_authenticated_nap(
     admission.activate(&ticket.ticket)
 }
 
+/// Owns an authenticated TLS session and its matching NAP reservation as one
+/// lifecycle unit. The running daemon must supply independent PANU attachment
+/// and detachment observations; this type does not discover Bluetooth links.
+///
+/// Critically, TLS loss does NOT release an already-activated radio capacity
+/// slot. A real PANU may remain attached after its control socket closes.
+/// Keep this owner until the matching PANU detach has been observed, or until
+/// the entire owned NAP has been shut down and its links removed.
+#[must_use = "retain the NAP owner until PANU detach or NAP shutdown"]
+pub struct RegisteredNapControlOwner<'session, 'nap> {
+    session: RegisteredControlSession<'session>,
+    lease: Option<AuthenticatedNapLease<'nap>>,
+    attached: bool,
+}
+
+fn release_pending_on_transport_loss(
+    lease: &mut Option<AuthenticatedNapLease<'_>>,
+    attached: bool,
+) {
+    if !attached {
+        lease.take();
+    }
+}
+
+impl<'session, 'nap> RegisteredNapControlOwner<'session, 'nap> {
+    /// Consume an already-registered, pinned, durably approved TLS session.
+    /// A failed reservation closes the session via its normal owner drop.
+    pub fn reserve(
+        mut session: RegisteredControlSession<'session>,
+        admission: &'nap NetworkNapAdmission,
+    ) -> Result<(Self, NapAdmissionDecision), CoreError> {
+        let (lease, decision) = session.reserve_nap_lease(admission)?;
+        Ok((
+            Self {
+                session,
+                lease: Some(lease),
+                attached: false,
+            },
+            decision,
+        ))
+    }
+
+    pub const fn network(&self) -> NetworkId {
+        self.session.network()
+    }
+
+    pub const fn peer(&self) -> NodeId {
+        self.session.peer()
+    }
+
+    pub const fn session_id(&self) -> &[u8; 16] {
+        self.session.session_id()
+    }
+
+    /// Must be called only after the daemon independently observes the
+    /// matching authenticated peer's PANU attachment. A stale or revoked
+    /// reservation cannot be promoted.
+    pub fn activate_after_observed_attachment(&mut self) -> Result<(), CoreError> {
+        let Some(lease) = &self.lease else {
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP reservation was already retired",
+            ));
+        };
+        if self.attached {
+            self.session.revalidate_approval().map_err(|error| {
+                CoreError::with_diagnostic(
+                    ErrorKind::AuthenticationFailed,
+                    "NAP control session is no longer approved",
+                    error.to_string(),
+                )
+            })?;
+            return Ok(());
+        }
+        match lease.activate(&mut self.session) {
+            Ok(true) => {
+                self.attached = true;
+                Ok(())
+            }
+            Ok(false) => {
+                self.on_transport_loss();
+                Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "NAP reservation was replaced or retired before attachment",
+                ))
+            }
+            Err(error) => {
+                self.on_transport_loss();
+                Err(error)
+            }
+        }
+    }
+
+    /// A closed or failed TLS stream releases only an unactivated reservation.
+    /// An active PANU continues consuming capacity until confirmed detached.
+    pub fn on_transport_loss(&mut self) {
+        self.session.cancel();
+        release_pending_on_transport_loss(&mut self.lease, self.attached);
+    }
+
+    /// The caller must have independently observed the matching PANU detach
+    /// (or completed owned NAP shutdown) before invoking this method.
+    pub fn confirm_observed_detach(&mut self) {
+        self.session.cancel();
+        self.attached = false;
+        self.lease.take();
+    }
+
+    /// A stale TLS callback cannot close a replacement or free its slot.
+    pub fn cancel_if_current(&mut self, expected_session_id: [u8; 16]) -> bool {
+        if !self.session.cancel_if_current(expected_session_id) {
+            return false;
+        }
+        release_pending_on_transport_loss(&mut self.lease, self.attached);
+        true
+    }
+
+    pub fn receive_next_at(
+        &mut self,
+        now_ms: u64,
+    ) -> Result<crate::control_tls::ControlSessionRead, crate::ControlSessionError> {
+        let result = self.session.receive_next_at(now_ms);
+        if result.is_err()
+            || matches!(&result, Ok(crate::control_tls::ControlSessionRead::Closed))
+        {
+            self.on_transport_loss();
+        }
+        result
+    }
+
+    pub fn revalidate_approval(&mut self) -> Result<(), crate::ControlSessionError> {
+        let result = self.session.revalidate_approval();
+        if result.is_err() {
+            self.on_transport_loss();
+        }
+        result
+    }
+
+    pub fn send_heartbeat_until(
+        &mut self,
+        deadline: std::time::Instant,
+    ) -> Result<(), crate::ControlSessionError> {
+        let result = self.session.send_heartbeat_until(deadline);
+        if result.is_err() {
+            self.on_transport_loss();
+        }
+        result
+    }
+
+    pub fn send_goodbye_until(
+        &mut self,
+        deadline: std::time::Instant,
+    ) -> Result<(), crate::ControlSessionError> {
+        let result = self.session.send_goodbye_until(deadline);
+        self.on_transport_loss();
+        result
+    }
+
+    pub const fn attachment_observed(&self) -> bool {
+        self.attached
+    }
+
+    pub fn awaiting_detach_after_tls_loss(&self) -> bool {
+        self.attached && self.session.is_terminal()
+    }
+}
+
 /// Teardown callbacks do not require a live TLS stream. Exact NAP owner and
 /// reservation generation checks prevent a stale callback from retiring a
 /// replacement. This never disconnects the underlying PANU socket.
@@ -212,6 +379,39 @@ mod tests {
         assert_eq!(admission.counts().unwrap(), (1, 0));
         assert!(lease.retire().unwrap());
         drop(lease);
+        assert_eq!(admission.counts().unwrap(), (0, 0));
+    }
+
+    #[test]
+    fn pending_tls_loss_releases_slot_but_attached_tls_loss_retains_capacity() {
+        let admission = NetworkNapAdmission::new(network(1), capabilities()).unwrap();
+        let (pending, _) = admission.reserve(peer(2)).unwrap();
+        let mut lease = Some(AuthenticatedNapLease {
+            admission: &admission,
+            ticket: AuthenticatedNapTicket {
+                ticket: pending,
+                session_id: [7; 16],
+            },
+        });
+        release_pending_on_transport_loss(&mut lease, false);
+        assert!(lease.is_none());
+        assert_eq!(admission.counts().unwrap(), (0, 0));
+
+        let (ticket, _) = admission.reserve(peer(2)).unwrap();
+        assert!(admission.activate(&ticket).unwrap());
+        let mut lease = Some(AuthenticatedNapLease {
+            admission: &admission,
+            ticket: AuthenticatedNapTicket {
+                ticket,
+                session_id: [8; 16],
+            },
+        });
+        release_pending_on_transport_loss(&mut lease, true);
+        assert!(lease.is_some());
+        assert_eq!(admission.counts().unwrap(), (1, 0));
+        // Only independently observed PANU detach (or full NAP shutdown)
+        // may release an active reservation after the TLS owner disappears.
+        lease.take();
         assert_eq!(admission.counts().unwrap(), (0, 0));
     }
 

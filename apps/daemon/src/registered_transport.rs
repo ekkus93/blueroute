@@ -17,7 +17,9 @@ use blueroute_protocol::session::{
 mod generation_guard;
 #[path = "nap_control_admission.rs"]
 mod nap_control_admission;
-pub use nap_control_admission::{AuthenticatedNapLease, AuthenticatedNapTicket};
+pub use nap_control_admission::{
+    AuthenticatedNapLease, AuthenticatedNapTicket, RegisteredNapControlOwner,
+};
 
 use crate::control_tls::ControlSessionRead;
 use crate::{ActiveControlSession, ControlSessionError};
