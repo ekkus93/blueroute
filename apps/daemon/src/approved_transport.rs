@@ -953,7 +953,11 @@ mod tests {
             assert!(session.is_terminal());
             assert!(registry.lock().unwrap().get(key).is_none());
             revoked_tx.send(()).unwrap();
-            assert!(session.send_heartbeat_until(Instant::now() + Duration::from_secs(5)).is_err());
+            assert!(
+                session
+                    .send_heartbeat_until(Instant::now() + Duration::from_secs(5))
+                    .is_err()
+            );
         });
 
         let dir = TestDirectory::new();
