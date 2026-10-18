@@ -231,10 +231,11 @@ where
             let lease = match self.runtime.configure_ip(network, &link).await {
                 Ok(lease) => lease,
                 Err(error) => {
+                    // IP setup can partially install an owned address/profile
+                    // before returning Err. There is no lease to prove cleanup
+                    // even if the PANU disconnect succeeds. Keep joins blocked
+                    // until a separate P6-009 reconciliation proves safety.
                     let panu = self.runtime.disconnect_panu(link).await;
-                    if panu.is_ok() {
-                        transition.reconciled();
-                    }
                     return Err(combine_rollback(error, Ok(()), Ok(()), panu));
                 }
             };
@@ -867,6 +868,20 @@ mod tests {
                 ]
             );
             assert!(operations.store.load().unwrap().is_empty());
+            // The failed backend might have installed IP state without
+            // returning a lease. PANU-only teardown cannot prove recovery.
+            let denied = operations.join_network(network).await.unwrap_err();
+            assert_eq!(denied.kind(), ErrorKind::InvalidState);
+            assert!(denied.message().contains("reconciliation"));
+            assert_eq!(
+                operations.runtime.steps(),
+                vec![
+                    Step::Preflight,
+                    Step::Panu,
+                    Step::Address,
+                    Step::DisconnectPanu,
+                ]
+            );
             fs::remove_dir_all(root).unwrap();
         });
     }
