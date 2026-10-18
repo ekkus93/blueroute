@@ -15,7 +15,7 @@ use blueroute_linux::{
     IpNetworkObservationBackend, NetworkAdvertisement, NetworkInterfaceHandle,
     NetworkManagerBackend, NetworkMembershipStore, NetworkStateBackend, PanBackend,
 };
-use blueroute_protocol::NetworkSummary;
+use blueroute_protocol::{DiagnosticInterface, NetworkSummary};
 
 pub type NetworkOperationFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, CoreError>> + Send + 'a>>;
@@ -29,6 +29,12 @@ pub trait NetworkOperations: Send + Sync {
         Box::pin(async { Ok(()) })
     }
     fn list_networks(&self) -> NetworkOperationFuture<'_, Vec<NetworkSummary>>;
+    /// Only return independently observed backend-owned interface addresses.
+    /// None means no observation provider is available; it is not an empty
+    /// interface inventory. No peer identity is inferred from an IP address.
+    fn diagnostic_interfaces(&self) -> NetworkOperationFuture<'_, Option<Vec<DiagnosticInterface>>> {
+        Box::pin(async { Ok(None) })
+    }
     fn start_discovery(&self) -> NetworkOperationFuture<'_, ()>;
     fn stop_discovery(&self) -> NetworkOperationFuture<'_, ()>;
 }
@@ -62,6 +68,10 @@ impl NetworkIdGenerator for SystemNetworkIdGenerator {
 }
 
 pub trait StarHostRuntime: Send + Sync {
+    fn diagnostic_interfaces(&self) -> NetworkOperationFuture<'_, Option<Vec<DiagnosticInterface>>> {
+        Box::pin(async { Ok(None) })
+    }
+
     fn start_host(
         &self,
         network: NetworkId,
@@ -95,6 +105,19 @@ struct ActiveLinuxStarHost {
 }
 
 impl StarHostRuntime for LinuxStarHostRuntime {
+    fn diagnostic_interfaces(&self) -> NetworkOperationFuture<'_, Option<Vec<DiagnosticInterface>>> {
+        Box::pin(async move {
+            let active = self.active.lock().map_err(lock_error)?.clone();
+            // An idle daemon cannot report host runtime observations; it
+            // must not treat an unknown inventory as an observed empty list.
+            let Some(active) = active else {
+                return Ok(None);
+            };
+            let addresses = active.network_backend.addresses().await?;
+            Ok(Some(owned_interface_diagnostics(active.network, &addresses)))
+        })
+    }
+
     fn start_host(
         &self,
         network: NetworkId,
@@ -406,6 +429,10 @@ where
     R: StarHostRuntime,
     G: NetworkIdGenerator,
 {
+    fn diagnostic_interfaces(&self) -> NetworkOperationFuture<'_, Option<Vec<DiagnosticInterface>>> {
+        self.runtime.diagnostic_interfaces()
+    }
+
     fn create_network(&self, name: DisplayName) -> NetworkOperationFuture<'_, NetworkId> {
         self.create_network_inner(name)
     }
@@ -627,6 +654,35 @@ fn discovered_network_summary(network: NetworkId) -> Result<NetworkSummary, Core
         name: DisplayName::new(format!("BlueRoute {}", &id[..8]))?,
         member_count: 0,
     })
+}
+
+/// Project only backend-reported, BlueRoute-owned IPv4 address entries for
+/// the active NAP network into read-only local diagnostics. This is not a
+/// physical link or authenticated peer observation. Foreign and other-network
+/// addresses are never attributed to the hosted network.
+fn owned_interface_diagnostics(
+    network: NetworkId,
+    addresses: &[InterfaceAddress],
+) -> Vec<DiagnosticInterface> {
+    let mut interfaces: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for address in addresses {
+        if address.owner != network {
+            continue;
+        }
+        let prefix = format!("{}/{}", address.prefix.address, address.prefix.prefix_len);
+        interfaces
+            .entry(address.interface.as_str().to_owned())
+            .or_default()
+            .push(prefix);
+    }
+    interfaces
+        .into_iter()
+        .map(|(name, mut addresses)| {
+            addresses.sort();
+            addresses.dedup();
+            DiagnosticInterface { name, addresses }
+        })
+        .collect()
 }
 
 pub fn current_network(registry: &MembershipRegistry) -> Result<Option<NetworkId>, CoreError> {
@@ -974,6 +1030,40 @@ mod tests {
     }
 
     static NEXT_TEST: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn owned_interface_diagnostics_filter_other_networks_and_stabilize_order() {
+        let owner = NetworkId::from_bytes([1; 16]);
+        let foreign = NetworkId::from_bytes([2; 16]);
+        let entries = vec![
+            InterfaceAddress {
+                interface: NetworkInterfaceHandle::new("brb-host").unwrap(),
+                prefix: blueroute_core::IpPrefix::new("10.72.0.1".parse().unwrap(), 24).unwrap(),
+                owner,
+            },
+            InterfaceAddress {
+                interface: NetworkInterfaceHandle::new("eth0").unwrap(),
+                prefix: blueroute_core::IpPrefix::new("192.168.0.10".parse().unwrap(), 24).unwrap(),
+                owner: foreign,
+            },
+            InterfaceAddress {
+                interface: NetworkInterfaceHandle::new("brb-host").unwrap(),
+                prefix: blueroute_core::IpPrefix::new("10.72.0.1".parse().unwrap(), 24).unwrap(),
+                owner,
+            },
+        ];
+        assert_eq!(
+            owned_interface_diagnostics(owner, &entries),
+            vec![DiagnosticInterface {
+                name: "brb-host".into(),
+                addresses: vec!["10.72.0.1/24".into()],
+            }]
+        );
+        assert!(owned_interface_diagnostics(foreign, &entries)
+            .iter()
+            .all(|item| item.name != "brb-host"));
+        assert!(owned_interface_diagnostics(NetworkId::from_bytes([3; 16]), &entries).is_empty());
+    }
 
     #[test]
     fn discovered_network_merge_preserves_remembered_metadata() {

@@ -371,7 +371,13 @@ impl DaemonService {
                     Self::encode_response(&Response::Networks(networks))
                 }
                 Command::GetDiagnostics => {
-                    let snapshot = self.diagnostics_snapshot().map_err(core_error_to_dbus)?;
+                    let mut snapshot = self.diagnostics_snapshot().map_err(core_error_to_dbus)?;
+                    if let Some(network) = &self.network_operations {
+                        snapshot.interfaces = network
+                            .diagnostic_interfaces()
+                            .await
+                            .map_err(core_error_to_dbus)?;
+                    }
                     Self::encode_response(&Response::Diagnostics(Box::new(snapshot)))
                 }
                 Command::ListNodes => {
