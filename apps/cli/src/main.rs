@@ -224,31 +224,96 @@ fn format_capabilities(caps: &NodeCapabilities, json: bool) -> Result<String, se
     }
 }
 
+/// Human diagnostics print only explicit daemon observations. None means
+/// "not available", which must not be confused with an observed empty list.
+/// Bound the output independently of the JSON contract.
+fn format_diagnostic_entries<T>(
+    name: &str,
+    entries: Option<&[T]>,
+    describe: impl Fn(&T) -> String,
+) -> String {
+    const MAX_ROWS: usize = 32;
+    match entries {
+        None => format!("{name}: unavailable (not reported by daemon)"),
+        Some([]) => format!("{name}: none reported by daemon"),
+        Some(entries) => {
+            let mut lines = vec![format!("{name}: {} daemon-reported", entries.len())];
+            for entry in entries.iter().take(MAX_ROWS) {
+                lines.push(format!("  {}", describe(entry)));
+            }
+            if entries.len() > MAX_ROWS {
+                lines.push(format!("  ... {} additional entries omitted", entries.len() - MAX_ROWS));
+            }
+            lines.join("\n")
+        }
+    }
+}
+
 fn format_diagnostics(
     snapshot: &DiagnosticSnapshot,
     json: bool,
 ) -> Result<String, serde_json::Error> {
     if json {
-        serde_json::to_string_pretty(snapshot)
-    } else {
-        Ok(format!(
-            "API: {}\nHealth: {:?}\nNetwork: {:?}\nReported nodes: {} (local-only until peer authentication)\nLocal control TLS SPKI SHA-256: {}\nSystem: {}\nRecent API failures: {}\nCapabilities:\n{:#?}",
-            snapshot.api_version,
-            snapshot.health,
-            snapshot.current_network,
-            snapshot.visible_nodes,
-            snapshot
-                .local_control_tls_spki_sha256
-                .as_deref()
-                .unwrap_or("unavailable"),
-            snapshot.system.as_ref().map_or_else(
-                || "platform details unavailable".to_owned(),
-                format_system_diagnostics,
-            ),
-            snapshot.recent_errors.len(),
-            snapshot.capabilities
-        ))
+        return serde_json::to_string_pretty(snapshot);
     }
+    let mut details = vec![format!(
+        "API: {}\nHealth: {:?}\nNetwork: {:?}\nReported nodes: {} (local-only until peer authentication)\nLocal control TLS SPKI SHA-256: {}\nSystem: {}\nRecent API failures: {} (details available with --json)\nCapabilities:\n{:#?}",
+        snapshot.api_version,
+        snapshot.health,
+        snapshot.current_network,
+        snapshot.visible_nodes,
+        snapshot
+            .local_control_tls_spki_sha256
+            .as_deref()
+            .unwrap_or("unavailable"),
+        snapshot.system.as_ref().map_or_else(
+            || "platform details unavailable".to_owned(),
+            format_system_diagnostics,
+        ),
+        snapshot.recent_errors.len(),
+        snapshot.capabilities,
+    )];
+    details.push(format_diagnostic_entries(
+        "System adapters",
+        snapshot.system.as_ref().map(|system| system.adapters.as_slice()),
+        |adapter| format!(
+            "id={:?} powered={} address={:?} driver={:?}",
+            adapter.id, adapter.powered, adapter.address, adapter.driver
+        ),
+    ));
+    details.push(format_diagnostic_entries(
+        "Observed peers (daemon-reported; do not infer authentication)",
+        snapshot.observed_peers.as_deref(),
+        |peer| format!("{} name={:?} reachability={:?}", peer.id, peer.name, peer.reachability),
+    ));
+    details.push(format_diagnostic_entries(
+        "Interfaces",
+        snapshot.interfaces.as_deref(),
+        |interface| format!("name={:?} addresses={:?}", interface.name, interface.addresses),
+    ));
+    details.push(format_diagnostic_entries(
+        "Routes",
+        snapshot.routes.as_deref(),
+        |route| format!("{route:?}"),
+    ));
+    if let Some(topology) = &snapshot.topology {
+        details.push(format_diagnostic_entries(
+            "Topology nodes",
+            Some(&topology.nodes),
+            |node| format!("{} name={:?} reachability={:?}", node.id, node.name, node.reachability),
+        ));
+        details.push(format_diagnostic_entries(
+            "Topology links",
+            Some(&topology.links),
+            |link| format!(
+                "id={:?} left={} right={} state={:?} health={:?}",
+                link.id, link.left, link.right, link.state, link.health
+            ),
+        ));
+    } else {
+        details.push("Topology: unavailable (not reported by daemon)".to_owned());
+    }
+    Ok(details.join("\n"))
 }
 
 /// Public local identity for out-of-band comparison. It is neither a trust
@@ -736,6 +801,82 @@ mod tests {
         let json = format_diagnostics(&snapshot, true).unwrap();
         let decoded: DiagnosticSnapshot = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, snapshot);
+    }
+
+
+    #[test]
+    fn human_diagnostics_distinguish_missing_from_observed_and_escape_untrusted_labels() {
+        let mut snapshot = DiagnosticSnapshot {
+            api_version: ApiVersion::CURRENT,
+            health: HealthLevel::Healthy,
+            current_network: None,
+            visible_nodes: 1,
+            capabilities: NodeCapabilities::default(),
+            local_control_tls_spki_sha256: None,
+            system: None,
+            observed_peers: None,
+            interfaces: None,
+            routes: None,
+            topology: None,
+            recent_errors: vec![],
+        };
+        let unknown = format_diagnostics(&snapshot, false).unwrap();
+        assert!(unknown.contains("Interfaces: unavailable (not reported by daemon)"));
+        assert!(unknown.contains("Routes: unavailable (not reported by daemon)"));
+        assert!(unknown.contains("Topology: unavailable (not reported by daemon)"));
+        assert!(unknown.contains("Observed peers (daemon-reported; do not infer authentication): unavailable"));
+        snapshot.interfaces = Some(vec![blueroute_protocol::DiagnosticInterface {
+            name: "bnep0\nunsafe".into(),
+            addresses: vec!["10.99.1.1/24".into()],
+        }]);
+        snapshot.routes = Some(vec![]);
+        snapshot.observed_peers = Some(vec![]);
+        snapshot.topology = Some(blueroute_protocol::DiagnosticTopology {
+            nodes: vec![],
+            links: vec![],
+        });
+        let known = format_diagnostics(&snapshot, false).unwrap();
+        assert!(known.contains("Interfaces: 1 daemon-reported"));
+        assert!(known.contains("bnep0\\nunsafe"));
+        assert!(!known.contains("bnep0\nunsafe"));
+        assert!(known.contains("10.99.1.1/24"));
+        assert!(known.contains("Routes: none reported by daemon"));
+        assert!(known.contains("Topology nodes: none reported by daemon"));
+        assert!(known.contains("Topology links: none reported by daemon"));
+        assert!(known.contains("Observed peers (daemon-reported; do not infer authentication): none reported by daemon"));
+        let encoded = format_diagnostics(&snapshot, true).unwrap();
+        assert_eq!(serde_json::from_str::<DiagnosticSnapshot>(&encoded).unwrap(), snapshot);
+    }
+
+    #[test]
+    fn human_diagnostics_bound_long_interface_inventory_without_changing_json() {
+        let interfaces = (0..40)
+            .map(|i| blueroute_protocol::DiagnosticInterface {
+                name: format!("bnep{i}"),
+                addresses: vec![],
+            })
+            .collect::<Vec<_>>();
+        let snapshot = DiagnosticSnapshot {
+            api_version: ApiVersion::CURRENT,
+            health: HealthLevel::Healthy,
+            current_network: None,
+            visible_nodes: 0,
+            capabilities: NodeCapabilities::default(),
+            local_control_tls_spki_sha256: None,
+            system: None,
+            observed_peers: None,
+            interfaces: Some(interfaces),
+            routes: None,
+            topology: None,
+            recent_errors: vec![],
+        };
+        let human = format_diagnostics(&snapshot, false).unwrap();
+        assert!(human.contains("Interfaces: 40 daemon-reported"));
+        assert!(human.contains("8 additional entries omitted"));
+        assert!(human.contains("bnep31"));
+        assert!(!human.contains("bnep32"));
+        let json = format_diagnostics(&snapshot, true).unwrap();
+        assert!(json.contains("bnep39"));
     }
 
     #[test]
