@@ -824,6 +824,32 @@ privileged teardown, network recovery after cancellation during cleanup,
 production authenticated TLS enrollment or physical Bluetooth traffic.
 P6-004 stays IN PROGRESS.
 
+**P6-004 ambiguous IPv4 failure safety (software-only, 2026-10-18):**
+`TransactionalJoinNetworkOperations` now preserves its fail-closed join
+reservation when `configure_ip` returns an error without an owned IP
+lease. Even after a successful PANU disconnect, a partially applied
+NetworkManager address/profile cannot be ruled out, so subsequent joins
+are denied until P6-009 runtime observation/reconciliation. A deterministic
+failure-injection regression checks that the second attempt makes no
+additional PANU or IP mutations. Implemented on `master` at
+`93f7df6d4e24674530800c54b4b1997a6d98c0ad`; [exact-head
+CI 39105713905](https://github.com/ekkus93/blueroute/actions/runs/39105713905)
+passed format, Clippy, Rust/workspace tests, fake socket and D-Bus
+checks. The coordinator remains an in-process guard, not daemon-restart
+recovery, production authenticated join, a live Bluetooth PAN test or
+a general automatic reconciliation implementation.
+
+**P6-004 zero-network API boundary (software-only, 2026-10-18):**
+The join coordinator itself now rejects the all-zero `NetworkId` before
+preflight, PANU/IP operations or durable membership writes. The
+regression also verifies that a subsequent valid fake-runtime join
+remains possible. Committed at
+`f738b687c382baade04cea5f6f4292b636415b47`.
+**CI NOT YET VERIFIED for this commit:** no exact-head GitHub Actions
+run was discoverable at documentation time; do not mark this separate
+test qualified until exact-head CI passes. This does not enable
+live joining or satisfy hardware acceptance.
+
 ## P6-005 — Implement IPv4 allocation for one star
 
 - [x] select private subnet policy.
