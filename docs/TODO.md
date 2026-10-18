@@ -1550,6 +1550,26 @@ carrier/link traffic, authenticated remote peers, current network routes, or
 Bluetooth physical acceptance. Route/topology observation and complete
 troubleshooting remain OPEN.
 
+
+**P10-005 diagnostic data minimization and bounded CLI rendering (software-only, 2026-10-18):**
+The typed `DiagnosticSnapshot` round-trip now has negative tests proving that unknown
+secret-like producer fields and raw error details are dropped, and that absent
+system/peer/interface/route/topology data is not fabricated. The tests were
+committed at `2f66ccdd75403b7f216af0816603cdbd50185fe2`; its
+formatting-only CI failure was corrected at
+`d745d3fb7c805117a707d8cbd2b66a56e70f7d33`
+([exact-head CI 39156383544](https://github.com/ekkus93/blueroute/actions/runs/39156383544),
+passed). Human-readable daemon-supplied diagnostic fields are additionally
+capped at 256 Unicode scalar values before terminal display, preserving valid
+UTF-8 and existing control-character escaping. A regression checks oversized
+fields, invisible terminal controls, and unchanged lossless JSON.
+Change `6cf542df1635f04c87be338d74f686de91e9307a` passed
+[exact-head CI 39156780711](https://github.com/ekkus93/blueroute/actions/runs/39156780711).
+These safeguards do **not** demonstrate complete secret redaction across
+future fields, production live kernel-route observations, authenticated
+remote inventory, daemon-owned PAN runtime wiring or physical Bluetooth.
+Keep P10-005 and dependent production/hardware acceptance OPEN.
+
 ## P10-006 — Define exit-code contract
 
 - [x] success (0).
