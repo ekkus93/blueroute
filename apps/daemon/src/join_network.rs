@@ -635,7 +635,10 @@ mod tests {
         drop(first);
         let mut restarted = operations.join_network(other);
         assert!(restarted.as_mut().poll(&mut context).is_pending());
-        assert_eq!(operations.runtime.steps(), vec![Step::Preflight, Step::Preflight]);
+        assert_eq!(
+            operations.runtime.steps(),
+            vec![Step::Preflight, Step::Preflight]
+        );
         drop(restarted);
         assert!(operations.store.load().unwrap().is_empty());
         fs::remove_dir_all(root).unwrap();
