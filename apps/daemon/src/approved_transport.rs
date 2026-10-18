@@ -831,4 +831,85 @@ mod tests {
         stream.flush().unwrap();
         server_thread.join().unwrap();
     }
+
+    #[test]
+    fn replayed_heartbeat_over_mutual_tls_retires_registered_session() {
+        let client = LocalControlTlsIdentity::generate(node(1)).unwrap();
+        let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
+        let client_pin =
+            PinnedControlTlsPeer::new(network(), client.node(), client.fingerprint()).unwrap();
+        let server_pin =
+            PinnedControlTlsPeer::new(network(), server.node(), server.fingerprint()).unwrap();
+        let (client_socket, server_socket) = socket_pair();
+        let (first_frame_tx, first_frame_rx) = std::sync::mpsc::channel();
+
+        let server_thread = thread::spawn(move || {
+            let dir = TestDirectory::new();
+            let trust = trust_for(&dir.0, client_pin.node(), client_pin.fingerprint(), true);
+            let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+            let mut session = accept_registered_from_durable_approval(
+                server_socket,
+                &server,
+                &trust,
+                setup(),
+                Arc::clone(&registry),
+            )
+            .unwrap();
+            let key = PeerSessionKey {
+                network: network(),
+                peer: client_pin.node(),
+            };
+            assert!(registry.lock().unwrap().get(key).is_some());
+            assert!(matches!(
+                session.receive_next_at(10).unwrap(),
+                ControlSessionRead::Frames(frames)
+                    if frames.len() == 1 && frames[0].message == ControlMessage::Heartbeat
+            ));
+            // Separate the reads so this proves an across-read replay,
+            // not only the existing coalesced-batch atomicity guard.
+            first_frame_tx.send(()).unwrap();
+            assert!(matches!(
+                session.receive_next_at(11),
+                Err(ControlSessionError::Ingress(_))
+            ));
+            assert!(session.is_terminal());
+            assert!(registry.lock().unwrap().get(key).is_none());
+            assert!(session.receive_next_at(12).is_err());
+        });
+
+        let (mut stream, certificate) = connect_pinned_control_tls(
+            client_socket,
+            &client,
+            network(),
+            server_pin,
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+        let authenticated = stream
+            .exchange_authenticated_hello(
+                network(),
+                &client,
+                &certificate,
+                setup().facts,
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap();
+        let mut writer =
+            blueroute_protocol::session_writer::SessionControlWriter::after_verified_hello(
+                network(),
+                client.node(),
+                server_pin.node(),
+                *authenticated.session_id(),
+            )
+            .unwrap();
+        let heartbeat = writer.heartbeat().unwrap();
+        stream.write_all(&heartbeat).unwrap();
+        stream.flush().unwrap();
+        first_frame_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        // A malicious peer retransmits the exact authenticated frame rather
+        // than advancing the sequence number. TLS alone cannot prevent it.
+        stream.write_all(&heartbeat).unwrap();
+        stream.flush().unwrap();
+        server_thread.join().unwrap();
+    }
 }
