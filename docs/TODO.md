@@ -1081,6 +1081,25 @@ P7-003/P7-004/P6-004 remain IN PROGRESS; hardware acceptance is DEFERRED.
 
 ## P7-004 — Implement control-session lifecycle
 
+**P7-004 active NAP backend listener preparation (software only, 2026-10-18):**
+The `LinuxStarHostRuntime::bind_owned_control_listener` implementation
+now checks that a currently active NAP host's owner, bridge and
+configured deterministic IPv4 plan agree, requests a fresh read-only
+`NetworkManagerBackend::addresses()` observation, and invokes the guarded
+port-46071 listener binder. This capability propagates through
+`SingleStarNetworkOperations`; idle hosts and generic/fake runtimes return
+`None`, never a wildcard listener. A deterministic idle-host test checks
+both boundaries. Source `d56f1f46e17600c3b04b4f041f9559ec31c9352c`
+required a formatting correction at
+`c124029ac2d8c4b9c26b965ae09e9adb85b39d48`;
+[exact-head CI 39165572871](https://github.com/ekkus93/blueroute/actions/runs/39165572871)
+**passed**. This still does **not** activate a listener in the running
+daemon, guarantee listener lifetime follows PAN teardown, independently
+enroll keys, accept mutual-TLS control sessions, or enable JoinNetwork.
+No physical Bluetooth behavior has been demonstrated. Keep P7-004/P7-003
+and P6-004 IN PROGRESS; hardware acceptance DEFERRED.
+
+
 **P7-004 NAP control listener bind-address boundary (software only, 2026-10-18):**
 `apps/daemon/src/control_listener.rs` exports `owned_nap_control_address`
 and `bind_owned_nap_control_listener`. They use P7-001's reserved TCP port
