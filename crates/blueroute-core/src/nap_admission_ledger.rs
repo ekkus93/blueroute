@@ -128,7 +128,7 @@ impl NapAdmissionLedger {
             .copied()
             .collect();
         let decision = plan_nap_client_admission(&state.host, &observed, candidate)?;
-         let generation = state.next_generation.checked_add(1).ok_or_else(|| {
+        let generation = state.next_generation.checked_add(1).ok_or_else(|| {
             CoreError::new(
                 ErrorKind::InvalidState,
                 "NAP admission generation exhausted",
