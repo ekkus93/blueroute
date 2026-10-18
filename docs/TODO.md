@@ -1056,6 +1056,18 @@ traffic. Keep the P7-005 transport-acceptance checkbox and P7-003/P7-004/
 P6-004 production gates OPEN until those separately required integrations
 are demonstrated.
 
+**P7-004 registered-owner malicious-frame cleanup (software-only, 2026-10-17):**
+The seven fresh TLS sessions above additionally enter the exact-generation
+`RegisteredControlSession` registry, and each malformed post-Hello frame
+must now retire the corresponding `(NetworkId, peer NodeId, exporter ID)`
+entry before `receive_next_at` returns. The next read and owner destruction
+must not reopen or resurrect the retired slot. The expanded regression passed
+[exact-head CI 39098282217](https://github.com/ekkus93/blueroute/actions/runs/39098282217)
+at `5ea52c4c7aceee5303c8ac2e5482a743bd23d092` after resolving formatting
+and a test-only Mutex import error. No running daemon listener, independent
+operator enrollment, production PANU linkage, authenticated JoinNetwork, or
+physical Bluetooth traffic was exercised. P7-004/P7-005 remain IN PROGRESS.
+
 ## P8-001 — Build neighbor observation model
 
 - [x] direct PAN links derived from verified active topology graph, not peer advertisements.
