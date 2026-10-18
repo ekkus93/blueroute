@@ -845,10 +845,13 @@ preflight, PANU/IP operations or durable membership writes. The
 regression also verifies that a subsequent valid fake-runtime join
 remains possible. Committed at
 `f738b687c382baade04cea5f6f4292b636415b47`.
-**CI NOT YET VERIFIED for this commit:** no exact-head GitHub Actions
-run was discoverable at documentation time; do not mark this separate
-test qualified until exact-head CI passes. This does not enable
-live joining or satisfy hardware acceptance.
+The implementation had no discoverable standalone CI run;
+the first combined run 39106020524 failed rustfmt only, which
+was corrected at `551aed4abc852b57aaafe69e5648f361a3db5fbc`.
+[Exact-head CI 39106148876](https://github.com/ekkus93/blueroute/actions/runs/39106148876)
+passed formatting, workspace checks, Clippy, unit/integration
+tests and packaging checks. This does not enable live joining
+or satisfy hardware acceptance.
 
 ## P6-005 — Implement IPv4 allocation for one star
 
