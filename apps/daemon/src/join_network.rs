@@ -255,10 +255,12 @@ where
             {
                 Ok(session) => session,
                 Err(error) => {
-                    let (error, clean) = self.rollback_after_ip(error, lease, link).await;
-                    if clean {
-                        transition.reconciled();
-                    }
+                    // Control-session setup may have opened a TLS transport
+                    // before returning Err without handing back its owner.
+                    // Even after IP and PANU cleanup, that unknown socket
+                    // cannot be proven closed; deny new joins until P6-009
+                    // runtime reconciliation establishes a clean slate.
+                    let (error, _) = self.rollback_after_ip(error, lease, link).await;
                     return Err(error);
                 }
             };
@@ -800,13 +802,18 @@ mod tests {
             operations.runtime.steps().last(),
             Some(&Step::DisconnectPanu)
         );
+        // The first failed control setup did not return a session handle:
+        // successful IP/PANU teardown does not prove a half-open TLS socket
+        // was closed, so no new preflight is permitted yet.
         let new_error = futures_lite::future::block_on(operations.join_network(competitor))
-            .expect_err("test runtime always fails authentication");
-        assert_eq!(new_error.kind(), ErrorKind::AuthenticationFailed);
+            .expect_err("ambiguous control setup requires reconciliation");
+        assert_eq!(new_error.kind(), ErrorKind::InvalidState);
+        assert!(new_error.message().contains("reconciliation"));
         assert_eq!(
             operations.runtime.steps().last(),
             Some(&Step::DisconnectPanu)
         );
+        assert_eq!(operations.runtime.steps().len(), 7);
         assert!(operations.store.load().unwrap().is_empty());
         fs::remove_dir_all(root).unwrap();
     }
@@ -954,6 +961,10 @@ mod tests {
                 ]
             );
             assert!(operations.store.load().unwrap().is_empty());
+            let denied = operations.join_network(network).await.unwrap_err();
+            assert_eq!(denied.kind(), ErrorKind::InvalidState);
+            assert!(denied.message().contains("reconciliation"));
+            assert_eq!(operations.runtime.steps().len(), 6);
             fs::remove_dir_all(root).unwrap();
         });
     }
