@@ -1088,6 +1088,31 @@ and a test-only Mutex import error. No running daemon listener, independent
 operator enrollment, production PANU linkage, authenticated JoinNetwork, or
 physical Bluetooth traffic was exercised. P7-004/P7-005 remain IN PROGRESS.
 
+**P7-005/P14-003 authenticated registered-session replay and revocation (software-only, 2026-10-18):**
+At `2de832e0c59aca3bd7ff19a5379f9cae1d45a15e`, a genuine
+mutual-TLS 1.3, exporter-bound Hello/HelloAck session rejects a malformed
+TLS-plaintext frame and retires its authenticated registry slot
+([CI 39099834770](https://github.com/ekkus93/blueroute/actions/runs/39099834770)).
+At `978a761f4b1582b3e72252732d64b23df8c43457`, the receiver
+accepts a valid heartbeat but rejects an identical sequence replay
+in a separate read, closing the transport and retiring its registry
+slot ([CI 39100307249](https://github.com/ekkus93/blueroute/actions/runs/39100307249)).
+At `6d1e96e45072862a60b34b570c1bfcc0cf28aebc`, a registered
+peer whose durable approval is revoked cannot send another outbound
+heartbeat without waiting for a separate revalidation call. The
+combined locked workspace, Clippy, unit/broker integration, package
+checks and formatting passed at exact head
+`fd2de94215ab04fdae8a16193ca14885551a012d`
+([CI 39100771543](https://github.com/ekkus93/blueroute/actions/runs/39100771543)).
+Intermediate runs 39100575260 and 39100677928 failed only
+rustfmt and were corrected; concurrent P6-004 changes were preserved.
+**Scope limit:** This proves localhost authenticated daemon-library
+regressions, not production PAN listener wiring, independently
+confirmed enrollment, physical Bluetooth traffic, a wired
+reconnect supervisor or production JoinNetwork. P7-003/P7-004/
+P7-005/P14-003/P6-004 remain IN PROGRESS; physical acceptance remains
+DEFERRED.
+
 ## P8-001 — Build neighbor observation model
 
 - [x] direct PAN links derived from verified active topology graph, not peer advertisements.
