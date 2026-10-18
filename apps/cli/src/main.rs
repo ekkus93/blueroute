@@ -242,7 +242,10 @@ fn format_diagnostic_entries<T>(
                 lines.push(format!("  {}", describe(entry)));
             }
             if entries.len() > MAX_ROWS {
-                lines.push(format!("  ... {} additional entries omitted", entries.len() - MAX_ROWS));
+                lines.push(format!(
+                    "  ... {} additional entries omitted",
+                    entries.len() - MAX_ROWS
+                ));
             }
             lines.join("\n")
         }
@@ -275,21 +278,36 @@ fn format_diagnostics(
     )];
     details.push(format_diagnostic_entries(
         "System adapters",
-        snapshot.system.as_ref().map(|system| system.adapters.as_slice()),
-        |adapter| format!(
-            "id={:?} powered={} address={:?} driver={:?}",
-            adapter.id, adapter.powered, adapter.address, adapter.driver
-        ),
+        snapshot
+            .system
+            .as_ref()
+            .map(|system| system.adapters.as_slice()),
+        |adapter| {
+            format!(
+                "id={:?} powered={} address={:?} driver={:?}",
+                adapter.id, adapter.powered, adapter.address, adapter.driver
+            )
+        },
     ));
     details.push(format_diagnostic_entries(
         "Observed peers (daemon-reported; do not infer authentication)",
         snapshot.observed_peers.as_deref(),
-        |peer| format!("{} name={:?} reachability={:?}", peer.id, peer.name, peer.reachability),
+        |peer| {
+            format!(
+                "{} name={:?} reachability={:?}",
+                peer.id, peer.name, peer.reachability
+            )
+        },
     ));
     details.push(format_diagnostic_entries(
         "Interfaces",
         snapshot.interfaces.as_deref(),
-        |interface| format!("name={:?} addresses={:?}", interface.name, interface.addresses),
+        |interface| {
+            format!(
+                "name={:?} addresses={:?}",
+                interface.name, interface.addresses
+            )
+        },
     ));
     details.push(format_diagnostic_entries(
         "Routes",
@@ -300,15 +318,22 @@ fn format_diagnostics(
         details.push(format_diagnostic_entries(
             "Topology nodes",
             Some(&topology.nodes),
-            |node| format!("{} name={:?} reachability={:?}", node.id, node.name, node.reachability),
+            |node| {
+                format!(
+                    "{} name={:?} reachability={:?}",
+                    node.id, node.name, node.reachability
+                )
+            },
         ));
         details.push(format_diagnostic_entries(
             "Topology links",
             Some(&topology.links),
-            |link| format!(
-                "id={:?} left={} right={} state={:?} health={:?}",
-                link.id, link.left, link.right, link.state, link.health
-            ),
+            |link| {
+                format!(
+                    "id={:?} left={} right={} state={:?} health={:?}",
+                    link.id, link.left, link.right, link.state, link.health
+                )
+            },
         ));
     } else {
         details.push("Topology: unavailable (not reported by daemon)".to_owned());
@@ -803,7 +828,6 @@ mod tests {
         assert_eq!(decoded, snapshot);
     }
 
-
     #[test]
     fn human_diagnostics_distinguish_missing_from_observed_and_escape_untrusted_labels() {
         let mut snapshot = DiagnosticSnapshot {
@@ -824,7 +848,9 @@ mod tests {
         assert!(unknown.contains("Interfaces: unavailable (not reported by daemon)"));
         assert!(unknown.contains("Routes: unavailable (not reported by daemon)"));
         assert!(unknown.contains("Topology: unavailable (not reported by daemon)"));
-        assert!(unknown.contains("Observed peers (daemon-reported; do not infer authentication): unavailable"));
+        assert!(unknown.contains(
+            "Observed peers (daemon-reported; do not infer authentication): unavailable"
+        ));
         snapshot.interfaces = Some(vec![blueroute_protocol::DiagnosticInterface {
             name: "bnep0\nunsafe".into(),
             addresses: vec!["10.99.1.1/24".into()],
@@ -843,9 +869,14 @@ mod tests {
         assert!(known.contains("Routes: none reported by daemon"));
         assert!(known.contains("Topology nodes: none reported by daemon"));
         assert!(known.contains("Topology links: none reported by daemon"));
-        assert!(known.contains("Observed peers (daemon-reported; do not infer authentication): none reported by daemon"));
+        assert!(known.contains(
+            "Observed peers (daemon-reported; do not infer authentication): none reported by daemon"
+        ));
         let encoded = format_diagnostics(&snapshot, true).unwrap();
-        assert_eq!(serde_json::from_str::<DiagnosticSnapshot>(&encoded).unwrap(), snapshot);
+        assert_eq!(
+            serde_json::from_str::<DiagnosticSnapshot>(&encoded).unwrap(),
+            snapshot
+        );
     }
 
     #[test]
