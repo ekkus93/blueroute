@@ -813,7 +813,7 @@ mod tests {
             operations.runtime.steps().last(),
             Some(&Step::DisconnectPanu)
         );
-        assert_eq!(operations.runtime.steps().len(), 7);
+        assert_eq!(operations.runtime.steps().len(), 6);
         assert!(operations.store.load().unwrap().is_empty());
         fs::remove_dir_all(root).unwrap();
     }
