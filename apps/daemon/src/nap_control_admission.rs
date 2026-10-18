@@ -190,9 +190,24 @@ fn retire_observed_detach_if_current(
     lease: &mut Option<AuthenticatedNapLease<'_>>,
     attached: &mut bool,
     current_session_id: [u8; 16],
+    expected_network: NetworkId,
+    expected_peer: NodeId,
     expected_session_id: [u8; 16],
 ) -> bool {
-    if current_session_id != expected_session_id {
+    // Detach callbacks must match the network, peer and TLS generation
+    // owned by the lease. A callback for another PANU is never proof of
+    // detachment, even when it arrives with a reused session identifier.
+    if !*attached
+        || current_session_id != expected_session_id
+        || !lease.as_ref().is_some_and(|lease| {
+            same_session(
+                expected_network,
+                expected_peer,
+                expected_session_id,
+                lease.ticket(),
+            )
+        })
+    {
         return false;
     }
     *attached = false;
@@ -269,11 +284,30 @@ impl<'session, 'nap> RegisteredNapControlOwner<'session, 'nap> {
         release_pending_on_transport_loss(&mut self.lease, self.attached);
     }
 
-    /// The caller must have independently observed PANU detachment (or
-    /// completed owned NAP shutdown) *and* mapped that event to this exact
-    /// TLS generation. Stale callbacks must never retire a replacement.
-    /// Close the TLS socket before releasing its capacity reservation.
-    pub fn confirm_observed_detach_if_current(&mut self, expected_session_id: [u8; 16]) -> bool {
+    /// The caller must independently observe PANU detachment (or completed
+    /// owned NAP shutdown) and correlate the event with the exact NetworkId,
+    /// NodeId and TLS generation. Reject unrelated or duplicate callbacks
+    /// *before* closing the socket or freeing the reservation.
+    pub fn confirm_observed_detach_if_current(
+        &mut self,
+        expected_network: NetworkId,
+        expected_peer: NodeId,
+        expected_session_id: [u8; 16],
+    ) -> bool {
+        if !self.attached
+            || self.network() != expected_network
+            || self.peer() != expected_peer
+            || self.lease.as_ref().is_none_or(|lease| {
+                !same_session(
+                    expected_network,
+                    expected_peer,
+                    expected_session_id,
+                    lease.ticket(),
+                )
+            })
+        {
+            return false;
+        }
         if !self.session.cancel_if_current(expected_session_id) {
             return false;
         }
@@ -281,6 +315,8 @@ impl<'session, 'nap> RegisteredNapControlOwner<'session, 'nap> {
             &mut self.lease,
             &mut self.attached,
             *self.session.session_id(),
+            expected_network,
+            expected_peer,
             expected_session_id,
         )
     }
@@ -539,24 +575,73 @@ mod tests {
             release_on_drop: true,
         });
         let mut attached = true;
-        assert!(!retire_observed_detach_if_current(
-            &mut lease,
-            &mut attached,
-            [9; 16],
-            [8; 16],
-        ));
-        assert!(attached);
-        assert!(lease.is_some());
-        assert_eq!(admission.counts().unwrap(), (1, 0));
+        for (network_id, peer_id, session_id) in [
+            (network(1), peer(2), [8; 16]),
+            (network(2), peer(2), [9; 16]),
+            (network(1), peer(3), [9; 16]),
+        ] {
+            assert!(!retire_observed_detach_if_current(
+                &mut lease,
+                &mut attached,
+                [9; 16],
+                network_id,
+                peer_id,
+                session_id,
+            ));
+            assert!(attached);
+            assert!(lease.is_some());
+            assert_eq!(admission.counts().unwrap(), (1, 0));
+        }
         assert!(retire_observed_detach_if_current(
             &mut lease,
             &mut attached,
             [9; 16],
+            network(1),
+            peer(2),
             [9; 16],
         ));
         assert!(!attached);
         assert!(lease.is_none());
         assert_eq!(admission.counts().unwrap(), (0, 0));
+    }
+
+    #[test]
+    fn detach_of_a_different_peer_cannot_retire_active_capacity() {
+        let admission = NetworkNapAdmission::new(network(1), capabilities()).unwrap();
+        let (first, _) = admission.reserve(peer(2)).unwrap();
+        let (second, _) = admission.reserve(peer(3)).unwrap();
+        assert!(admission.activate(&first).unwrap());
+        assert!(admission.activate(&second).unwrap());
+        let mut first_lease = Some(AuthenticatedNapLease {
+            admission: &admission,
+            ticket: AuthenticatedNapTicket {
+                ticket: first,
+                session_id: [9; 16],
+            },
+            release_on_drop: true,
+        });
+        let mut attached = true;
+        // Even an identical synthetic generation must not let peer 3's
+        // observed event retire peer 2's current reservation.
+        assert!(!retire_observed_detach_if_current(
+            &mut first_lease,
+            &mut attached,
+            [9; 16],
+            network(1),
+            peer(3),
+            [9; 16],
+        ));
+        assert_eq!(admission.counts().unwrap(), (2, 0));
+        assert!(retire_observed_detach_if_current(
+            &mut first_lease,
+            &mut attached,
+            [9; 16],
+            network(1),
+            peer(2),
+            [9; 16],
+        ));
+        assert_eq!(admission.counts().unwrap(), (1, 0));
+        assert!(admission.retire(&second).unwrap());
     }
 
     #[test]
