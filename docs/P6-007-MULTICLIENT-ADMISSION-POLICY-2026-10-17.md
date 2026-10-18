@@ -107,9 +107,10 @@ capability-change cancellation, socket teardown and multi-client traffic.
 session to an exact network/owner/generation-scoped NAP reservation. Pending
 capacity is released when TLS terminates, but an activated slot remains
 accounted for until the runtime reports independently observed PANU detach
-or completed owned NAP shutdown. The underlying `AuthenticatedNapLease`
-still releases on drop: the running daemon must **retain** its owning object
-for the life of the attachment and supply genuine detach observations.
+or completed owned NAP shutdown. A standalone `AuthenticatedNapLease` releases on drop, while the registered
+owner now conservatively retains observed attachment capacity on unexpected
+destruction. The running daemon must retain the exact detach ticket and supply
+genuine detach observations to avoid stranded reservations.
 The current production daemon does not yet wire this lifecycle to BlueZ.
 
 The source landed at `ea0224cf75cf447ce86a4be8cd2fcb634940bbf6`.
@@ -150,3 +151,30 @@ BlueZ attachment observation, independently confirmed detachment event,
 user-verified TLS key enrollment, concurrent PANU traffic, or physical controller
 capacity measurement was performed. The running daemon must wire real NAP/PAN
 ownership, persist or retain exact tickets for teardown, and keep P6-007 open.
+
+## Generation-scoped detach and failed-activation retention (2026-10-17)
+
+The public `RegisteredNapControlOwner::confirm_observed_detach_if_current`
+requires an exact TLS exporter generation, closes the owned control socket
+before retiring its NAP reservation, and ignores stale detach callbacks.
+A deterministic regression checks that a mismatched generation cannot free
+the current peer's active capacity, whereas a matching detach releases it.
+
+A separate fail-closed correction records the caller's independently observed
+PANU attachment *before* trying to promote its reservation. If a concurrent
+capability downgrade, approval revocation or activation failure occurs, the
+pending slot remains occupied through TLS loss and unexpected owner drop
+until independently confirmed detach or complete owned NAP shutdown. The
+owner no longer equates an attachment observation with successful ledger
+activation. A regression covers failed-activation cleanup and exact-ticket
+retirement. No physical PANU attach/detach was simulated as real hardware.
+
+Generation-scoped detach qualified at `3fea6cdf7e4426e9a96dc2cf517a4a5fe23bf51d`
+([exact-head CI 39089969164](https://github.com/ekkus93/blueroute/actions/runs/39089969164)).
+Failed-activation retention qualified at `6a2ea7f18da6b6e626dda8850bef2e565590f0b0`
+([exact-head CI 39090162641](https://github.com/ekkus93/blueroute/actions/runs/39090162641)).
+The initial detach change failed formatting at `6e8fb537` and was repaired;
+the initial activation change required a match-arm syntax correction. Both
+final exact-head runs passed. Production BlueZ lifecycle wiring, independent
+key enrollment, actual simultaneous PANU traffic and physical acceptance
+remain open.
