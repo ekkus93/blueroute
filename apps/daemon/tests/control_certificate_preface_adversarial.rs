@@ -9,9 +9,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use blueroute_core::{NetworkId, NodeId};
-use blueroute_daemon::{
-    ControlTlsError, LocalControlTlsIdentity, exchange_control_tls_candidate,
-};
+use blueroute_daemon::{ControlTlsError, LocalControlTlsIdentity, exchange_control_tls_candidate};
 
 const PREFACE: &[u8] = b"BLUEROUTE-CONTROL-CERT-V1\0";
 const CERT_LIMIT: u32 = 16 * 1024;
