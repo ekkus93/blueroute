@@ -186,6 +186,20 @@ fn preserve_attached_capacity_on_owner_drop(
     }
 }
 
+fn retire_observed_detach_if_current(
+    lease: &mut Option<AuthenticatedNapLease<'_>>,
+    attached: &mut bool,
+    current_session_id: [u8; 16],
+    expected_session_id: [u8; 16],
+) -> bool {
+    if current_session_id != expected_session_id {
+        return false;
+    }
+    *attached = false;
+    lease.take();
+    true
+}
+
 impl<'session, 'nap> RegisteredNapControlOwner<'session, 'nap> {
     /// Consume an already-registered, pinned, durably approved TLS session.
     /// A failed reservation closes the session via its normal owner drop.
@@ -262,12 +276,23 @@ impl<'session, 'nap> RegisteredNapControlOwner<'session, 'nap> {
         release_pending_on_transport_loss(&mut self.lease, self.attached);
     }
 
-    /// The caller must have independently observed the matching PANU detach
-    /// (or completed owned NAP shutdown) before invoking this method.
-    pub fn confirm_observed_detach(&mut self) {
-        self.session.cancel();
-        self.attached = false;
-        self.lease.take();
+    /// The caller must have independently observed PANU detachment (or
+    /// completed owned NAP shutdown) *and* mapped that event to this exact
+    /// TLS generation. Stale callbacks must never retire a replacement.
+    /// Close the TLS socket before releasing its capacity reservation.
+    pub fn confirm_observed_detach_if_current(
+        &mut self,
+        expected_session_id: [u8; 16],
+    ) -> bool {
+        if !self.session.cancel_if_current(expected_session_id) {
+            return false;
+        }
+        retire_observed_detach_if_current(
+            &mut self.lease,
+            &mut self.attached,
+            *self.session.session_id(),
+            expected_session_id,
+        )
     }
 
     /// A stale TLS callback cannot close a replacement or free its slot.
@@ -484,6 +509,40 @@ mod tests {
         assert!(!retire_authenticated_nap(&admission, &authenticated).unwrap());
         assert_eq!(admission.counts().unwrap(), (0, 1));
         assert!(admission.retire(&replacement).unwrap());
+    }
+
+    #[test]
+    fn stale_detach_callback_cannot_retire_replacement_generation() {
+        let admission = NetworkNapAdmission::new(network(1), capabilities()).unwrap();
+        let (ticket, _) = admission.reserve(peer(2)).unwrap();
+        assert!(admission.activate(&ticket).unwrap());
+        let mut lease = Some(AuthenticatedNapLease {
+            admission: &admission,
+            ticket: AuthenticatedNapTicket {
+                ticket,
+                session_id: [9; 16],
+            },
+            release_on_drop: true,
+        });
+        let mut attached = true;
+        assert!(!retire_observed_detach_if_current(
+            &mut lease,
+            &mut attached,
+            [9; 16],
+            [8; 16],
+        ));
+        assert!(attached);
+        assert!(lease.is_some());
+        assert_eq!(admission.counts().unwrap(), (1, 0));
+        assert!(retire_observed_detach_if_current(
+            &mut lease,
+            &mut attached,
+            [9; 16],
+            [9; 16],
+        ));
+        assert!(!attached);
+        assert!(lease.is_none());
+        assert_eq!(admission.counts().unwrap(), (0, 0));
     }
 
     #[test]
