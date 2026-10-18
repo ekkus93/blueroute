@@ -413,8 +413,15 @@ fn format_local_key(
 /// supplied diagnostic text. These fields are display-only and must never
 /// inject new terminal lines or control sequences into CLI output.
 fn safe_diagnostic_field(value: &str) -> String {
-    let mut safe = String::with_capacity(value.len());
-    for ch in value.chars() {
+    // Avoid unbounded terminal output/allocation for daemon-supplied strings.
+    // Cap on Unicode scalar values rather than bytes to preserve UTF-8.
+    const MAX_DISPLAY_CHARS: usize = 256;
+    let mut safe = String::with_capacity(value.len().min(MAX_DISPLAY_CHARS * 8));
+    for (index, ch) in value.chars().enumerate() {
+        if index == MAX_DISPLAY_CHARS {
+            safe.push_str("...[truncated]");
+            break;
+        }
         if ch.is_control()
             || matches!(ch, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
         {
@@ -733,6 +740,32 @@ mod tests {
         assert!(!rendered.contains('\u{202e}'));
         assert!(!rendered.contains('\n'));
         assert_eq!(safe_diagnostic_field("plain Linux"), "plain Linux");
+    }
+
+    #[test]
+    fn human_diagnostics_bound_large_untrusted_fields_without_truncating_utf8() {
+        let large = format!("{}{}", "Ω".repeat(256), "\u{1b}[31mhidden");
+        let sanitized = safe_diagnostic_field(&large);
+        assert_eq!(sanitized, format!("{}...[truncated]", "Ω".repeat(256)));
+        assert!(!sanitized.contains('\u{1b}'));
+        assert!(!sanitized.contains("hidden"));
+        assert_eq!(safe_diagnostic_field(&"Ω".repeat(256)), "Ω".repeat(256));
+
+        let system = SystemDiagnosticMetadata {
+            daemon_version: "0.1.0".into(),
+            platform: large,
+            kernel_release: None,
+            bluez_version: None,
+            network_backend_version: None,
+            adapters: Vec::new(),
+        };
+        let output = format_system_diagnostics(&system);
+        assert!(output.contains("...[truncated]"));
+        assert!(!output.contains('\u{1b}'));
+        assert!(!output.contains("hidden"));
+        // The read-only JSON contract remains lossless.
+        let encoded = serde_json::to_string(&system).unwrap();
+        assert!(encoded.contains("hidden"));
     }
 
     #[test]
