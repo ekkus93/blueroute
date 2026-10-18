@@ -789,6 +789,26 @@ This is the first complete product slice.
 
 - Compatible node joins without manual Bluetooth/network shell commands.
 
+**P6-004 join transaction concurrency guard (software-only, 2026-10-17):**
+`TransactionalJoinNetworkOperations` now holds an atomic compare-and-swap
+in-flight guard across durable membership reads, PANU/IP/control attempts,
+final membership write, and all reverse-order rollback paths. Overlapping
+same-network or different-network join requests fail with `InvalidState`
+**before** any additional networking mutations; dropping a suspended async
+join releases the guard without claiming membership. Deterministic
+pending-preflight/cancellation tests verify serialization and recovery, with
+the production P7 authentication preflight still fail-closed. The source
+commit was `891d5d8d`; an overlapping change cancelled its CI before checks.
+Another concurrently running session reconciled a rustfmt issue in
+`fd2de94215ab04fdae8a16193ca14885551a012d`. Full
+[exact-head CI 39100771543](https://github.com/ekkus93/blueroute/actions/runs/39100771543)
+**passed** at `fd2de94215ab04fdae8a16193ca14885551a012d`.
+**Limits:** this guard applies to a single live join coordinator; it is not
+cross-process locking or daemon-restart ownership reconciliation. Production
+PANU linking, independently approved TLS enrollment, authenticated control
+session, successful joined-state transition and physical Bluetooth acceptance
+remain OPEN. Do not mark P6-004 complete.
+
 ## P6-005 — Implement IPv4 allocation for one star
 
 - [x] select private subnet policy.
