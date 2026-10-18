@@ -843,6 +843,19 @@ This is the first complete product slice.
 
 **P6-007 observed detach callback identity scope (software-only, 2026-10-17):** `RegisteredNapControlOwner::confirm_observed_detach_if_current` now requires an exact NetworkId, NodeId and TLS-exporter generation match to the reservation before closing the control socket or releasing NAP capacity. A mismatched or duplicate callback has no effect on the current attachment, and the existing generation-scoped ledger still prevents stale replacements from being retired. Negative tests for wrong network, wrong peer and stale generation, plus a two-client simulated callback-isolation regression, passed [exact-head CI 39090592243](https://github.com/ekkus93/blueroute/actions/runs/39090592243) at `7324f11e058650ab8ed43ce178b03d870b6981f2`. These are synthetic software checks: authenticating BlueZ detach observations and wiring them into the production daemon remain OPEN. [Evidence](P6-007-MULTICLIENT-ADMISSION-POLICY-2026-10-17.md).
 
+**P6-007 concurrent retire/reconnect safety (software-only, 2026-10-17):**
+A new 48-round synchronized regression in `nap_admission_ledger.rs` races
+an attached peer's exact-generation retirement against same-peer readmission.
+It verifies that an admitted replacement receives a distinct generation,
+stale detach cannot free the successor's pending or active capacity, and
+accounting returns to zero after explicit cleanup.
+[Exact-head CI 39094475449](https://github.com/ekkus93/blueroute/actions/runs/39094475449)
+passed at `192d7755783029e205f767b564036c91feb9264c`;
+see [P6-007 evidence](P6-007-MULTICLIENT-ADMISSION-POLICY-2026-10-17.md).
+**This does not implement authenticated production PANU attachment detection,
+physical multi-client traffic or measured controller capacity. P6-007 remains
+IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
+
 ## P6-008 — Implement leave-network operation
 
 - [x] daemon API/CLI leave request performs idempotent teardown of an actively owned local-host NAP, advertisement, bridge and address; clears current member flags while retaining peer trust.
