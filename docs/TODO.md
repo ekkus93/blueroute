@@ -809,6 +809,21 @@ PANU linking, independently approved TLS enrollment, authenticated control
 session, successful joined-state transition and physical Bluetooth acceptance
 remain OPEN. Do not mark P6-004 complete.
 
+**P6-004 rollback-phase join concurrency regression (software-only, 2026-10-17):**
+A deterministic fake-runtime test now suspends after a control-session
+authentication failure *while reverse-order IP teardown is pending*. It
+verifies that attempted same-network and different-network joins fail
+closed before any additional PANU/IP mutation; releasing the cleanup
+continues to PANU disconnect and preserves the original typed
+`AuthenticationFailed` result. Subsequent join attempts can run,
+and durable membership remains uncommitted after both failed joins.
+[Exact-head CI 39101249045](https://github.com/ekkus93/blueroute/actions/runs/39101249045)
+**passed** at `55c33b7e4cda70327056571d6c7fc31c15617beb`.
+The test uses synthetic callbacks; it does not exercise live PANU,
+privileged teardown, network recovery after cancellation during cleanup,
+production authenticated TLS enrollment or physical Bluetooth traffic.
+P6-004 stays IN PROGRESS.
+
 ## P6-005 — Implement IPv4 allocation for one star
 
 - [x] select private subnet policy.
