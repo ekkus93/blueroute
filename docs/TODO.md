@@ -1081,6 +1081,28 @@ P7-003/P7-004/P6-004 remain IN PROGRESS; hardware acceptance is DEFERRED.
 
 ## P7-004 — Implement control-session lifecycle
 
+**P7-004 NAP control listener bind-address boundary (software only, 2026-10-18):**
+`apps/daemon/src/control_listener.rs` exports `owned_nap_control_address`
+and `bind_owned_nap_control_listener`. They use P7-001's reserved TCP port
+46071 and the deterministic NAP .1 host IPv4, checking a fresh
+backend-reported address against the exact BlueRoute NetworkId, hosted
+bridge identity and expected prefix before attempting a non-wildcard bind.
+Missing host addresses, zero network identities, conflicting locally owned
+bridge addresses, and ambiguous cross-interface/network ownership fail
+closed. Four deterministic tests cover positive address selection,
+duplicate observations, foreign/wrong-interface rejection and unavailable
+host refusal. Initial implementation `3c3b0b04209cf6b24887953c6348ad576c800063`
+required rustfmt and Clippy corrections; final source
+`3a99e81d385803e014139595428c993946534e98` passed
+[exact-head CI 39164935307](https://github.com/ekkus93/blueroute/actions/runs/39164935307).
+**Scope limitation:** This is a library bind-address seam only. The running
+daemon still does NOT start the listener, accept registered mutual-TLS
+sessions, enforce active PAN teardown, independently enroll keys or enable
+production JoinNetwork. Backend-owned IPv4 records alone cannot prove
+a live Bluetooth link; hardware acceptance remains DEFERRED. P7-003/P7-004
+and P6-004 remain IN PROGRESS.
+
+
 **P7-004 durable-derived inbound TLS allowlist (software-only, 2026-10-16):** `DurablePeerTrustOperations::approved_control_pins` now builds a deterministic incoming peer allowlist only by intersecting current on-disk network approval with separately enrolled SPKI pins, under existing authorization locks. `accept_registered_from_durable_approval` closes the owned TCP socket on an invalid preflight, then performs pinned mutual-TLS 1.3, exporter-bound Hello/HelloAck, durable activation and registry admission. A revoked/orphaned pin or wrong-network entry does not authorize a peer; trust-only requests and invalid network preflights fail before TLS, while corrupt pin state is not treated as an empty but trusted registry. Real localhost TLS and negative socket EOF tests plus new orphaned/cross-network/corruption regressions pass in [exact-head CI 38900079715](https://github.com/ekkus93/blueroute/actions/runs/38900079715) at `b8bd390ccda03a811bf54e2b20b17f707a24babc` (prior commits `90358903`, `8b3a9056`, `74133b5e`, `bd4651b2`; formatting repair `b8bd390c`). **Still NOT live daemon/PAN listener**, independently verified enrollment UI, connected reconnect ownership, production JoinNetwork, or physical Bluetooth acceptance; P7-003/P7-004/P6-004 remain open and hardware acceptance deferred.
 
 
