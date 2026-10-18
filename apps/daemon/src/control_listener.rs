@@ -52,6 +52,17 @@ pub fn owned_nap_control_address(
             "NAP control address has ambiguous interface ownership",
         ));
     }
+    // A bridge attributed to another logical network is not exclusively
+    // owned, even if the foreign address differs from our planned host IP.
+    // Do not rely on Linux TCP bind to distinguish the network provenance.
+    if observed.iter().any(|address| {
+        address.interface == interface && address.owner != network
+    }) {
+        return Err(CoreError::new(
+            ErrorKind::AddressConflict,
+            "NAP control bridge has foreign network ownership",
+        ));
+    }
     // The selected bridge must not report a conflicting BlueRoute-owned
     // address, even if the expected address is also present.
     if observed.iter().any(|address| {
@@ -180,6 +191,21 @@ mod tests {
                 .unwrap_err()
                 .kind(),
             ErrorKind::InvalidState
+        );
+    }
+
+    #[test]
+    fn foreign_network_on_owned_bridge_cannot_bind_even_with_distinct_ip() {
+        let owner = network(7);
+        let owned = address(owner);
+        let mut foreign = address(network(9));
+        assert_ne!(owned.prefix.address, foreign.prefix.address);
+        foreign.interface = owned.interface.clone();
+        assert_eq!(
+            owned_nap_control_address(owner, &DaemonConfig::default(), &[owned, foreign])
+                .unwrap_err()
+                .kind(),
+            ErrorKind::AddressConflict
         );
     }
 
