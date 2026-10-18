@@ -1040,6 +1040,30 @@ IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
 
 **P7-003 local public-key comparison display (software-only, 2026-10-16):** `blueroute peer local-key [--json]` shows the persisted daemon NodeId beside its TLS SPKI-SHA256 fingerprint using the version-checked read-only daemon API; invalid/missing/zero identities or malformed fingerprints fail closed, and CLI regression tests pass [exact-head CI 38929324205](https://github.com/ekkus93/blueroute/actions/runs/38929324205) at `4b05c3c4c7e8f35429a1e673a3f401030da17b97`. This supports independent out-of-band comparison but is **not** a remotely obtained candidate certificate, authenticated proof of a remote key, peer enrollment ceremony, key-pinning authorization, live PAN daemon listener, or production JoinNetwork. P7-003/P7-004/P6-004 remain open.
 
+**P7-003/P14-004 strict certificate DER and bounded key parsing (software-only, 2026-10-18):**
+`apps/daemon/src/control_tls.rs` now rejects a nonempty remainder from
+both X.509 DER parsing paths before extracting a peer NodeId or
+SPKI-SHA256 fingerprint; a valid leaf certificate followed by additional
+ASN.1 bytes must not become an enrollable pin or a local TLS identity.
+That fix passed [exact-head CI 39113195327](https://github.com/ekkus93/blueroute/actions/runs/39113195327)
+at `e3afd8787166065bdb31d6230049f26018e861a9`.
+The public local identity constructor now also rejects empty or
+oversized (>16 KiB) private-key DER before cloning or parsing, matching
+the owner-only persistence record bound; a valid generated key still
+loads. The source at `a79df601b6555d987bc132301cb754111ee077aa`
+needed a rustfmt-only follow-up, qualified at
+`69f084d5350a7f37879026b21ade5e665576999a`
+([CI 39113555971](https://github.com/ekkus93/blueroute/actions/runs/39113555971)).
+Finally, a real localhost TCP candidate-certificate exchange now
+proves that an attacker-supplied valid certificate plus trailing DER
+is rejected **before** first-key confirmation
+(`e0ec85d53a79871b30f3259ccb90279d81fc6dfb`,
+[exact-head CI 39113806090](https://github.com/ekkus93/blueroute/actions/runs/39113806090)
+passed). These are parser and identity-storage security checks, **not**
+independently verified production enrollment, running-daemon control
+listener, PAN authentication or physical Bluetooth acceptance.
+P7-003/P7-004/P14-003 and production P6-004 remain OPEN.
+
 ## P7-004 — Implement control-session lifecycle
 
 **P7-004 durable-derived inbound TLS allowlist (software-only, 2026-10-16):** `DurablePeerTrustOperations::approved_control_pins` now builds a deterministic incoming peer allowlist only by intersecting current on-disk network approval with separately enrolled SPKI pins, under existing authorization locks. `accept_registered_from_durable_approval` closes the owned TCP socket on an invalid preflight, then performs pinned mutual-TLS 1.3, exporter-bound Hello/HelloAck, durable activation and registry admission. A revoked/orphaned pin or wrong-network entry does not authorize a peer; trust-only requests and invalid network preflights fail before TLS, while corrupt pin state is not treated as an empty but trusted registry. Real localhost TLS and negative socket EOF tests plus new orphaned/cross-network/corruption regressions pass in [exact-head CI 38900079715](https://github.com/ekkus93/blueroute/actions/runs/38900079715) at `b8bd390ccda03a811bf54e2b20b17f707a24babc` (prior commits `90358903`, `8b3a9056`, `74133b5e`, `bd4651b2`; formatting repair `b8bd390c`). **Still NOT live daemon/PAN listener**, independently verified enrollment UI, connected reconnect ownership, production JoinNetwork, or physical Bluetooth acceptance; P7-003/P7-004/P6-004 remain open and hardware acceptance deferred.
