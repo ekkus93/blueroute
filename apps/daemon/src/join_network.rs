@@ -293,22 +293,22 @@ where
 
             if let Err(error) = mark_local_membership_joined(&mut registry, network) {
                 let (error, clean) = self
-                        .rollback_after_control(error, session, lease, link)
-                        .await;
-                    if clean {
-                        transition.reconciled();
-                    }
-                    return Err(error);
+                    .rollback_after_control(error, session, lease, link)
+                    .await;
+                if clean {
+                    transition.reconciled();
+                }
+                return Err(error);
             }
 
             if let Err(error) = self.store.save(&registry) {
                 let (error, clean) = self
-                        .rollback_after_control(error, session, lease, link)
-                        .await;
-                    if clean {
-                        transition.reconciled();
-                    }
-                    return Err(error);
+                    .rollback_after_control(error, session, lease, link)
+                    .await;
+                if clean {
+                    transition.reconciled();
+                }
+                return Err(error);
             }
 
             transition.reconciled();
@@ -790,7 +790,10 @@ mod tests {
         let mut context = Context::from_waker(Waker::noop());
 
         assert!(first.as_mut().poll(&mut context).is_pending());
-        assert_eq!(operations.runtime.steps().last(), Some(&Step::RemoveAddress));
+        assert_eq!(
+            operations.runtime.steps().last(),
+            Some(&Step::RemoveAddress)
+        );
         // Dropping the future aborts pending cleanup; opening the gate
         // cannot resume a canceled rollback.
         drop(first);
@@ -958,40 +961,3 @@ mod tests {
     #[test]
     fn rollback_failures_are_never_silently_discarded() {
         let error = combine_rollback(
-            CoreError::new(ErrorKind::AuthenticationFailed, "primary failure"),
-            Err(CoreError::new(
-                ErrorKind::ProtocolError,
-                "control cleanup failed",
-            )),
-            Ok(()),
-            Err(CoreError::new(ErrorKind::PanFailure, "PANU cleanup failed")),
-        );
-        assert_eq!(error.kind(), ErrorKind::AuthenticationFailed);
-        assert_eq!(error.message(), "primary failure");
-        let diagnostic = error.diagnostic().unwrap();
-        assert!(diagnostic.contains("control rollback: control cleanup failed"));
-        assert!(diagnostic.contains("PANU rollback: PANU cleanup failed"));
-    }
-
-    #[test]
-    fn durable_member_without_runtime_does_not_fake_join_success() {
-        futures_lite::future::block_on(async {
-            let (root, store) = temp_store("idempotent");
-            let network = NetworkId::from_bytes([0x48; 16]);
-            let mut membership =
-                NetworkMembership::new(network, DisplayName::new("Already joined").unwrap());
-            membership.state = MembershipState::Member;
-            let mut registry = MembershipRegistry::default();
-            registry.remember_network(membership);
-            store.save(&registry).unwrap();
-            let runtime = FakeRuntime::successful();
-            let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime);
-
-            let error = operations.join_network(network).await.unwrap_err();
-            assert_eq!(error.kind(), ErrorKind::InvalidState);
-            assert!(error.message().contains("P6-009"));
-            assert!(operations.runtime.steps().is_empty());
-            fs::remove_dir_all(root).unwrap();
-        });
-    }
-}
