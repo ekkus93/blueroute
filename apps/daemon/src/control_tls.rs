@@ -97,6 +97,13 @@ impl LocalControlTlsIdentity {
         if certificate.len() > MAX_CERTIFICATE_BYTES {
             return Err(ControlTlsError::InvalidCertificate);
         }
+        // Bound caller-supplied keys before cloning or parsing them.
+        // The owner-only persisted format has the same size ceiling.
+        if private_key.secret_der().is_empty()
+            || private_key.secret_der().len() > MAX_PRIVATE_KEY_BYTES
+        {
+            return Err(ControlTlsError::InvalidKey);
+        }
         let fingerprint = certificate_fingerprint(&certificate)?;
         if !certificate_names_node(&certificate, node)? {
             return Err(ControlTlsError::CertificateIdentityMismatch);
@@ -1658,6 +1665,36 @@ mod tests {
             ),
             Err(ControlTlsError::InvalidCertificate)
         ));
+    }
+
+    #[test]
+    fn local_tls_constructor_enforces_persisted_private_key_size_limits() {
+        let local = LocalControlTlsIdentity::generate(node(7)).unwrap();
+        let too_large = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(vec![
+            0_u8;
+            MAX_PRIVATE_KEY_BYTES + 1
+        ]));
+        assert!(matches!(
+            LocalControlTlsIdentity::from_der(
+                local.node(),
+                local.certificate().clone(),
+                too_large,
+            ),
+            Err(ControlTlsError::InvalidKey)
+        ));
+        let empty = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(Vec::new()));
+        assert!(matches!(
+            LocalControlTlsIdentity::from_der(local.node(), local.certificate().clone(), empty),
+            Err(ControlTlsError::InvalidKey)
+        ));
+        assert!(
+            LocalControlTlsIdentity::from_der(
+                local.node(),
+                local.certificate().clone(),
+                local.private_key.clone_key(),
+            )
+            .is_ok()
+        );
     }
 
     #[test]
