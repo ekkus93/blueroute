@@ -2140,9 +2140,7 @@ mod tests {
 
     #[test]
     fn malformed_post_hello_frames_on_mutual_tls_fail_closed_without_reusing_session() {
-        use blueroute_protocol::control::{
-            CONTROL_VERSION, ControlEnvelope, encode_control_frame,
-        };
+        use blueroute_protocol::control::{CONTROL_VERSION, ControlEnvelope, encode_control_frame};
 
         // All inputs traverse real TLS 1.3 mutual certificate checks, exporter
         // bound Hello/HelloAck, and durable approved-key ingress. Untrusted
