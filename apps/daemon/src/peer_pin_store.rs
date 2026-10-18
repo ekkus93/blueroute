@@ -346,6 +346,25 @@ mod tests {
     }
 
     #[test]
+    fn hardlinked_approval_lock_is_rejected_and_recovery_requires_single_link() {
+        let tmp = Temp::new();
+        let store = tmp.store();
+        drop(store.try_lock().unwrap());
+
+        let lock_path = tmp.0.join("secret-state").join(PEER_LOCK_FILE);
+        let alias = tmp.0.join("unexpected-hardlink");
+        fs::hard_link(&lock_path, &alias).unwrap();
+        assert_eq!(
+            store.try_lock().unwrap_err().kind(),
+            ErrorKind::PersistenceError
+        );
+        // Do not replace or unlink the persistent lock inode while another
+        // process might hold it; restoring a single link permits normal use.
+        fs::remove_file(&alias).unwrap();
+        assert!(store.try_lock().is_ok());
+    }
+
+    #[test]
     fn forged_symlink_and_world_readable_lock_file_fail_closed() {
         let tmp = Temp::new();
         let store = tmp.store();
