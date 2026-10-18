@@ -178,3 +178,22 @@ the initial activation change required a match-arm syntax correction. Both
 final exact-head runs passed. Production BlueZ lifecycle wiring, independent
 key enrollment, actual simultaneous PANU traffic and physical acceptance
 remain open.
+
+## Network/peer/generation-scoped detach callbacks (2026-10-17)
+
+A PANU detach callback now must match all three dimensions of the
+authenticated reservation: NetworkId, peer NodeId and TLS exporter-session
+generation. The owner validates these against its own registered session and
+lease **before** closing the socket or retiring capacity. A callback for a
+different peer or network, even with the same synthetic generation bytes,
+cannot remove another peer's occupied slot. Unobserved/double-detach requests
+cannot independently release an active reservation.
+
+Deterministic negative regressions cover stale generations, foreign
+networks, different peers and a two-client NAP reservation scenario.
+The code and tests passed [exact-head CI 39090592243](https://github.com/ekkus93/blueroute/actions/runs/39090592243)
+at `7324f11e058650ab8ed43ce178b03d870b6981f2`.
+
+This is **not** a trusted Bluetooth event source, daemon dispatch wiring,
+real PANU attachment/detach detection, authenticated user enrollment or
+physical multi-client acceptance. P6-007 remains IN PROGRESS.
