@@ -201,7 +201,7 @@ pub fn accept_registered_from_durable_approval<'a>(
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::io::Read;
+    use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -770,5 +770,65 @@ mod tests {
             server_registry.lock().unwrap().get(key).unwrap().session_id,
             replacement_id
         );
+    }
+
+    #[test]
+    fn malformed_authenticated_frame_retires_registered_owner_without_dispatch() {
+        let client = LocalControlTlsIdentity::generate(node(1)).unwrap();
+        let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
+        let client_pin =
+            PinnedControlTlsPeer::new(network(), client.node(), client.fingerprint()).unwrap();
+        let server_pin =
+            PinnedControlTlsPeer::new(network(), server.node(), server.fingerprint()).unwrap();
+        let (client_socket, server_socket) = socket_pair();
+        let server_thread = thread::spawn(move || {
+            let dir = TestDirectory::new();
+            let trust = trust_for(&dir.0, client_pin.node(), client_pin.fingerprint(), true);
+            let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+            let mut session = accept_registered_from_durable_approval(
+                server_socket,
+                &server,
+                &trust,
+                setup(),
+                Arc::clone(&registry),
+            )
+            .unwrap();
+            let key = PeerSessionKey {
+                network: network(),
+                peer: client_pin.node(),
+            };
+            assert!(registry.lock().unwrap().get(key).is_some());
+            // The malformed length is carried as TLS plaintext by a peer
+            // that completed mutual certificate proof and Hello/HelloAck.
+            // It must never reach application dispatch or leave a live slot.
+            assert!(matches!(
+                session.receive_next_at(10),
+                Err(ControlSessionError::Ingress(_))
+            ));
+            assert!(session.is_terminal());
+            assert!(registry.lock().unwrap().get(key).is_none());
+            assert!(session.receive_next_at(11).is_err());
+        });
+
+        let (mut stream, certificate) = connect_pinned_control_tls(
+            client_socket,
+            &client,
+            network(),
+            server_pin,
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+        let _authenticated = stream
+            .exchange_authenticated_hello(
+                network(),
+                &client,
+                &certificate,
+                setup().facts,
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap();
+        stream.write_all(&[0xff, 0xff, 0xff, 0xff]).unwrap();
+        stream.flush().unwrap();
+        server_thread.join().unwrap();
     }
 }
