@@ -260,8 +260,7 @@ impl<'session, 'nap> RegisteredNapControlOwner<'session, 'nap> {
         now_ms: u64,
     ) -> Result<crate::control_tls::ControlSessionRead, crate::ControlSessionError> {
         let result = self.session.receive_next_at(now_ms);
-        if result.is_err()
-            || matches!(&result, Ok(crate::control_tls::ControlSessionRead::Closed))
+        if result.is_err() || matches!(&result, Ok(crate::control_tls::ControlSessionRead::Closed))
         {
             self.on_transport_loss();
         }
