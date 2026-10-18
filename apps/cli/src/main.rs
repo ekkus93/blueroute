@@ -982,11 +982,13 @@ mod tests {
             topology: None,
             recent_errors: Vec::new(),
         };
-        snapshot.recent_errors.push(blueroute_protocol::DiagnosticFailure {
-            timestamp_unix_ms: 1234,
-            operation: "join\\nspoof".replace("\\n", "\n"),
-            failure_class: "Denied\\u{1b}[31m".replace("\\u{1b}", "\u{1b}"),
-        });
+        snapshot
+            .recent_errors
+            .push(blueroute_protocol::DiagnosticFailure {
+                timestamp_unix_ms: 1234,
+                operation: "join\\nspoof".replace("\\n", "\n"),
+                failure_class: "Denied\\u{1b}[31m".replace("\\u{1b}", "\u{1b}"),
+            });
         let detailed = format_diagnostics(&snapshot, false).unwrap();
         assert!(detailed.contains("Recent failure details: 1 daemon-reported"));
         assert!(detailed.contains("unix_ms=1234"));
@@ -1000,11 +1002,13 @@ mod tests {
             snapshot
         );
         for i in 1..40 {
-            snapshot.recent_errors.push(blueroute_protocol::DiagnosticFailure {
-                timestamp_unix_ms: i,
-                operation: format!("op{i}"),
-                failure_class: "denied".to_owned(),
-            });
+            snapshot
+                .recent_errors
+                .push(blueroute_protocol::DiagnosticFailure {
+                    timestamp_unix_ms: i,
+                    operation: format!("op{i}"),
+                    failure_class: "denied".to_owned(),
+                });
         }
         let bounded = format_diagnostics(&snapshot, false).unwrap();
         assert!(bounded.contains("Recent failure details: 40 daemon-reported"));
