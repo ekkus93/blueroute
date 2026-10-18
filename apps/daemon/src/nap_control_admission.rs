@@ -243,11 +243,11 @@ impl<'session, 'nap> RegisteredNapControlOwner<'session, 'nap> {
         // The PANU is already independently observed by the caller. Even
         // if policy revalidation or ledger activation now fails, its radio
         // slot cannot be freed until detach is independently confirmed.
-        // Repeated calls must retry activation, not mistake this observation
-        // for a successfully activated ledger ticket.
+        // Repeated calls must revalidate activation, not mistake this
+        // observation for a successfully activated ledger ticket.
         self.attached = true;
         match lease.activate(&mut self.session) {
-            Ok(true) => Ok(())
+            Ok(true) => Ok(()),
             Ok(false) => {
                 self.on_transport_loss();
                 Err(CoreError::new(
