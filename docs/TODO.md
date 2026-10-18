@@ -865,11 +865,13 @@ separate P6-009 runtime reconciliation is available. This supersedes
 the older rollback-phase test description that said a new join could
 run immediately after cleanup. Implemented at
 `a6cc7248325769b6c3952de31050fe3c1f8e72dc`.
-**CI for this exact behavior is pending**, as its first run
-39106451974 was canceled when a late validation of older
-`f738b687` started. Never label this complete until exact-head
-qualification succeeds. No live daemon session, production join
-or Bluetooth hardware acceptance is claimed.
+Its initial run 39106451974 was canceled when a validation
+of the older `f738b687` revision started; the subsequently
+reconciled combined head `5993f862b3955956d21fb257d4c2eb7f4e567200`
+[passed exact-head CI 39106611458](https://github.com/ekkus93/blueroute/actions/runs/39106611458)
+including formatting, Clippy, Rust/workspace tests and broker checks.
+This is a qualified rollback safety regression, **not** a live daemon
+control session, production JoinNetwork or Bluetooth hardware acceptance.
 
 ## P6-005 — Implement IPv4 allocation for one star
 
