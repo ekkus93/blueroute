@@ -1177,11 +1177,13 @@ mod tests {
                 .unwrap_err();
             assert_eq!(failure.kind(), ErrorKind::InvalidState);
             drop(transition);
-            assert!(runtime
-                .bind_owned_control_listener(DaemonConfig::default())
-                .await
-                .unwrap()
-                .is_none());
+            assert!(
+                runtime
+                    .bind_owned_control_listener(DaemonConfig::default())
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
         });
     }
 
