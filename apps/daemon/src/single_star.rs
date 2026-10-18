@@ -131,6 +131,10 @@ impl StarHostRuntime for LinuxStarHostRuntime {
         config: DaemonConfig,
     ) -> NetworkOperationFuture<'_, Option<TcpListener>> {
         Box::pin(async move {
+            // Serialize fresh address observation and TCP bind with NAP
+            // startup/teardown. A cloned active host alone can become stale
+            // while NetworkManager's address query is awaiting completion.
+            let _transition = TransitionGuard::claim(&self.transition)?;
             let active = self.active.lock().map_err(lock_error)?.clone();
             let Some(active) = active else {
                 return Ok(None);
@@ -598,6 +602,7 @@ where
             if let Some(discovery) = discovery {
                 let discovered = discovery
                     .bluez
+
                     .discovered_network_ids(discovery.adapter.clone())
                     .await?;
                 merge_discovered_networks(&mut networks, discovered)?;
@@ -1161,6 +1166,27 @@ mod tests {
     }
 
     #[test]
+    fn control_listener_binding_rejects_host_transition_and_recovers_when_idle() {
+        futures_lite::future::block_on(async {
+            let runtime = LinuxStarHostRuntime::default();
+            // A startup or teardown already owns the transition; binding
+            // must fail before it can query a stale host address.
+            let transition = TransitionGuard::claim(&runtime.transition).unwrap();
+            let failure = runtime
+                .bind_owned_control_listener(DaemonConfig::default())
+                .await
+                .unwrap_err();
+            assert_eq!(failure.kind(), ErrorKind::InvalidState);
+            drop(transition);
+            assert!(runtime
+                .bind_owned_control_listener(DaemonConfig::default())
+                .await
+                .unwrap()
+                .is_none());
+        });
+    }
+
+    #[test]
     fn discovered_network_merge_preserves_remembered_metadata() {
         let remembered = NetworkId::from_bytes([0x11; 16]);
         let discovered = NetworkId::from_bytes([0x22; 16]);
@@ -1198,6 +1224,7 @@ mod tests {
                 prefix: address.prefix,
             },
             ActiveIpv4Prefix {
+
                 interface: Some(foreign),
                 prefix: blueroute_core::IpPrefix::new("10.201.44.0".parse().unwrap(), 24).unwrap(),
             },
