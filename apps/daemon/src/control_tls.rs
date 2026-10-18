@@ -1668,6 +1668,34 @@ mod tests {
     }
 
     #[test]
+    fn certificate_candidate_exchange_rejects_trailing_der_before_enrollment() {
+        let (candidate, server) = make_tls_pair();
+        let (mut candidate_socket, server_socket) = stream_pair();
+        let server_thread = thread::spawn(move || {
+            exchange_control_tls_candidate(
+                server_socket,
+                &server,
+                network(9),
+                Instant::now() + Duration::from_secs(5),
+            )
+        });
+        // Present a valid node certificate with an extra ASN.1 value in
+        // the same bounded certificate preface. A peer-controlled suffix
+        // must not be silently ignored by the first-key parser.
+        let mut bad_certificate = candidate.certificate().as_ref().to_vec();
+        bad_certificate.extend_from_slice(&[0x05, 0x00]);
+        let mut preface = Vec::new();
+        preface.extend_from_slice(CERTIFICATE_PREFACE);
+        preface.extend_from_slice(&(bad_certificate.len() as u32).to_be_bytes());
+        preface.extend_from_slice(&bad_certificate);
+        candidate_socket.write_all(&preface).unwrap();
+        assert!(matches!(
+            server_thread.join().unwrap(),
+            Err(ControlTlsError::InvalidCertificate)
+        ));
+    }
+
+    #[test]
     fn local_tls_constructor_enforces_persisted_private_key_size_limits() {
         let local = LocalControlTlsIdentity::generate(node(7)).unwrap();
         let too_large = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(vec![
