@@ -1037,6 +1037,25 @@ IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
 
 **Software-first:** Use deterministic topology graphs, simulated peers and Linux namespaces/veth with kernel IP forwarding/routing where feasible; exercise loss/convergence/cleanup. Physical two-hop and interconnected-star Bluetooth traffic under P8-006/P8-007 stays **HARDWARE DEFERRED**, not completed by virtual networking.
 
+**P7-005 pinned mutual-TLS hostile-frame regression (software-only, 2026-10-17):**
+`apps/daemon/src/control_tls.rs` now runs seven fresh, real localhost
+mutual-TLS 1.3 exchanges with exporter-bound Hello/HelloAck, matching local
+user-approval/pin test fixtures and active daemon-library ingress. Each
+authenticated channel receives an independently corrupted post-Hello frame:
+wrong NetworkId, wrong NodeId, wrong TLS exporter session ID, replayed
+handshake sequence, unexpected second Hello, unknown critical envelope field
+or a grossly oversized framing header. The receiver rejects each frame,
+closes the TLS transport and refuses subsequent reuse of the terminal session.
+The first CI run 39097745162 failed rustfmt only; the corrected test passed
+[exact-head CI 39097834651](https://github.com/ekkus93/blueroute/actions/runs/39097834651)
+at `3429a46fd2dca0f2fcfa98fc2b8ddc6e70ac52b2`.
+**Scope limit:** This runs the real authenticated daemon *library* session,
+not an installed daemon-owned listener, an independently confirmed production
+key-enrollment ceremony, a live Bluetooth PAN link or actual physical peer
+traffic. Keep the P7-005 transport-acceptance checkbox and P7-003/P7-004/
+P6-004 production gates OPEN until those separately required integrations
+are demonstrated.
+
 ## P8-001 — Build neighbor observation model
 
 - [x] direct PAN links derived from verified active topology graph, not peer advertisements.
