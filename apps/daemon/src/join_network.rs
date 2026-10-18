@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use blueroute_core::{
     CoreError, DisplayName, ErrorKind, Ipv4AddressPool, Ipv4StarAddressPlan, MembershipRegistry,
@@ -98,9 +99,34 @@ pub trait JoinRuntime: Send + Sync {
     fn stop_control_session(&self, session: JoinControlSession) -> JoinNetworkFuture<'_, ()>;
 }
 
+/// An in-flight join owns exclusive access to this coordinator until the
+/// attempt either commits or completes every required rollback. Dropping an
+/// abandoned async future releases the guard without claiming success.
+struct JoinTransitionGuard<'a>(&'a AtomicBool);
+
+impl<'a> JoinTransitionGuard<'a> {
+    fn claim(flag: &'a AtomicBool) -> Result<Self, CoreError> {
+        flag.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| {
+                CoreError::new(
+                    ErrorKind::InvalidState,
+                    "another BlueRoute join operation is already in progress",
+                )
+            })?;
+        Ok(Self(flag))
+    }
+}
+
+impl Drop for JoinTransitionGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
 pub struct TransactionalJoinNetworkOperations<R = LinuxJoinRuntime> {
     store: NetworkMembershipStore,
     runtime: R,
+    join_in_progress: AtomicBool,
 }
 
 impl TransactionalJoinNetworkOperations<LinuxJoinRuntime> {
@@ -121,7 +147,11 @@ where
     R: JoinRuntime,
 {
     pub fn with_runtime(store: NetworkMembershipStore, runtime: R) -> Self {
-        Self { store, runtime }
+        Self {
+            store,
+            runtime,
+            join_in_progress: AtomicBool::new(false),
+        }
     }
 
     async fn rollback_after_control(
@@ -155,6 +185,10 @@ where
 {
     fn join_network(&self, network: NetworkId) -> JoinNetworkFuture<'_, ()> {
         Box::pin(async move {
+            // Hold this guard through commit and all rollback paths, not just
+            // the first preflight; an overlapping join must never undo an
+            // earlier attempt's PANU or IP ownership.
+            let _transition = JoinTransitionGuard::claim(&self.join_in_progress)?;
             let registry = self.store.load()?;
             if let Some(current) = current_network(&registry)? {
                 return if current == network {
@@ -426,6 +460,7 @@ mod tests {
         fail_address: bool,
         fail_control: bool,
         concurrent_member: Option<(std::path::PathBuf, NetworkId)>,
+        pause_preflight: bool,
     }
 
     impl FakeRuntime {
@@ -435,6 +470,7 @@ mod tests {
                 fail_address: false,
                 fail_control: false,
                 concurrent_member: None,
+                pause_preflight: false,
             }
         }
 
@@ -451,6 +487,9 @@ mod tests {
         fn preflight(&self, _network: NetworkId) -> JoinNetworkFuture<'_, ()> {
             Box::pin(async move {
                 self.push(Step::Preflight);
+                if self.pause_preflight {
+                    std::future::pending::<()>().await;
+                }
                 Ok(())
             })
         }
@@ -559,6 +598,50 @@ mod tests {
     }
 
     #[test]
+    fn overlapping_joins_fail_before_runtime_mutation_and_cancel_releases_guard() {
+        use std::task::{Context, Waker};
+
+        let (root, store) = temp_store("overlapping-joins");
+        let network = NetworkId::from_bytes([0x7a; 16]);
+        let other = NetworkId::from_bytes([0x7b; 16]);
+        let operations = TransactionalJoinNetworkOperations::with_runtime(
+            store,
+            FakeRuntime {
+                pause_preflight: true,
+                ..FakeRuntime::successful()
+            },
+        );
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
+
+        // Drive one join until preflight suspends while holding ownership.
+        let mut first = operations.join_network(network);
+        assert!(first.as_mut().poll(&mut context).is_pending());
+        assert_eq!(operations.runtime.steps(), vec![Step::Preflight]);
+
+        // Both a same-network duplicate and a different-network request
+        // must fail before they can allocate IPs, create PANU links or
+        // overwrite the first join's membership.
+        for attempted in [network, other] {
+            let error = futures_lite::future::block_on(operations.join_network(attempted))
+                .expect_err("overlapping join must fail closed");
+            assert_eq!(error.kind(), ErrorKind::InvalidState);
+            assert!(error.message().contains("already in progress"));
+        }
+        assert_eq!(operations.runtime.steps(), vec![Step::Preflight]);
+        assert!(operations.store.load().unwrap().is_empty());
+
+        // Cancelling a suspended future must not strand the coordinator.
+        drop(first);
+        let mut restarted = operations.join_network(other);
+        assert!(restarted.as_mut().poll(&mut context).is_pending());
+        assert_eq!(operations.runtime.steps(), vec![Step::Preflight, Step::Preflight]);
+        drop(restarted);
+        assert!(operations.store.load().unwrap().is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn membership_is_committed_only_after_all_runtime_steps_succeed() {
         futures_lite::future::block_on(async {
             let (root, store) = temp_store("success");
@@ -590,6 +673,7 @@ mod tests {
                 fail_address: true,
                 fail_control: false,
                 concurrent_member: None,
+                pause_preflight: false,
             };
             let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime);
 
@@ -619,6 +703,7 @@ mod tests {
                 fail_address: false,
                 fail_control: true,
                 concurrent_member: None,
+                pause_preflight: false,
             };
             let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime);
 
@@ -665,6 +750,7 @@ mod tests {
                 fail_address: false,
                 fail_control: false,
                 concurrent_member: Some((store.path().to_owned(), concurrent_network)),
+                pause_preflight: false,
             };
             let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime);
 
