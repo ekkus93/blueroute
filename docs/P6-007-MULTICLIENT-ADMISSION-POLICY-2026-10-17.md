@@ -99,3 +99,28 @@ deterministic regression covers both failure paths and recovery.
 passed at `081b15915daa189b59a0ea09ab34f6c354deb892`.
 The daemon still needs to wire actual authenticated attachment observation,
 capability-change cancellation, socket teardown and multi-client traffic.
+
+## Active reservation retention across TLS loss (2026-10-17)
+
+`apps/daemon/src/nap_control_admission.rs` now defines
+`RegisteredNapControlOwner`, which couples a registered, pin-verified TLS
+session to an exact network/owner/generation-scoped NAP reservation. Pending
+capacity is released when TLS terminates, but an activated slot remains
+accounted for until the runtime reports independently observed PANU detach
+or completed owned NAP shutdown. The underlying `AuthenticatedNapLease`
+still releases on drop: the running daemon must **retain** its owning object
+for the life of the attachment and supply genuine detach observations.
+The current production daemon does not yet wire this lifecycle to BlueZ.
+
+The source landed at `ea0224cf75cf447ce86a4be8cd2fcb634940bbf6`.
+Its initial CI run 39082117795 failed at Rust formatting, and the formatting
+repair `93fb4f185b3b52413e408da4412deec713e74a51` exposed an unused
+public API export in Clippy. Re-exporting the ownership type at
+`2251855bc55a7298502a195c0fd31acaa2552b67` resolved strict lint.
+[Exact-head CI 39088779662](https://github.com/ekkus93/blueroute/actions/runs/39088779662)
+passed at that commit.
+
+This is **software-only** qualification. It does not demonstrate a live PAN
+listener, real Bluetooth attachment tracking, user-approved key enrollment,
+authenticated production JoinNetwork, concurrent application traffic or a
+measured hardware peer ceiling. P6-007 remains IN PROGRESS.
