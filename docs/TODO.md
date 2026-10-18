@@ -1353,6 +1353,24 @@ remote inventory, detailed live interface/route/topology observations and full
 troubleshooting coverage. This is display of explicitly supplied snapshot
 fields only; it is not PAN/radio or physical acceptance. P10-005 stays OPEN.
 
+**P10-005 production local interface observation (software-only, 2026-10-17):**
+The daemon now queries the active hosted-NAP NetworkManager backend via the
+existing read-only `IpNetworkBackend::addresses` interface when servicing
+`GetDiagnostics`; the host-runtime abstraction and `NetworkOperations`
+propagate `Option<Vec<DiagnosticInterface>>`. Only addresses tagged with
+the **current hosted NetworkId** are projected. Foreign network ownership
+is excluded; duplicate backend records are deduplicated with stable ordering.
+An inactive or unsupported host returns `None` (unavailable), **not** a
+fabricated empty live interface inventory. A deterministic ownership test
+covers filtering and deduplication. All formatting, Rust workspace, Clippy,
+tests, D-Bus and packaging gates passed
+[exact-head CI 39095752322](https://github.com/ekkus93/blueroute/actions/runs/39095752322)
+at `762d6081801043dfad00dbac8fe3e0b57b415243`.
+This reports **backend-owned local address records**, not kernel-verified
+carrier/link traffic, authenticated remote peers, current network routes, or
+Bluetooth physical acceptance. Route/topology observation and complete
+troubleshooting remain OPEN.
+
 ## P10-006 — Define exit-code contract
 
 - [x] success (0).
