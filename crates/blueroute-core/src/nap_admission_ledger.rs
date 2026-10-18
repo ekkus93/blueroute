@@ -248,6 +248,7 @@ mod tests {
             ErrorKind::CapabilityUnavailable
         );
         assert_eq!(
+
             ledger.reserve(peer(1)).unwrap_err().kind(),
             ErrorKind::InvalidState
         );
@@ -452,6 +453,50 @@ mod tests {
         }
         assert_eq!(ledger.counts().unwrap(), (0, 0));
         assert!(ledger.reserve(peer(20)).is_err());
+    }
+
+    #[test]
+    fn concurrent_retirement_and_reconnect_never_transfer_active_ownership() {
+        // A replacement TLS session must acquire its own generation even if
+        // teardown of the old PANU races with a new admission attempt. An old
+        // detach callback cannot retire the successor's pending/active slot.
+        const ROUNDS: usize = 48;
+        let ledger = Arc::new(NapAdmissionLedger::new(host(Some(1))));
+        for _ in 0..ROUNDS {
+            let (original, _) = ledger.reserve(peer(1)).unwrap();
+            assert!(ledger.activate(original).unwrap());
+
+            let barrier = Arc::new(Barrier::new(3));
+            let retiring_ledger = Arc::clone(&ledger);
+            let retiring_barrier = Arc::clone(&barrier);
+            let retiring = thread::spawn(move || {
+                retiring_barrier.wait();
+                retiring_ledger.retire(original).unwrap()
+            });
+            let reconnecting_ledger = Arc::clone(&ledger);
+            let reconnecting_barrier = Arc::clone(&barrier);
+            let reconnecting = thread::spawn(move || {
+                reconnecting_barrier.wait();
+                reconnecting_ledger.reserve(peer(1))
+            });
+            barrier.wait();
+            assert!(retiring.join().unwrap());
+            let replacement = match reconnecting.join().unwrap() {
+                Ok((ticket, _)) => ticket,
+                Err(error) => {
+                    assert_eq!(error.kind(), ErrorKind::InvalidState);
+                    ledger.reserve(peer(1)).unwrap().0
+                }
+            };
+            assert_ne!(original.generation, replacement.generation);
+            assert!(!ledger.retire(original).unwrap());
+            assert_eq!(ledger.counts().unwrap(), (0, 1));
+            assert!(ledger.activate(replacement).unwrap());
+            assert!(!ledger.retire(original).unwrap());
+            assert_eq!(ledger.counts().unwrap(), (1, 0));
+            assert!(ledger.retire(replacement).unwrap());
+            assert_eq!(ledger.counts().unwrap(), (0, 0));
+        }
     }
 
     #[test]
