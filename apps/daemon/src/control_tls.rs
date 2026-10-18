@@ -1672,14 +1672,11 @@ mod tests {
         let local = LocalControlTlsIdentity::generate(node(7)).unwrap();
         let too_large = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(vec![
             0_u8;
-            MAX_PRIVATE_KEY_BYTES + 1
+            MAX_PRIVATE_KEY_BYTES
+                + 1
         ]));
         assert!(matches!(
-            LocalControlTlsIdentity::from_der(
-                local.node(),
-                local.certificate().clone(),
-                too_large,
-            ),
+            LocalControlTlsIdentity::from_der(local.node(), local.certificate().clone(), too_large,),
             Err(ControlTlsError::InvalidKey)
         ));
         let empty = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(Vec::new()));
