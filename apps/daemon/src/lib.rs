@@ -7,6 +7,7 @@ mod approved_transport;
 mod attempt_socket;
 mod authorization;
 mod control_tls;
+mod control_listener;
 mod join_network;
 mod peer_pin_store;
 mod peer_trust;
@@ -37,6 +38,9 @@ use blueroute_protocol::{
     ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, DiagnosticFailure,
     DiagnosticSnapshot, Event, NodeSummary, ProtocolCodecError, Response, SystemDiagnosticMetadata,
     decode_command, encode_event, encode_response,
+};
+pub use control_listener::{
+    CONTROL_TCP_PORT, bind_owned_nap_control_listener, owned_nap_control_address,
 };
 pub use control_tls::{
     ActiveControlSession, AuthenticatedControlPeer, ControlSessionError,
