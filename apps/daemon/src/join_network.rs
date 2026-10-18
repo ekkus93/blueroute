@@ -99,10 +99,14 @@ pub trait JoinRuntime: Send + Sync {
     fn stop_control_session(&self, session: JoinControlSession) -> JoinNetworkFuture<'_, ()>;
 }
 
-/// An in-flight join owns exclusive access to this coordinator until the
-/// attempt either commits or completes every required rollback. Dropping an
-/// abandoned async future releases the guard without claiming success.
-struct JoinTransitionGuard<'a>(&'a AtomicBool);
+/// Serialize join attempts. Cancellation before runtime mutation is safe;
+/// cancellation after mutation may strand a PANU/IP lease or control session.
+/// Without proven cleanup, reserve this coordinator until an explicit
+/// reconciliation path exists (P6-009). Dropping an async future is not rollback.
+struct JoinTransitionGuard<'a> {
+    flag: &'a AtomicBool,
+    may_have_live_resources: bool,
+}
 
 impl<'a> JoinTransitionGuard<'a> {
     fn claim(flag: &'a AtomicBool) -> Result<Self, CoreError> {
@@ -110,16 +114,29 @@ impl<'a> JoinTransitionGuard<'a> {
             .map_err(|_| {
                 CoreError::new(
                     ErrorKind::InvalidState,
-                    "another BlueRoute join operation is already in progress",
+                    "another BlueRoute join operation is already in progress or requires runtime reconciliation",
                 )
             })?;
-        Ok(Self(flag))
+        Ok(Self {
+            flag,
+            may_have_live_resources: false,
+        })
+    }
+
+    fn mutation_started(&mut self) {
+        self.may_have_live_resources = true;
+    }
+
+    fn reconciled(&mut self) {
+        self.may_have_live_resources = false;
     }
 }
 
 impl Drop for JoinTransitionGuard<'_> {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
+        if !self.may_have_live_resources {
+            self.flag.store(false, Ordering::Release);
+        }
     }
 }
 
@@ -160,11 +177,12 @@ where
         session: JoinControlSession,
         lease: JoinIpLease,
         link: JoinPanLink,
-    ) -> CoreError {
+    ) -> (CoreError, bool) {
         let control = self.runtime.stop_control_session(session).await;
         let address = self.runtime.remove_ip(lease).await;
         let panu = self.runtime.disconnect_panu(link).await;
-        combine_rollback(primary, control, address, panu)
+        let clean = control.is_ok() && address.is_ok() && panu.is_ok();
+        (combine_rollback(primary, control, address, panu), clean)
     }
 
     async fn rollback_after_ip(
@@ -172,10 +190,11 @@ where
         primary: CoreError,
         lease: JoinIpLease,
         link: JoinPanLink,
-    ) -> CoreError {
+    ) -> (CoreError, bool) {
         let address = self.runtime.remove_ip(lease).await;
         let panu = self.runtime.disconnect_panu(link).await;
-        combine_rollback(primary, Ok(()), address, panu)
+        let clean = address.is_ok() && panu.is_ok();
+        (combine_rollback(primary, Ok(()), address, panu), clean)
     }
 }
 
@@ -188,7 +207,7 @@ where
             // Hold this guard through commit and all rollback paths, not just
             // the first preflight; an overlapping join must never undo an
             // earlier attempt's PANU or IP ownership.
-            let _transition = JoinTransitionGuard::claim(&self.join_in_progress)?;
+            let mut transition = JoinTransitionGuard::claim(&self.join_in_progress)?;
             let registry = self.store.load()?;
             if let Some(current) = current_network(&registry)? {
                 return if current == network {
@@ -205,11 +224,17 @@ where
             }
 
             self.runtime.preflight(network).await?;
+            // PANU activation may have side effects even when its future
+            // fails or is canceled. Never release ownership without cleanup.
+            transition.mutation_started();
             let link = self.runtime.establish_panu(network).await?;
             let lease = match self.runtime.configure_ip(network, &link).await {
                 Ok(lease) => lease,
                 Err(error) => {
                     let panu = self.runtime.disconnect_panu(link).await;
+                    if panu.is_ok() {
+                        transition.reconciled();
+                    }
                     return Err(combine_rollback(error, Ok(()), Ok(()), panu));
                 }
             };
@@ -219,15 +244,25 @@ where
                 .await
             {
                 Ok(session) => session,
-                Err(error) => return Err(self.rollback_after_ip(error, lease, link).await),
+                Err(error) => {
+                    let (error, clean) = self.rollback_after_ip(error, lease, link).await;
+                    if clean {
+                        transition.reconciled();
+                    }
+                    return Err(error);
+                }
             };
 
             let mut registry = match self.store.load() {
                 Ok(registry) => registry,
                 Err(error) => {
-                    return Err(self
+                    let (error, clean) = self
                         .rollback_after_control(error, session, lease, link)
-                        .await);
+                        .await;
+                    if clean {
+                        transition.reconciled();
+                    }
+                    return Err(error);
                 }
             };
             match current_network(&registry) {
@@ -237,29 +272,46 @@ where
                         ErrorKind::InvalidState,
                         "BlueRoute membership changed while join networking was being established",
                     );
-                    return Err(self
+                    let (error, clean) = self
                         .rollback_after_control(error, session, lease, link)
-                        .await);
+                        .await;
+                    if clean {
+                        transition.reconciled();
+                    }
+                    return Err(error);
                 }
                 Err(error) => {
-                    return Err(self
+                    let (error, clean) = self
                         .rollback_after_control(error, session, lease, link)
-                        .await);
+                        .await;
+                    if clean {
+                        transition.reconciled();
+                    }
+                    return Err(error);
                 }
             }
 
             if let Err(error) = mark_local_membership_joined(&mut registry, network) {
-                return Err(self
-                    .rollback_after_control(error, session, lease, link)
-                    .await);
+                let (error, clean) = self
+                        .rollback_after_control(error, session, lease, link)
+                        .await;
+                    if clean {
+                        transition.reconciled();
+                    }
+                    return Err(error);
             }
 
             if let Err(error) = self.store.save(&registry) {
-                return Err(self
-                    .rollback_after_control(error, session, lease, link)
-                    .await);
+                let (error, clean) = self
+                        .rollback_after_control(error, session, lease, link)
+                        .await;
+                    if clean {
+                        transition.reconciled();
+                    }
+                    return Err(error);
             }
 
+            transition.reconciled();
             Ok(())
         })
     }
@@ -714,6 +766,50 @@ mod tests {
         assert_eq!(
             operations.runtime.steps().last(),
             Some(&Step::DisconnectPanu)
+        );
+        assert!(operations.store.load().unwrap().is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn canceled_join_during_rollback_blocks_reuse_until_reconciliation() {
+        use std::sync::Arc;
+        use std::task::{Context, Waker};
+
+        let (root, store) = temp_store("canceled-rollback");
+        let network = NetworkId::from_bytes([0x8c; 16]);
+        let competitor = NetworkId::from_bytes([0x8d; 16]);
+        let release = Arc::new(AtomicBool::new(false));
+        let runtime = FakeRuntime {
+            fail_control: true,
+            pause_rollback_until: Some(Arc::clone(&release)),
+            ..FakeRuntime::successful()
+        };
+        let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime);
+        let mut first = operations.join_network(network);
+        let mut context = Context::from_waker(Waker::noop());
+
+        assert!(first.as_mut().poll(&mut context).is_pending());
+        assert_eq!(operations.runtime.steps().last(), Some(&Step::RemoveAddress));
+        // Dropping the future aborts pending cleanup; opening the gate
+        // cannot resume a canceled rollback.
+        drop(first);
+        release.store(true, Ordering::Release);
+        for attempted in [network, competitor] {
+            let error = futures_lite::future::block_on(operations.join_network(attempted))
+                .expect_err("canceled cleanup must poison the join coordinator");
+            assert_eq!(error.kind(), ErrorKind::InvalidState);
+            assert!(error.message().contains("reconciliation"));
+        }
+        assert_eq!(
+            operations.runtime.steps(),
+            vec![
+                Step::Preflight,
+                Step::Panu,
+                Step::Address,
+                Step::Control,
+                Step::RemoveAddress,
+            ]
         );
         assert!(operations.store.load().unwrap().is_empty());
         fs::remove_dir_all(root).unwrap();
