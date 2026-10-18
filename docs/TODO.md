@@ -1081,6 +1081,21 @@ P7-003/P7-004/P6-004 remain IN PROGRESS; hardware acceptance is DEFERRED.
 
 ## P7-004 — Implement control-session lifecycle
 
+**P7-004 control-listener host-transition exclusion (software only, 2026-10-18):**
+`LinuxStarHostRuntime::bind_owned_control_listener` now claims the same
+host transition guard as NAP startup/teardown across active-host inspection,
+fresh NetworkManager address observation, and guarded TCP socket binding.
+A deterministic regression rejects a bind while a host transition owns the
+guard and confirms an idle host still returns no listener when the guard is
+released. Implemented at `84df9af` with source-pagination and rustfmt
+follow-ups `39d64a0` and `fefa57560d3f37917c2bed3df180a360339acd3d`;
+[exact-head CI 39171394428](https://github.com/ekkus93/blueroute/actions/runs/39171394428)
+**passed**. This prevents a simultaneous NAP transition during bind, but it
+does **not** install the listener in the running daemon, own its lifetime
+through subsequent host teardown, establish independently enrolled mutual
+TLS sessions, enable production JoinNetwork or prove physical Bluetooth.
+P7-003/P7-004/P6-004 remain IN PROGRESS; hardware acceptance DEFERRED.
+
 **P7-004 active NAP backend listener preparation (software only, 2026-10-18):**
 The `LinuxStarHostRuntime::bind_owned_control_listener` implementation
 now checks that a currently active NAP host's owner, bridge and
