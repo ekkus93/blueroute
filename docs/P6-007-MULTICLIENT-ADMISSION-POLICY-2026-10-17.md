@@ -124,3 +124,29 @@ This is **software-only** qualification. It does not demonstrate a live PAN
 listener, real Bluetooth attachment tracking, user-approved key enrollment,
 authenticated production JoinNetwork, concurrent application traffic or a
 measured hardware peer ceiling. P6-007 remains IN PROGRESS.
+
+## Unexpected TLS-owner drop retains observed PANU occupancy (2026-10-17)
+
+An authenticated control-session owner can be destroyed by a task failure or
+ordinary Rust unwinding while its PANU remains physically attached. Previously
+that destruction also dropped its active reservation lease and falsely freed
+capacity. The `RegisteredNapControlOwner` destructor now retains an already
+observed attachment in the generation-scoped admission ledger, while an
+unactivated pending reservation still releases normally. A cloneable exact
+`AuthenticatedNapTicket` can be saved by the daemon for independently
+confirmed later detach; retirement ignores stale generations after replacement.
+An unobserved detach leaves the slot conservatively occupied until explicit
+reconciliation or full owned NAP shutdown, rather than overbooking the radio.
+
+Two deterministic regressions cover retained active occupancy, pending cleanup,
+exact-generation detach and stale callback rejection. The first implementation
+at `20b1caf8461509c01253ec78770bf69d69281a8b` failed strict Clippy on a
+collapsible conditional; the corrected implementation and public detach-ticket
+export passed [exact-head CI 39089631145](https://github.com/ekkus93/blueroute/actions/runs/39089631145)
+at `a6be95912f48a8f162f503945e0c78502c2e319d`.
+
+**Remaining:** This is still a software-only lifecycle guard. No production
+BlueZ attachment observation, independently confirmed detachment event,
+user-verified TLS key enrollment, concurrent PANU traffic, or physical controller
+capacity measurement was performed. The running daemon must wire real NAP/PAN
+ownership, persist or retain exact tickets for teardown, and keep P6-007 open.
