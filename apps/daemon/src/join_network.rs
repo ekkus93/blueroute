@@ -461,6 +461,7 @@ mod tests {
         fail_control: bool,
         concurrent_member: Option<(std::path::PathBuf, NetworkId)>,
         pause_preflight: bool,
+        pause_rollback_until: Option<std::sync::Arc<AtomicBool>>,
     }
 
     impl FakeRuntime {
@@ -471,6 +472,7 @@ mod tests {
                 fail_control: false,
                 concurrent_member: None,
                 pause_preflight: false,
+                pause_rollback_until: None,
             }
         }
 
@@ -544,6 +546,16 @@ mod tests {
         fn remove_ip(&self, _lease: JoinIpLease) -> JoinNetworkFuture<'_, ()> {
             Box::pin(async move {
                 self.push(Step::RemoveAddress);
+                if let Some(release) = &self.pause_rollback_until {
+                    std::future::poll_fn(|_cx| {
+                        if release.load(Ordering::Acquire) {
+                            std::task::Poll::Ready(())
+                        } else {
+                            std::task::Poll::Pending
+                        }
+                    })
+                    .await;
+                }
                 Ok(())
             })
         }
@@ -645,6 +657,69 @@ mod tests {
     }
 
     #[test]
+    fn competing_join_is_denied_until_reverse_order_rollback_finishes() {
+        use std::sync::Arc;
+        use std::task::{Context, Poll, Waker};
+
+        let (root, store) = temp_store("pending-rollback");
+        let network = NetworkId::from_bytes([0x8a; 16]);
+        let competitor = NetworkId::from_bytes([0x8b; 16]);
+        let release = Arc::new(AtomicBool::new(false));
+        let runtime = FakeRuntime {
+            fail_control: true,
+            pause_rollback_until: Some(Arc::clone(&release)),
+            ..FakeRuntime::successful()
+        };
+        let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime);
+        let mut first = operations.join_network(network);
+        let mut context = Context::from_waker(Waker::noop());
+
+        // Authentication fails only after PANU and IP setup. Block inside
+        // reverse-order address cleanup, after the control error is known.
+        assert!(first.as_mut().poll(&mut context).is_pending());
+        assert_eq!(
+            operations.runtime.steps(),
+            vec![
+                Step::Preflight,
+                Step::Panu,
+                Step::Address,
+                Step::Control,
+                Step::RemoveAddress,
+            ]
+        );
+        for attempted in [network, competitor] {
+            let error = futures_lite::future::block_on(operations.join_network(attempted))
+                .expect_err("another join must not start during teardown");
+            assert_eq!(error.kind(), ErrorKind::InvalidState);
+            assert!(error.message().contains("already in progress"));
+        }
+        assert_eq!(operations.runtime.steps().len(), 5);
+        assert!(operations.store.load().unwrap().is_empty());
+
+        // Completing address rollback must then disconnect the PANU and
+        // release the transaction guard, preserving the original error.
+        release.store(true, Ordering::Release);
+        match first.as_mut().poll(&mut context) {
+            Poll::Ready(Err(error)) => assert_eq!(error.kind(), ErrorKind::AuthenticationFailed),
+            other => panic!("rollback did not finish: {other:?}"),
+        }
+        drop(first);
+        assert_eq!(
+            operations.runtime.steps().last(),
+            Some(&Step::DisconnectPanu)
+        );
+        let new_error = futures_lite::future::block_on(operations.join_network(competitor))
+            .expect_err("test runtime always fails authentication");
+        assert_eq!(new_error.kind(), ErrorKind::AuthenticationFailed);
+        assert_eq!(
+            operations.runtime.steps().last(),
+            Some(&Step::DisconnectPanu)
+        );
+        assert!(operations.store.load().unwrap().is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn membership_is_committed_only_after_all_runtime_steps_succeed() {
         futures_lite::future::block_on(async {
             let (root, store) = temp_store("success");
@@ -677,6 +752,7 @@ mod tests {
                 fail_control: false,
                 concurrent_member: None,
                 pause_preflight: false,
+                pause_rollback_until: None,
             };
             let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime);
 
@@ -707,6 +783,7 @@ mod tests {
                 fail_control: true,
                 concurrent_member: None,
                 pause_preflight: false,
+                pause_rollback_until: None,
             };
             let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime);
 
@@ -754,6 +831,7 @@ mod tests {
                 fail_control: false,
                 concurrent_member: Some((store.path().to_owned(), concurrent_network)),
                 pause_preflight: false,
+                pause_rollback_until: None,
             };
             let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime);
 
