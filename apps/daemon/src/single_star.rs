@@ -602,7 +602,6 @@ where
             if let Some(discovery) = discovery {
                 let discovered = discovery
                     .bluez
-
                     .discovered_network_ids(discovery.adapter.clone())
                     .await?;
                 merge_discovered_networks(&mut networks, discovered)?;
@@ -1224,7 +1223,6 @@ mod tests {
                 prefix: address.prefix,
             },
             ActiveIpv4Prefix {
-
                 interface: Some(foreign),
                 prefix: blueroute_core::IpPrefix::new("10.201.44.0".parse().unwrap(), 24).unwrap(),
             },
