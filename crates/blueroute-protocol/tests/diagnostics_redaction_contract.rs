@@ -56,7 +56,13 @@ fn diagnostics_drop_unrecognized_sensitive_fields_on_typed_round_trip() {
 #[test]
 fn diagnostics_do_not_invent_observations_when_fields_are_absent() {
     let mut wire = serde_json::to_value(snapshot()).unwrap();
-    for field in ["system", "observed_peers", "interfaces", "routes", "topology"] {
+    for field in [
+        "system",
+        "observed_peers",
+        "interfaces",
+        "routes",
+        "topology",
+    ] {
         wire.as_object_mut().unwrap().remove(field);
     }
     let typed: DiagnosticSnapshot = serde_json::from_value(wire).unwrap();
