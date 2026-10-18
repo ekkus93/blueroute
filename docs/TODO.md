@@ -1064,6 +1064,21 @@ independently verified production enrollment, running-daemon control
 listener, PAN authentication or physical Bluetooth acceptance.
 P7-003/P7-004/P14-003 and production P6-004 remain OPEN.
 
+
+**P7-003 hostile candidate-certificate preface qualification (software-only, 2026-10-18):**
+`apps/daemon/tests/control_certificate_preface_adversarial.rs` exercises actual localhost
+TCP candidate-certificate exchange against five unauthenticated hostile peer inputs:
+bad magic, partial preface header, declared certificate size over the 16 KiB
+limit, zero certificate length, and a peer that holds the socket open past
+the absolute exchange deadline. All five regressions passed in
+[exact-head CI 39116378364](https://github.com/ekkus93/blueroute/actions/runs/39116378364)
+at `064fdbb1b951e4db3934d4d03d5aaa52f2ecab86`. This qualifies only
+the unauthenticated enrollment-candidate parser and socket deadline;
+it does **not** independently confirm a user-visible peer fingerprint,
+verify possession of a remote key via TLS, wire daemon-owned PAN sessions,
+enable production JoinNetwork, or establish physical Bluetooth acceptance.
+P7-003/P7-004/P6-004 remain IN PROGRESS; hardware acceptance is DEFERRED.
+
 ## P7-004 — Implement control-session lifecycle
 
 **P7-004 durable-derived inbound TLS allowlist (software-only, 2026-10-16):** `DurablePeerTrustOperations::approved_control_pins` now builds a deterministic incoming peer allowlist only by intersecting current on-disk network approval with separately enrolled SPKI pins, under existing authorization locks. `accept_registered_from_durable_approval` closes the owned TCP socket on an invalid preflight, then performs pinned mutual-TLS 1.3, exporter-bound Hello/HelloAck, durable activation and registry admission. A revoked/orphaned pin or wrong-network entry does not authorize a peer; trust-only requests and invalid network preflights fail before TLS, while corrupt pin state is not treated as an empty but trusted registry. Real localhost TLS and negative socket EOF tests plus new orphaned/cross-network/corruption regressions pass in [exact-head CI 38900079715](https://github.com/ekkus93/blueroute/actions/runs/38900079715) at `b8bd390ccda03a811bf54e2b20b17f707a24babc` (prior commits `90358903`, `8b3a9056`, `74133b5e`, `bd4651b2`; formatting repair `b8bd390c`). **Still NOT live daemon/PAN listener**, independently verified enrollment UI, connected reconnect ownership, production JoinNetwork, or physical Bluetooth acceptance; P7-003/P7-004/P6-004 remain open and hardware acceptance deferred.
