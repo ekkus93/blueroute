@@ -204,6 +204,15 @@ where
 {
     fn join_network(&self, network: NetworkId) -> JoinNetworkFuture<'_, ()> {
         Box::pin(async move {
+            // Reject the zero sentinel here, not only in the CLI parser:
+            // another D-Bus/API caller must not drive PANU or durable state
+            // with an invalid logical network identity.
+            if network == NetworkId::from_bytes([0; 16]) {
+                return Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "zero NetworkId is not a joinable BlueRoute network",
+                ));
+            }
             // Hold this guard through commit and all rollback paths, not just
             // the first preflight; an overlapping join must never undo an
             // earlier attempt's PANU or IP ownership.
@@ -660,6 +669,31 @@ mod tests {
             root.clone(),
             NetworkMembershipStore::new(root.join("memberships-v1")),
         )
+    }
+
+    #[test]
+    fn invalid_zero_network_never_uses_runtime_or_persists_membership() {
+        let (root, store) = temp_store("zero-network");
+        let operations =
+            TransactionalJoinNetworkOperations::with_runtime(store, FakeRuntime::successful());
+        let error = futures_lite::future::block_on(
+            operations.join_network(NetworkId::from_bytes([0; 16])),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidState);
+        assert!(error.message().contains("zero NetworkId"));
+        assert!(operations.runtime.steps().is_empty());
+        assert!(operations.store.load().unwrap().is_empty());
+        // A rejected invalid request must not poison a future legitimate
+        // transaction or require physical-state reconciliation.
+        let valid = NetworkId::from_bytes([0x55; 16]);
+        futures_lite::future::block_on(operations.join_network(valid)).unwrap();
+        assert_eq!(operations.runtime.steps().len(), 4);
+        assert_eq!(
+            operations.store.load().unwrap().network(&valid).unwrap().state,
+            MembershipState::Member
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
