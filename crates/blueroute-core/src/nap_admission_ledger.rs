@@ -497,3 +497,16 @@ mod tests {
             assert_eq!(ledger.counts().unwrap(), (0, 0));
         }
     }
+
+    #[test]
+    fn unknown_or_disabled_policy_does_not_reserve() {
+        for host in [host(None), host(Some(0))] {
+            let ledger = NapAdmissionLedger::new(host);
+            assert!(ledger.reserve(peer(1)).is_err());
+            assert_eq!(ledger.counts().unwrap(), (0, 0));
+        }
+        let ledger = NapAdmissionLedger::new(host(Some(2)));
+        assert!(ledger.reserve(peer(0)).is_err());
+        assert_eq!(ledger.counts().unwrap(), (0, 0));
+    }
+}
