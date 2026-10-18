@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::future::Future;
 use std::io::Read;
+use std::net::TcpListener;
 use std::pin::Pin;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,6 +24,13 @@ pub type NetworkOperationFuture<'a, T> =
 const MAX_ADDRESS_CONFLICT_RETRIES: usize = 16;
 
 pub trait NetworkOperations: Send + Sync {
+    /// Return a TCP listener only for the currently active, independently
+    /// observed NAP host address. A missing provider is NOT a wildcard bind.
+    /// Merely binding does not activate authenticated peer sessions.
+    fn bind_owned_control_listener(&self) -> NetworkOperationFuture<'_, Option<TcpListener>> {
+        Box::pin(async { Ok(None) })
+    }
+
     fn create_network(&self, name: DisplayName) -> NetworkOperationFuture<'_, NetworkId>;
     fn leave_network(&self) -> NetworkOperationFuture<'_, ()>;
     fn reconcile_on_startup(&self) -> NetworkOperationFuture<'_, ()> {
@@ -70,6 +78,15 @@ impl NetworkIdGenerator for SystemNetworkIdGenerator {
 }
 
 pub trait StarHostRuntime: Send + Sync {
+    /// Active-host backend boundary. The production implementation rechecks
+    /// NetworkManager-owned addresses before binding; fakes need no listener.
+    fn bind_owned_control_listener(
+        &self,
+        _config: DaemonConfig,
+    ) -> NetworkOperationFuture<'_, Option<TcpListener>> {
+        Box::pin(async { Ok(None) })
+    }
+
     fn diagnostic_interfaces(
         &self,
     ) -> NetworkOperationFuture<'_, Option<Vec<DiagnosticInterface>>> {
@@ -109,6 +126,35 @@ struct ActiveLinuxStarHost {
 }
 
 impl StarHostRuntime for LinuxStarHostRuntime {
+    fn bind_owned_control_listener(
+        &self,
+        config: DaemonConfig,
+    ) -> NetworkOperationFuture<'_, Option<TcpListener>> {
+        Box::pin(async move {
+            let active = self.active.lock().map_err(lock_error)?.clone();
+            let Some(active) = active else {
+                return Ok(None);
+            };
+            // A stale or mismatched runtime handle must never permit the
+            // listener to follow a foreign interface or arbitrary address.
+            let planned =
+                Ipv4StarAddressPlan::for_network(active.network, config.ipv4_address_pool)?;
+            if active.address.owner != active.network
+                || active.address.interface != active.bridge
+                || active.address.prefix != planned.host
+            {
+                return Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "active NAP runtime does not match its planned host address",
+                ));
+            }
+            let addresses = active.network_backend.addresses().await?;
+            let listener =
+                crate::bind_owned_nap_control_listener(active.network, &config, &addresses)?;
+            Ok(Some(listener))
+        })
+    }
+
     fn diagnostic_interfaces(
         &self,
     ) -> NetworkOperationFuture<'_, Option<Vec<DiagnosticInterface>>> {
@@ -438,6 +484,10 @@ where
     R: StarHostRuntime,
     G: NetworkIdGenerator,
 {
+    fn bind_owned_control_listener(&self) -> NetworkOperationFuture<'_, Option<TcpListener>> {
+        self.runtime.bind_owned_control_listener(self.config.clone())
+    }
+
     fn diagnostic_interfaces(
         &self,
     ) -> NetworkOperationFuture<'_, Option<Vec<DiagnosticInterface>>> {
@@ -1076,6 +1126,33 @@ mod tests {
                 .all(|item| item.name != "brb-host")
         );
         assert!(owned_interface_diagnostics(NetworkId::from_bytes([3; 16]), &entries).is_empty());
+    }
+
+    #[test]
+    fn idle_host_cannot_bind_control_listener_through_runtime_or_operations() {
+        futures_lite::future::block_on(async {
+            let empty_runtime = LinuxStarHostRuntime::default();
+            assert!(empty_runtime
+                .bind_owned_control_listener(DaemonConfig::default())
+                .await
+                .unwrap()
+                .is_none());
+
+            let (root, store) = temp_store("idle-control-listener");
+            let operations = SingleStarNetworkOperations::with_runtime_and_generator(
+                store,
+                DaemonConfig::default(),
+                nap_capabilities(Some(true)),
+                FakeRuntime::default(),
+                SequenceGenerator::new([]),
+            );
+            assert!(operations
+                .bind_owned_control_listener()
+                .await
+                .unwrap()
+                .is_none());
+            fs::remove_dir_all(root).unwrap();
+        });
     }
 
     #[test]
