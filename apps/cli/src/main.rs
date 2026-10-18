@@ -263,7 +263,7 @@ fn format_diagnostics(
         return serde_json::to_string_pretty(snapshot);
     }
     let mut details = vec![format!(
-        "API: {}\nHealth: {:?}\nNetwork: {:?}\nReported nodes: {} (local-only until peer authentication)\nLocal control TLS SPKI SHA-256: {}\nSystem: {}\nRecent API failures: {} (details available with --json)\nCapabilities:\n{:#?}",
+        "API: {}\nHealth: {:?}\nNetwork: {:?}\nReported nodes: {} (local-only until peer authentication)\nLocal control TLS SPKI SHA-256: {}\nSystem: {}\nRecent API failures: {} (bounded details below)\nCapabilities:\n{:#?}",
         snapshot.api_version,
         snapshot.health,
         snapshot.current_network,
@@ -279,6 +279,18 @@ fn format_diagnostics(
         snapshot.recent_errors.len(),
         snapshot.capabilities,
     )];
+    details.push(format_diagnostic_entries(
+        "Recent failure details",
+        Some(snapshot.recent_errors.as_slice()),
+        |failure| {
+            format!(
+                "unix_ms={} operation={} class={}",
+                failure.timestamp_unix_ms,
+                safe_diagnostic_field(&failure.operation),
+                safe_diagnostic_field(&failure.failure_class)
+            )
+        },
+    ));
     details.push(format_diagnostic_entries(
         "System adapters",
         snapshot
@@ -952,6 +964,52 @@ mod tests {
             serde_json::from_str::<DiagnosticSnapshot>(&encoded).unwrap(),
             snapshot
         );
+    }
+
+    #[test]
+    fn detailed_diagnostics_escape_and_bound_recent_failure_records() {
+        let mut snapshot = DiagnosticSnapshot {
+            api_version: ApiVersion::CURRENT,
+            health: HealthLevel::Degraded,
+            current_network: None,
+            visible_nodes: 0,
+            capabilities: NodeCapabilities::default(),
+            local_control_tls_spki_sha256: None,
+            system: None,
+            observed_peers: None,
+            interfaces: None,
+            routes: None,
+            topology: None,
+            recent_errors: Vec::new(),
+        };
+        snapshot.recent_errors.push(blueroute_protocol::DiagnosticFailure {
+            timestamp_unix_ms: 1234,
+            operation: "join\\nspoof".replace("\\n", "\n"),
+            failure_class: "Denied\\u{1b}[31m".replace("\\u{1b}", "\u{1b}"),
+        });
+        let detailed = format_diagnostics(&snapshot, false).unwrap();
+        assert!(detailed.contains("Recent failure details: 1 daemon-reported"));
+        assert!(detailed.contains("unix_ms=1234"));
+        assert!(detailed.contains("operation=join\\u{a}spoof"));
+        assert!(detailed.contains("class=Denied\\u{1b}[31m"));
+        assert!(!detailed.contains("join\nspoof"));
+        assert!(!detailed.contains('\u{1b}'));
+        let json = format_diagnostics(&snapshot, true).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DiagnosticSnapshot>(&json).unwrap(),
+            snapshot
+        );
+        for i in 1..40 {
+            snapshot.recent_errors.push(blueroute_protocol::DiagnosticFailure {
+                timestamp_unix_ms: i,
+                operation: format!("op{i}"),
+                failure_class: "denied".to_owned(),
+            });
+        }
+        let bounded = format_diagnostics(&snapshot, false).unwrap();
+        assert!(bounded.contains("Recent failure details: 40 daemon-reported"));
+        assert!(bounded.contains("8 additional entries omitted"));
+        assert!(!bounded.contains("operation=op39"));
     }
 
     #[test]
