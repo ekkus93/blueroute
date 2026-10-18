@@ -88,8 +88,11 @@ impl NapAdmissionLedger {
 
     /// Atomically reserve one slot against active *and pending* peers.
     ///
-    /// A duplicate pending attempt is rejected rather than starting a second
-    /// connection. An already active peer returns its original ticket.
+    /// Duplicate pending *and active* attempts are rejected. Returning an
+    /// existing active ticket to a new session would give the new owner the
+    /// ability to retire a still-attached peer on its own TLS loss/drop.
+    /// Reconnection must explicitly reconcile/retire the previous physical
+    /// attachment before reserving a fresh generation.
     pub fn reserve(
         &self,
         candidate: NodeId,
@@ -112,6 +115,12 @@ impl NapAdmissionLedger {
                 "NAP peer admission already pending",
             ));
         }
+        if state.active.contains_key(&candidate) {
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP peer already attached; cannot transfer reservation ownership",
+            ));
+        }
         let observed: Vec<NodeId> = state
             .active
             .keys()
@@ -119,16 +128,7 @@ impl NapAdmissionLedger {
             .copied()
             .collect();
         let decision = plan_nap_client_admission(&state.host, &observed, candidate)?;
-        if let Some(&generation) = state.active.get(&candidate) {
-            return Ok((
-                NapAdmissionTicket {
-                    candidate,
-                    generation,
-                },
-                decision,
-            ));
-        }
-        let generation = state.next_generation.checked_add(1).ok_or_else(|| {
+         let generation = state.next_generation.checked_add(1).ok_or_else(|| {
             CoreError::new(
                 ErrorKind::InvalidState,
                 "NAP admission generation exhausted",
@@ -254,12 +254,44 @@ mod tests {
         assert!(ledger.activate(ticket).unwrap());
         assert!(!ledger.activate(ticket).unwrap());
         assert_eq!(ledger.counts().unwrap(), (1, 0));
-        let (again, decision) = ledger.reserve(peer(1)).unwrap();
-        assert_eq!(again, ticket);
-        assert!(decision.already_attached);
+        assert_eq!(
+            ledger.reserve(peer(1)).unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
+        assert_eq!(ledger.counts().unwrap(), (1, 0));
         assert!(ledger.retire(ticket).unwrap());
         assert!(!ledger.retire(ticket).unwrap());
         assert_eq!(ledger.counts().unwrap(), (0, 0));
+    }
+
+    #[test]
+    fn duplicate_authenticated_session_cannot_steal_active_lease() {
+        let ledger = NapAdmissionLedger::new(host(Some(2)));
+        let (original, _) = ledger.reserve(peer(1)).unwrap();
+        assert!(ledger.activate(original).unwrap());
+        // A second TLS session for the same peer must not obtain the
+        // first owner's ticket: dropping its lease would free a live slot.
+        for _ in 0..3 {
+            assert_eq!(
+                ledger.reserve(peer(1)).unwrap_err().kind(),
+                ErrorKind::InvalidState
+            );
+            assert_eq!(ledger.counts().unwrap(), (1, 0));
+        }
+        let (other, _) = ledger.reserve(peer(2)).unwrap();
+        assert!(ledger.activate(other).unwrap());
+        assert_eq!(ledger.counts().unwrap(), (2, 0));
+        assert_eq!(
+            ledger.reserve(peer(1)).unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
+        assert!(ledger.retire(original).unwrap());
+        let (replacement, _) = ledger.reserve(peer(1)).unwrap();
+        assert_ne!(replacement.generation, original.generation);
+        assert!(!ledger.retire(original).unwrap());
+        assert_eq!(ledger.counts().unwrap(), (1, 1));
+        assert!(ledger.activate(replacement).unwrap());
+        assert_eq!(ledger.counts().unwrap(), (2, 0));
     }
 
     #[test]
