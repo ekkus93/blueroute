@@ -30,15 +30,21 @@ impl AuthenticatedNapTicket {
 }
 
 /// Owns one capacity reservation until explicitly retired or dropped.
-/// The owner must keep this lease alive while the PANU is attached; losing
-/// the authenticated control owner should drop this lease and release its slot.
+/// Pending leases normally release on drop. Once an attachment is observed,
+/// RegisteredNapControlOwner retains capacity on unexpected owner drop until
+/// an independently confirmed PANU detach or complete owned NAP shutdown.
 #[derive(Debug)]
 pub struct AuthenticatedNapLease<'a> {
     admission: &'a NetworkNapAdmission,
     ticket: AuthenticatedNapTicket,
+    release_on_drop: bool,
 }
 
 impl AuthenticatedNapLease<'_> {
+    fn retain_capacity_on_drop(&mut self) {
+        self.release_on_drop = false;
+    }
+
     pub fn ticket(&self) -> &AuthenticatedNapTicket {
         &self.ticket
     }
@@ -57,7 +63,9 @@ impl Drop for AuthenticatedNapLease<'_> {
     fn drop(&mut self) {
         // The ledger is generation-scoped. A stale lease can never remove
         // a replacement; on poison, further admission is already denied.
-        let _ = self.retire();
+        if self.release_on_drop {
+            let _ = self.retire();
+        }
     }
 }
 
@@ -68,7 +76,14 @@ pub fn reserve_authenticated_nap_lease<'a>(
     admission: &'a NetworkNapAdmission,
 ) -> Result<(AuthenticatedNapLease<'a>, NapAdmissionDecision), CoreError> {
     let (ticket, decision) = reserve_authenticated_nap(session, admission)?;
-    Ok((AuthenticatedNapLease { admission, ticket }, decision))
+    Ok((
+        AuthenticatedNapLease {
+            admission,
+            ticket,
+            release_on_drop: true,
+        },
+        decision,
+    ))
 }
 
 fn same_session(
@@ -159,6 +174,17 @@ fn release_pending_on_transport_loss(
 ) {
     if !attached {
         lease.take();
+    }
+}
+
+fn preserve_attached_capacity_on_owner_drop(
+    lease: &mut Option<AuthenticatedNapLease<'_>>,
+    attached: bool,
+) {
+    if attached {
+        if let Some(lease) = lease.as_mut() {
+            lease.retain_capacity_on_drop();
+        }
     }
 }
 
@@ -295,12 +321,32 @@ impl<'session, 'nap> RegisteredNapControlOwner<'session, 'nap> {
         result
     }
 
+    /// Copy the exact admission generation for later independently observed
+    /// detachment. The caller must keep this ticket if it cannot retain the
+    /// owner; dropping an attached owner conservatively preserves capacity.
+    /// Only retire the ticket after matching PANU detach or owned NAP shutdown.
+    pub fn observed_attachment_ticket(&self) -> Option<AuthenticatedNapTicket> {
+        if self.attached {
+            self.lease.as_ref().map(|lease| lease.ticket().clone())
+        } else {
+            None
+        }
+    }
+
     pub const fn attachment_observed(&self) -> bool {
         self.attached
     }
 
     pub fn awaiting_detach_after_tls_loss(&self) -> bool {
         self.attached && self.session.is_terminal()
+    }
+}
+
+impl Drop for RegisteredNapControlOwner<'_, '_> {
+    fn drop(&mut self) {
+        // TLS owner drop is not independent proof of PANU detachment.
+        // Preserve occupied capacity rather than admitting an overlapping peer.
+        preserve_attached_capacity_on_owner_drop(&mut self.lease, self.attached);
     }
 }
 
@@ -358,6 +404,7 @@ mod tests {
         let (pending, _) = admission.reserve(peer(2)).unwrap();
         let lease = AuthenticatedNapLease {
             admission: &admission,
+            release_on_drop: true,
             ticket: AuthenticatedNapTicket {
                 ticket: pending,
                 session_id: [7; 16],
@@ -370,6 +417,7 @@ mod tests {
         assert!(admission.activate(&active).unwrap());
         let lease = AuthenticatedNapLease {
             admission: &admission,
+            release_on_drop: true,
             ticket: AuthenticatedNapTicket {
                 ticket: active,
                 session_id: [8; 16],
@@ -387,6 +435,7 @@ mod tests {
         let (pending, _) = admission.reserve(peer(2)).unwrap();
         let mut lease = Some(AuthenticatedNapLease {
             admission: &admission,
+            release_on_drop: true,
             ticket: AuthenticatedNapTicket {
                 ticket: pending,
                 session_id: [7; 16],
@@ -400,6 +449,7 @@ mod tests {
         assert!(admission.activate(&ticket).unwrap());
         let mut lease = Some(AuthenticatedNapLease {
             admission: &admission,
+            release_on_drop: true,
             ticket: AuthenticatedNapTicket {
                 ticket,
                 session_id: [8; 16],
@@ -411,6 +461,47 @@ mod tests {
         // Only independently observed PANU detach (or full NAP shutdown)
         // may release an active reservation after the TLS owner disappears.
         lease.take();
+        assert_eq!(admission.counts().unwrap(), (0, 0));
+    }
+
+    #[test]
+    fn owner_drop_preserves_observed_attachment_until_exact_detach() {
+        let admission = NetworkNapAdmission::new(network(1), capabilities()).unwrap();
+        let (ticket, _) = admission.reserve(peer(2)).unwrap();
+        assert!(admission.activate(&ticket).unwrap());
+        let authenticated = AuthenticatedNapTicket {
+            ticket,
+            session_id: [7; 16],
+        };
+        let mut lease = Some(AuthenticatedNapLease {
+            admission: &admission,
+            ticket: authenticated.clone(),
+            release_on_drop: true,
+        });
+        preserve_attached_capacity_on_owner_drop(&mut lease, true);
+        drop(lease);
+        assert_eq!(admission.counts().unwrap(), (1, 0));
+        assert!(retire_authenticated_nap(&admission, &authenticated).unwrap());
+        let (replacement, _) = admission.reserve(peer(2)).unwrap();
+        assert!(!retire_authenticated_nap(&admission, &authenticated).unwrap());
+        assert_eq!(admission.counts().unwrap(), (0, 1));
+        assert!(admission.retire(&replacement).unwrap());
+    }
+
+    #[test]
+    fn unobserved_attachment_does_not_strand_pending_capacity_on_owner_drop() {
+        let admission = NetworkNapAdmission::new(network(1), capabilities()).unwrap();
+        let (ticket, _) = admission.reserve(peer(2)).unwrap();
+        let mut lease = Some(AuthenticatedNapLease {
+            admission: &admission,
+            ticket: AuthenticatedNapTicket {
+                ticket,
+                session_id: [7; 16],
+            },
+            release_on_drop: true,
+        });
+        preserve_attached_capacity_on_owner_drop(&mut lease, false);
+        drop(lease);
         assert_eq!(admission.counts().unwrap(), (0, 0));
     }
 
