@@ -853,6 +853,24 @@ passed formatting, workspace checks, Clippy, unit/integration
 tests and packaging checks. This does not enable live joining
 or satisfy hardware acceptance.
 
+**P6-004 ambiguous control-session startup failure (software-only, 2026-10-18):**
+After `start_control_session` returns an error without an owned
+`JoinControlSession`, the coordinator still performs reverse-order
+IP lease removal and PANU disconnect, but now **keeps the join
+reservation fail-closed** even if those two cleanups succeed: neither
+operation proves that a partly opened TLS/control socket was closed.
+Simulated control authentication failure and paused rollback tests
+verify that no later join restarts preflight/PANU/IP work until a
+separate P6-009 runtime reconciliation is available. This supersedes
+the older rollback-phase test description that said a new join could
+run immediately after cleanup. Implemented at
+`a6cc7248325769b6c3952de31050fe3c1f8e72dc`.
+**CI for this exact behavior is pending**, as its first run
+39106451974 was canceled when a late validation of older
+`f738b687` started. Never label this complete until exact-head
+qualification succeeds. No live daemon session, production join
+or Bluetooth hardware acceptance is claimed.
+
 ## P6-005 — Implement IPv4 allocation for one star
 
 - [x] select private subnet policy.
