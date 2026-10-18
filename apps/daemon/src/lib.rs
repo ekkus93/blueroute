@@ -56,7 +56,8 @@ pub use peer_trust::{
 };
 pub use pinned_ingress::{PinnedIngressError, PinnedSessionIngress, VerifiedTlsIdentity};
 pub use registered_transport::{
-    RegisteredControlSession, RegisteredNapControlOwner, SessionAdmissionError,
+    AuthenticatedNapTicket, RegisteredControlSession, RegisteredNapControlOwner,
+    SessionAdmissionError,
 };
 pub use single_star::{
     LinuxStarHostRuntime, NetworkIdGenerator, NetworkOperationFuture, NetworkOperations,

@@ -181,10 +181,8 @@ fn preserve_attached_capacity_on_owner_drop(
     lease: &mut Option<AuthenticatedNapLease<'_>>,
     attached: bool,
 ) {
-    if attached {
-        if let Some(lease) = lease.as_mut() {
-            lease.retain_capacity_on_drop();
-        }
+    if attached && let Some(lease) = lease.as_mut() {
+        lease.retain_capacity_on_drop();
     }
 }
 
