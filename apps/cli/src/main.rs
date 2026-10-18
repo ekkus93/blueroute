@@ -53,7 +53,10 @@ enum CapabilityCommand {
 }
 #[derive(Debug, Subcommand)]
 enum DiagnosticsCommand {
-    Show,
+    Show {
+        #[arg(long, conflicts_with = "json")]
+        summary: bool,
+    },
 }
 #[derive(Debug, Subcommand)]
 enum NetworkCommand {
@@ -85,7 +88,7 @@ enum Operation {
     Version,
     Status { json: bool },
     Capabilities { json: bool },
-    Diagnostics { json: bool },
+    Diagnostics { json: bool, summary: bool },
     LocalKey { json: bool },
     NetworkList { json: bool },
     NodeList { json: bool },
@@ -137,8 +140,8 @@ fn parse(args: &[String]) -> Result<Operation, String> {
             command: CapabilityCommand::Show,
         }) => Operation::Capabilities { json },
         Some(CliCommand::Diagnostics {
-            command: DiagnosticsCommand::Show,
-        }) => Operation::Diagnostics { json },
+            command: DiagnosticsCommand::Show { summary },
+        }) => Operation::Diagnostics { json, summary },
         Some(CliCommand::Network {
             command: NetworkCommand::List,
         }) => Operation::NetworkList { json },
@@ -341,6 +344,35 @@ fn format_diagnostics(
     Ok(details.join("\n"))
 }
 
+/// Short read-only health overview for automation and first-line support.
+/// Missing observations are never displayed as observed zero, and discovery
+/// counts never imply authenticated remote membership.
+fn format_diagnostics_summary(snapshot: &DiagnosticSnapshot) -> String {
+    let count = |value: Option<usize>| match value {
+        Some(value) => format!("{value} daemon-reported"),
+        None => "unavailable (not reported by daemon)".to_owned(),
+    };
+    let topology = snapshot.topology.as_ref().map(|topology| {
+        format!(
+            "{} nodes, {} links (daemon-reported; not authentication evidence)",
+            topology.nodes.len(),
+            topology.links.len()
+        )
+    });
+    format!(
+        "Health: {:?}\nNetwork: {:?}\nReported nodes: {} (local-only until peer authentication)\nBluetooth adapters: {}\nObserved peers: {} (not authenticated membership)\nInterfaces: {}\nRoutes: {}\nTopology: {}\nRecent API failures: {}\nUse 'blueroute diagnostics show' for details or '--json' for the full snapshot.",
+        snapshot.health,
+        snapshot.current_network,
+        snapshot.visible_nodes,
+        count(snapshot.system.as_ref().map(|system| system.adapters.len())),
+        count(snapshot.observed_peers.as_ref().map(Vec::len)),
+        count(snapshot.interfaces.as_ref().map(Vec::len)),
+        count(snapshot.routes.as_ref().map(Vec::len)),
+        topology.unwrap_or_else(|| "unavailable (not reported by daemon)".to_owned()),
+        snapshot.recent_errors.len(),
+    )
+}
+
 /// Public local identity for out-of-band comparison. It is neither a trust
 /// decision nor evidence of a remote certificate's private-key possession.
 fn format_local_key(
@@ -529,12 +561,16 @@ fn run(args: &[String]) -> i32 {
         Operation::Capabilities { json } => futures_lite::future::block_on(client.capabilities())
             .map_err(CliFailure::from)
             .and_then(|caps| format_capabilities(&caps, json).map_err(CliFailure::from)),
-        Operation::Diagnostics { json } => {
+        Operation::Diagnostics { json, summary } => {
             futures_lite::future::block_on(client.request(&Command::GetDiagnostics))
                 .map_err(CliFailure::from)
                 .and_then(|response| match response {
                     Response::Diagnostics(snapshot) => {
-                        format_diagnostics(&snapshot, json).map_err(CliFailure::from)
+                        if summary {
+                            Ok(format_diagnostics_summary(&snapshot))
+                        } else {
+                            format_diagnostics(&snapshot, json).map_err(CliFailure::from)
+                        }
                     }
                     _ => Err("daemon returned an unexpected diagnostics response".into()),
                 })
@@ -710,7 +746,10 @@ mod tests {
         );
         assert_eq!(
             parse(&args(&["diagnostics", "show", "--json"])),
-            Ok(Operation::Diagnostics { json: true })
+            Ok(Operation::Diagnostics {
+                json: true,
+                summary: false,
+            })
         );
         assert!(parse(&args(&["diagnostics"])).is_err());
         assert!(parse(&args(&["network", "join"])).is_err());
@@ -944,6 +983,56 @@ mod tests {
         assert!(!human.contains("bnep32"));
         let json = format_diagnostics(&snapshot, true).unwrap();
         assert!(json.contains("bnep39"));
+    }
+
+    #[test]
+    fn diagnostic_summary_is_opt_in_and_preserves_unknown_vs_empty() {
+        assert_eq!(
+            parse(&args(&["diagnostics", "show", "--summary"])),
+            Ok(Operation::Diagnostics {
+                json: false,
+                summary: true,
+            })
+        );
+        assert!(parse(&args(&["diagnostics", "show", "--summary", "--json"])).is_err());
+        assert!(parse(&args(&["diagnostics", "show", "--summary", "--summary"])).is_err());
+        let mut snapshot = DiagnosticSnapshot {
+            api_version: ApiVersion::CURRENT,
+            health: HealthLevel::Degraded,
+            current_network: None,
+            visible_nodes: 1,
+            capabilities: NodeCapabilities::default(),
+            local_control_tls_spki_sha256: None,
+            system: None,
+            observed_peers: None,
+            interfaces: None,
+            routes: None,
+            topology: None,
+            recent_errors: Vec::new(),
+        };
+        let unknown = format_diagnostics_summary(&snapshot);
+        assert!(unknown.contains("Health: Degraded"));
+        assert!(unknown.contains("Interfaces: unavailable (not reported by daemon)"));
+        assert!(unknown.contains("Bluetooth adapters: unavailable"));
+        assert!(unknown.contains("Observed peers: unavailable"));
+        assert!(unknown.contains("local-only until peer authentication"));
+        snapshot.interfaces = Some(Vec::new());
+        snapshot.routes = Some(Vec::new());
+        snapshot.observed_peers = Some(Vec::new());
+        snapshot.system = Some(SystemDiagnosticMetadata {
+            daemon_version: "1.0".into(),
+            platform: "Linux".into(),
+            kernel_release: None,
+            bluez_version: None,
+            network_backend_version: None,
+            adapters: Vec::new(),
+        });
+        let empty = format_diagnostics_summary(&snapshot);
+        assert!(empty.contains("Interfaces: 0 daemon-reported"));
+        assert!(empty.contains("Routes: 0 daemon-reported"));
+        assert!(empty.contains("Observed peers: 0 daemon-reported"));
+        assert!(empty.contains("Bluetooth adapters: 0 daemon-reported"));
+        assert!(!empty.contains("authenticated remote peers"));
     }
 
     #[test]
