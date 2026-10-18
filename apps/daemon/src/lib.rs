@@ -6,8 +6,8 @@ mod approved_transport;
 #[allow(dead_code)]
 mod attempt_socket;
 mod authorization;
-mod control_tls;
 mod control_listener;
+mod control_tls;
 mod join_network;
 mod peer_pin_store;
 mod peer_trust;

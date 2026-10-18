@@ -24,14 +24,20 @@ pub fn owned_nap_control_address(
     observed: &[InterfaceAddress],
 ) -> Result<SocketAddrV4, CoreError> {
     if network == NetworkId::from_bytes([0; 16]) {
-        return Err(CoreError::new(ErrorKind::InvalidInput, "invalid zero control network"));
+        return Err(CoreError::new(
+            ErrorKind::InvalidInput,
+            "invalid zero control network",
+        ));
     }
     config.validate()?;
     let plan = Ipv4StarAddressPlan::for_network(network, config.ipv4_address_pool)?;
     let network_string = network.to_string();
     let interface = NetworkInterfaceHandle::new(format!("brb-{}", &network_string[..8]))?;
     let IpAddr::V4(host_ip) = plan.host.address else {
-        return Err(CoreError::new(ErrorKind::InvalidState, "NAP control host is not IPv4"));
+        return Err(CoreError::new(
+            ErrorKind::InvalidState,
+            "NAP control host is not IPv4",
+        ));
     };
 
     // Linux binds a TCP socket to an IP, not to the interface provenance of
@@ -49,9 +55,7 @@ pub fn owned_nap_control_address(
     // The selected bridge must not report a conflicting BlueRoute-owned
     // address, even if the expected address is also present.
     if observed.iter().any(|address| {
-        address.owner == network
-            && address.interface == interface
-            && address.prefix != plan.host
+        address.owner == network && address.interface == interface && address.prefix != plan.host
     }) {
         return Err(CoreError::new(
             ErrorKind::InvalidState,
@@ -59,9 +63,7 @@ pub fn owned_nap_control_address(
         ));
     }
     let found = observed.iter().any(|address| {
-        address.owner == network
-            && address.interface == interface
-            && address.prefix == plan.host
+        address.owner == network && address.interface == interface && address.prefix == plan.host
     });
     if !found {
         return Err(CoreError::new(
@@ -115,8 +117,8 @@ mod tests {
     fn selected_nap_host_address_is_exact_and_never_wildcard() {
         let owner = network(7);
         let owned = address(owner);
-        let result = owned_nap_control_address(owner, &DaemonConfig::default(), &[owned.clone()])
-            .unwrap();
+        let result =
+            owned_nap_control_address(owner, &DaemonConfig::default(), &[owned.clone()]).unwrap();
         assert_eq!(result.port(), CONTROL_TCP_PORT);
         assert_eq!(IpAddr::V4(*result.ip()), owned.prefix.address);
         assert!(!result.ip().is_unspecified());
@@ -133,23 +135,31 @@ mod tests {
         let owner = network(7);
         let config = DaemonConfig::default();
         assert_eq!(
-            owned_nap_control_address(owner, &config, &[]).unwrap_err().kind(),
+            owned_nap_control_address(owner, &config, &[])
+                .unwrap_err()
+                .kind(),
             ErrorKind::InvalidState
         );
         let mut foreign = address(owner);
         foreign.owner = network(9);
         assert_eq!(
-            owned_nap_control_address(owner, &config, &[foreign]).unwrap_err().kind(),
+            owned_nap_control_address(owner, &config, &[foreign])
+                .unwrap_err()
+                .kind(),
             ErrorKind::AddressConflict
         );
         let mut wrong_iface = address(owner);
         wrong_iface.interface = NetworkInterfaceHandle::new("eth0").unwrap();
         assert_eq!(
-            owned_nap_control_address(owner, &config, &[wrong_iface]).unwrap_err().kind(),
+            owned_nap_control_address(owner, &config, &[wrong_iface])
+                .unwrap_err()
+                .kind(),
             ErrorKind::AddressConflict
         );
         assert_eq!(
-            owned_nap_control_address(network(0), &config, &[]).unwrap_err().kind(),
+            owned_nap_control_address(network(0), &config, &[])
+                .unwrap_err()
+                .kind(),
             ErrorKind::InvalidInput
         );
     }
@@ -159,11 +169,8 @@ mod tests {
         let owner = network(7);
         let good = address(owner);
         let mut conflicting = good.clone();
-        conflicting.prefix = IpPrefix::new(
-            "10.201.22.1".parse().unwrap(),
-            good.prefix.prefix_len,
-        )
-        .unwrap();
+        conflicting.prefix =
+            IpPrefix::new("10.201.22.1".parse().unwrap(), good.prefix.prefix_len).unwrap();
         assert_eq!(
             owned_nap_control_address(owner, &DaemonConfig::default(), &[good, conflicting])
                 .unwrap_err()
