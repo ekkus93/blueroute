@@ -1435,8 +1435,13 @@ fn certificate_fingerprint(
 fn certificate_subject_public_key_info(
     certificate: &CertificateDer<'_>,
 ) -> Result<Vec<u8>, ControlTlsError> {
-    let (_, parsed) = X509Certificate::from_der(certificate.as_ref())
+    let (remaining, parsed) = X509Certificate::from_der(certificate.as_ref())
         .map_err(|_| ControlTlsError::InvalidCertificate)?;
+    // A valid prefix followed by arbitrary bytes is not a valid complete
+    // certificate. Reject it consistently for enrollment and TLS pin checks.
+    if !remaining.is_empty() {
+        return Err(ControlTlsError::InvalidCertificate);
+    }
     Ok(parsed.public_key().raw.to_vec())
 }
 
@@ -1448,8 +1453,13 @@ fn certificate_names_node(
 }
 
 fn certificate_node_id(certificate: &CertificateDer<'_>) -> Result<NodeId, ControlTlsError> {
-    let (_, parsed) = X509Certificate::from_der(certificate.as_ref())
+    let (remaining, parsed) = X509Certificate::from_der(certificate.as_ref())
         .map_err(|_| ControlTlsError::InvalidCertificate)?;
+    // A valid prefix followed by arbitrary bytes is not a valid complete
+    // certificate. Reject it consistently for enrollment and TLS pin checks.
+    if !remaining.is_empty() {
+        return Err(ControlTlsError::InvalidCertificate);
+    }
     let Some(names) = parsed
         .subject_alternative_name()
         .map_err(|_| ControlTlsError::InvalidCertificate)?
@@ -1612,6 +1622,41 @@ mod tests {
                 identity.fingerprint()
             ),
             Err(ControlTlsError::CertificateIdentityMismatch)
+        ));
+    }
+
+    #[test]
+    fn certificate_parsers_reject_valid_der_with_trailing_untrusted_bytes() {
+        let local = LocalControlTlsIdentity::generate(node(7)).unwrap();
+        // The signed certificate is intact but the complete input is not
+        // canonical DER. Both parsers must reject the extra ASN.1 value.
+        let mut bytes = local.certificate().as_ref().to_vec();
+        bytes.extend_from_slice(&[0x05, 0x00]);
+        let trailing = CertificateDer::from(bytes);
+        assert!(matches!(
+            certificate_fingerprint(&trailing),
+            Err(ControlTlsError::InvalidCertificate)
+        ));
+        assert!(matches!(
+            certificate_node_id(&trailing),
+            Err(ControlTlsError::InvalidCertificate)
+        ));
+        assert!(matches!(
+            PinnedControlTlsCertificate::new(
+                network(9),
+                local.node(),
+                trailing.clone(),
+                local.fingerprint(),
+            ),
+            Err(ControlTlsError::InvalidCertificate)
+        ));
+        assert!(matches!(
+            LocalControlTlsIdentity::from_der(
+                local.node(),
+                trailing,
+                local.private_key.clone_key(),
+            ),
+            Err(ControlTlsError::InvalidCertificate)
         ));
     }
 
