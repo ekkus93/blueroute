@@ -280,10 +280,7 @@ impl<'session, 'nap> RegisteredNapControlOwner<'session, 'nap> {
     /// completed owned NAP shutdown) *and* mapped that event to this exact
     /// TLS generation. Stale callbacks must never retire a replacement.
     /// Close the TLS socket before releasing its capacity reservation.
-    pub fn confirm_observed_detach_if_current(
-        &mut self,
-        expected_session_id: [u8; 16],
-    ) -> bool {
+    pub fn confirm_observed_detach_if_current(&mut self, expected_session_id: [u8; 16]) -> bool {
         if !self.session.cancel_if_current(expected_session_id) {
             return false;
         }
