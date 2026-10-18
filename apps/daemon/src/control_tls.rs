@@ -2197,11 +2197,8 @@ mod tests {
                     network: network(9),
                     peer: node(1),
                 };
-                let mut registered = crate::RegisteredControlSession::admit(
-                    active,
-                    Arc::clone(&registry),
-                )
-                .unwrap();
+                let mut registered =
+                    crate::RegisteredControlSession::admit(active, Arc::clone(&registry)).unwrap();
                 assert!(registry.lock().unwrap().get(key).is_some());
                 assert!(
                     registered.receive_next_at(10).is_err(),
