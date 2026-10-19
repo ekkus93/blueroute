@@ -1081,6 +1081,24 @@ P7-003/P7-004/P6-004 remain IN PROGRESS; hardware acceptance is DEFERRED.
 
 ## P7-004 — Implement control-session lifecycle
 
+**P7-004 exact-endpoint construction and queued-connection denial (software only, 2026-10-18):**
+`ObservedControlListener::new` now requires a separate fresh observed
+NAP endpoint and refuses an already-bound socket at any different IPv4
+address/port, in addition to its zero-network and wildcard checks.
+Once independently observed network/endpoint ownership is lost, a
+pending untrusted TCP connection is denied without a subsequent accept.
+Two further localhost regressions cover wrong initial bind address and
+queued TCP loss. Initial source `a06592b2f291bc811d67dba367ffd4775b9e9fb2`
+needed a rustfmt assertion wrap; corrected at
+`3ba9c254faa2c4eb9427e17a3d850ebd06528f9b`,
+[exact-head CI 39211528784](https://github.com/ekkus93/blueroute/actions/runs/39211528784)
+**passed** (format, Clippy, workspace checks, tests and integration).
+The bound listener owner still relies on independently fresh runtime
+observations and is **not wired into the live daemon accept loop**;
+socket acceptance does not confer authenticated membership. P7-003
+independent enrollment, full P7-004 PAN/TLS lifecycle, production
+P6-004 JoinNetwork and new physical Bluetooth acceptance stay open.
+
 **P7-004 observed-NAP listener ownership gate (software only, 2026-10-18):**
 `ObservedControlListener` now owns a nonblocking, non-wildcard IPv4
 TCP listener and refuses to poll/accept when either the fresh
