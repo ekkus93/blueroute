@@ -238,6 +238,14 @@ impl ObservedControlListener {
     where
         F: FnMut() -> Result<(Option<NetworkId>, Option<SocketAddrV4>), CoreError>,
     {
+        // A retired listener must never invoke a potentially expensive or
+        // side-effectful backend observation, even if the caller retries.
+        if self.listener.is_none() {
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP control listener has already been retired",
+            ));
+        }
         let (network, endpoint) = match observe() {
             Ok(snapshot) => snapshot,
             Err(error) => {
@@ -540,14 +548,19 @@ mod tests {
         assert_eq!(error.kind(), ErrorKind::InvalidState);
         assert_eq!(observations, 1);
         assert!(TcpStream::connect(addr).is_err());
+        let mut retried_observations = 0;
         assert_eq!(
             owner
-                .poll_with_fresh_observations(|| Ok((Some(network(7)), Some(addr))))
+                .poll_with_fresh_observations(|| {
+                    retried_observations += 1;
+                    Ok((Some(network(7)), Some(addr)))
+                })
                 .err()
                 .unwrap()
                 .kind(),
             ErrorKind::InvalidState
         );
+        assert_eq!(retried_observations, 0);
     }
 
     #[test]
