@@ -3,6 +3,7 @@
 // Prepared for the future authenticated transport runtime. Keep this
 // fail-closed socket owner compiled and tested without treating it as wired.
 mod approved_transport;
+mod enrollment_transport;
 #[allow(dead_code)]
 mod attempt_socket;
 mod authorization;
@@ -25,6 +26,7 @@ pub use approved_transport::{
     accept_registered_control_session, accept_registered_from_durable_approval,
     connect_approved_control_session, connect_registered_control_session,
 };
+pub use enrollment_transport::enroll_confirmed_control_candidate;
 pub use authorization::{
     CommandAuthorization, INTERNET_SHARING_ACTION_ID, MODIFY_ACTION_ID, command_authorization,
     command_operation,
