@@ -1012,6 +1012,18 @@ IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
 
 ## P7-003 — Implement peer hello/capability exchange
 
+**P7-003 candidate certificate body negative regressions (software only, 2026-10-19):**
+The localhost adversarial candidate-certificate preface suite now additionally
+rejects an EOF after a valid header declares more certificate bytes than were
+received, and rejects a complete length-delimited but malformed X.509 DER
+body. Both fail before a certificate can become an enrollment candidate.
+Implementation `b689dd5716bd6cf8cb67d24fd3853955b243ff2c` passed
+[exact-head CI 39237619869](https://github.com/ekkus93/blueroute/actions/runs/39237619869)
+(format, locked workspace, Clippy and integration tests). These tests do
+**not** provide independent human fingerprint confirmation, remote key
+possession proof, live daemon PAN transport or production JoinNetwork.
+P7-003/P7-004/P6-004 remain OPEN; physical acceptance is DEFERRED.
+
 - [x] software/protocol version represented in envelope/hello.
 - [x] stable identity claimed by envelope sender (not authenticated yet).
 - [x] node capability facts are typed and validated.
