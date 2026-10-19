@@ -339,3 +339,72 @@ fn stalled_partial_certificate_body_expires_whole_exchange_deadline() {
     payload.extend_from_slice(&[0x30, 0x02, 0x01, 0x01]);
     reject_stalled_candidate(&payload);
 }
+
+/// Exercise valid X.509 identity material at the *approved* pre-TLS boundary.
+/// A parseable certificate is not sufficient to enter mutual TLS: its claimed
+/// NodeId and SPKI must match the exact independently enrolled allowlist.
+fn reject_unapproved_certificate_after_preface(
+    presented: &LocalControlTlsIdentity,
+    approved: PinnedControlTlsPeer,
+    expected: ControlTlsError,
+) {
+    use std::io::Read;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
+    let server_thread = thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        exchange_control_tls_certificate(
+            &mut socket,
+            &server,
+            network(),
+            &[approved],
+            Instant::now() + Duration::from_secs(3),
+        )
+    });
+
+    let mut peer = TcpStream::connect(address).unwrap();
+    peer.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    let cert = presented.certificate().as_ref();
+    let mut preface = PREFACE.to_vec();
+    preface.extend_from_slice(&(cert.len() as u32).to_be_bytes());
+    preface.extend_from_slice(cert);
+    peer.write_all(&preface).unwrap();
+
+    // The protocol deliberately exchanges public certificates before checking
+    // the allowlist. The failure must then close the socket instead of
+    // allowing a client to continue into TLS on an unapproved identity.
+    let mut response = Vec::new();
+    peer.read_to_end(&mut response).unwrap();
+    assert!(response.starts_with(PREFACE));
+    assert!(response.len() > PREFACE.len() + 4);
+    assert_eq!(server_thread.join().unwrap().unwrap_err(), expected);
+}
+
+#[test]
+fn approved_preface_rejects_valid_certificate_for_unknown_node_and_closes_socket() {
+    let presented = LocalControlTlsIdentity::generate(node(3)).unwrap();
+    let known = LocalControlTlsIdentity::generate(node(4)).unwrap();
+    let approved = PinnedControlTlsPeer::new(network(), known.node(), known.fingerprint()).unwrap();
+    reject_unapproved_certificate_after_preface(
+        &presented,
+        approved,
+        ControlTlsError::CertificateIdentityMismatch,
+    );
+}
+
+#[test]
+fn approved_preface_rejects_valid_node_with_wrong_key_and_closes_socket() {
+    let presented = LocalControlTlsIdentity::generate(node(3)).unwrap();
+    let other_key = LocalControlTlsIdentity::generate(node(4)).unwrap();
+    // Same approved NodeId, but a different public key: NodeId-only trust must
+    // never promote an unpinned certificate into a session.
+    let approved =
+        PinnedControlTlsPeer::new(network(), presented.node(), other_key.fingerprint()).unwrap();
+    reject_unapproved_certificate_after_preface(
+        &presented,
+        approved,
+        ControlTlsError::FingerprintMismatch,
+    );
+}
