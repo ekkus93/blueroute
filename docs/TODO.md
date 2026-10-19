@@ -1081,6 +1081,23 @@ P7-003/P7-004/P6-004 remain IN PROGRESS; hardware acceptance is DEFERRED.
 
 ## P7-004 — Implement control-session lifecycle
 
+**P7-004 post-handshake durable revocation gate (software only, 2026-10-19):**
+`ObservedControlListener::release_registered_if_current` now rechecks durable
+peer approval and the exact active registry generation after a fresh matching
+NAP ownership observation, immediately before releasing a registered TLS
+session to its caller. If a previously approved peer was revoked after mutual
+TLS/Hello and registry admission, the session is closed and its exact registry
+slot retired without retiring an otherwise correctly owned listener. The
+localhost mutual-TLS regression also covers endpoint drift, missing NAP
+ownership, backend observation errors, and wrong-network sessions. Source
+`1a1320af37e1219acc5aaaf57ac97b924d423338` and formatting correction
+`bd62025ab49ab3802540415b4bde83a868544a25` passed [exact-head CI
+39236697009](https://github.com/ekkus93/blueroute/actions/runs/39236697009)
+(format, Clippy, locked workspace and integration tests). **This is a
+software-only post-handshake guard, not a running daemon PAN accept loop,
+independent user enrollment, production JoinNetwork or physical Bluetooth
+acceptance.** P7-003/P7-004/P6-004 remain OPEN.
+
 **P7-004 fresh-ownership listener polling seam (software only, 2026-10-19):**
 `ObservedControlListener::poll_with_fresh_observations` now invokes a caller-supplied
 fresh trusted-membership and guarded NAP endpoint observation before every
