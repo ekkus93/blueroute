@@ -1081,6 +1081,31 @@ P7-003/P7-004/P6-004 remain IN PROGRESS; hardware acceptance is DEFERRED.
 
 ## P7-004 — Implement control-session lifecycle
 
+**P7-004 host ownership and transition-safe diagnostics (software-only, 2026-10-18):**
+`LinuxStarHostRuntime::start_host` refuses an idempotent re-start unless
+the complete active `(NetworkId, bridge, InterfaceAddress)` matches the
+requested host configuration; differing network, interface and address
+claims have negative regression tests. The new ownership check was
+implemented in `494b17a85f53266db980699f5d619aeeb6453215`, but
+its initial CI failed only at rustfmt; the incident and platform-level
+write denials are documented in
+[the host ownership incident](P7-004-HOST-OWNERSHIP-INCIDENT-2026-10-18.md).
+A subsequent exact-head formatting correction was committed at
+`fde1cc8c357b1c1e35d4928e1fd1d8e1c8a0aaaf`.
+`LinuxStarHostRuntime::diagnostic_interfaces` now holds the same NAP
+transition guard during active-host observation and backend address
+query, failing closed on concurrent startup/teardown; a regression
+verifies transition refusal and recovery for an idle runtime. That
+change was committed at `8fd15ebc862cf6ef9a41dca6f36a6b56ea78070c`.
+[Exact-head CI 39200480659](https://github.com/ekkus93/blueroute/actions/runs/39200480659)
+**passed**, including formatting, workspace, Clippy, tests and integration
+checks. Earlier intermediate CI 39200332129 was cancelled by a later
+push and is not claimed as a pass. This evidence does **not** establish
+a live daemon listener/accept loop, independently confirmed TLS peer
+enrollment, complete PAN session/teardown lifecycle, production
+JoinNetwork or physical Bluetooth acceptance. Keep P7-003/P7-004/P6-004
+IN PROGRESS and hardware acceptance DEFERRED.
+
 **P7-004 owned NAP endpoint observation seam (software only, 2026-10-18):**
 `NetworkOperations::observed_owned_control_endpoint` and the corresponding
 `StarHostRuntime` backend now expose a transition-guarded, fresh

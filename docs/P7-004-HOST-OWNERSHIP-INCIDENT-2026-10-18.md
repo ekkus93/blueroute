@@ -12,3 +12,22 @@ This is a **software-only incident record**, not P7 authenticated-session or Blu
 - A safety rollback attempt using `restore_file_from_ref` (source `245b3dee...`, target exact head `494b17a...`) received the same platform safety rejection.
 - These are **platform-level write denials**, not GitHub authentication, Ralph Bridge errors, stale compare-and-swap heads or CI runner failures. Neither rejected call was retried. No secret values or full source bodies are recorded here.
 - **Next action:** reconcile current exact `master` before any write. If allowed, format the three test assertions or restore the qualified prior source; rerun exact-head formatting, Clippy, workspace tests and CI. Do not mark P7-004 or production JoinNetwork complete.
+
+## Reconciliation — 2026-10-19 04:41 UTC
+
+After an independent exact-head reinspection of `master` at
+`d9bfbe96ce9a81daf92934c161d63e07fde84a86` and the unchanged
+three-test rustfmt diff, Ralph Bridge v0.6.2 GitHub App
+`commit_files` accepted the exact-head source-format correction in
+operation `e4542e16ab124873b7f01b9e95ee8950`, producing
+`fde1cc8c357b1c1e35d4928e1fd1d8e1c8a0aaaf`.
+No safety denial recurred. A subsequent separately scoped
+NAP-diagnostics transition guard plus regression test was accepted
+under operation `b69deb50bf9c419489af9b0b782531df`, producing
+`8fd15ebc862cf6ef9a41dca6f36a6b56ea78070c`.
+[Exact-head CI 39200480659](https://github.com/ekkus93/blueroute/actions/runs/39200480659)
+**passed**. The earlier source-format commit's push CI 39200332129 was
+cancelled after master advanced, not marked successful. The prior
+platform-level safety denials remain recorded accurately as incidents,
+now resolved for this narrowly scoped correction. No physical Bluetooth
+acceptance, verified enrollment or production JoinNetwork was established.
