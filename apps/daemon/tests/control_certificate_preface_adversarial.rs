@@ -43,6 +43,31 @@ fn reject_candidate(payload: &[u8], expected: ControlTlsError) {
     assert_eq!(server_thread.join().unwrap().unwrap_err(), expected);
 }
 
+
+fn reject_stalled_candidate(payload: &[u8]) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
+    let server_thread = thread::spawn(move || {
+        let (socket, _) = listener.accept().unwrap();
+        exchange_control_tls_candidate(
+            socket,
+            &server,
+            network(),
+            Instant::now() + Duration::from_millis(300),
+        )
+    });
+
+    // Keep the write side open: this tests the absolute deadline rather
+    // than the early-EOF rejection exercised by reject_candidate.
+    let mut attacker = TcpStream::connect(address).unwrap();
+    attacker.write_all(payload).unwrap();
+    assert_eq!(
+        server_thread.join().unwrap().unwrap_err(),
+        ControlTlsError::CertificateExchangeDeadlineExpired,
+    );
+}
+
 #[test]
 fn certificate_candidate_rejects_bad_magic() {
     let mut payload = PREFACE.to_vec();
@@ -93,24 +118,22 @@ fn certificate_candidate_rejects_complete_malformed_der() {
 
 #[test]
 fn stalled_certificate_preface_expires_whole_exchange_deadline() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = listener.local_addr().unwrap();
-    let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
-    let server_thread = thread::spawn(move || {
-        let (socket, _) = listener.accept().unwrap();
-        exchange_control_tls_candidate(
-            socket,
-            &server,
-            network(),
-            Instant::now() + Duration::from_millis(300),
-        )
-    });
+    reject_stalled_candidate(&[]);
+}
 
-    // Hold the connection open without sending any of the preface header.
-    // The server must not wait indefinitely for the attacker.
-    let _attacker = TcpStream::connect(address).unwrap();
-    assert_eq!(
-        server_thread.join().unwrap().unwrap_err(),
-        ControlTlsError::CertificateExchangeDeadlineExpired,
-    );
+#[test]
+fn stalled_partial_certificate_header_expires_whole_exchange_deadline() {
+    // The peer sends a valid magic but only half the four-byte length.
+    let mut payload = PREFACE.to_vec();
+    payload.extend_from_slice(&[0, 0]);
+    reject_stalled_candidate(&payload);
+}
+
+#[test]
+fn stalled_partial_certificate_body_expires_whole_exchange_deadline() {
+    // The header declares a body, but the peer never sends its remainder.
+    let mut payload = PREFACE.to_vec();
+    payload.extend_from_slice(&16_u32.to_be_bytes());
+    payload.extend_from_slice(&[0x30, 0x02, 0x01, 0x01]);
+    reject_stalled_candidate(&payload);
 }
