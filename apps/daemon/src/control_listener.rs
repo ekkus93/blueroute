@@ -55,9 +55,10 @@ pub fn owned_nap_control_address(
     // A bridge attributed to another logical network is not exclusively
     // owned, even if the foreign address differs from our planned host IP.
     // Do not rely on Linux TCP bind to distinguish the network provenance.
-    if observed.iter().any(|address| {
-        address.interface == interface && address.owner != network
-    }) {
+    if observed
+        .iter()
+        .any(|address| address.interface == interface && address.owner != network)
+    {
         return Err(CoreError::new(
             ErrorKind::AddressConflict,
             "NAP control bridge has foreign network ownership",
