@@ -346,7 +346,6 @@ impl ObservedControlListener {
             }
         }
     }
-
 }
 
 #[cfg(test)]
@@ -779,6 +778,11 @@ mod tests {
         use std::thread;
         use std::time::{Duration, Instant};
 
+        use crate::{
+            ApprovedControlSetup, DurablePeerTrustOperations, LocalControlTlsIdentity,
+            PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer,
+            accept_registered_from_durable_approval, connect_approved_control_session,
+        };
         use blueroute_core::{
             DisplayName, MembershipRegistry, MembershipState, NetworkMembership, NodeId,
         };
@@ -786,11 +790,6 @@ mod tests {
         use blueroute_protocol::control::HelloFacts;
         use blueroute_protocol::session::{
             ConnectionDeadline, ConnectionStage, ControlSessionRegistry, PeerSessionKey,
-        };
-        use crate::{
-            ApprovedControlSetup, DurablePeerTrustOperations, LocalControlTlsIdentity,
-            PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer,
-            accept_registered_from_durable_approval, connect_approved_control_session,
         };
 
         static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -809,15 +808,22 @@ mod tests {
                 PeerPinStore::new(path.join("pins")),
             );
             futures_lite::future::block_on(trust.trust_peer(peer.node())).unwrap();
-            trust.enroll_verified_key(
-                network(7), peer.node(), peer.fingerprint(), peer.fingerprint(),
-            ).unwrap();
+            trust
+                .enroll_verified_key(
+                    network(7),
+                    peer.node(),
+                    peer.fingerprint(),
+                    peer.fingerprint(),
+                )
+                .unwrap();
             trust
         }
 
         fn setup() -> ApprovedControlSetup {
             let mut active_deadline = ConnectionDeadline::new(0);
-            active_deadline.advance(ConnectionStage::TlsHandshake, 1).unwrap();
+            active_deadline
+                .advance(ConnectionStage::TlsHandshake, 1)
+                .unwrap();
             active_deadline.advance(ConnectionStage::Hello, 2).unwrap();
             active_deadline.advance(ConnectionStage::Active, 3).unwrap();
             ApprovedControlSetup {
@@ -849,7 +855,8 @@ mod tests {
             let client_socket = TcpStream::connect(addr).unwrap();
             let root = std::env::temp_dir().join(format!(
                 "blueroute-listener-post-auth-{}-{}",
-                std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed),
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed),
             ));
             fs::create_dir_all(&root).unwrap();
             let server_dir = root.join("server");
@@ -860,11 +867,20 @@ mod tests {
                 let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
                 let accepted = owner
                     .poll_with_fresh_observations(|| Ok((Some(network(7)), Some(addr))))
-                    .unwrap().unwrap();
+                    .unwrap()
+                    .unwrap();
                 let session = accept_registered_from_durable_approval(
-                    accepted, &server, &trust, setup(), Arc::clone(&registry),
-                ).unwrap();
-                let key = PeerSessionKey { network: network(7), peer: local_node };
+                    accepted,
+                    &server,
+                    &trust,
+                    setup(),
+                    Arc::clone(&registry),
+                )
+                .unwrap();
+                let key = PeerSessionKey {
+                    network: network(7),
+                    peer: local_node,
+                };
                 assert!(registry.lock().unwrap().get(key).is_some());
                 let result = owner.release_registered_if_current(session, || {
                     if retain_ownership {
@@ -880,8 +896,11 @@ mod tests {
                 } else {
                     assert_eq!(result.err().unwrap().kind(), ErrorKind::InvalidState);
                     assert_eq!(
-                        owner.accept_if_current(Some(network(7)), Some(addr))
-                            .err().unwrap().kind(),
+                        owner
+                            .accept_if_current(Some(network(7)), Some(addr))
+                            .err()
+                            .unwrap()
+                            .kind(),
                         ErrorKind::InvalidState,
                     );
                 }
@@ -889,8 +908,13 @@ mod tests {
             });
             let client_trust = approved_trust(&client_dir, server_pin);
             let session = connect_approved_control_session(
-                client_socket, &client, server_pin, &client_trust, setup(),
-            ).unwrap();
+                client_socket,
+                &client,
+                server_pin,
+                &client_trust,
+                setup(),
+            )
+            .unwrap();
             drop(session);
             server_thread.join().unwrap();
             fs::remove_dir_all(root).unwrap();
