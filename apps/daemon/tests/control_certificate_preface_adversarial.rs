@@ -208,6 +208,56 @@ fn invalid_pin_allowlists_close_borrowed_socket_without_disclosing_certificate()
 }
 
 #[test]
+fn approved_certificate_exchange_restores_borrowed_socket_timeouts() {
+    // The pre-TLS parser temporarily installs absolute-deadline read/write
+    // timeouts. On success, it must return the borrowed socket to its caller
+    // with the original settings, rather than weakening later TLS I/O policy.
+    let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
+    let client = LocalControlTlsIdentity::generate(node(3)).unwrap();
+    let server_pin =
+        PinnedControlTlsPeer::new(network(), server.node(), server.fingerprint()).unwrap();
+    let client_pin =
+        PinnedControlTlsPeer::new(network(), client.node(), client.fingerprint()).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server_thread = thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        let original_read = Duration::from_millis(1300);
+        let original_write = Duration::from_millis(1700);
+        socket.set_read_timeout(Some(original_read)).unwrap();
+        socket.set_write_timeout(Some(original_write)).unwrap();
+        let accepted = exchange_control_tls_certificate(
+            &mut socket,
+            &server,
+            network(),
+            &[client_pin],
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+        assert_eq!(accepted.fingerprint(), client.fingerprint());
+        assert_eq!(socket.read_timeout().unwrap(), Some(original_read));
+        assert_eq!(socket.write_timeout().unwrap(), Some(original_write));
+    });
+    let mut socket = TcpStream::connect(address).unwrap();
+    let original_read = Duration::from_millis(900);
+    let original_write = Duration::from_millis(1500);
+    socket.set_read_timeout(Some(original_read)).unwrap();
+    socket.set_write_timeout(Some(original_write)).unwrap();
+    let accepted = exchange_control_tls_certificate(
+        &mut socket,
+        &client,
+        network(),
+        &[server_pin],
+        Instant::now() + Duration::from_secs(5),
+    )
+    .unwrap();
+    assert_eq!(accepted.fingerprint(), server_pin.fingerprint());
+    assert_eq!(socket.read_timeout().unwrap(), Some(original_read));
+    assert_eq!(socket.write_timeout().unwrap(), Some(original_write));
+    server_thread.join().unwrap();
+}
+
+#[test]
 fn certificate_candidate_rejects_uppercase_hex_alias_in_node_san() {
     // General NodeId input accepts uppercase hex, but the signed DNS SAN
     // is a canonical protocol identity and must not accept textual aliases.
