@@ -198,6 +198,7 @@ impl ObservedControlListener {
                 "NAP control listener lost its observed network ownership",
             ));
         }
+
         let listener = self.listener.as_ref().expect("checked live listener");
         match listener.accept() {
             Ok((socket, _source)) => {
@@ -398,6 +399,7 @@ mod tests {
         assert_eq!(
             owned_nap_control_address(owner, &config, &[])
                 .unwrap_err()
+
                 .kind(),
             ErrorKind::InvalidState
         );
@@ -598,6 +600,7 @@ mod tests {
         assert_eq!(observations, 1);
         assert!(TcpStream::connect(addr).is_err());
         let mut retried_observations = 0;
+
         assert_eq!(
             owner
                 .poll_with_fresh_observations(|| {
@@ -798,6 +801,7 @@ mod tests {
             fs::create_dir_all(path).unwrap();
             let membership_store = NetworkMembershipStore::new(path.join("membership"));
             let mut membership =
+
                 NetworkMembership::new(network(7), DisplayName::new("Local test").unwrap());
             membership.state = MembershipState::Member;
             let mut memberships = MembershipRegistry::default();
@@ -852,9 +856,12 @@ mod tests {
                 SocketAddr::V4(addr) => addr,
                 SocketAddr::V6(_) => panic!("test listener must be IPv4"),
             };
-            let listener_network = if scenario == 3 { network(8) } else { network(7) };
-            let mut owner =
-                ObservedControlListener::new(listener_network, addr, listener).unwrap();
+            let listener_network = if scenario == 3 {
+                network(8)
+            } else {
+                network(7)
+            };
+            let mut owner = ObservedControlListener::new(listener_network, addr, listener).unwrap();
             let client_socket = TcpStream::connect(addr).unwrap();
             let root = std::env::temp_dir().join(format!(
                 "blueroute-listener-post-auth-{}-{}",
@@ -885,16 +892,14 @@ mod tests {
                     peer: local_node,
                 };
                 assert!(registry.lock().unwrap().get(key).is_some());
-                let result = owner.release_registered_if_current(session, || {
-                    match scenario {
-                        0 => Ok((Some(network(7)), Some(addr))),
-                        1 => Ok((None, Some(addr))),
-                        2 => Err(CoreError::new(
-                            ErrorKind::InvalidState,
-                            "fresh NAP observation failed after TLS",
-                        )),
-                        _ => panic!("wrong-network session must not query NAP ownership"),
-                    }
+                let result = owner.release_registered_if_current(session, || match scenario {
+                    0 => Ok((Some(network(7)), Some(addr))),
+                    1 => Ok((None, Some(addr))),
+                    2 => Err(CoreError::new(
+                        ErrorKind::InvalidState,
+                        "fresh NAP observation failed after TLS",
+                    )),
+                    _ => panic!("wrong-network session must not query NAP ownership"),
                 });
                 if scenario == 0 {
                     let mut session = result.unwrap();
@@ -928,3 +933,4 @@ mod tests {
         }
     }
 }
+
