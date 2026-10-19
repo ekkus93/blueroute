@@ -124,9 +124,14 @@ pub struct ObservedControlListener {
 }
 
 impl ObservedControlListener {
-    /// Takes ownership only of an already bound, non-wildcard IPv4 listener.
+    /// Takes ownership only of an already bound, non-wildcard IPv4 listener
+    /// at the exact endpoint supplied by a fresh independent NAP observation.
     /// For production, obtain the socket via the guarded owned-NAP binder.
-    pub fn new(network: NetworkId, listener: TcpListener) -> Result<Self, CoreError> {
+    pub fn new(
+        network: NetworkId,
+        observed_endpoint: SocketAddrV4,
+        listener: TcpListener,
+    ) -> Result<Self, CoreError> {
         if network == NetworkId::from_bytes([0; 16]) {
             return Err(CoreError::new(
                 ErrorKind::InvalidInput,
@@ -150,6 +155,12 @@ impl ObservedControlListener {
             return Err(CoreError::new(
                 ErrorKind::InvalidState,
                 "NAP control listener may not bind a wildcard address",
+            ));
+        }
+        if endpoint != observed_endpoint {
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP control listener address differs from observed owned endpoint",
             ));
         }
         listener.set_nonblocking(true).map_err(|error| {
@@ -336,7 +347,7 @@ mod tests {
             SocketAddr::V4(addr) => addr,
             SocketAddr::V6(_) => panic!("test listener must be IPv4"),
         };
-        let mut owner = ObservedControlListener::new(network(7), listener).unwrap();
+        let mut owner = ObservedControlListener::new(network(7), addr, listener).unwrap();
         assert!(
             owner
                 .accept_if_current(Some(network(7)), Some(addr))
@@ -367,7 +378,7 @@ mod tests {
                 SocketAddr::V4(addr) => addr,
                 SocketAddr::V6(_) => panic!("test listener must be IPv4"),
             };
-            let mut owner = ObservedControlListener::new(network(7), listener).unwrap();
+            let mut owner = ObservedControlListener::new(network(7), addr, listener).unwrap();
             let endpoint = if endpoint_change {
                 Some(SocketAddrV4::new(*addr.ip(), addr.port().wrapping_add(1)))
             } else {
@@ -392,18 +403,71 @@ mod tests {
     }
 
     #[test]
+    fn observed_listener_rejects_socket_bound_to_a_different_endpoint() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let actual = match listener.local_addr().unwrap() {
+            SocketAddr::V4(addr) => addr,
+            SocketAddr::V6(_) => panic!("test listener must be IPv4"),
+        };
+        let unexpected = SocketAddrV4::new(*actual.ip(), 46071);
+        let observed = if unexpected == actual {
+            SocketAddrV4::new(*actual.ip(), 46072)
+        } else {
+            unexpected
+        };
+        assert_eq!(
+            ObservedControlListener::new(network(7), observed, listener)
+                .err()
+                .unwrap()
+                .kind(),
+            ErrorKind::InvalidState
+        );
+        assert!(TcpStream::connect(actual).is_err());
+    }
+
+    #[test]
+    fn observed_listener_rejects_queued_socket_after_local_ownership_loss() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let actual = match listener.local_addr().unwrap() {
+            SocketAddr::V4(addr) => addr,
+            SocketAddr::V6(_) => panic!("test listener must be IPv4"),
+        };
+        let mut owner = ObservedControlListener::new(network(7), actual, listener).unwrap();
+        let _queued = TcpStream::connect(actual).unwrap();
+        assert_eq!(
+            owner.accept_if_current(None, Some(actual)).unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
+        assert_eq!(
+            owner
+                .accept_if_current(Some(network(7)), Some(actual))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidState
+        );
+    }
+
+    #[test]
     fn observed_listener_rejects_zero_network_and_wildcard_binding() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = match listener.local_addr().unwrap() {
+            SocketAddr::V4(addr) => addr,
+            SocketAddr::V6(_) => panic!("test listener must be IPv4"),
+        };
         assert_eq!(
-            ObservedControlListener::new(network(0), listener)
+            ObservedControlListener::new(network(0), addr, listener)
                 .err()
                 .unwrap()
                 .kind(),
             ErrorKind::InvalidInput
         );
         let wildcard = TcpListener::bind("0.0.0.0:0").unwrap();
+        let wildcard_addr = match wildcard.local_addr().unwrap() {
+            SocketAddr::V4(addr) => addr,
+            SocketAddr::V6(_) => panic!("test listener must be IPv4"),
+        };
         assert_eq!(
-            ObservedControlListener::new(network(7), wildcard)
+            ObservedControlListener::new(network(7), wildcard_addr, wildcard)
                 .err()
                 .unwrap()
                 .kind(),
