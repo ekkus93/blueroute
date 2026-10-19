@@ -222,6 +222,48 @@ impl ObservedControlListener {
             }
         }
     }
+
+    /// Accept a candidate only if ownership survives a second independent
+    /// observation after TCP accept. The recheck must query fresh local
+    /// membership and the guarded network backend, not reuse the first
+    /// snapshot. On loss or observation failure both sockets are retired.
+    ///
+    /// This is only a TOCTOU defense for an untrusted TCP candidate; a caller
+    /// must still revalidate ownership, pins and mutual TLS before admitting
+    /// an authenticated control session or changing membership.
+    pub fn accept_with_revalidation<F>(
+        &mut self,
+        observed_network: Option<NetworkId>,
+        observed_endpoint: Option<SocketAddrV4>,
+        reobserve: F,
+    ) -> Result<Option<TcpStream>, CoreError>
+    where
+        F: FnOnce() -> Result<(Option<NetworkId>, Option<SocketAddrV4>), CoreError>,
+    {
+        let Some(socket) = self.accept_if_current(observed_network, observed_endpoint)? else {
+            return Ok(None);
+        };
+        match reobserve() {
+            Ok((Some(network), Some(endpoint)))
+                if network == self.network && endpoint == self.endpoint =>
+            {
+                Ok(Some(socket))
+            }
+            Ok(_) => {
+                self.listener.take();
+                let _ = socket.shutdown(std::net::Shutdown::Both);
+                Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "NAP control listener lost ownership after TCP accept",
+                ))
+            }
+            Err(error) => {
+                self.listener.take();
+                let _ = socket.shutdown(std::net::Shutdown::Both);
+                Err(error)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -248,6 +290,7 @@ mod tests {
     #[test]
     fn selected_nap_host_address_is_exact_and_never_wildcard() {
         let owner = network(7);
+
         let owned = address(owner);
         let result = owned_nap_control_address(
             owner,
@@ -448,6 +491,67 @@ mod tests {
                 .kind(),
             ErrorKind::InvalidState
         );
+    }
+
+    #[test]
+    fn post_accept_revalidation_rejects_ownership_loss_and_closes_candidate() {
+        for failure in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = match listener.local_addr().unwrap() {
+                SocketAddr::V4(addr) => addr,
+                SocketAddr::V6(_) => panic!("test listener must be IPv4"),
+            };
+            let mut owner = ObservedControlListener::new(network(7), addr, listener).unwrap();
+            let mut remote = TcpStream::connect(addr).unwrap();
+            remote
+                .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+                .unwrap();
+            let error = owner
+                .accept_with_revalidation(Some(network(7)), Some(addr), || {
+                    if failure {
+                        Err(CoreError::new(
+                            ErrorKind::InvalidState,
+                            "fresh ownership observation failed",
+                        ))
+                    } else {
+                        Ok((None, Some(addr)))
+                    }
+                })
+                .err()
+                .unwrap();
+            assert_eq!(error.kind(), ErrorKind::InvalidState);
+            assert_eq!(remote.read(&mut [0_u8; 1]).unwrap(), 0);
+            assert!(TcpStream::connect(addr).is_err());
+            assert_eq!(
+                owner
+                    .accept_if_current(Some(network(7)), Some(addr))
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::InvalidState
+            );
+        }
+    }
+
+    #[test]
+    fn post_accept_revalidation_allows_matching_candidate_without_authorizing_it() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = match listener.local_addr().unwrap() {
+            SocketAddr::V4(addr) => addr,
+            SocketAddr::V6(_) => panic!("test listener must be IPv4"),
+        };
+        let mut owner = ObservedControlListener::new(network(7), addr, listener).unwrap();
+        let mut remote = TcpStream::connect(addr).unwrap();
+        remote.write_all(b"x").unwrap();
+        let mut accepted = owner
+            .accept_with_revalidation(Some(network(7)), Some(addr), || {
+                Ok((Some(network(7)), Some(addr)))
+            })
+            .unwrap()
+            .unwrap();
+        let mut byte = [0; 1];
+        accepted.read_exact(&mut byte).unwrap();
+        assert_eq!(&byte, b"x");
+        // This raw TCP socket still has no authenticated peer identity.
     }
 
     #[test]
