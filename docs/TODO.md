@@ -1081,6 +1081,35 @@ P7-003/P7-004/P6-004 remain IN PROGRESS; hardware acceptance is DEFERRED.
 
 ## P7-004 — Implement control-session lifecycle
 
+**P7-004 owned NAP endpoint observation seam (software only, 2026-10-18):**
+`NetworkOperations::observed_owned_control_endpoint` and the corresponding
+`StarHostRuntime` backend now expose a transition-guarded, fresh
+NetworkManager-derived address snapshot without attempting to bind another
+TCP socket. The Linux backend checks that active NAP ownership, bridge and
+deterministic host prefix agree and shares this validation with the
+existing guarded listener bind path; idle/fake backends return `None`.
+Regression tests reject observation during host startup/teardown and
+confirm idle-host behavior on both layers. Implementation
+`5c6f67fbe23f8f35189773d53fbc9b2f5d544f77`, rustfmt correction
+`04ced096888890c4563115d1141a563f8f0b4ba8`;
+[exact-head CI 39186125452](https://github.com/ekkus93/blueroute/actions/runs/39186125452)
+**passed** (format, workspace, Clippy, tests, integration gates).
+The endpoint is a momentary ownership observation, **not** a lease or
+proof that later accepts are safe; the running daemon still has no
+active listener supervisor, TLS accept loop, PAN teardown ownership,
+independently confirmed enrollment, production JoinNetwork or new
+physical Bluetooth acceptance. P7-003/P7-004/P6-004 remain IN PROGRESS,
+hardware acceptance DEFERRED.
+
+**P7-004 foreign network bridge provenance regression (software only, 2026-10-18):**
+`owned_nap_control_address` now fails closed when a foreign NetworkId
+claims the selected NAP bridge, even with a different host IP.
+Implementation `b7d6f533ad232b6788337bde03d749d1b4b0c8f3` required a
+rustfmt-only correction at `29bbc7e223408b8bef5147468db02c71ebedcacc`;
+[exact-head CI 39185600504](https://github.com/ekkus93/blueroute/actions/runs/39185600504)
+**passed**. This is a backend address-ownership check, not daemon
+authenticated-listener activation or real Bluetooth acceptance.
+
 **P7-004 control-listener host-transition exclusion (software only, 2026-10-18):**
 `LinuxStarHostRuntime::bind_owned_control_listener` now claims the same
 host transition guard as NAP startup/teardown across active-host inspection,
