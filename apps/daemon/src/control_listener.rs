@@ -399,7 +399,6 @@ mod tests {
         assert_eq!(
             owned_nap_control_address(owner, &config, &[])
                 .unwrap_err()
-
                 .kind(),
             ErrorKind::InvalidState
         );
@@ -801,7 +800,6 @@ mod tests {
             fs::create_dir_all(path).unwrap();
             let membership_store = NetworkMembershipStore::new(path.join("membership"));
             let mut membership =
-
                 NetworkMembership::new(network(7), DisplayName::new("Local test").unwrap());
             membership.state = MembershipState::Member;
             let mut memberships = MembershipRegistry::default();
@@ -933,4 +931,3 @@ mod tests {
         }
     }
 }
-
