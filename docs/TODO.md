@@ -1081,6 +1081,23 @@ P7-003/P7-004/P6-004 remain IN PROGRESS; hardware acceptance is DEFERRED.
 
 ## P7-004 — Implement control-session lifecycle
 
+**P7-004 post-accept NAP ownership revalidation (software only, 2026-10-19):**
+`ObservedControlListener::accept_with_revalidation` now permits an untrusted
+TCP candidate to leave the listener owner only after a second caller-supplied,
+independently fresh NAP network/endpoint observation. A changed network,
+missing endpoint or observation error closes the accepted TCP socket and
+irreversibly retires the listener, rather than exposing a candidate from
+a stale pre-accept snapshot. Two localhost regressions cover loss/error EOF,
+listener retirement and a matching candidate; implementation
+`bfa55b818915cae5dcf0271b9710055badbb8b67` passed
+[exact-head CI 39215478458](https://github.com/ekkus93/blueroute/actions/runs/39215478458)
+(format, locked Clippy, workspace tests and integration).
+**This helper is not wired into the live daemon accept loop**; it does not
+authenticate a TCP source, replace the mandatory TLS/pin/Hello check, independently
+enroll keys, close already active PAN sessions, activate JoinNetwork or prove
+physical Bluetooth operation. P7-003/P7-004/P6-004 remain IN PROGRESS;
+hardware acceptance remains DEFERRED.
+
 **P7-004 bound listener and ownership identity integration seam (software-only, 2026-10-18):**
 `StarHostRuntime::bind_guarded_control_listener` and
 `NetworkOperations::bind_guarded_control_listener` now provide an
