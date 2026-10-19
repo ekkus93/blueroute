@@ -1155,6 +1155,21 @@ P7-003/P7-004/P6-004 remain IN PROGRESS; hardware acceptance is DEFERRED.
 
 ## P7-004 — Implement control-session lifecycle
 
+**P7-004 post-TLS listener-release registry replacement regression (software only, 2026-10-19):**
+A real localhost mutual-TLS integration regression now simulates loss of the
+original registered exporter generation after handshake and admission, then
+installs a different synthetic registry generation before listener release.
+The stale TLS owner is denied despite matching fresh NAP endpoint observations;
+its teardown cannot delete the replacement registry slot or retire an otherwise
+correctly owned listener. Revoked-pin and host-loss negative cases remain in
+the same suite. Source `d2e9955b52412407eac2c81e1bdda6ef1d49c142` passed
+[exact-head CI 39318901542](https://github.com/ekkus93/blueroute/actions/runs/39318901542)
+(format, locked workspace, Clippy, tests and integration). The replacement is
+a synthetic registry entry, **not** a second verified live TLS channel, a
+daemon PAN accept loop, independently confirmed enrollment, production
+JoinNetwork or physical Bluetooth acceptance. P7-003/P7-004/P6-004 remain
+IN PROGRESS; hardware acceptance remains DEFERRED.
+
 **P7-004 post-handshake durable revocation gate (software only, 2026-10-19):**
 `ObservedControlListener::release_registered_if_current` now rechecks durable
 peer approval and the exact active registry generation after a fresh matching
