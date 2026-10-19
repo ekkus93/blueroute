@@ -923,7 +923,10 @@ mod tests {
                     assert!(registry.lock().unwrap().get(key).is_some());
                     session.cancel();
                 } else if scenario == 5 {
-                    assert_eq!(result.err().unwrap().kind(), ErrorKind::AuthenticationFailed);
+                    assert_eq!(
+                        result.err().unwrap().kind(),
+                        ErrorKind::AuthenticationFailed
+                    );
                     // Revocation of one peer must not retire an otherwise
                     // correctly owned listener for independently approved peers.
                     assert!(
