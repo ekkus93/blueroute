@@ -221,8 +221,44 @@ impl DurablePeerTrustOperations {
         )
     }
 
-    /// Synthetic policy seam for tests and internal callers. Production
-    /// enrollment must use the opaque TLS-verified peer entry point above.
+    /// First-key bootstrap for an *untrusted* certificate candidate.
+    ///
+    /// A fresh bounded TCP certificate exchange yields a candidate but cannot
+    /// prove private-key possession until the peer has been pinned. Only an
+    /// independently confirmed, out-of-band SPKI fingerprint may promote that
+    /// candidate to a durable pin, and only for an already approved NodeId on
+    /// the current network. The later mutual-TLS handshake must still prove
+    /// possession of this exact key before authorizing any control traffic.
+    ///
+    /// This is NOT a user enrollment ceremony or a D-Bus API: callers must
+    /// authenticate the operator and collect the independent confirmation
+    /// before invoking it. Never copy the confirmation from the same untrusted
+    /// candidate or from a Bluetooth/IP address or peer advertisement.
+    pub fn enroll_candidate_after_independent_confirmation(
+        &self,
+        candidate: crate::ControlTlsCertificateCandidate,
+        independently_confirmed_spki: SpkiSha256,
+    ) -> Result<bool, CoreError> {
+        let pinned = candidate
+            .confirm_fingerprint(independently_confirmed_spki)
+            .map_err(|error| {
+                CoreError::with_diagnostic(
+                    ErrorKind::AuthenticationFailed,
+                    "untrusted peer certificate does not match independently confirmed key",
+                    error.to_string(),
+                )
+            })?;
+        let peer = pinned.peer_pin();
+        self.enroll_key_inner(
+            peer.network(),
+            peer.node(),
+            peer.fingerprint(),
+            independently_confirmed_spki,
+        )
+    }
+
+    /// Synthetic policy seam for tests and internal callers. This helper bypasses neither
+    /// independent confirmation nor durable approval and is not a UI.
     #[cfg(test)]
     pub(crate) fn enroll_verified_key(
         &self,
@@ -367,6 +403,121 @@ mod tests {
         let mut registry = MembershipRegistry::default();
         registry.remember_network(membership);
         store.save(&registry).unwrap();
+    }
+
+    /// Obtain a genuine but untrusted certificate candidate over loopback.
+    /// Neither endpoint authorizes this exchange as a control session.
+    fn candidate_from_untrusted_socket(
+        remote_node: NodeId,
+        scope: NetworkId,
+    ) -> (crate::ControlTlsCertificateCandidate, SpkiSha256) {
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let local = crate::LocalControlTlsIdentity::generate(NodeId::from_bytes([0xee; 16]))
+            .unwrap();
+        let remote = crate::LocalControlTlsIdentity::generate(remote_node).unwrap();
+        let fingerprint = remote.fingerprint();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            crate::exchange_control_tls_candidate(
+                socket,
+                &remote,
+                scope,
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap();
+        });
+        let socket = TcpStream::connect(address).unwrap();
+        let candidate = crate::exchange_control_tls_candidate(
+            socket,
+            &local,
+            scope,
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+        server.join().unwrap();
+        (candidate, fingerprint)
+    }
+
+    #[test]
+    fn untrusted_candidate_bootstrap_requires_independent_key_and_durable_approval() {
+        let (root, store) = temp_store("p7-candidate-bootstrap");
+        let network = NetworkId::from_bytes([0x31; 16]);
+        let other_network = NetworkId::from_bytes([0x32; 16]);
+        let remote_node = NodeId::from_bytes([0x33; 16]);
+        seed_current_network(&store, network);
+        let trust = DurablePeerTrustOperations::with_peer_pin_store(
+            store,
+            PeerPinStore::new(root.join("peer-keys")),
+        );
+        let (candidate, fingerprint) =
+            candidate_from_untrusted_socket(remote_node, network);
+        let wrong = SpkiSha256::from_verified_certificate_digest([0x77; 32]).unwrap();
+
+        // Even a perfectly parseable candidate cannot create approval or a
+        // durable pin without a separate current-network trust decision.
+        assert_eq!(
+            trust
+                .enroll_candidate_after_independent_confirmation(candidate.clone(), fingerprint)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::AuthenticationFailed
+        );
+        futures_lite::future::block_on(trust.trust_peer(remote_node)).unwrap();
+        assert_eq!(
+            trust
+                .enroll_candidate_after_independent_confirmation(candidate.clone(), wrong)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::AuthenticationFailed
+        );
+        assert!(trust.approved_control_pins(network).unwrap().is_empty());
+
+        // A matching independently supplied fingerprint can bootstrap only
+        // the pin. Actual TLS key possession and Hello still happen later.
+        assert_eq!(
+            trust.enroll_candidate_after_independent_confirmation(candidate.clone(), fingerprint),
+            Ok(true)
+        );
+        assert_eq!(
+            trust.enroll_candidate_after_independent_confirmation(candidate.clone(), fingerprint),
+            Ok(false)
+        );
+        let pins = trust.approved_control_pins(network).unwrap();
+        assert_eq!(pins.len(), 1);
+        assert_eq!(pins[0].node(), remote_node);
+        assert_eq!(pins[0].fingerprint(), fingerprint);
+
+        let (foreign, foreign_fingerprint) =
+            candidate_from_untrusted_socket(remote_node, other_network);
+        assert_eq!(
+            trust
+                .enroll_candidate_after_independent_confirmation(foreign, foreign_fingerprint)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidState
+        );
+        futures_lite::future::block_on(trust.forget_peer(remote_node)).unwrap();
+        assert!(trust.approved_control_pins(network).unwrap().is_empty());
+        futures_lite::future::block_on(trust.trust_peer(remote_node)).unwrap();
+        assert!(trust.approved_control_pins(network).unwrap().is_empty());
+
+        // A legacy trust-only runtime cannot persist a bootstrap pin.
+        let legacy = DurablePeerTrustOperations::new(
+            NetworkMembershipStore::new(root.join("memberships-v1")),
+        );
+        assert_eq!(
+            legacy
+                .enroll_candidate_after_independent_confirmation(candidate, fingerprint)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::AuthenticationFailed
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
