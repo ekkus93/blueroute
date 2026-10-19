@@ -852,8 +852,9 @@ mod tests {
             }
         }
 
-        // Match, lost host, backend failure, wrong network, endpoint drift, and revoked trust.
-        for scenario in 0_u8..6 {
+        // Match, lost host, backend failure, wrong network, endpoint drift,
+        // revoked trust, and a replaced registry generation.
+        for scenario in 0_u8..7 {
             let client = LocalControlTlsIdentity::generate(NodeId::from_bytes([11; 16])).unwrap();
             let server = LocalControlTlsIdentity::generate(NodeId::from_bytes([12; 16])).unwrap();
             let client_pin =
@@ -903,6 +904,14 @@ mod tests {
                 assert!(registry.lock().unwrap().get(key).is_some());
                 if scenario == 5 {
                     futures_lite::future::block_on(trust.forget_peer(local_node)).unwrap();
+                } else if scenario == 6 {
+                    // Simulate a newer independently admitted generation while
+                    // the original TLS owner is waiting for listener release.
+                    // The old owner must not remove the replacement's slot.
+                    let old_id = *session.session_id();
+                    let mut entries = registry.lock().unwrap();
+                    assert!(entries.remove_if_current(key, old_id));
+                    entries.activate_after_authentication(key, [42; 16]).unwrap();
                 }
                 let result = owner.release_registered_if_current(session, || match scenario {
                     0 => Ok((Some(network(7)), Some(addr))),
@@ -922,13 +931,13 @@ mod tests {
                     let mut session = result.unwrap();
                     assert!(registry.lock().unwrap().get(key).is_some());
                     session.cancel();
-                } else if scenario == 5 {
+                } else if scenario == 5 || scenario == 6 {
                     assert_eq!(
                         result.err().unwrap().kind(),
                         ErrorKind::AuthenticationFailed
                     );
-                    // Revocation of one peer must not retire an otherwise
-                    // correctly owned listener for independently approved peers.
+                    // Revocation or stale registry ownership must not retire
+                    // an otherwise correctly owned listener for other peers.
                     assert!(
                         owner
                             .accept_if_current(Some(network(7)), Some(addr))
@@ -946,7 +955,15 @@ mod tests {
                         ErrorKind::InvalidState,
                     );
                 }
-                assert!(registry.lock().unwrap().get(key).is_none());
+                if scenario == 6 {
+                    assert_eq!(
+                        registry.lock().unwrap().get(key).unwrap().session_id,
+                        [42; 16],
+                        "stale TLS owner must not retire its replacement"
+                    );
+                } else {
+                    assert!(registry.lock().unwrap().get(key).is_none());
+                }
             });
             let client_trust = approved_trust(&client_dir, server_pin);
             let session = connect_approved_control_session(
