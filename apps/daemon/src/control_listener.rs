@@ -305,11 +305,13 @@ impl ObservedControlListener {
     ///
     /// Failure drops the owned TLS session, closing its socket and retiring
     /// its exact registry generation; ownership loss also retires this listener.
-    /// Success is not a lease: the daemon must keep observing PAN ownership
-    /// and cancel active sessions when the host is torn down.
+    /// Release also rechecks durable peer approval and exact registry ownership;
+    /// a revoked session cannot escape this post-handshake boundary. Success
+    /// is not a lease: the daemon must keep observing PAN ownership and
+    /// cancel active sessions when the host is torn down.
     pub fn release_registered_if_current<'a, F>(
         &mut self,
-        session: crate::RegisteredControlSession<'a>,
+        mut session: crate::RegisteredControlSession<'a>,
         observe: F,
     ) -> Result<crate::RegisteredControlSession<'a>, CoreError>
     where
@@ -332,6 +334,15 @@ impl ObservedControlListener {
             Ok((Some(network), Some(endpoint)))
                 if network == self.network && endpoint == self.endpoint =>
             {
+                // Trust or registry ownership can change after TLS/Hello.
+                // Drop only this revoked session; unrelated peers must still
+                // be able to use the correctly owned NAP listener.
+                session.revalidate_approval().map_err(|_| {
+                    CoreError::new(
+                        ErrorKind::AuthenticationFailed,
+                        "control session lost approval before listener release",
+                    )
+                })?;
                 Ok(session)
             }
             Ok(_) => {
@@ -841,8 +852,8 @@ mod tests {
             }
         }
 
-        // Match, lost host, backend failure, authenticated wrong-network, and endpoint drift.
-        for scenario in 0_u8..5 {
+        // Match, lost host, backend failure, wrong network, endpoint drift, and revoked trust.
+        for scenario in 0_u8..6 {
             let client = LocalControlTlsIdentity::generate(NodeId::from_bytes([11; 16])).unwrap();
             let server = LocalControlTlsIdentity::generate(NodeId::from_bytes([12; 16])).unwrap();
             let client_pin =
@@ -890,6 +901,9 @@ mod tests {
                     peer: local_node,
                 };
                 assert!(registry.lock().unwrap().get(key).is_some());
+                if scenario == 5 {
+                    futures_lite::future::block_on(trust.forget_peer(local_node)).unwrap();
+                }
                 let result = owner.release_registered_if_current(session, || match scenario {
                     0 => Ok((Some(network(7)), Some(addr))),
                     1 => Ok((None, Some(addr))),
@@ -898,6 +912,7 @@ mod tests {
                         "fresh NAP observation failed after TLS",
                     )),
                     3 => panic!("wrong-network session must not query NAP ownership"),
+                    5 => Ok((Some(network(7)), Some(addr))),
                     _ => Ok((
                         Some(network(7)),
                         Some(SocketAddrV4::new(*addr.ip(), addr.port().wrapping_add(1))),
@@ -907,6 +922,16 @@ mod tests {
                     let mut session = result.unwrap();
                     assert!(registry.lock().unwrap().get(key).is_some());
                     session.cancel();
+                } else if scenario == 5 {
+                    assert_eq!(result.err().unwrap().kind(), ErrorKind::AuthenticationFailed);
+                    // Revocation of one peer must not retire an otherwise
+                    // correctly owned listener for independently approved peers.
+                    assert!(
+                        owner
+                            .accept_if_current(Some(network(7)), Some(addr))
+                            .unwrap()
+                            .is_none()
+                    );
                 } else {
                     assert_eq!(result.err().unwrap().kind(), ErrorKind::InvalidState);
                     assert_eq!(
