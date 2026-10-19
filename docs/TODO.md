@@ -1014,6 +1014,21 @@ IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
 
 ## P7-003 — Implement peer hello/capability exchange
 
+**P7-003 invalid-pin preflight closes borrowed TCP sockets (software only, 2026-10-19):**
+The public pre-TLS certificate-exchange API now shuts down its borrowed
+TCP socket when the allowed peer set fails the initial validation, rather
+than returning an error while leaving the unauthenticated socket open.
+Four real localhost negative cases verify that missing approval pins, a
+zero NetworkId, duplicate peer entries, and pins for a different network
+all fail before sending a certificate; each client observes EOF with no
+certificate bytes. Commit `368d06650a0be9ed5f279591aa72b11c90101b0a`
+passed [exact-head CI 39314525695](https://github.com/ekkus93/blueroute/actions/runs/39314525695)
+(formatting, locked workspace, Clippy, tests and integration validation).
+This tightens fail-closed preflight, but does **not** complete independent
+user-verified enrollment, live authenticated daemon PAN/TCP integration,
+production JoinNetwork or physical Bluetooth acceptance.
+P7-003/P7-004/P6-004 remain IN PROGRESS; hardware is DEFERRED.
+
 **P7-003 own-identity reflection and zero-network candidate denial (software only, 2026-10-19):**
 Two real localhost TCP regression tests reject a syntactically valid X.509
 candidate certificate whose claimed NodeId equals the receiving daemon's
