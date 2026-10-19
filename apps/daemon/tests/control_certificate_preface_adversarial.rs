@@ -216,6 +216,53 @@ fn certificate_candidate_rejects_uppercase_hex_alias_in_node_san() {
 }
 
 #[test]
+fn candidate_certificate_refuses_missing_node_san() {
+    // A valid signed X.509 leaf without any DNS identity is not an
+    // enrollable logical peer, irrespective of its possession of a key.
+    let key = rcgen::KeyPair::generate().unwrap();
+    let params = rcgen::CertificateParams::new(Vec::<String>::new()).unwrap();
+    let certificate = params.self_signed(&key).unwrap();
+    let der = certificate.der().as_ref();
+    let mut payload = PREFACE.to_vec();
+    payload.extend_from_slice(&(der.len() as u32).to_be_bytes());
+    payload.extend_from_slice(der);
+    reject_candidate(&payload, ControlTlsError::CertificateIdentityMismatch);
+}
+
+#[test]
+fn candidate_certificate_refuses_multiple_node_sans() {
+    // Never select a convenient peer identity from an ambiguous signed
+    // certificate carrying multiple otherwise valid node names.
+    let key = rcgen::KeyPair::generate().unwrap();
+    let params = rcgen::CertificateParams::new(vec![
+        format!("node-{}", node(3)),
+        format!("node-{}", node(4)),
+    ])
+    .unwrap();
+    let certificate = params.self_signed(&key).unwrap();
+    let der = certificate.der().as_ref();
+    let mut payload = PREFACE.to_vec();
+    payload.extend_from_slice(&(der.len() as u32).to_be_bytes());
+    payload.extend_from_slice(der);
+    reject_candidate(&payload, ControlTlsError::CertificateIdentityMismatch);
+}
+
+#[test]
+fn candidate_certificate_refuses_zero_node_san() {
+    // A syntactically valid signed certificate for the all-zero NodeId
+    // must not become an enrollment candidate or a future TLS pin.
+    let key = rcgen::KeyPair::generate().unwrap();
+    let params =
+        rcgen::CertificateParams::new(vec![format!("node-{}", node(0))]).unwrap();
+    let certificate = params.self_signed(&key).unwrap();
+    let der = certificate.der().as_ref();
+    let mut payload = PREFACE.to_vec();
+    payload.extend_from_slice(&(der.len() as u32).to_be_bytes());
+    payload.extend_from_slice(der);
+    reject_candidate(&payload, ControlTlsError::InvalidIdentity);
+}
+
+#[test]
 fn stalled_certificate_preface_expires_whole_exchange_deadline() {
     reject_stalled_candidate(&[]);
 }
