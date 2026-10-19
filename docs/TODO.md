@@ -1014,6 +1014,22 @@ IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
 
 ## P7-003 — Implement peer hello/capability exchange
 
+**P7-003 pre-TLS approved-key allowlist uniqueness and alias defense (software only, 2026-10-19):**
+`exchange_control_tls_certificate` now uses ordered sets to reject duplicate
+NodeIds and repeated public-key fingerprints in the pre-handshake allowlist,
+replacing repeated quadratic full-list scans with ordered uniqueness checks.
+Expanded real localhost negative tests require rejection and TCP EOF before
+a certificate is disclosed when two NodeIds share one fingerprint or an
+entry claims the daemon's own NodeId; previously covered empty, duplicate,
+zero-network and foreign-network cases remain. Source
+`2c6e12ee51c9e70cf706b64e86535cdf502054b2` passed
+[exact-head CI 39324855212](https://github.com/ekkus93/blueroute/actions/runs/39324855212)
+(format, locked workspace, Clippy, Rust/integration, socket and D-Bus checks).
+This is only pre-TLS policy validation. It does not perform independently
+confirmed enrollment, verify a live daemon-owned PAN transport, enable
+production JoinNetwork or satisfy physical acceptance. Keep P7-003/P7-004/
+P6-004 IN PROGRESS and physical acceptance DEFERRED.
+
 **P7-003 strict certificate SAN cardinality and sentinel rejection (software only, 2026-10-19):**
 Three real localhost attacker-certificate preface regressions verify that a
 syntactically signed X.509 certificate without any NodeId DNS SAN, a certificate
