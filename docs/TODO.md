@@ -1081,6 +1081,30 @@ P7-003/P7-004/P6-004 remain IN PROGRESS; hardware acceptance is DEFERRED.
 
 ## P7-004 — Implement control-session lifecycle
 
+**P7-004 observed-NAP listener ownership gate (software only, 2026-10-18):**
+`ObservedControlListener` now owns a nonblocking, non-wildcard IPv4
+TCP listener and refuses to poll/accept when either the fresh
+locally observed NAP endpoint or the trusted network identity is
+missing, mismatched, or changed. It retires the listener on ownership
+loss and cannot resume accepting after retirement; source addresses
+are **never** authenticated identities. The caller must obtain its
+snapshots from local durable membership and guarded NetworkManager
+observation, independently revalidate during TLS/session activation,
+and close existing sessions on teardown. Three localhost regression
+tests cover matching idle/accepted TCP, missing/wrong network or endpoint,
+irreversible retirement, zero NetworkId and wildcard refusal.
+Initial implementation `66d16f74ef354921dc09a826a28150803d51059a`
+needed a complete `lib.rs` restore after a bounded read
+(`bafe5b79ee1ec8c8ec7376f6aa1ff199536e193c`), then a rustfmt
+correction `1f4f4a5fcf7616cef0481a9c2b67744ac0cb7ded`.
+[Exact-head CI 39210898782](https://github.com/ekkus93/blueroute/actions/runs/39210898782)
+**passed** (format, Clippy, workspace build, tests, integration).
+This is an **unwired library guard**, not daemon listener startup,
+durable independently verified key enrollment, pinned TLS acceptance,
+session shutdown on PAN loss, production JoinNetwork or physical
+Bluetooth acceptance. Keep P7-003/P7-004/P6-004 **IN PROGRESS**,
+physical acceptance **DEFERRED**.
+
 **P7-004 host ownership and transition-safe diagnostics (software-only, 2026-10-18):**
 `LinuxStarHostRuntime::start_host` refuses an idempotent re-start unless
 the complete active `(NetworkId, bridge, InterfaceAddress)` matches the
