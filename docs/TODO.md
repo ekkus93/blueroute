@@ -1014,6 +1014,22 @@ IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
 
 ## P7-003 — Implement peer hello/capability exchange
 
+**P7-003 canonical signed NodeId SAN (software only, 2026-10-19):**
+The X.509 identity parser now requires the certificate's sole DNS SAN
+to exactly equal the canonical `node-<lowercase NodeId>` string. General
+user-facing NodeId parsing still accepts uppercase text, but that textual
+alias cannot enter a signed control TLS identity. A real localhost
+certificate-preface regression constructs a syntactically valid signed
+certificate with an uppercase-hex SAN and verifies rejection before it
+becomes an enrollment candidate. Source
+`f5cedf93e6c559a0ee431b48db539b4ba668ccc5`, Rust type correction
+`948ab48738e5b5c38f10100ee7a20e39b85b91da`, and
+[exact-head CI 39316527020](https://github.com/ekkus93/blueroute/actions/runs/39316527020)
+**passed** formatting, locked workspace, Clippy and integrations.
+This is canonicalization defense, not an independent human confirmation
+ceremony, a live daemon PAN control loop, production JoinNetwork or physical
+Bluetooth acceptance. P7-003/P7-004/P6-004 remain IN PROGRESS.
+
 **P7-003 invalid-pin preflight closes borrowed TCP sockets (software only, 2026-10-19):**
 The public pre-TLS certificate-exchange API now shuts down its borrowed
 TCP socket when the allowed peer set fails the initial validation, rather
@@ -1055,7 +1071,7 @@ Implementation `b689dd5716bd6cf8cb67d24fd3853955b243ff2c` passed
 possession proof, live daemon PAN transport or production JoinNetwork.
 P7-003/P7-004/P6-004 remain OPEN; physical acceptance is DEFERRED.
 
-**P7-003 candidate-preface partial-stall deadline regressions (software only, 2026-10-19):
+**P7-003 candidate-preface partial-stall deadline regressions (software only, 2026-10-19):**
 Two localhost TCP tests keep the attacker's write side open after sending
 only half of the certificate-length header or a short fragment of a declared
 certificate body. Both must expire the same absolute whole-exchange deadline
