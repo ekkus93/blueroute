@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::future::Future;
 use std::io::Read;
-use std::net::TcpListener;
+use std::net::{SocketAddrV4, TcpListener};
 use std::pin::Pin;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,6 +24,13 @@ pub type NetworkOperationFuture<'a, T> =
 const MAX_ADDRESS_CONFLICT_RETRIES: usize = 16;
 
 pub trait NetworkOperations: Send + Sync {
+    /// Read the current owned NAP endpoint without opening a second socket.
+    /// The result is a snapshot, not peer identity or an enduring lease;
+    /// a caller must recheck ownership before accepting control traffic.
+    fn observed_owned_control_endpoint(&self) -> NetworkOperationFuture<'_, Option<SocketAddrV4>> {
+        Box::pin(async { Ok(None) })
+    }
+
     /// Return a TCP listener only for the currently active, independently
     /// observed NAP host address. A missing provider is NOT a wildcard bind.
     /// Merely binding does not activate authenticated peer sessions.
@@ -78,6 +85,14 @@ impl NetworkIdGenerator for SystemNetworkIdGenerator {
 }
 
 pub trait StarHostRuntime: Send + Sync {
+    /// A transition-safe, read-only snapshot of the active NAP control IP.
+    fn observed_owned_control_endpoint(
+        &self,
+        _config: DaemonConfig,
+    ) -> NetworkOperationFuture<'_, Option<SocketAddrV4>> {
+        Box::pin(async { Ok(None) })
+    }
+
     /// Active-host backend boundary. The production implementation rechecks
     /// NetworkManager-owned addresses before binding; fakes need no listener.
     fn bind_owned_control_listener(
@@ -125,36 +140,62 @@ struct ActiveLinuxStarHost {
     network_backend: NetworkManagerBackend,
 }
 
+impl LinuxStarHostRuntime {
+    /// Caller must hold the NAP transition guard across the backend query.
+    /// Both observation and binding use exactly the same ownership checks.
+    async fn observed_owned_host_addresses(
+        &self,
+        config: &DaemonConfig,
+    ) -> Result<Option<(NetworkId, Vec<InterfaceAddress>)>, CoreError> {
+        let active = self.active.lock().map_err(lock_error)?.clone();
+        let Some(active) = active else {
+            return Ok(None);
+        };
+        let planned =
+            Ipv4StarAddressPlan::for_network(active.network, config.ipv4_address_pool)?;
+        if active.address.owner != active.network
+            || active.address.interface != active.bridge
+            || active.address.prefix != planned.host
+        {
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "active NAP runtime does not match its planned host address",
+            ));
+        }
+        let addresses = active.network_backend.addresses().await?;
+        Ok(Some((active.network, addresses)))
+    }
+}
+
 impl StarHostRuntime for LinuxStarHostRuntime {
+    fn observed_owned_control_endpoint(
+        &self,
+        config: DaemonConfig,
+    ) -> NetworkOperationFuture<'_, Option<SocketAddrV4>> {
+        Box::pin(async move {
+            let _transition = TransitionGuard::claim(&self.transition)?;
+            let Some((network, addresses)) = self.observed_owned_host_addresses(&config).await?
+            else {
+                return Ok(None);
+            };
+            let address = crate::owned_nap_control_address(network, &config, &addresses)?;
+            Ok(Some(address))
+        })
+    }
+
     fn bind_owned_control_listener(
         &self,
         config: DaemonConfig,
     ) -> NetworkOperationFuture<'_, Option<TcpListener>> {
         Box::pin(async move {
-            // Serialize fresh address observation and TCP bind with NAP
-            // startup/teardown. A cloned active host alone can become stale
-            // while NetworkManager's address query is awaiting completion.
+            // Serialize both the backend observation and TCP bind with NAP
+            // startup/teardown; an unlocked snapshot could become stale.
             let _transition = TransitionGuard::claim(&self.transition)?;
-            let active = self.active.lock().map_err(lock_error)?.clone();
-            let Some(active) = active else {
+            let Some((network, addresses)) = self.observed_owned_host_addresses(&config).await?
+            else {
                 return Ok(None);
             };
-            // A stale or mismatched runtime handle must never permit the
-            // listener to follow a foreign interface or arbitrary address.
-            let planned =
-                Ipv4StarAddressPlan::for_network(active.network, config.ipv4_address_pool)?;
-            if active.address.owner != active.network
-                || active.address.interface != active.bridge
-                || active.address.prefix != planned.host
-            {
-                return Err(CoreError::new(
-                    ErrorKind::InvalidState,
-                    "active NAP runtime does not match its planned host address",
-                ));
-            }
-            let addresses = active.network_backend.addresses().await?;
-            let listener =
-                crate::bind_owned_nap_control_listener(active.network, &config, &addresses)?;
+            let listener = crate::bind_owned_nap_control_listener(network, &config, &addresses)?;
             Ok(Some(listener))
         })
     }
@@ -488,6 +529,11 @@ where
     R: StarHostRuntime,
     G: NetworkIdGenerator,
 {
+    fn observed_owned_control_endpoint(&self) -> NetworkOperationFuture<'_, Option<SocketAddrV4>> {
+        self.runtime
+            .observed_owned_control_endpoint(self.config.clone())
+    }
+
     fn bind_owned_control_listener(&self) -> NetworkOperationFuture<'_, Option<TcpListener>> {
         self.runtime
             .bind_owned_control_listener(self.config.clone())
@@ -1145,6 +1191,14 @@ mod tests {
                     .is_none()
             );
 
+            assert!(
+                empty_runtime
+                    .observed_owned_control_endpoint(DaemonConfig::default())
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+
             let (root, store) = temp_store("idle-control-listener");
             let operations = SingleStarNetworkOperations::with_runtime_and_generator(
                 store,
@@ -1160,6 +1214,7 @@ mod tests {
                     .unwrap()
                     .is_none()
             );
+            assert!(operations.observed_owned_control_endpoint().await.unwrap().is_none());
             fs::remove_dir_all(root).unwrap();
         });
     }
@@ -1176,10 +1231,22 @@ mod tests {
                 .await
                 .unwrap_err();
             assert_eq!(failure.kind(), ErrorKind::InvalidState);
+            let observed = runtime
+                .observed_owned_control_endpoint(DaemonConfig::default())
+                .await
+                .unwrap_err();
+            assert_eq!(observed.kind(), ErrorKind::InvalidState);
             drop(transition);
             assert!(
                 runtime
                     .bind_owned_control_listener(DaemonConfig::default())
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(
+                runtime
+                    .observed_owned_control_endpoint(DaemonConfig::default())
                     .await
                     .unwrap()
                     .is_none()
