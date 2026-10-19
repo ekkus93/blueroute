@@ -4,7 +4,8 @@
 //! observed NetworkManager-owned addresses. It does not authenticate a peer,
 //! begin accepting sockets, activate JoinNetwork, or prove Bluetooth traffic.
 
-use std::net::{IpAddr, SocketAddrV4, TcpListener};
+use std::io::ErrorKind as IoErrorKind;
+use std::net::{IpAddr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
 
 use blueroute_core::{CoreError, DaemonConfig, ErrorKind, Ipv4StarAddressPlan, NetworkId};
 use blueroute_linux::{InterfaceAddress, NetworkInterfaceHandle};
@@ -105,10 +106,118 @@ pub fn bind_owned_nap_control_listener(
     })
 }
 
+/// Own a nonblocking control listener and retire it when the independently
+/// observed NAP network or endpoint changes. This only hands out *untrusted*
+/// TCP sockets; callers MUST run pinned mutual TLS, Hello and durable approval
+/// before accepting any peer claim or network membership.
+///
+/// The caller must obtain the current endpoint from a fresh guarded
+/// NetworkOperations::observed_owned_control_endpoint() observation and the
+/// current NetworkId from trusted local membership state before *each* poll.
+/// A snapshot can change immediately after a successful poll: the caller must
+/// revalidate live ownership before TLS/session activation, and on teardown
+/// must close active authenticated sessions independently.
+pub struct ObservedControlListener {
+    network: NetworkId,
+    endpoint: SocketAddrV4,
+    listener: Option<TcpListener>,
+}
+
+impl ObservedControlListener {
+    /// Takes ownership only of an already bound, non-wildcard IPv4 listener.
+    /// For production, obtain the socket via the guarded owned-NAP binder.
+    pub fn new(network: NetworkId, listener: TcpListener) -> Result<Self, CoreError> {
+        if network == NetworkId::from_bytes([0; 16]) {
+            return Err(CoreError::new(
+                ErrorKind::InvalidInput,
+                "control listener requires a nonzero local network",
+            ));
+        }
+        let local = listener.local_addr().map_err(|error| {
+            CoreError::with_diagnostic(
+                ErrorKind::PanFailure,
+                "cannot inspect bound NAP control listener",
+                error.to_string(),
+            )
+        })?;
+        let SocketAddr::V4(endpoint) = local else {
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP control listener must bind an IPv4 address",
+            ));
+        };
+        if endpoint.ip().is_unspecified() {
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP control listener may not bind a wildcard address",
+            ));
+        }
+        listener.set_nonblocking(true).map_err(|error| {
+            CoreError::with_diagnostic(
+                ErrorKind::PanFailure,
+                "cannot make NAP control listener nonblocking",
+                error.to_string(),
+            )
+        })?;
+        Ok(Self {
+            network,
+            endpoint,
+            listener: Some(listener),
+        })
+    }
+
+    /// Poll without blocking the daemon. No matching fresh ownership evidence
+    /// means the socket is dropped before any queued connection is accepted.
+    /// A returned stream is unauthenticated and must never imply membership.
+    pub fn accept_if_current(
+        &mut self,
+        observed_network: Option<NetworkId>,
+        observed_endpoint: Option<SocketAddrV4>,
+    ) -> Result<Option<TcpStream>, CoreError> {
+        if self.listener.is_none() {
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP control listener has already been retired",
+            ));
+        }
+        if observed_network != Some(self.network) || observed_endpoint != Some(self.endpoint) {
+            self.listener.take();
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP control listener lost its observed network ownership",
+            ));
+        }
+        let listener = self.listener.as_ref().expect("checked live listener");
+        match listener.accept() {
+            Ok((socket, _source)) => {
+                // Never use a peer's source IP as an identity or authorization.
+                socket.set_nonblocking(false).map_err(|error| {
+                    CoreError::with_diagnostic(
+                        ErrorKind::PanFailure,
+                        "cannot prepare untrusted control TCP socket",
+                        error.to_string(),
+                    )
+                })?;
+                Ok(Some(socket))
+            }
+            Err(error) if error.kind() == IoErrorKind::WouldBlock => Ok(None),
+            Err(error) => {
+                self.listener.take();
+                Err(CoreError::with_diagnostic(
+                    ErrorKind::PanFailure,
+                    "NAP control listener accept failed",
+                    error.to_string(),
+                ))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use blueroute_core::IpPrefix;
+    use std::io::{Read, Write};
 
     fn network(value: u8) -> NetworkId {
         NetworkId::from_bytes([value; 16])
@@ -218,5 +327,63 @@ mod tests {
                 .kind(),
             ErrorKind::InvalidState
         );
+    }    #[test]
+    fn observed_listener_accepts_only_after_matching_local_ownership_snapshot() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = match listener.local_addr().unwrap() {
+            SocketAddr::V4(addr) => addr,
+            SocketAddr::V6(_) => panic!("test listener must be IPv4"),
+        };
+        let mut owner = ObservedControlListener::new(network(7), listener).unwrap();
+        assert!(owner.accept_if_current(Some(network(7)), Some(addr)).unwrap().is_none());
+        let mut remote = TcpStream::connect(addr).unwrap();
+        remote.write_all(b"x").unwrap();
+        let mut inbound = owner.accept_if_current(Some(network(7)), Some(addr)).unwrap().unwrap();
+        let mut byte = [0; 1];
+        inbound.read_exact(&mut byte).unwrap();
+        assert_eq!(&byte, b"x");
+        // A socket being accepted is not authenticated peer evidence.
     }
+
+    #[test]
+    fn observed_listener_retires_on_missing_wrong_network_or_changed_endpoint() {
+        for (network_observation, endpoint_change) in [(None, false), (Some(network(9)), false), (Some(network(7)), true)] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = match listener.local_addr().unwrap() {
+                SocketAddr::V4(addr) => addr,
+                SocketAddr::V6(_) => panic!("test listener must be IPv4"),
+            };
+            let mut owner = ObservedControlListener::new(network(7), listener).unwrap();
+            let endpoint = if endpoint_change {
+                Some(SocketAddrV4::new(*addr.ip(), addr.port().wrapping_add(1)))
+            } else {
+                Some(addr)
+            };
+            assert_eq!(
+                owner.accept_if_current(network_observation, endpoint).unwrap_err().kind(),
+                ErrorKind::InvalidState
+            );
+            assert_eq!(
+                owner.accept_if_current(Some(network(7)), Some(addr)).unwrap_err().kind(),
+                ErrorKind::InvalidState
+            );
+            assert!(TcpStream::connect(addr).is_err());
+        }
+    }
+
+    #[test]
+    fn observed_listener_rejects_zero_network_and_wildcard_binding() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        assert_eq!(
+            ObservedControlListener::new(network(0), listener).err().unwrap().kind(),
+            ErrorKind::InvalidInput
+        );
+        let wildcard = TcpListener::bind("0.0.0.0:0").unwrap();
+        assert_eq!(
+            ObservedControlListener::new(network(7), wildcard).err().unwrap().kind(),
+            ErrorKind::InvalidState
+        );
+    }
+
+
 }
