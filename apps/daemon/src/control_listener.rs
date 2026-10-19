@@ -911,7 +911,9 @@ mod tests {
                     let old_id = *session.session_id();
                     let mut entries = registry.lock().unwrap();
                     assert!(entries.remove_if_current(key, old_id));
-                    entries.activate_after_authentication(key, [42; 16]).unwrap();
+                    entries
+                        .activate_after_authentication(key, [42; 16])
+                        .unwrap();
                 }
                 let result = owner.release_registered_if_current(session, || match scenario {
                     0 => Ok((Some(network(7)), Some(addr))),
