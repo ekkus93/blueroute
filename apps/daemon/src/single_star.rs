@@ -166,6 +166,22 @@ impl LinuxStarHostRuntime {
     }
 }
 
+// Idempotent host startup requires the entire owned runtime identity to match.
+// A matching logical NetworkId alone must not silently accept a different
+// bridge or address after a configuration change or an inconsistent restore.
+fn same_host_ownership(
+    active_network: NetworkId,
+    active_bridge: &NetworkInterfaceHandle,
+    active_address: &InterfaceAddress,
+    requested_network: NetworkId,
+    requested_bridge: &NetworkInterfaceHandle,
+    requested_address: &InterfaceAddress,
+) -> bool {
+    active_network == requested_network
+        && active_bridge == requested_bridge
+        && active_address == requested_address
+}
+
 impl StarHostRuntime for LinuxStarHostRuntime {
     fn observed_owned_control_endpoint(
         &self,
@@ -228,12 +244,19 @@ impl StarHostRuntime for LinuxStarHostRuntime {
             {
                 let active = self.active.lock().map_err(lock_error)?;
                 if let Some(active) = active.as_ref() {
-                    return if active.network == network {
+                    return if same_host_ownership(
+                        active.network,
+                        &active.bridge,
+                        &active.address,
+                        network,
+                        &bridge,
+                        &address,
+                    ) {
                         Ok(())
                     } else {
                         Err(CoreError::new(
                             ErrorKind::InvalidState,
-                            "a different BlueRoute star is already hosted on this daemon",
+                            "a different BlueRoute host configuration is already active",
                         ))
                     };
                 }
@@ -1141,6 +1164,35 @@ mod tests {
     }
 
     static NEXT_TEST: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn repeated_host_start_requires_exact_network_bridge_and_address_ownership() {
+        let network = NetworkId::from_bytes([0x31; 16]);
+        let other = NetworkId::from_bytes([0x32; 16]);
+        let bridge = bridge_name(network).unwrap();
+        let address = local_star_address(network, &DaemonConfig::default()).unwrap();
+        assert!(same_host_ownership(
+            network, &bridge, &address, network, &bridge, &address
+        ));
+        assert!(!same_host_ownership(
+            network, &bridge, &address, other, &bridge, &address
+        ));
+        let other_bridge = NetworkInterfaceHandle::new("brb-other").unwrap();
+        assert!(!same_host_ownership(
+            network, &bridge, &address, network, &other_bridge, &address
+        ));
+        let mut other_address = address.clone();
+        other_address.owner = other;
+        assert!(!same_host_ownership(
+            network, &bridge, &address, network, &bridge, &other_address
+        ));
+        let mut other_address = address.clone();
+        other_address.prefix =
+            blueroute_core::IpPrefix::new("10.201.99.1".parse().unwrap(), 24).unwrap();
+        assert!(!same_host_ownership(
+            network, &bridge, &address, network, &bridge, &other_address
+        ));
+    }
 
     #[test]
     fn owned_interface_diagnostics_filter_other_networks_and_stabilize_order() {
