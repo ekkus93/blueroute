@@ -841,8 +841,8 @@ mod tests {
             }
         }
 
-        // Match, lost host, backend failure, and authenticated wrong-network.
-        for scenario in 0_u8..4 {
+        // Match, lost host, backend failure, authenticated wrong-network, and endpoint drift.
+        for scenario in 0_u8..5 {
             let client = LocalControlTlsIdentity::generate(NodeId::from_bytes([11; 16])).unwrap();
             let server = LocalControlTlsIdentity::generate(NodeId::from_bytes([12; 16])).unwrap();
             let client_pin =
@@ -897,7 +897,11 @@ mod tests {
                         ErrorKind::InvalidState,
                         "fresh NAP observation failed after TLS",
                     )),
-                    _ => panic!("wrong-network session must not query NAP ownership"),
+                    3 => panic!("wrong-network session must not query NAP ownership"),
+                    _ => Ok((
+                        Some(network(7)),
+                        Some(SocketAddrV4::new(*addr.ip(), addr.port().wrapping_add(1))),
+                    )),
                 });
                 if scenario == 0 {
                     let mut session = result.unwrap();
