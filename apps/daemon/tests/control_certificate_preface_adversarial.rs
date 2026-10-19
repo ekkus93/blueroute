@@ -116,6 +116,46 @@ fn certificate_candidate_rejects_complete_malformed_der() {
 }
 
 #[test]
+fn certificate_candidate_rejects_its_own_node_even_with_valid_der() {
+    // A peer can echo a syntactically valid certificate, but this must never
+    // become an enrollable identity for the local daemon itself.
+    let reflected = LocalControlTlsIdentity::generate(node(2)).unwrap();
+    let certificate = reflected.certificate().as_ref();
+    let mut payload = PREFACE.to_vec();
+    payload.extend_from_slice(&(certificate.len() as u32).to_be_bytes());
+    payload.extend_from_slice(certificate);
+    reject_candidate(&payload, ControlTlsError::InvalidIdentity);
+}
+
+#[test]
+fn zero_network_candidate_is_rejected_before_any_certificate_exchange() {
+    use std::io::Read;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
+    let server_thread = thread::spawn(move || {
+        let (socket, _) = listener.accept().unwrap();
+        exchange_control_tls_candidate(
+            socket,
+            &server,
+            NetworkId::from_bytes([0; 16]),
+            Instant::now() + Duration::from_secs(2),
+        )
+    });
+
+    let mut peer = TcpStream::connect(address).unwrap();
+    peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    assert_eq!(
+        server_thread.join().unwrap().unwrap_err(),
+        ControlTlsError::InvalidIdentity,
+    );
+    // No cleartext candidate certificate should be leaked on invalid scope.
+    let mut first_byte = [0; 1];
+    assert_eq!(peer.read(&mut first_byte).unwrap(), 0);
+}
+
+#[test]
 fn stalled_certificate_preface_expires_whole_exchange_deadline() {
     reject_stalled_candidate(&[]);
 }
