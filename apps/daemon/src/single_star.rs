@@ -31,6 +31,15 @@ pub trait NetworkOperations: Send + Sync {
         Box::pin(async { Ok(None) })
     }
 
+    /// Bind an owned, nonblocking listener with its immutable NAP identity
+    /// and endpoint. The caller must still re-observe ownership before each
+    /// accept, perform pinned mutual TLS and close sessions during teardown.
+    fn bind_guarded_control_listener(
+        &self,
+    ) -> NetworkOperationFuture<'_, Option<crate::ObservedControlListener>> {
+        Box::pin(async { Ok(None) })
+    }
+
     /// Return a TCP listener only for the currently active, independently
     /// observed NAP host address. A missing provider is NOT a wildcard bind.
     /// Merely binding does not activate authenticated peer sessions.
@@ -90,6 +99,15 @@ pub trait StarHostRuntime: Send + Sync {
         &self,
         _config: DaemonConfig,
     ) -> NetworkOperationFuture<'_, Option<SocketAddrV4>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    /// Production binds under the host transition guard, returning a socket
+    /// paired with the exact network identity and backend-owned endpoint.
+    fn bind_guarded_control_listener(
+        &self,
+        _config: DaemonConfig,
+    ) -> NetworkOperationFuture<'_, Option<crate::ObservedControlListener>> {
         Box::pin(async { Ok(None) })
     }
 
@@ -183,6 +201,26 @@ fn same_host_ownership(
 }
 
 impl StarHostRuntime for LinuxStarHostRuntime {
+    fn bind_guarded_control_listener(
+        &self,
+        config: DaemonConfig,
+    ) -> NetworkOperationFuture<'_, Option<crate::ObservedControlListener>> {
+        Box::pin(async move {
+            // The network identity, fresh backend observation, TCP bind and
+            // listener construction all occur before startup/teardown can
+            // acquire the same host transition guard.
+            let _transition = TransitionGuard::claim(&self.transition)?;
+            let Some((network, addresses)) = self.observed_owned_host_addresses(&config).await?
+            else {
+                return Ok(None);
+            };
+            let endpoint = crate::owned_nap_control_address(network, &config, &addresses)?;
+            let listener = crate::bind_owned_nap_control_listener(network, &config, &addresses)?;
+            let owned = crate::ObservedControlListener::new(network, endpoint, listener)?;
+            Ok(Some(owned))
+        })
+    }
+
     fn observed_owned_control_endpoint(
         &self,
         config: DaemonConfig,
@@ -554,6 +592,12 @@ where
     R: StarHostRuntime,
     G: NetworkIdGenerator,
 {
+    fn bind_guarded_control_listener(
+        &self,
+    ) -> NetworkOperationFuture<'_, Option<crate::ObservedControlListener>> {
+        self.runtime.bind_guarded_control_listener(self.config.clone())
+    }
+
     fn observed_owned_control_endpoint(&self) -> NetworkOperationFuture<'_, Option<SocketAddrV4>> {
         self.runtime
             .observed_owned_control_endpoint(self.config.clone())
@@ -1254,6 +1298,13 @@ mod tests {
             let empty_runtime = LinuxStarHostRuntime::default();
             assert!(
                 empty_runtime
+                    .bind_guarded_control_listener(DaemonConfig::default())
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(
+                empty_runtime
                     .bind_owned_control_listener(DaemonConfig::default())
                     .await
                     .unwrap()
@@ -1275,6 +1326,13 @@ mod tests {
                 nap_capabilities(Some(true)),
                 FakeRuntime::default(),
                 SequenceGenerator::new([]),
+            );
+            assert!(
+                operations
+                    .bind_guarded_control_listener()
+                    .await
+                    .unwrap()
+                    .is_none()
             );
             assert!(
                 operations
@@ -1313,6 +1371,12 @@ mod tests {
             // A startup or teardown already owns the transition; binding
             // must fail before it can query a stale host address.
             let transition = TransitionGuard::claim(&runtime.transition).unwrap();
+            let guarded_error = runtime
+                .bind_guarded_control_listener(DaemonConfig::default())
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(guarded_error.kind(), ErrorKind::InvalidState);
             let failure = runtime
                 .bind_owned_control_listener(DaemonConfig::default())
                 .await
