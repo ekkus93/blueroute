@@ -595,7 +595,8 @@ where
     fn bind_guarded_control_listener(
         &self,
     ) -> NetworkOperationFuture<'_, Option<crate::ObservedControlListener>> {
-        self.runtime.bind_guarded_control_listener(self.config.clone())
+        self.runtime
+            .bind_guarded_control_listener(self.config.clone())
     }
 
     fn observed_owned_control_endpoint(&self) -> NetworkOperationFuture<'_, Option<SocketAddrV4>> {
