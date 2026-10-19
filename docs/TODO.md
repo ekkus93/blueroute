@@ -1014,6 +1014,21 @@ IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
 
 ## P7-003 — Implement peer hello/capability exchange
 
+**P7-003 borrowed TCP timeout restoration (software only, 2026-10-19):**
+A two-sided real localhost approved-certificate preface regression sets distinct
+read/write timeouts on both TCP sockets, completes the independently pinned
+certificate exchange and verifies the original timeout policy is restored
+before returning each borrowed socket to its caller. The first test commit
+`06f30e34307676aba879fb9dc8a400e910fbe8d5` failed Clippy on a
+test-only moved-value error; corrected at
+`075f98dca6920eb86551342e364128864cedc897`, with
+[exact-head CI 39326145116](https://github.com/ekkus93/blueroute/actions/runs/39326145116)
+**passed** formatting, locked workspace, Clippy, tests and integrations.
+This is pre-TLS socket-policy qualification only, **not** independent
+user-approved key enrollment, live daemon PAN/TLS supervision, production
+JoinNetwork or physical Bluetooth acceptance. P7-003/P7-004/P6-004
+remain IN PROGRESS; hardware acceptance remains DEFERRED.
+
 **P7-003 pre-TLS approved-key allowlist uniqueness and alias defense (software only, 2026-10-19):**
 `exchange_control_tls_certificate` now uses ordered sets to reject duplicate
 NodeIds and repeated public-key fingerprints in the pre-handshake allowlist,
