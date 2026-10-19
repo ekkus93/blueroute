@@ -219,6 +219,9 @@ impl StarHostRuntime for LinuxStarHostRuntime {
         &self,
     ) -> NetworkOperationFuture<'_, Option<Vec<DiagnosticInterface>>> {
         Box::pin(async move {
+            // Do not observe a partially started or torn-down NAP host.
+            // The fresh backend address query belongs to this transition.
+            let _transition = TransitionGuard::claim(&self.transition)?;
             let active = self.active.lock().map_err(lock_error)?.clone();
             // An idle daemon cannot report host runtime observations; it
             // must not treat an unknown inventory as an observed empty list.
@@ -1288,6 +1291,18 @@ mod tests {
                     .is_none()
             );
             fs::remove_dir_all(root).unwrap();
+        });
+    }
+
+    #[test]
+    fn diagnostic_interfaces_rejects_host_transition_then_recovers_when_idle() {
+        futures_lite::future::block_on(async {
+            let runtime = LinuxStarHostRuntime::default();
+            let transition = TransitionGuard::claim(&runtime.transition).unwrap();
+            let error = runtime.diagnostic_interfaces().await.unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::InvalidState);
+            drop(transition);
+            assert!(runtime.diagnostic_interfaces().await.unwrap().is_none());
         });
     }
 
