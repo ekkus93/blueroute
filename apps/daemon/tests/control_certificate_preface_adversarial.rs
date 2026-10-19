@@ -9,7 +9,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use blueroute_core::{NetworkId, NodeId};
-use blueroute_daemon::{ControlTlsError, LocalControlTlsIdentity, exchange_control_tls_candidate};
+use blueroute_daemon::{
+    ControlTlsError, LocalControlTlsIdentity, PinnedControlTlsPeer, exchange_control_tls_candidate,
+    exchange_control_tls_certificate,
+};
 
 const PREFACE: &[u8] = b"BLUEROUTE-CONTROL-CERT-V1\0";
 const CERT_LIMIT: u32 = 16 * 1024;
@@ -153,6 +156,48 @@ fn zero_network_candidate_is_rejected_before_any_certificate_exchange() {
     // No cleartext candidate certificate should be leaked on invalid scope.
     let mut first_byte = [0; 1];
     assert_eq!(peer.read(&mut first_byte).unwrap(), 0);
+}
+
+#[test]
+fn invalid_pin_allowlists_close_borrowed_socket_without_disclosing_certificate() {
+    use std::io::Read;
+
+    let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
+    let remote = LocalControlTlsIdentity::generate(node(3)).unwrap();
+    let valid = PinnedControlTlsPeer::new(network(), remote.node(), remote.fingerprint()).unwrap();
+    let foreign = PinnedControlTlsPeer::new(
+        NetworkId::from_bytes([7; 16]),
+        remote.node(),
+        remote.fingerprint(),
+    )
+    .unwrap();
+
+    // No approved pins, zero network, duplicate peer, and foreign-network
+    // pins must all fail before sending the daemon's cleartext certificate.
+    for (scope, pins) in [
+        (network(), vec![]),
+        (NetworkId::from_bytes([0; 16]), vec![valid]),
+        (network(), vec![valid, valid]),
+        (network(), vec![foreign]),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut peer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let (mut accepted, _) = listener.accept().unwrap();
+        assert_eq!(
+            exchange_control_tls_certificate(
+                &mut accepted,
+                &server,
+                scope,
+                &pins,
+                Instant::now() + Duration::from_secs(2),
+            )
+            .unwrap_err(),
+            ControlTlsError::InvalidIdentity,
+        );
+        let mut received = [0; 1];
+        assert_eq!(peer.read(&mut received).unwrap(), 0);
+    }
 }
 
 #[test]

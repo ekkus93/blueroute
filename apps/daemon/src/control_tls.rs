@@ -499,6 +499,9 @@ pub fn exchange_control_tls_certificate(
                     != 1
         })
     {
+        // This public borrowed-socket API must fail closed, too: callers
+        // cannot continue using an unauthenticated stream after bad policy.
+        let _ = socket.shutdown(Shutdown::Both);
         return Err(ControlTlsError::InvalidIdentity);
     }
     let original_read_timeout = socket
