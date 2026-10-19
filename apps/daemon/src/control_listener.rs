@@ -327,7 +327,9 @@ mod tests {
                 .kind(),
             ErrorKind::InvalidState
         );
-    }    #[test]
+    }
+
+    #[test]
     fn observed_listener_accepts_only_after_matching_local_ownership_snapshot() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = match listener.local_addr().unwrap() {
@@ -335,10 +337,18 @@ mod tests {
             SocketAddr::V6(_) => panic!("test listener must be IPv4"),
         };
         let mut owner = ObservedControlListener::new(network(7), listener).unwrap();
-        assert!(owner.accept_if_current(Some(network(7)), Some(addr)).unwrap().is_none());
+        assert!(
+            owner
+                .accept_if_current(Some(network(7)), Some(addr))
+                .unwrap()
+                .is_none()
+        );
         let mut remote = TcpStream::connect(addr).unwrap();
         remote.write_all(b"x").unwrap();
-        let mut inbound = owner.accept_if_current(Some(network(7)), Some(addr)).unwrap().unwrap();
+        let mut inbound = owner
+            .accept_if_current(Some(network(7)), Some(addr))
+            .unwrap()
+            .unwrap();
         let mut byte = [0; 1];
         inbound.read_exact(&mut byte).unwrap();
         assert_eq!(&byte, b"x");
@@ -347,7 +357,11 @@ mod tests {
 
     #[test]
     fn observed_listener_retires_on_missing_wrong_network_or_changed_endpoint() {
-        for (network_observation, endpoint_change) in [(None, false), (Some(network(9)), false), (Some(network(7)), true)] {
+        for (network_observation, endpoint_change) in [
+            (None, false),
+            (Some(network(9)), false),
+            (Some(network(7)), true),
+        ] {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let addr = match listener.local_addr().unwrap() {
                 SocketAddr::V4(addr) => addr,
@@ -360,11 +374,17 @@ mod tests {
                 Some(addr)
             };
             assert_eq!(
-                owner.accept_if_current(network_observation, endpoint).unwrap_err().kind(),
+                owner
+                    .accept_if_current(network_observation, endpoint)
+                    .unwrap_err()
+                    .kind(),
                 ErrorKind::InvalidState
             );
             assert_eq!(
-                owner.accept_if_current(Some(network(7)), Some(addr)).unwrap_err().kind(),
+                owner
+                    .accept_if_current(Some(network(7)), Some(addr))
+                    .unwrap_err()
+                    .kind(),
                 ErrorKind::InvalidState
             );
             assert!(TcpStream::connect(addr).is_err());
@@ -375,15 +395,19 @@ mod tests {
     fn observed_listener_rejects_zero_network_and_wildcard_binding() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         assert_eq!(
-            ObservedControlListener::new(network(0), listener).err().unwrap().kind(),
+            ObservedControlListener::new(network(0), listener)
+                .err()
+                .unwrap()
+                .kind(),
             ErrorKind::InvalidInput
         );
         let wildcard = TcpListener::bind("0.0.0.0:0").unwrap();
         assert_eq!(
-            ObservedControlListener::new(network(7), wildcard).err().unwrap().kind(),
+            ObservedControlListener::new(network(7), wildcard)
+                .err()
+                .unwrap()
+                .kind(),
             ErrorKind::InvalidState
         );
     }
-
-
 }
