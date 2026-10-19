@@ -923,7 +923,7 @@ mod tests {
                         "fresh NAP observation failed after TLS",
                     )),
                     3 => panic!("wrong-network session must not query NAP ownership"),
-                    5 => Ok((Some(network(7)), Some(addr))),
+                    5 | 6 => Ok((Some(network(7)), Some(addr))),
                     _ => Ok((
                         Some(network(7)),
                         Some(SocketAddrV4::new(*addr.ip(), addr.port().wrapping_add(1))),
