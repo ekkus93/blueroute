@@ -1014,6 +1014,22 @@ IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
 
 ## P7-003 — Implement peer hello/capability exchange
 
+**P7-003 strict certificate SAN cardinality and sentinel rejection (software only, 2026-10-19):**
+Three real localhost attacker-certificate preface regressions verify that a
+syntactically signed X.509 certificate without any NodeId DNS SAN, a certificate
+with two otherwise valid NodeId DNS SAN entries, and a certificate claiming the
+all-zero NodeId never become enrollment candidates. Missing/ambiguous SANs
+fail as `CertificateIdentityMismatch`; the zero NodeId fails as
+`InvalidIdentity`. Source `eab374c38498fa5576bd64878413c9961b3dd499`,
+formatting follow-up `7a296bf7b412475b1a65ece05cdf4e7dbbb1a1e8`,
+and [exact-head CI 39323732524](https://github.com/ekkus93/blueroute/actions/runs/39323732524)
+**passed** formatting, locked workspace checks, Clippy, Rust tests, simulated
+socket tests, D-Bus integrations and authorization packaging validation.
+These are software-only hostile-input tests: they do **not** implement
+independently confirmed peer key enrollment, the running daemon's authenticated
+PAN/TLS listener, production JoinNetwork or physical Bluetooth acceptance.
+Keep P7-003/P7-004/P6-004 IN PROGRESS and hardware acceptance DEFERRED.
+
 **P7-003 canonical signed NodeId SAN (software only, 2026-10-19):**
 The X.509 identity parser now requires the certificate's sole DNS SAN
 to exactly equal the canonical `node-<lowercase NodeId>` string. General
