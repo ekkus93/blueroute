@@ -1081,6 +1081,23 @@ P7-003/P7-004/P6-004 remain IN PROGRESS; hardware acceptance is DEFERRED.
 
 ## P7-004 — Implement control-session lifecycle
 
+**P7-004 fresh-ownership listener polling seam (software only, 2026-10-19):**
+`ObservedControlListener::poll_with_fresh_observations` now invokes a caller-supplied
+fresh trusted-membership and guarded NAP endpoint observation before every
+nonblocking accept attempt, repeats that observation after an accepted TCP
+candidate, and permanently retires the listener on observation failure even
+when no socket was queued. Three localhost regressions prove idle single-poll
+behavior, two observations for an accepted candidate, and EOF/retirement on
+a failed post-accept observation. Implementation
+`99688c53bdc85c729211dc580c0572aa7ce161c2` passed
+[exact-head CI 39222431265](https://github.com/ekkus93/blueroute/actions/runs/39222431265)
+(format, locked Clippy, workspace tests and integration).
+This is a reusable, **unwired** daemon listener boundary: the caller must
+supply independently fresh observations; TCP source identity is not trusted,
+no mutual-TLS session or independent enrollment was performed, production
+JoinNetwork stays fail-closed, and physical Bluetooth acceptance remains
+DEFERRED. P7-003/P7-004/P6-004 stay IN PROGRESS.
+
 **P7-004 post-accept NAP ownership revalidation (software only, 2026-10-19):**
 `ObservedControlListener::accept_with_revalidation` now permits an untrusted
 TCP candidate to leave the listener owner only after a second caller-supplied,
