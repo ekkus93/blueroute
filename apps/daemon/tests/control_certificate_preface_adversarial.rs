@@ -43,7 +43,6 @@ fn reject_candidate(payload: &[u8], expected: ControlTlsError) {
     assert_eq!(server_thread.join().unwrap().unwrap_err(), expected);
 }
 
-
 fn reject_stalled_candidate(payload: &[u8]) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
