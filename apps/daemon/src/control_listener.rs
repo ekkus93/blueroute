@@ -297,6 +297,56 @@ impl ObservedControlListener {
             }
         }
     }
+    /// Release a registered, mutually authenticated session to the daemon
+    /// only if its logical network and the freshly observed NAP endpoint still
+    /// match after TLS/Hello and registry admission. A changed host can never
+    /// inherit an authenticated session from an earlier listener generation.
+    ///
+    /// Failure drops the owned TLS session, closing its socket and retiring
+    /// its exact registry generation; ownership loss also retires this listener.
+    /// Success is not a lease: the daemon must keep observing PAN ownership
+    /// and cancel active sessions when the host is torn down.
+    pub fn release_registered_if_current<'a, F>(
+        &mut self,
+        session: crate::RegisteredControlSession<'a>,
+        observe: F,
+    ) -> Result<crate::RegisteredControlSession<'a>, CoreError>
+    where
+        F: FnOnce() -> Result<(Option<NetworkId>, Option<SocketAddrV4>), CoreError>,
+    {
+        if self.listener.is_none() {
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP control listener has already been retired",
+            ));
+        }
+        if session.network() != self.network {
+            self.listener.take();
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "authenticated session network differs from NAP listener",
+            ));
+        }
+        match observe() {
+            Ok((Some(network), Some(endpoint)))
+                if network == self.network && endpoint == self.endpoint =>
+            {
+                Ok(session)
+            }
+            Ok(_) => {
+                self.listener.take();
+                Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "NAP ownership changed during authenticated control setup",
+                ))
+            }
+            Err(error) => {
+                self.listener.take();
+                Err(error)
+            }
+        }
+    }
+
 }
 
 #[cfg(test)]
@@ -718,5 +768,132 @@ mod tests {
                 .kind(),
             ErrorKind::InvalidState
         );
+    }
+
+    #[test]
+    fn registered_tls_session_requires_post_handshake_nap_ownership() {
+        use std::fs;
+        use std::path::Path;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        use blueroute_core::{
+            DisplayName, MembershipRegistry, MembershipState, NetworkMembership, NodeId,
+        };
+        use blueroute_linux::NetworkMembershipStore;
+        use blueroute_protocol::control::HelloFacts;
+        use blueroute_protocol::session::{
+            ConnectionDeadline, ConnectionStage, ControlSessionRegistry, PeerSessionKey,
+        };
+        use crate::{
+            ApprovedControlSetup, DurablePeerTrustOperations, LocalControlTlsIdentity,
+            PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer,
+            accept_registered_from_durable_approval, connect_approved_control_session,
+        };
+
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+        fn approved_trust(path: &Path, peer: PinnedControlTlsPeer) -> DurablePeerTrustOperations {
+            fs::create_dir_all(path).unwrap();
+            let membership_store = NetworkMembershipStore::new(path.join("membership"));
+            let mut membership =
+                NetworkMembership::new(network(7), DisplayName::new("Local test").unwrap());
+            membership.state = MembershipState::Member;
+            let mut memberships = MembershipRegistry::default();
+            memberships.remember_network(membership);
+            membership_store.save(&memberships).unwrap();
+            let trust = DurablePeerTrustOperations::with_peer_pin_store(
+                membership_store,
+                PeerPinStore::new(path.join("pins")),
+            );
+            futures_lite::future::block_on(trust.trust_peer(peer.node())).unwrap();
+            trust.enroll_verified_key(
+                network(7), peer.node(), peer.fingerprint(), peer.fingerprint(),
+            ).unwrap();
+            trust
+        }
+
+        fn setup() -> ApprovedControlSetup {
+            let mut active_deadline = ConnectionDeadline::new(0);
+            active_deadline.advance(ConnectionStage::TlsHandshake, 1).unwrap();
+            active_deadline.advance(ConnectionStage::Hello, 2).unwrap();
+            active_deadline.advance(ConnectionStage::Active, 3).unwrap();
+            ApprovedControlSetup {
+                network: network(7),
+                facts: HelloFacts {
+                    software_version: "listener-ownership-test".to_owned(),
+                    capabilities: blueroute_core::NodeCapabilities::default(),
+                    segment: None,
+                    direct_neighbors: Vec::new(),
+                },
+                handshake_deadline: Instant::now() + Duration::from_secs(5),
+                active_deadline,
+            }
+        }
+
+        for retain_ownership in [true, false] {
+            let client = LocalControlTlsIdentity::generate(NodeId::from_bytes([11; 16])).unwrap();
+            let server = LocalControlTlsIdentity::generate(NodeId::from_bytes([12; 16])).unwrap();
+            let client_pin =
+                PinnedControlTlsPeer::new(network(7), client.node(), client.fingerprint()).unwrap();
+            let server_pin =
+                PinnedControlTlsPeer::new(network(7), server.node(), server.fingerprint()).unwrap();
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = match listener.local_addr().unwrap() {
+                SocketAddr::V4(addr) => addr,
+                SocketAddr::V6(_) => panic!("test listener must be IPv4"),
+            };
+            let mut owner = ObservedControlListener::new(network(7), addr, listener).unwrap();
+            let client_socket = TcpStream::connect(addr).unwrap();
+            let root = std::env::temp_dir().join(format!(
+                "blueroute-listener-post-auth-{}-{}",
+                std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed),
+            ));
+            fs::create_dir_all(&root).unwrap();
+            let server_dir = root.join("server");
+            let client_dir = root.join("client");
+            let local_node = client.node();
+            let server_thread = thread::spawn(move || {
+                let trust = approved_trust(&server_dir, client_pin);
+                let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+                let accepted = owner
+                    .poll_with_fresh_observations(|| Ok((Some(network(7)), Some(addr))))
+                    .unwrap().unwrap();
+                let session = accept_registered_from_durable_approval(
+                    accepted, &server, &trust, setup(), Arc::clone(&registry),
+                ).unwrap();
+                let key = PeerSessionKey { network: network(7), peer: local_node };
+                assert!(registry.lock().unwrap().get(key).is_some());
+                let result = owner.release_registered_if_current(session, || {
+                    if retain_ownership {
+                        Ok((Some(network(7)), Some(addr)))
+                    } else {
+                        Ok((None, Some(addr)))
+                    }
+                });
+                if retain_ownership {
+                    let mut session = result.unwrap();
+                    assert!(registry.lock().unwrap().get(key).is_some());
+                    session.cancel();
+                } else {
+                    assert_eq!(result.err().unwrap().kind(), ErrorKind::InvalidState);
+                    assert_eq!(
+                        owner.accept_if_current(Some(network(7)), Some(addr))
+                            .err().unwrap().kind(),
+                        ErrorKind::InvalidState,
+                    );
+                }
+                assert!(registry.lock().unwrap().get(key).is_none());
+            });
+            let client_trust = approved_trust(&client_dir, server_pin);
+            let session = connect_approved_control_session(
+                client_socket, &client, server_pin, &client_trust, setup(),
+            ).unwrap();
+            drop(session);
+            server_thread.join().unwrap();
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 }
