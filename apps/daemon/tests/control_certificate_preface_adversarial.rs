@@ -252,8 +252,7 @@ fn candidate_certificate_refuses_zero_node_san() {
     // A syntactically valid signed certificate for the all-zero NodeId
     // must not become an enrollment candidate or a future TLS pin.
     let key = rcgen::KeyPair::generate().unwrap();
-    let params =
-        rcgen::CertificateParams::new(vec![format!("node-{}", node(0))]).unwrap();
+    let params = rcgen::CertificateParams::new(vec![format!("node-{}", node(0))]).unwrap();
     let certificate = params.self_signed(&key).unwrap();
     let der = certificate.der().as_ref();
     let mut payload = PREFACE.to_vec();
