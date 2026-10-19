@@ -1490,7 +1490,7 @@ fn certificate_node_id(certificate: &CertificateDer<'_>) -> Result<NodeId, Contr
         .map_err(|_| ControlTlsError::CertificateIdentityMismatch)?;
     // NodeId CLI input permits uppercase hex, but a signed certificate
     // identity must have one unambiguous canonical DNS representation.
-    if name != node_dns_name(node) {
+    if *name != node_dns_name(node) {
         return Err(ControlTlsError::CertificateIdentityMismatch);
     }
     Ok(node)
