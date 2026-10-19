@@ -234,7 +234,7 @@ fn approved_certificate_exchange_restores_borrowed_socket_timeouts() {
             Instant::now() + Duration::from_secs(5),
         )
         .unwrap();
-        assert_eq!(accepted.fingerprint(), client.fingerprint());
+        assert_eq!(accepted.fingerprint(), client_pin.fingerprint());
         assert_eq!(socket.read_timeout().unwrap(), Some(original_read));
         assert_eq!(socket.write_timeout().unwrap(), Some(original_write));
     });
