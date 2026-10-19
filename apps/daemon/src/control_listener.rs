@@ -839,7 +839,8 @@ mod tests {
             }
         }
 
-        for retain_ownership in [true, false] {
+        // Match, lost host, backend failure, and authenticated wrong-network.
+        for scenario in 0_u8..4 {
             let client = LocalControlTlsIdentity::generate(NodeId::from_bytes([11; 16])).unwrap();
             let server = LocalControlTlsIdentity::generate(NodeId::from_bytes([12; 16])).unwrap();
             let client_pin =
@@ -851,7 +852,9 @@ mod tests {
                 SocketAddr::V4(addr) => addr,
                 SocketAddr::V6(_) => panic!("test listener must be IPv4"),
             };
-            let mut owner = ObservedControlListener::new(network(7), addr, listener).unwrap();
+            let listener_network = if scenario == 3 { network(8) } else { network(7) };
+            let mut owner =
+                ObservedControlListener::new(listener_network, addr, listener).unwrap();
             let client_socket = TcpStream::connect(addr).unwrap();
             let root = std::env::temp_dir().join(format!(
                 "blueroute-listener-post-auth-{}-{}",
@@ -866,7 +869,7 @@ mod tests {
                 let trust = approved_trust(&server_dir, client_pin);
                 let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
                 let accepted = owner
-                    .poll_with_fresh_observations(|| Ok((Some(network(7)), Some(addr))))
+                    .poll_with_fresh_observations(|| Ok((Some(listener_network), Some(addr))))
                     .unwrap()
                     .unwrap();
                 let session = accept_registered_from_durable_approval(
@@ -883,13 +886,17 @@ mod tests {
                 };
                 assert!(registry.lock().unwrap().get(key).is_some());
                 let result = owner.release_registered_if_current(session, || {
-                    if retain_ownership {
-                        Ok((Some(network(7)), Some(addr)))
-                    } else {
-                        Ok((None, Some(addr)))
+                    match scenario {
+                        0 => Ok((Some(network(7)), Some(addr))),
+                        1 => Ok((None, Some(addr))),
+                        2 => Err(CoreError::new(
+                            ErrorKind::InvalidState,
+                            "fresh NAP observation failed after TLS",
+                        )),
+                        _ => panic!("wrong-network session must not query NAP ownership"),
                     }
                 });
-                if retain_ownership {
+                if scenario == 0 {
                     let mut session = result.unwrap();
                     assert!(registry.lock().unwrap().get(key).is_some());
                     session.cancel();
@@ -897,7 +904,7 @@ mod tests {
                     assert_eq!(result.err().unwrap().kind(), ErrorKind::InvalidState);
                     assert_eq!(
                         owner
-                            .accept_if_current(Some(network(7)), Some(addr))
+                            .accept_if_current(Some(listener_network), Some(addr))
                             .err()
                             .unwrap()
                             .kind(),
