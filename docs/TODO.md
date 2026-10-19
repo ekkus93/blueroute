@@ -1014,6 +1014,20 @@ IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
 
 ## P7-003 — Implement peer hello/capability exchange
 
+**P7-003 valid-but-unapproved certificate preface rejection (software only, 2026-10-19):**
+Two real localhost TCP negative tests present syntactically valid X.509 certificates
+for (1) an unknown NodeId and (2) a known NodeId bearing a different SPKI key.
+The approved-certificate pre-TLS filter rejects those candidates respectively
+as an identity mismatch and a fingerprint mismatch, then closes the borrowed
+TCP socket rather than continuing into TLS. Source
+`c38440989628cbd22d65b273dced7085bbcaca5f` passed
+[exact-head CI 39337988696](https://github.com/ekkus93/blueroute/actions/runs/39337988696)
+(format, locked workspace, Clippy, Rust/integration, socket, D-Bus and packaging).
+These are software-only preflight regressions, not independently approved key
+enrollment, live daemon PAN/TLS session supervision, production JoinNetwork or
+physical Bluetooth acceptance. P7-003/P7-004/P6-004 remain IN PROGRESS;
+hardware acceptance remains DEFERRED.
+
 **P7-003 borrowed TCP timeout restoration (software only, 2026-10-19):**
 A two-sided real localhost approved-certificate preface regression sets distinct
 read/write timeouts on both TCP sockets, completes the independently pinned
