@@ -1014,6 +1014,20 @@ IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
 
 ## P7-003 — Implement peer hello/capability exchange
 
+**P7-003 own-identity reflection and zero-network candidate denial (software only, 2026-10-19):**
+Two real localhost TCP regression tests reject a syntactically valid X.509
+candidate certificate whose claimed NodeId equals the receiving daemon's
+own NodeId, and reject an all-zero NetworkId before the daemon sends a
+certificate or accepts any untrusted candidate. The second case also
+checks that the peer observes socket EOF with no certificate bytes.
+Implementation `dd4e96a489b1c0cb9ef4702c567ba1ee591b177f` passed
+[exact-head CI 39313400421](https://github.com/ekkus93/blueroute/actions/runs/39313400421)
+(formatting, workspace checks, Clippy, tests and integration checks).
+These are software-only enrollment input guards, **not** independently
+confirmed key enrollment, live daemon TCP/PAN supervision, production
+JoinNetwork, or physical Bluetooth acceptance. P7-003/P7-004/P6-004 remain
+IN PROGRESS; physical acceptance remains DEFERRED.
+
 **P7-003 candidate certificate body negative regressions (software only, 2026-10-19):**
 The localhost adversarial candidate-certificate preface suite now additionally
 rejects an EOF after a valid header declares more certificate bytes than were
