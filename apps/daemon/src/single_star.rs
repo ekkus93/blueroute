@@ -1179,18 +1179,33 @@ mod tests {
         ));
         let other_bridge = NetworkInterfaceHandle::new("brb-other").unwrap();
         assert!(!same_host_ownership(
-            network, &bridge, &address, network, &other_bridge, &address
+            network,
+            &bridge,
+            &address,
+            network,
+            &other_bridge,
+            &address
         ));
         let mut other_address = address.clone();
         other_address.owner = other;
         assert!(!same_host_ownership(
-            network, &bridge, &address, network, &bridge, &other_address
+            network,
+            &bridge,
+            &address,
+            network,
+            &bridge,
+            &other_address
         ));
         let mut other_address = address.clone();
         other_address.prefix =
             blueroute_core::IpPrefix::new("10.201.99.1".parse().unwrap(), 24).unwrap();
         assert!(!same_host_ownership(
-            network, &bridge, &address, network, &bridge, &other_address
+            network,
+            &bridge,
+            &address,
+            network,
+            &bridge,
+            &other_address
         ));
     }
 
