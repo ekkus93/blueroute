@@ -151,8 +151,7 @@ impl LinuxStarHostRuntime {
         let Some(active) = active else {
             return Ok(None);
         };
-        let planned =
-            Ipv4StarAddressPlan::for_network(active.network, config.ipv4_address_pool)?;
+        let planned = Ipv4StarAddressPlan::for_network(active.network, config.ipv4_address_pool)?;
         if active.address.owner != active.network
             || active.address.interface != active.bridge
             || active.address.prefix != planned.host
@@ -1214,7 +1213,13 @@ mod tests {
                     .unwrap()
                     .is_none()
             );
-            assert!(operations.observed_owned_control_endpoint().await.unwrap().is_none());
+            assert!(
+                operations
+                    .observed_owned_control_endpoint()
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
             fs::remove_dir_all(root).unwrap();
         });
     }
