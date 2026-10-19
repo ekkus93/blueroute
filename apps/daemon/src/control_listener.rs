@@ -223,6 +223,31 @@ impl ObservedControlListener {
         }
     }
 
+    /// Poll using independently fresh observations on both sides of TCP
+    /// acceptance. An observation error retires the listener even if there
+    /// was no pending connection. A successful idle poll observes once; an
+    /// accepted candidate observes twice before leaving this owner.
+    ///
+    /// The callback must read trusted local membership and the guarded
+    /// network backend each time. Never use peer-supplied identity or reuse
+    /// a cached snapshot. Returned TCP sockets remain unauthenticated.
+    pub fn poll_with_fresh_observations<F>(
+        &mut self,
+        mut observe: F,
+    ) -> Result<Option<TcpStream>, CoreError>
+    where
+        F: FnMut() -> Result<(Option<NetworkId>, Option<SocketAddrV4>), CoreError>,
+    {
+        let (network, endpoint) = match observe() {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                self.listener.take();
+                return Err(error);
+            }
+        };
+        self.accept_with_revalidation(network, endpoint, observe)
+    }
+
     /// Accept a candidate only if ownership survives a second independent
     /// observation after TCP accept. The recheck must query fresh local
     /// membership and the guarded network backend, not reuse the first
@@ -491,6 +516,106 @@ mod tests {
                 .kind(),
             ErrorKind::InvalidState
         );
+    }
+
+    #[test]
+    fn fresh_observation_failure_retires_idle_listener() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = match listener.local_addr().unwrap() {
+            SocketAddr::V4(addr) => addr,
+            SocketAddr::V6(_) => panic!("test listener must be IPv4"),
+        };
+        let mut owner = ObservedControlListener::new(network(7), addr, listener).unwrap();
+        let mut observations = 0;
+        let error = owner
+            .poll_with_fresh_observations(|| {
+                observations += 1;
+                Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "fresh NAP ownership observation failed",
+                ))
+            })
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidState);
+        assert_eq!(observations, 1);
+        assert!(TcpStream::connect(addr).is_err());
+        assert_eq!(
+            owner
+                .poll_with_fresh_observations(|| Ok((Some(network(7)), Some(addr))))
+                .err()
+                .unwrap()
+                .kind(),
+            ErrorKind::InvalidState
+        );
+    }
+
+    #[test]
+    fn fresh_observations_run_again_after_accept_but_not_for_idle_poll() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = match listener.local_addr().unwrap() {
+            SocketAddr::V4(addr) => addr,
+            SocketAddr::V6(_) => panic!("test listener must be IPv4"),
+        };
+        let mut owner = ObservedControlListener::new(network(7), addr, listener).unwrap();
+        let mut observations = 0;
+        assert!(
+            owner
+                .poll_with_fresh_observations(|| {
+                    observations += 1;
+                    Ok((Some(network(7)), Some(addr)))
+                })
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(observations, 1);
+        let mut remote = TcpStream::connect(addr).unwrap();
+        remote.write_all(b"x").unwrap();
+        let mut accepted = owner
+            .poll_with_fresh_observations(|| {
+                observations += 1;
+                Ok((Some(network(7)), Some(addr)))
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(observations, 3);
+        let mut byte = [0; 1];
+        accepted.read_exact(&mut byte).unwrap();
+        assert_eq!(&byte, b"x");
+        // Two fresh ownership observations do not authenticate the TCP peer.
+    }
+
+    #[test]
+    fn second_fresh_observation_failure_closes_accepted_socket() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = match listener.local_addr().unwrap() {
+            SocketAddr::V4(addr) => addr,
+            SocketAddr::V6(_) => panic!("test listener must be IPv4"),
+        };
+        let mut owner = ObservedControlListener::new(network(7), addr, listener).unwrap();
+        let mut remote = TcpStream::connect(addr).unwrap();
+        remote
+            .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+            .unwrap();
+        let mut observations = 0;
+        let error = owner
+            .poll_with_fresh_observations(|| {
+                observations += 1;
+                if observations == 1 {
+                    Ok((Some(network(7)), Some(addr)))
+                } else {
+                    Err(CoreError::new(
+                        ErrorKind::InvalidState,
+                        "second NAP ownership observation failed",
+                    ))
+                }
+            })
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidState);
+        assert_eq!(observations, 2);
+        assert_eq!(remote.read(&mut [0_u8; 1]).unwrap(), 0);
+        assert!(TcpStream::connect(addr).is_err());
     }
 
     #[test]
