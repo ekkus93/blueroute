@@ -435,7 +435,10 @@ mod tests {
         let mut owner = ObservedControlListener::new(network(7), actual, listener).unwrap();
         let _queued = TcpStream::connect(actual).unwrap();
         assert_eq!(
-            owner.accept_if_current(None, Some(actual)).unwrap_err().kind(),
+            owner
+                .accept_if_current(None, Some(actual))
+                .unwrap_err()
+                .kind(),
             ErrorKind::InvalidState
         );
         assert_eq!(
