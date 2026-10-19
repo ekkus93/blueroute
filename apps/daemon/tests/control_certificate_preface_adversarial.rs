@@ -201,6 +201,21 @@ fn invalid_pin_allowlists_close_borrowed_socket_without_disclosing_certificate()
 }
 
 #[test]
+fn certificate_candidate_rejects_uppercase_hex_alias_in_node_san() {
+    // General NodeId input accepts uppercase hex, but the signed DNS SAN
+    // is a canonical protocol identity and must not accept textual aliases.
+    let upper = NodeId::from_bytes([0xab; 16]).to_string().to_uppercase();
+    let key = rcgen::KeyPair::generate().unwrap();
+    let params = rcgen::CertificateParams::new(vec![format!("node-{upper}")]).unwrap();
+    let certificate = params.self_signed(&key).unwrap();
+    let der = certificate.der().as_ref();
+    let mut payload = PREFACE.to_vec();
+    payload.extend_from_slice(&(der.len() as u32).to_be_bytes());
+    payload.extend_from_slice(der);
+    reject_candidate(&payload, ControlTlsError::CertificateIdentityMismatch);
+}
+
+#[test]
 fn stalled_certificate_preface_expires_whole_exchange_deadline() {
     reject_stalled_candidate(&[]);
 }

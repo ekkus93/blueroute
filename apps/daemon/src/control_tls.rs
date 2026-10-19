@@ -1485,9 +1485,15 @@ fn certificate_node_id(certificate: &CertificateDer<'_>) -> Result<NodeId, Contr
     let value = name
         .strip_prefix("node-")
         .ok_or(ControlTlsError::CertificateIdentityMismatch)?;
-    value
+    let node: NodeId = value
         .parse()
-        .map_err(|_| ControlTlsError::CertificateIdentityMismatch)
+        .map_err(|_| ControlTlsError::CertificateIdentityMismatch)?;
+    // NodeId CLI input permits uppercase hex, but a signed certificate
+    // identity must have one unambiguous canonical DNS representation.
+    if name != node_dns_name(node) {
+        return Err(ControlTlsError::CertificateIdentityMismatch);
+    }
+    Ok(node)
 }
 
 fn node_dns_name(node: NodeId) -> String {
