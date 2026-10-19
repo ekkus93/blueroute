@@ -482,21 +482,18 @@ pub fn exchange_control_tls_certificate(
     allowed_peers: &[PinnedControlTlsPeer],
     deadline: Instant,
 ) -> Result<PinnedControlTlsCertificate, ControlTlsError> {
+    // Reject ambiguous per-network key mappings before exchanging even a
+    // public certificate. Ordered sets avoid quadratic rescanning when
+    // many independently enrolled clients share a NAP.
+    let mut nodes = BTreeSet::new();
+    let mut fingerprints = BTreeSet::new();
     if is_zero_network(network)
         || allowed_peers.is_empty()
         || allowed_peers.iter().any(|peer| {
             peer.network != network
                 || peer.node == local.node
-                || allowed_peers
-                    .iter()
-                    .filter(|other| other.node == peer.node)
-                    .count()
-                    != 1
-                || allowed_peers
-                    .iter()
-                    .filter(|other| other.fingerprint == peer.fingerprint)
-                    .count()
-                    != 1
+                || !nodes.insert(peer.node)
+                || !fingerprints.insert(peer.fingerprint)
         })
     {
         // This public borrowed-socket API must fail closed, too: callers

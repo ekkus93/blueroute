@@ -171,6 +171,11 @@ fn invalid_pin_allowlists_close_borrowed_socket_without_disclosing_certificate()
         remote.fingerprint(),
     )
     .unwrap();
+    // An alias NodeId with the same key and the server's own NodeId
+    // must never enter the trusted pre-TLS certificate allowlist.
+    let alias = PinnedControlTlsPeer::new(network(), node(4), remote.fingerprint()).unwrap();
+    let self_peer =
+        PinnedControlTlsPeer::new(network(), server.node(), server.fingerprint()).unwrap();
 
     // No approved pins, zero network, duplicate peer, and foreign-network
     // pins must all fail before sending the daemon's cleartext certificate.
@@ -178,6 +183,8 @@ fn invalid_pin_allowlists_close_borrowed_socket_without_disclosing_certificate()
         (network(), vec![]),
         (NetworkId::from_bytes([0; 16]), vec![valid]),
         (network(), vec![valid, valid]),
+        (network(), vec![valid, alias]),
+        (network(), vec![self_peer]),
         (network(), vec![foreign]),
     ] {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
