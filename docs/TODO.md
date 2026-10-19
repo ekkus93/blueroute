@@ -351,6 +351,7 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 
 
+
 ## P2-002 — Define node capability model
 
 - [x] Bluetooth adapter usability.
@@ -698,6 +699,7 @@ Do this early. Architecture must be informed by real Bluetooth PAN behavior, but
 
 - [x] connect.
 - [x] version negotiation.
+
 - [x] typed requests.
 
 - [x] events.
@@ -1024,6 +1026,20 @@ Implementation `b689dd5716bd6cf8cb67d24fd3853955b243ff2c` passed
 possession proof, live daemon PAN transport or production JoinNetwork.
 P7-003/P7-004/P6-004 remain OPEN; physical acceptance is DEFERRED.
 
+**P7-003 candidate-preface partial-stall deadline regressions (software only, 2026-10-19):
+Two localhost TCP tests keep the attacker's write side open after sending
+only half of the certificate-length header or a short fragment of a declared
+certificate body. Both must expire the same absolute whole-exchange deadline
+rather than hang waiting for EOF; the existing no-byte stall case shares the
+same helper. Implementation `aa3b8ae93f544934194c2ae70ed083b4e37cd0fc`
+required a rustfmt-only correction at
+`cf88cd8c5b48abcada1545aa320e2191dae0e1b7`; [exact-head CI
+39243278556](https://github.com/ekkus93/blueroute/actions/runs/39243278556)
+passed (format, Clippy, locked workspace and tests). This is untrusted
+candidate-parser timing evidence only, **not** independent enrollment,
+authenticated daemon PAN transport, production JoinNetwork or physical
+Bluetooth acceptance. P7-003/P7-004/P6-004 remain OPEN.
+
 - [x] software/protocol version represented in envelope/hello.
 - [x] stable identity claimed by envelope sender (not authenticated yet).
 - [x] node capability facts are typed and validated.
@@ -1047,6 +1063,7 @@ P7-003/P7-004/P6-004 remain OPEN; physical acceptance is DEFERRED.
 **P7-003 fail-closed zero-identity enrollment (software-only, 2026-10-14):** The peer-key registry refuses an all-zero `NetworkId` or `NodeId` both on enrollment and authorization; owner-only durable pin loading also rejects records containing either identity rather than persisting invalid approval state. Negative in-memory, on-disk and preserved-valid-peer tests passed [exact-head CI 38692365152](https://github.com/ekkus93/blueroute/actions/runs/38692365152) at `efd0708bf5c14e8fff92d57cb525a94c8186f8b8`. **No actual TLS verification, independently approved enrollment UX, authenticated daemon session or hardware acceptance is established.**
 
 **P7-003/P7-004 TLS implementation (commit `84f05a6`, 2026-10-15):** `apps/daemon/src/control_tls.rs` generates a stable local TLS identity, validates the certificate's NodeId and key match, persists the identity in owner-only storage without replacing an existing key, exchanges a bounded cleartext candidate-certificate preface that is matched against approved `(NetworkId, NodeId, SPKI-SHA256)` pins, establishes TLS 1.3 mutual authentication by an absolute deadline, derives the channel exporter session ID, and exchanges authenticated Hello/HelloAck on the same TLS stream. Opaque peer evidence is rebound to that exact stream before entering `PinnedSessionIngress`, which rechecks durable membership and key approval. Tests cover loopback mutual key possession, unknown-key rejection, exporter binding, authenticated Hello and ingress, cross-channel evidence rejection, restart persistence, corruption failure and atomic concurrent first creation. The daemon loads its identity on startup. The four locked workspace checks passed locally after this commit; no CI claim is made. Independent user enrollment UX/ceremony, wiring real PAN sockets into the helper, reconnect/runtime lifecycle wiring and production JoinNetwork remain open.
+
 
 **P7-003 first-key enrollment bootstrap groundwork (commit `f88e1f3`, 2026-10-15):** `exchange_control_tls_candidate` returns only a bounded, parsed but explicitly untrusted certificate candidate for independent NodeId/fingerprint display. It can become an exact-leaf TLS trust input only when the caller supplies a matching independently confirmed SPKI fingerprint; the existing pinned connection helpers still recheck the certificate on the connection. Loopback tests verify peer identity extraction, matching confirmation, wrong-fingerprint rejection, and subsequent mutual-TLS proof. This primitive does not provide a user ceremony, enroll a durable pin, authorize membership, or enable JoinNetwork.
 
@@ -1398,6 +1415,7 @@ and P6-004 remain IN PROGRESS.
 **Software-first:** Use deterministic topology graphs, simulated peers and Linux namespaces/veth with kernel IP forwarding/routing where feasible; exercise loss/convergence/cleanup. Physical two-hop and interconnected-star Bluetooth traffic under P8-006/P8-007 stays **HARDWARE DEFERRED**, not completed by virtual networking.
 
 **P7-005 pinned mutual-TLS hostile-frame regression (software-only, 2026-10-17):**
+
 `apps/daemon/src/control_tls.rs` now runs seven fresh, real localhost
 mutual-TLS 1.3 exchanges with exporter-bound Hello/HelloAck, matching local
 user-approval/pin test fixtures and active daemon-library ingress. Each
@@ -1749,6 +1767,7 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 **Software partial (2026-10-14):** `apps/daemon/src/lib.rs` now serves `GetDiagnostics` read-only over system D-Bus using the existing typed `DiagnosticSnapshot` contract. The CLI displays the daemon's actual health, network and capabilities in human or JSON form, and labels node counts local-only until P7 authenticated peers exist. An empty local identity yields zero reported nodes; remote discovery/trust is never treated as authenticated reachability. Unit and D-Bus broker integration tests passed [exact-head CI 38692903150](https://github.com/ekkus93/blueroute/actions/runs/38692903150) at `9ac40ea6b3c7212d1842854bcde41a7b268fae71`. **No TLS peer authentication, PAN network path, physical controller diagnostics or hardware acceptance is implied.**
 
+
 **Acceptance**
 
 - Diagnostics expose enough system/PAN/route/capability state to troubleshoot heterogeneous hardware.
@@ -2097,6 +2116,7 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 - [x] classify transient transport errors separately from permanent authentication/protocol/configuration failures.
 - [x] bounded per-peer exponential backoff with retry exhaustion and no parallel attempts.
 - [x] reset only after authenticated success or explicit cancellation; close pending sockets before retry.
+
 
 **Software partial (2026-10-15):** `ErrorKind::is_retryable_transport_failure` and `PendingHandshakeSockets::failed_with_kind` now retire permanent failures without retry and schedule transient transport failures through the bounded per-peer scheduler. Existing scheduler tests cover exhaustion, peer isolation, deadlines, clock regression and retry reset policy. The real authenticated session manager is not wired into daemon runtime yet, so overall P13-006 acceptance remains open with P7-003/P7-004 integration.
 
@@ -2448,6 +2468,7 @@ Cover:
 - address conflict;
 - stale/reconnecting state;
 - routed peer unavailable;
+
 - driver/firmware quirks.
 
 **Software partial (2026-10-15):** `docs/TROUBLESHOOTING.md` covers each listed failure class with current diagnostics and recovery boundaries. Acceptance remains open because the CLI/TUI/desktop do not yet link their runtime errors to this guidance and authenticated routed-peer states are not implemented.
