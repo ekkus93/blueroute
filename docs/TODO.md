@@ -1081,6 +1081,28 @@ P7-003/P7-004/P6-004 remain IN PROGRESS; hardware acceptance is DEFERRED.
 
 ## P7-004 — Implement control-session lifecycle
 
+**P7-004 bound listener and ownership identity integration seam (software-only, 2026-10-18):**
+`StarHostRuntime::bind_guarded_control_listener` and
+`NetworkOperations::bind_guarded_control_listener` now provide an
+optional `ObservedControlListener` that carries the actual active
+NAP NetworkId and non-wildcard endpoint, rather than handing the
+future daemon loop an unscoped `TcpListener`. The Linux runtime
+holds the same transition guard across active-host inspection,
+fresh NetworkManager address observation, exact owned address
+validation, TCP bind and listener construction. Generic/fake or
+idle runtimes return `None`; transition-contention regressions
+fail closed. Implementation at
+`24228e3414eb4a08609903621e3046499b361ed9`
+required a rustfmt-only forwarder fix at
+`8061636c9fa5668a40fd7dfc79f3170908369423`;
+[exact-head CI 39212192949](https://github.com/ekkus93/blueroute/actions/runs/39212192949)
+**passed** (format, workspace, Clippy, tests and integration).
+This is a reusable software seam; **the actual daemon has not yet
+started or supervised the listener**, authenticated a socket via
+durable independently verified mutual TLS, coordinated active socket
+teardown on PAN loss or enabled production JoinNetwork. Do not
+complete P7-003/P7-004/P6-004 or deferred physical acceptance.
+
 **P7-004 exact-endpoint construction and queued-connection denial (software only, 2026-10-18):**
 `ObservedControlListener::new` now requires a separate fresh observed
 NAP endpoint and refuses an already-bound socket at any different IPv4
