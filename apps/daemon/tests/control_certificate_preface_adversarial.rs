@@ -74,6 +74,24 @@ fn certificate_candidate_rejects_zero_length_certificate() {
 }
 
 #[test]
+fn certificate_candidate_rejects_truncated_declared_body() {
+    let mut payload = PREFACE.to_vec();
+    payload.extend_from_slice(&16_u32.to_be_bytes());
+    payload.extend_from_slice(&[0x30, 0x02, 0x01, 0x01]);
+    // EOF before the declared body is complete must not create a candidate.
+    reject_candidate(&payload, ControlTlsError::CertificateExchangeFailed);
+}
+
+#[test]
+fn certificate_candidate_rejects_complete_malformed_der() {
+    let mut payload = PREFACE.to_vec();
+    payload.extend_from_slice(&4_u32.to_be_bytes());
+    payload.extend_from_slice(&[0xff, 0xff, 0xff, 0xff]);
+    // A complete length-delimited body is still untrusted certificate input.
+    reject_candidate(&payload, ControlTlsError::InvalidCertificate);
+}
+
+#[test]
 fn stalled_certificate_preface_expires_whole_exchange_deadline() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
