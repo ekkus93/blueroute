@@ -1014,6 +1014,21 @@ IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
 
 ## P7-003 — Implement peer hello/capability exchange
 
+**P7-003 revocation after candidate discovery blocks key enrollment (software-only, 2026-10-19):**
+A real localhost TCP regression discovers an untrusted candidate certificate for
+an initially approved peer, then revokes the durable peer approval before
+starting independently confirmed mutual TLS. Even with the originally matching
+confirmed fingerprint, the composed enrollment helper rechecks current
+membership, rejects the request, shuts down the TCP socket before
+certificate exchange and leaves the durable SPKI pin registry empty.
+Source `5fa66d4840a4704c79e40ea71a5d84a1339c5c9f` passed
+[exact-head CI 39349421880](https://github.com/ekkus93/blueroute/actions/runs/39349421880)
+(format, locked workspace, Clippy, Rust unit/integration, socket, D-Bus and
+packaging checks). This is policy+localhost TCP evidence, not user confirmation
+UX, live daemon/PAN admission or supervision, production JoinNetwork, or
+physical Bluetooth acceptance. P7-003/P7-004/P6-004 remain IN PROGRESS;
+hardware remains DEFERRED.
+
 **P7-003 mutually authenticated TLS without completed Hello rejects enrollment (software-only, 2026-10-19):**
 A real two-peer localhost regression allows candidate certificate discovery and
 successful pinned mutual-TLS 1.3 handshake, but the server closes the TLS stream
