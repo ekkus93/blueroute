@@ -124,6 +124,12 @@ pub struct ObservedControlListener {
 }
 
 impl ObservedControlListener {
+    /// Immutable local network identity captured by the guarded NAP binder.
+    /// This is local provenance, never a remote peer-authentication claim.
+    pub(crate) const fn network(&self) -> NetworkId {
+        self.network
+    }
+
     /// Takes ownership only of an already bound, non-wildcard IPv4 listener
     /// at the exact endpoint supplied by a fresh independent NAP observation.
     /// For production, obtain the socket via the guarded owned-NAP binder.

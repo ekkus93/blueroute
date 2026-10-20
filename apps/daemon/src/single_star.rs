@@ -595,8 +595,32 @@ where
     fn bind_guarded_control_listener(
         &self,
     ) -> NetworkOperationFuture<'_, Option<crate::ObservedControlListener>> {
-        self.runtime
-            .bind_guarded_control_listener(self.config.clone())
+        Box::pin(async move {
+            // A live NAP backend is insufficient authority if durable local
+            // membership was revoked or replaced. Check before binding and
+            // again after the asynchronous guarded bind completes.
+            let Some(network) = current_network(&self.store.load()?)? else {
+                return Ok(None);
+            };
+            let Some(listener) = self
+                .runtime
+                .bind_guarded_control_listener(self.config.clone())
+                .await?
+            else {
+                return Ok(None);
+            };
+            if listener.network() != network
+                || current_network(&self.store.load()?)? != Some(network)
+            {
+                // Dropping the listener closes its queued unauthenticated
+                // candidates; never expose a socket from a stale membership.
+                return Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "NAP control listener is not backed by current durable membership",
+                ));
+            }
+            Ok(Some(listener))
+        })
     }
 
     fn observed_owned_control_endpoint(&self) -> NetworkOperationFuture<'_, Option<SocketAddrV4>> {
@@ -1793,4 +1817,117 @@ mod tests {
         assert_eq!(ipv4.octets()[0..2], [10, 201]);
         assert_eq!(ipv4.octets()[3], 1);
     }
+    #[test]
+    fn guarded_control_bind_requires_stable_durable_host_membership() {
+        use std::net::{SocketAddr, TcpListener, TcpStream};
+
+        #[derive(Clone)]
+        struct BindingRuntime {
+            host: NetworkId,
+            membership_path: std::path::PathBuf,
+            replace_membership: Option<NetworkId>,
+            binds: Arc<AtomicUsize>,
+            bound_address: Arc<Mutex<Option<SocketAddrV4>>>,
+        }
+
+        impl StarHostRuntime for BindingRuntime {
+            fn bind_guarded_control_listener(
+                &self,
+                _config: DaemonConfig,
+            ) -> NetworkOperationFuture<'_, Option<crate::ObservedControlListener>> {
+                Box::pin(async move {
+                    self.binds.fetch_add(1, Ordering::SeqCst);
+                    let socket = TcpListener::bind("127.0.0.1:0").unwrap();
+                    let SocketAddr::V4(endpoint) = socket.local_addr().unwrap() else {
+                        panic!("test must bind IPv4");
+                    };
+                    *self.bound_address.lock().unwrap() = Some(endpoint);
+                    if let Some(replacement) = self.replace_membership {
+                        let mut registry = MembershipRegistry::default();
+                        let mut member = NetworkMembership::new(
+                            replacement,
+                            DisplayName::new("Replaced host").unwrap(),
+                        );
+                        member.state = MembershipState::Member;
+                        registry.remember_network(member);
+                        NetworkMembershipStore::new(&self.membership_path)
+                            .save(&registry)
+                            .unwrap();
+                    }
+                    Ok(Some(crate::ObservedControlListener::new(
+                        self.host, endpoint, socket,
+                    )?))
+                })
+            }
+
+            fn start_host(
+                &self,
+                _network: NetworkId,
+                _bridge: NetworkInterfaceHandle,
+                _address: InterfaceAddress,
+            ) -> NetworkOperationFuture<'_, ()> {
+                Box::pin(async { Ok(()) })
+            }
+
+            fn stop_host(
+                &self,
+                _network: NetworkId,
+                _bridge: NetworkInterfaceHandle,
+                _address: InterfaceAddress,
+            ) -> NetworkOperationFuture<'_, ()> {
+                Box::pin(async { Ok(()) })
+            }
+        }
+
+        futures_lite::future::block_on(async {
+            let network = NetworkId::from_bytes([0x91; 16]);
+            let other = NetworkId::from_bytes([0x92; 16]);
+            for scenario in 0..4 {
+                let (root, store) = temp_store("guarded-durable-membership");
+                if scenario != 0 {
+                    let mut registry = MembershipRegistry::default();
+                    let mut member =
+                        NetworkMembership::new(network, DisplayName::new("Host").unwrap());
+                    member.state = MembershipState::Member;
+                    registry.remember_network(member);
+                    store.save(&registry).unwrap();
+                }
+                let binds = Arc::new(AtomicUsize::new(0));
+                let bound_address = Arc::new(Mutex::new(None));
+                let runtime = BindingRuntime {
+                    host: if scenario == 2 { other } else { network },
+                    membership_path: root.join("memberships-v1"),
+                    replace_membership: if scenario == 3 { Some(other) } else { None },
+                    binds: Arc::clone(&binds),
+                    bound_address: Arc::clone(&bound_address),
+                };
+                let operations = SingleStarNetworkOperations::with_runtime_and_generator(
+                    store,
+                    DaemonConfig::default(),
+                    nap_capabilities(Some(true)),
+                    runtime,
+                    SequenceGenerator::new([]),
+                );
+                let result = operations.bind_guarded_control_listener().await;
+                if scenario == 0 {
+                    assert!(result.unwrap().is_none(), "no member cannot bind");
+                    assert_eq!(binds.load(Ordering::SeqCst), 0);
+                } else if scenario == 1 {
+                    let listener = result.unwrap().expect("stable member may bind");
+                    assert_eq!(listener.network(), network);
+                    let endpoint = bound_address.lock().unwrap().unwrap();
+                    assert!(TcpStream::connect(endpoint).is_ok());
+                    drop(listener);
+                    assert!(TcpStream::connect(endpoint).is_err());
+                } else {
+                    assert_eq!(result.err().unwrap().kind(), ErrorKind::InvalidState);
+                    let endpoint = bound_address.lock().unwrap().unwrap();
+                    assert!(TcpStream::connect(endpoint).is_err(),
+                        "mismatched or changed membership must close listener");
+                }
+                fs::remove_dir_all(root).unwrap();
+            }
+        });
+    }
+
 }
