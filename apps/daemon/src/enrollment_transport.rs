@@ -646,4 +646,115 @@ mod tests {
         );
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn revocation_after_mutual_tls_before_hello_prevents_first_key_enrollment() {
+        // An approval snapshot taken before TLS cannot authorize a durable
+        // pin after the operator revokes that peer during the handshake.
+        let root = std::env::temp_dir().join(format!(
+            "blueroute-enrollment-revoked-after-tls-{}-{}",
+            std::process::id(),
+            NEXT_TEST.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let store = NetworkMembershipStore::new(root.join("membership"));
+        let mut membership =
+            NetworkMembership::new(network(), DisplayName::new("Late revocation").unwrap());
+        membership.state = MembershipState::Member;
+        let mut registry = MembershipRegistry::default();
+        registry.remember_network(membership);
+        store.save(&registry).unwrap();
+        let trust = std::sync::Arc::new(DurablePeerTrustOperations::with_peer_pin_store(
+            store,
+            PeerPinStore::new(root.join("pins")),
+        ));
+        futures_lite::future::block_on(trust.trust_peer(node(3))).unwrap();
+
+        let client = LocalControlTlsIdentity::generate(node(2)).unwrap();
+        let server = LocalControlTlsIdentity::generate(node(3)).unwrap();
+        let confirmed = server.fingerprint();
+        let client_pin =
+            PinnedControlTlsPeer::new(network(), client.node(), client.fingerprint()).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tls_ready_tx, tls_ready_rx) = std::sync::mpsc::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        let server_thread = thread::spawn(move || {
+            let (discovery, _) = listener.accept().unwrap();
+            exchange_control_tls_candidate(
+                discovery,
+                &server,
+                network(),
+                Instant::now() + Duration::from_secs(10),
+            )
+            .unwrap();
+
+            let (accepted, _) = listener.accept().unwrap();
+            let (mut tls, certificate) = accept_pinned_control_tls(
+                accepted,
+                &server,
+                network(),
+                &[client_pin],
+                Instant::now() + Duration::from_secs(10),
+            )
+            .unwrap();
+            // Both parties have completed real mutual TLS. Hold the server
+            // before Hello so revocation deterministically precedes the
+            // client's durable enrollment transaction.
+            tls_ready_tx.send(()).unwrap();
+            resume_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            let authenticated = tls
+                .exchange_authenticated_hello(
+                    network(),
+                    &server,
+                    &certificate,
+                    facts(),
+                    Instant::now() + Duration::from_secs(10),
+                )
+                .unwrap();
+            assert_eq!(authenticated.peer().node(), client_pin.node());
+            tls.close();
+        });
+
+        let candidate = exchange_control_tls_candidate(
+            TcpStream::connect(addr).unwrap(),
+            &client,
+            network(),
+            Instant::now() + Duration::from_secs(10),
+        )
+        .unwrap();
+        assert_eq!(candidate.fingerprint(), confirmed);
+        let client_trust = std::sync::Arc::clone(&trust);
+        let client_thread = thread::spawn(move || {
+            enroll_confirmed_control_candidate(
+                TcpStream::connect(addr).unwrap(),
+                &client,
+                candidate,
+                confirmed,
+                &client_trust,
+                facts(),
+                Instant::now() + Duration::from_secs(10),
+            )
+        });
+        tls_ready_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        futures_lite::future::block_on(trust.forget_peer(node(3))).unwrap();
+        resume_tx.send(()).unwrap();
+
+        assert_eq!(
+            client_thread.join().unwrap().unwrap_err().kind(),
+            ErrorKind::AuthenticationFailed,
+        );
+        server_thread.join().unwrap();
+        // Check raw durable pins, not only the filtered approved allowlist:
+        // a revoked peer's hidden pin must not be silently persisted.
+        assert_eq!(
+            PeerPinStore::new(root.join("pins"))
+                .load()
+                .unwrap()
+                .entries()
+                .count(),
+            0,
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 }
