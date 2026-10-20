@@ -455,7 +455,10 @@ mod tests {
             ErrorKind::AuthenticationFailed
         );
         server_thread.join().unwrap();
-        assert_eq!(trust.approved_control_pins(network()).unwrap(), vec![original_pin]);
+        assert_eq!(
+            trust.approved_control_pins(network()).unwrap(),
+            vec![original_pin]
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }
