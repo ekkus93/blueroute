@@ -262,7 +262,9 @@ fn serialize_registry(registry: &MembershipRegistry) -> Result<String, CoreError
 
     for membership in registry.networks() {
         if membership.network_id == NetworkId::from_bytes([0; 16]) {
-            return Err(malformed_state("cannot persist an all-zero network identity"));
+            return Err(malformed_state(
+                "cannot persist an all-zero network identity",
+            ));
         }
         let state = durable_state_code(membership.state)?;
         let encoded_name = encode_hex(membership.network_name.as_str().as_bytes());
@@ -330,7 +332,10 @@ fn parse_network_record<'a>(
         .parse::<NetworkId>()
         .map_err(|error| malformed_value(line_number, "invalid network id", error))?;
     if network_id == NetworkId::from_bytes([0; 16]) {
-        return Err(malformed_line(line_number, "all-zero network identity is invalid"));
+        return Err(malformed_line(
+            line_number,
+            "all-zero network identity is invalid",
+        ));
     }
     if registry.network(&network_id).is_some() {
         return Err(malformed_line(line_number, "duplicate network record"));
@@ -365,7 +370,10 @@ fn parse_peer_record<'a>(
         .parse::<NodeId>()
         .map_err(|error| malformed_value(line_number, "invalid peer node id", error))?;
     if network_id == NetworkId::from_bytes([0; 16]) || node_id == NodeId::from_bytes([0; 16]) {
-        return Err(malformed_line(line_number, "all-zero network or peer identity is invalid"));
+        return Err(malformed_line(
+            line_number,
+            "all-zero network or peer identity is invalid",
+        ));
     }
     let member = parse_bool(
         required_field(fields, line_number, "peer member flag")?,
@@ -597,7 +605,13 @@ mod tests {
         );
         assert_eq!(fs::read_to_string(&path).unwrap(), invalid_peer_file);
         fs::write(&path, &original).unwrap();
-        assert!(store.load().unwrap().network(&NetworkId::from_bytes([3; 16])).is_some());
+        assert!(
+            store
+                .load()
+                .unwrap()
+                .network(&NetworkId::from_bytes([3; 16]))
+                .is_some()
+        );
     }
 
     #[test]
