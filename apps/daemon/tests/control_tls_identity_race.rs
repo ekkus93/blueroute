@@ -33,13 +33,23 @@ fn simultaneous_initializations_converge_to_one_persisted_tls_identity() {
                 let identity = ControlTlsIdentityStore::new(identity_dir)
                     .load_or_create(node)
                     .unwrap();
-                (identity.node(), identity.fingerprint(), identity.certificate().as_ref().to_vec())
+                (
+                    identity.node(),
+                    identity.fingerprint(),
+                    identity.certificate().as_ref().to_vec(),
+                )
             })
         })
         .collect();
-    let results: Vec<_> = workers.into_iter().map(|worker| worker.join().unwrap()).collect();
+    let results: Vec<_> = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .collect();
     for entry in &results {
-        assert_eq!(entry, &results[0], "one state directory must yield one TLS identity");
+        assert_eq!(
+            entry, &results[0],
+            "one state directory must yield one TLS identity"
+        );
     }
     let reopened = ControlTlsIdentityStore::new(&identity_dir)
         .load_or_create(node)
@@ -49,9 +59,11 @@ fn simultaneous_initializations_converge_to_one_persisted_tls_identity() {
 
     // An alternate NodeId may not silently rotate or overwrite that key.
     let wrong_node = NodeId::from_bytes([0x42; 16]);
-    assert!(ControlTlsIdentityStore::new(&identity_dir)
-        .load_or_create(wrong_node)
-        .is_err());
+    assert!(
+        ControlTlsIdentityStore::new(&identity_dir)
+            .load_or_create(wrong_node)
+            .is_err()
+    );
     let unchanged = ControlTlsIdentityStore::new(&identity_dir)
         .load_or_create(node)
         .unwrap();
