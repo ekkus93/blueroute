@@ -16,8 +16,7 @@ fn listener(byte: u8) -> (ObservedControlListener, SocketAddrV4) {
         panic!("localhost listener must be IPv4");
     };
     (
-        ObservedControlListener::new(NetworkId::from_bytes([byte; 16]), endpoint, socket)
-            .unwrap(),
+        ObservedControlListener::new(NetworkId::from_bytes([byte; 16]), endpoint, socket).unwrap(),
         endpoint,
     )
 }
@@ -99,10 +98,7 @@ fn post_accept_ownership_failure_closes_accepted_and_queued_candidates() {
         let mut client = TcpStream::connect(other_endpoint).unwrap();
         client.write_all(b"ok").unwrap();
         let mut accepted = independent
-            .accept_if_current(
-                Some(NetworkId::from_bytes([8; 16])),
-                Some(other_endpoint),
-            )
+            .accept_if_current(Some(NetworkId::from_bytes([8; 16])), Some(other_endpoint))
             .unwrap()
             .unwrap();
         let mut bytes = [0_u8; 2];
