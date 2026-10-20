@@ -303,6 +303,79 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
+    fn revoked_approval_after_candidate_discovery_prevents_enrollment() {
+        // Certificate discovery is not a durable authorization snapshot.
+        // Revoke P6 membership approval between discovery and confirmed
+        // enrollment; the second TCP socket must close before TLS.
+        let root = std::env::temp_dir().join(format!(
+            "blueroute-enrollment-revoked-before-tls-{}-{}",
+            std::process::id(),
+            NEXT_TEST.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let store = NetworkMembershipStore::new(root.join("membership"));
+        let mut membership =
+            NetworkMembership::new(network(), DisplayName::new("Revocation test").unwrap());
+        membership.state = MembershipState::Member;
+        let mut registry = MembershipRegistry::default();
+        registry.remember_network(membership);
+        store.save(&registry).unwrap();
+        let trust = DurablePeerTrustOperations::with_peer_pin_store(
+            store,
+            PeerPinStore::new(root.join("pins")),
+        );
+        futures_lite::future::block_on(trust.trust_peer(node(3))).unwrap();
+
+        let client = LocalControlTlsIdentity::generate(node(2)).unwrap();
+        let server = LocalControlTlsIdentity::generate(node(3)).unwrap();
+        let fingerprint = server.fingerprint();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_thread = thread::spawn(move || {
+            let (discovery, _) = listener.accept().unwrap();
+            exchange_control_tls_candidate(
+                discovery,
+                &server,
+                network(),
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap();
+            let (mut denied, _) = listener.accept().unwrap();
+            denied
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            assert_eq!(denied.read(&mut [0_u8; 1]).unwrap(), 0);
+        });
+
+        let candidate = exchange_control_tls_candidate(
+            TcpStream::connect(addr).unwrap(),
+            &client,
+            network(),
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+        assert_eq!(candidate.fingerprint(), fingerprint);
+        futures_lite::future::block_on(trust.forget_peer(node(3))).unwrap();
+        assert_eq!(
+            enroll_confirmed_control_candidate(
+                TcpStream::connect(addr).unwrap(),
+                &client,
+                candidate,
+                fingerprint,
+                &trust,
+                facts(),
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap_err()
+            .kind(),
+            ErrorKind::AuthenticationFailed
+        );
+        server_thread.join().unwrap();
+        assert!(trust.approved_control_pins(network()).unwrap().is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn mutually_authenticated_tls_without_hello_cannot_persist_first_key() {
         // A completed certificate proof is not sufficient. A peer that
         // immediately closes before Hello/HelloAck must remain unenrolled.
