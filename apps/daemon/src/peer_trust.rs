@@ -76,6 +76,7 @@ impl DurablePeerTrustOperations {
     }
 
     pub fn require_peer_approved(&self, network: NetworkId, node: NodeId) -> Result<(), CoreError> {
+        require_nonzero_peer_identity(node)?;
         let registry = self.store.load()?;
         let current = current_network(&registry)?.ok_or_else(no_current_network)?;
         if current != network {
@@ -310,6 +311,7 @@ impl DurablePeerTrustOperations {
 impl PeerTrustOperations for DurablePeerTrustOperations {
     fn trust_peer(&self, node: NodeId) -> PeerTrustFuture<'_, ()> {
         Box::pin(async move {
+            require_nonzero_peer_identity(node)?;
             let _guard = self.lock_state()?;
             let mut registry = self.store.load()?;
             let network = current_network(&registry)?.ok_or_else(no_current_network)?;
@@ -328,6 +330,7 @@ impl PeerTrustOperations for DurablePeerTrustOperations {
 
     fn forget_peer(&self, node: NodeId) -> PeerTrustFuture<'_, ()> {
         Box::pin(async move {
+            require_nonzero_peer_identity(node)?;
             let _guard = self.lock_state()?;
             let mut registry = self.store.load()?;
             let network = current_network(&registry)?.ok_or_else(no_current_network)?;
@@ -362,6 +365,18 @@ pub async fn pair_and_trust_bluetooth_peer(peer: PeerHandle) -> Result<(), CoreE
     let bluez = BluezBackend::connect_system().await?;
     bluez.pair(peer.clone()).await?;
     bluez.set_trusted(peer, true).await
+}
+
+/// A zero NodeId is an invalid sentinel, not a peer that may receive durable
+/// trust or be used as an authorization target. Reject it before state I/O.
+fn require_nonzero_peer_identity(node: NodeId) -> Result<(), CoreError> {
+    if node == NodeId::from_bytes([0; 16]) {
+        return Err(CoreError::new(
+            ErrorKind::InvalidInput,
+            "all-zero peer NodeId cannot be trusted or authorized",
+        ));
+    }
+    Ok(())
 }
 
 fn no_current_network() -> CoreError {
@@ -423,6 +438,35 @@ mod tests {
             assert!(!membership.is_peer_member(&peer));
             fs::remove_dir_all(root).unwrap();
         });
+    }
+
+    #[test]
+    fn zero_peer_identity_is_rejected_before_any_durable_trust_mutation() {
+        let (root, store) = temp_store("zero-peer-identity");
+        let network = NetworkId::from_bytes([0x51; 16]);
+        let zero = NodeId::from_bytes([0; 16]);
+        let valid = NodeId::from_bytes([0x52; 16]);
+        seed_current_network(&store, network);
+        let trust = DurablePeerTrustOperations::with_peer_pin_store(
+            store,
+            PeerPinStore::new(root.join("peer-keys")),
+        );
+        for result in [
+            futures_lite::future::block_on(trust.trust_peer(zero)),
+            futures_lite::future::block_on(trust.forget_peer(zero)),
+            trust.require_peer_approved(network, zero),
+        ] {
+            assert_eq!(result.unwrap_err().kind(), ErrorKind::InvalidInput);
+        }
+        let registry = trust.store.load().unwrap();
+        let membership = registry.network(&network).unwrap();
+        assert!(!membership.is_peer_trusted(&zero));
+        assert!(trust.pin_store.as_ref().unwrap().load().unwrap().is_empty());
+        // Rejecting the sentinel must not poison ordinary peer approval.
+        futures_lite::future::block_on(trust.trust_peer(valid)).unwrap();
+        trust.require_peer_approved(network, valid).unwrap();
+        futures_lite::future::block_on(trust.forget_peer(valid)).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
