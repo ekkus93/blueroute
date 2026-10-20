@@ -1014,6 +1014,20 @@ IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
 
 ## P7-003 — Implement peer hello/capability exchange
 
+**P7-003 mutually authenticated TLS without completed Hello rejects enrollment (software-only, 2026-10-19):**
+A real two-peer localhost regression allows candidate certificate discovery and
+successful pinned mutual-TLS 1.3 handshake, but the server closes the TLS stream
+before completing authenticated Hello/HelloAck. The local confirmation attempt
+fails, and the durable peer-key store remains empty despite separately approved
+NodeId membership and a matching independently confirmed fingerprint.
+Source `57ab26b0b7bddf9676e5d3b7e58921f8a7ba7d69` passed
+[exact-head CI 39348795966](https://github.com/ekkus93/blueroute/actions/runs/39348795966)
+(format, locked workspace, Clippy, Rust tests and integration/packaging steps).
+This proves only a local post-TLS admission gate: there is no live daemon
+PAN/TLS supervisor or human-verified enrollment UI, and production
+JoinNetwork and physical Bluetooth acceptance remain OPEN.
+Keep P7-003/P7-004/P6-004 IN PROGRESS; hardware DEFERRED.
+
 **P7-003 confirmed enrollment absolute-deadline persistence guard (software only, 2026-10-19):**
 The composed confirmed-key enrollment helper refuses an already-expired
 operator/TLS budget before checking peer approval or exchanging a certificate,
