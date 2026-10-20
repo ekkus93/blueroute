@@ -1014,6 +1014,21 @@ IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
 
 ## P7-003 — Implement peer hello/capability exchange
 
+**P7-003 confirmed enrollment absolute-deadline persistence guard (software only, 2026-10-19):**
+The composed confirmed-key enrollment helper refuses an already-expired
+operator/TLS budget before checking peer approval or exchanging a certificate,
+closes the TCP connection, and rechecks the same absolute deadline *after*
+the exporter-bound mutual-TLS Hello and *before* persisting an enrolled SPKI.
+A localhost preflight regression asserts rejection, TCP EOF without certificate
+disclosure, and no durable peer pin write for expired confirmation. Source
+`f55f34a4450211fe3b541907fddf6babd3558680` passed
+[exact-head CI 39348416581](https://github.com/ekkus93/blueroute/actions/runs/39348416581)
+(format, locked workspace, Clippy, Rust unit/integration, socket, D-Bus,
+authorization and packaging). This is a software-only expiry boundary, not
+human enrollment UX, live daemon/PAN supervision, production JoinNetwork or
+Bluetooth radio acceptance. P7-003/P7-004/P6-004 remain IN PROGRESS;
+physical acceptance remains DEFERRED.
+
 **P7-003 authenticated enrollment idempotency and pin-rotation denial (software only, 2026-10-19):**
 The real localhost mutual-TLS/Hello enrollment regression now performs a
 second fully authenticated confirmation of the same independently matched
