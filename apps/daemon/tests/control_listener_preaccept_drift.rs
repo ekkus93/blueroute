@@ -42,7 +42,10 @@ fn preaccept_ownership_mismatch_retires_all_queued_sockets_without_reobserving()
                     1 => (Some(network(8)), Some(endpoint)),
                     _ => (
                         Some(network(7)),
-                        Some(SocketAddrV4::new(*endpoint.ip(), endpoint.port().wrapping_add(1))),
+                        Some(SocketAddrV4::new(
+                            *endpoint.ip(),
+                            endpoint.port().wrapping_add(1),
+                        )),
                     ),
                 };
                 Ok(snapshot)
