@@ -1014,6 +1014,26 @@ IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
 
 ## P7-003 — Implement peer hello/capability exchange
 
+**P7-003 authenticated enrollment idempotency and pin-rotation denial (software only, 2026-10-19):**
+The real localhost mutual-TLS/Hello enrollment regression now performs a
+second fully authenticated confirmation of the same independently matched
+key and expects `Ok(false)` without rewriting the durable pin
+(`1741daa5d7fd9a186e12b124b1aeec5c680bfb29`,
+[exact-head CI 39346620429](https://github.com/ekkus93/blueroute/actions/runs/39346620429)
+**passed**). A separate localhost negative regression first seeds an
+already-approved NodeId with an existing durable pin, then performs a
+**successful mutual-TLS and exporter-bound Hello** with a *different*
+independently confirmed key claiming the same NodeId. The enrollment
+operation rejects the conflicting key and retains the original pin.
+Source `ee421698763e01208b2895210683bc189c108319`, formatting follow-up
+`ee221a2a1de08763d09609e1320478f8576efd98`,
+[exact-head CI 39347150492](https://github.com/ekkus93/blueroute/actions/runs/39347150492)
+**passed** formatting, Clippy, tests and integration. The initial
+existing-pin seed is a synthetic test policy helper, not an independent
+human ceremony. These tests do **not** complete P7-003 user-confirmation UX,
+P7-004 live daemon-owned PAN/TLS lifecycle, P6-004 production JoinNetwork,
+or deferred physical Bluetooth acceptance.
+
 **P7-003 candidate-to-TLS key substitution regression (software only, 2026-10-19):**
 A second localhost integration test uses two independently generated certificates
 with the *same* NodeId but different public keys. It first discovers the
