@@ -1031,6 +1031,21 @@ physical Bluetooth acceptance remain OPEN. Keep P7-003/P7-004/P6-004
 IN PROGRESS and hardware acceptance DEFERRED.
 
 
+**P7-003 corrupt durable pin-store fail-closed ingress/egress (software-only, 2026-10-19):**
+A deterministic localhost TCP regression first enrolls an approved peer, then
+corrupts the owner-only durable peer-key pin file. Both the inbound
+durable-derived allowlist path and outbound pinned connection path reject
+authorization with a persistence error before starting TLS, close their owned
+TCP sockets, and leave the authenticated session registry empty. The test also
+proves that the malformed on-disk trust record is not silently repaired or
+rewritten by a failed connection attempt. Source
+`cefedd61ff7f9e62769a08d2a8bd73d93a5a6f22` passed
+[exact-head CI 39357673501](https://github.com/ekkus93/blueroute/actions/runs/39357673501).
+This is software-only fail-closed trust-store qualification, **not** human
+confirmation UX, live daemon PAN/TLS supervision, production JoinNetwork or
+physical Bluetooth acceptance. P7-003/P7-004/P6-004 remain IN PROGRESS;
+hardware acceptance remains DEFERRED.
+
 **P7-003 revocation after candidate discovery blocks key enrollment (software-only, 2026-10-19):**
 A real localhost TCP regression discovers an untrusted candidate certificate for
 an initially approved peer, then revokes the durable peer approval before
