@@ -171,27 +171,30 @@ mod tests {
                 assert_eq!(denied.read(&mut [0_u8; 1]).unwrap(), 0);
             }
 
-            // Only the third attempt may reach mutual TLS and Hello.
-            let (accepted, _) = listener.accept().unwrap();
-            let (mut stream, cert) = accept_pinned_control_tls(
-                accepted,
-                &server,
-                network(),
-                &[client_pin],
-                Instant::now() + Duration::from_secs(5),
-            )
-            .unwrap();
-            let authenticated = stream
-                .exchange_authenticated_hello(
-                    network(),
+            // Both the first successful enrollment and an idempotent
+            // confirmation must independently prove the same key and Hello.
+            for _ in 0..2 {
+                let (accepted, _) = listener.accept().unwrap();
+                let (mut stream, cert) = accept_pinned_control_tls(
+                    accepted,
                     &server,
-                    &cert,
-                    facts(),
+                    network(),
+                    &[client_pin],
                     Instant::now() + Duration::from_secs(5),
                 )
                 .unwrap();
-            assert_eq!(authenticated.peer().node(), client_pin.node());
-            stream.close();
+                let authenticated = stream
+                    .exchange_authenticated_hello(
+                        network(),
+                        &server,
+                        &cert,
+                        facts(),
+                        Instant::now() + Duration::from_secs(5),
+                    )
+                    .unwrap();
+                assert_eq!(authenticated.peer().node(), client_pin.node());
+                stream.close();
+            }
         });
 
         let candidate = exchange_control_tls_candidate(
@@ -240,13 +243,26 @@ mod tests {
             enroll_confirmed_control_candidate(
                 TcpStream::connect(addr).unwrap(),
                 &client,
-                candidate,
+                candidate.clone(),
                 expected_key,
                 &trust,
                 facts(),
                 Instant::now() + Duration::from_secs(5),
             ),
             Ok(true)
+        );
+        // Re-confirmation is safe and does not rewrite an existing key pin.
+        assert_eq!(
+            enroll_confirmed_control_candidate(
+                TcpStream::connect(addr).unwrap(),
+                &client,
+                candidate,
+                expected_key,
+                &trust,
+                facts(),
+                Instant::now() + Duration::from_secs(5),
+            ),
+            Ok(false)
         );
         server_thread.join().unwrap();
         assert_eq!(
