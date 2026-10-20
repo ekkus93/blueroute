@@ -95,7 +95,10 @@ fn conflicting_node_id_first_start_never_creates_two_local_tls_owners() {
         fs::create_dir(&root).unwrap();
         let identity_dir = root.join("control-tls");
         let gate = Arc::new(Barrier::new(2));
-        let ids = [NodeId::from_bytes([0x51; 16]), NodeId::from_bytes([0x52; 16])];
+        let ids = [
+            NodeId::from_bytes([0x51; 16]),
+            NodeId::from_bytes([0x52; 16]),
+        ];
         let handles: Vec<_> = ids
             .into_iter()
             .map(|node| {
@@ -103,21 +106,36 @@ fn conflicting_node_id_first_start_never_creates_two_local_tls_owners() {
                 let gate = Arc::clone(&gate);
                 thread::spawn(move || {
                     gate.wait();
-                    (node, ControlTlsIdentityStore::new(path)
-                        .load_or_create(node)
-                        .map(|identity| identity.fingerprint()))
+                    (
+                        node,
+                        ControlTlsIdentityStore::new(path)
+                            .load_or_create(node)
+                            .map(|identity| identity.fingerprint()),
+                    )
                 })
             })
             .collect();
-        let results: Vec<_> = handles.into_iter().map(|handle| handle.join().unwrap()).collect();
-        let winners: Vec<_> = results.iter().filter(|(_, result)| result.is_ok()).collect();
-        assert_eq!(winners.len(), 1, "exactly one NodeId may own local TLS state");
+        let results: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect();
+        let winners: Vec<_> = results
+            .iter()
+            .filter(|(_, result)| result.is_ok())
+            .collect();
+        assert_eq!(
+            winners.len(),
+            1,
+            "exactly one NodeId may own local TLS state"
+        );
         let (winner, fingerprint) = winners[0];
         let fingerprint = fingerprint.as_ref().unwrap();
         let loser = if *winner == ids[0] { ids[1] } else { ids[0] };
-        assert!(ControlTlsIdentityStore::new(&identity_dir)
-            .load_or_create(loser)
-            .is_err());
+        assert!(
+            ControlTlsIdentityStore::new(&identity_dir)
+                .load_or_create(loser)
+                .is_err()
+        );
         let reopened = ControlTlsIdentityStore::new(&identity_dir)
             .load_or_create(*winner)
             .unwrap();
