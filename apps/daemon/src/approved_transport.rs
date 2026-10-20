@@ -404,6 +404,57 @@ mod tests {
     }
 
     #[test]
+    fn corrupted_durable_peer_pins_fail_closed_before_tls_in_both_directions() {
+        let local = LocalControlTlsIdentity::generate(node(1)).unwrap();
+        let remote = LocalControlTlsIdentity::generate(node(2)).unwrap();
+        let dir = TestDirectory::new();
+        let trust = trust_for(&dir.0, remote.node(), remote.fingerprint(), true);
+        let pins_path = dir.0.join("peer-pins/peer-key-pins-v1");
+        let corrupt_record = b"BLUEROUTE_PEER_PINS_V1\\ninvalid-record\\n";
+        fs::write(&pins_path, corrupt_record).unwrap();
+        let expected =
+            PinnedControlTlsPeer::new(network(), remote.node(), remote.fingerprint()).unwrap();
+        let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+
+        for inbound in [true, false] {
+            let (socket, mut peer) = socket_pair();
+            let result = if inbound {
+                accept_registered_from_durable_approval(
+                    socket,
+                    &local,
+                    &trust,
+                    setup(),
+                    Arc::clone(&registry),
+                )
+            } else {
+                connect_registered_control_session(
+                    socket,
+                    &local,
+                    expected,
+                    &trust,
+                    setup(),
+                    Arc::clone(&registry),
+                )
+            };
+            assert!(matches!(
+                result,
+                Err(RegisteredControlSetupError::Control(
+                    ControlSessionError::Ingress(PinnedIngressError::Authorization(error))
+                )) if error.kind() == ErrorKind::PersistenceError
+            ));
+            // Neither side may start TLS or retain a registry owner when the
+            // on-disk authorization source is corrupt, even if a pin was
+            // previously approved and enrolled.
+            peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+            assert_eq!(peer.read(&mut [0_u8; 1]).unwrap(), 0);
+            assert!(registry.lock().unwrap().is_empty());
+        }
+        // An authentication attempt must not silently repair/replace the
+        // corrupted durable trust state or reauthorize an earlier key.
+        assert_eq!(fs::read(&pins_path).unwrap().as_slice(), corrupt_record);
+    }
+
+    #[test]
     fn second_live_mutual_tls_session_cannot_replace_active_registered_peer() {
         let client = LocalControlTlsIdentity::generate(node(1)).unwrap();
         let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
