@@ -1014,6 +1014,23 @@ IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
 
 ## P7-003 — Implement peer hello/capability exchange
 
+**P7-003 revocation after mutual TLS but before Hello blocks key enrollment (software-only, 2026-10-19):**
+A synchronized two-peer localhost regression first discovers an untrusted
+certificate candidate, completes a real pinned mutual-TLS 1.3 handshake,
+then revokes the previously approved NodeId while the server pauses before
+Hello/HelloAck. The resumed authenticated Hello succeeds, but the final
+durable enrollment transaction rechecks current approval and refuses to
+persist the independently confirmed key. The test checks the raw durable
+pin store, not merely the approval-filtered allowlist. Source
+`9d19d54befb308841a4498e5cbd9c5976a2e269d`;
+[exact-head CI 39352191159](https://github.com/ekkus93/blueroute/actions/runs/39352191159)
+**passed** the repository CI workflow. This is a software-only
+post-handshake revocation regression; the human confirmation UX,
+live daemon PAN listener/session supervisor, production JoinNetwork and
+physical Bluetooth acceptance remain OPEN. Keep P7-003/P7-004/P6-004
+IN PROGRESS and hardware acceptance DEFERRED.
+
+
 **P7-003 revocation after candidate discovery blocks key enrollment (software-only, 2026-10-19):**
 A real localhost TCP regression discovers an untrusted candidate certificate for
 an initially approved peer, then revokes the durable peer approval before
