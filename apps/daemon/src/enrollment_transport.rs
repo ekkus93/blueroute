@@ -255,4 +255,89 @@ mod tests {
         );
         fs::remove_dir_all(root).unwrap();
     }
+    #[test]
+    fn key_rotation_between_candidate_discovery_and_tls_never_enrolls() {
+        // Two distinct certificates can claim the same canonical NodeId.
+        // The independently confirmed first certificate is not proof that
+        // the second socket still possesses that same private key.
+        let root = std::env::temp_dir().join(format!(
+            "blueroute-enrollment-key-rotation-{}-{}",
+            std::process::id(),
+            NEXT_TEST.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let store = NetworkMembershipStore::new(root.join("membership"));
+        let mut membership =
+            NetworkMembership::new(network(), DisplayName::new("Rotation test").unwrap());
+        membership.state = MembershipState::Member;
+        let mut registry = MembershipRegistry::default();
+        registry.remember_network(membership);
+        store.save(&registry).unwrap();
+        let trust = DurablePeerTrustOperations::with_peer_pin_store(
+            store,
+            PeerPinStore::new(root.join("pins")),
+        );
+        futures_lite::future::block_on(trust.trust_peer(node(3))).unwrap();
+
+        let client = LocalControlTlsIdentity::generate(node(2)).unwrap();
+        let advertised = LocalControlTlsIdentity::generate(node(3)).unwrap();
+        let rotated = LocalControlTlsIdentity::generate(node(3)).unwrap();
+        assert_ne!(advertised.fingerprint(), rotated.fingerprint());
+        let confirmed = advertised.fingerprint();
+        let client_pin =
+            PinnedControlTlsPeer::new(network(), client.node(), client.fingerprint()).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_thread = thread::spawn(move || {
+            let (first, _) = listener.accept().unwrap();
+            exchange_control_tls_candidate(
+                first,
+                &advertised,
+                network(),
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap();
+
+            let (second, _) = listener.accept().unwrap();
+            // The rotated server can exchange candidate prefaces, but the
+            // client closes before unapproved TLS can become active.
+            assert!(
+                accept_pinned_control_tls(
+                    second,
+                    &rotated,
+                    network(),
+                    &[client_pin],
+                    Instant::now() + Duration::from_secs(5),
+                )
+                .is_err()
+            );
+        });
+
+        let candidate = exchange_control_tls_candidate(
+            TcpStream::connect(addr).unwrap(),
+            &client,
+            network(),
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+        assert_eq!(candidate.fingerprint(), confirmed);
+        assert_eq!(
+            enroll_confirmed_control_candidate(
+                TcpStream::connect(addr).unwrap(),
+                &client,
+                candidate,
+                confirmed,
+                &trust,
+                facts(),
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap_err()
+            .kind(),
+            ErrorKind::AuthenticationFailed
+        );
+        server_thread.join().unwrap();
+        assert!(trust.approved_control_pins(network()).unwrap().is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
 }
