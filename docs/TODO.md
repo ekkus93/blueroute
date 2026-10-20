@@ -1014,6 +1014,8 @@ IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
 
 ## P7-003 — Implement peer hello/capability exchange
 
+**P7-003 enrollment confirmation deadline at storage lock (software only, 2026-10-20):** Independently confirmed TLS first-key enrollment now carries its deadline into the durable peer trust/pin transaction. The operation rejects expired confirmation after lock contention/disk reads and immediately before beginning any changed-pin save. The lock-contention regression proves an expired confirmation writes no persistent pin, while a fresh deadline still enrolls the approved matching key. Implementation commit [b79ac51c](https://github.com/ekkus93/blueroute/commit/b79ac51c6fc88ced9beaf83d8797332bd3f62aad), formatting commit [a2e47930](https://github.com/ekkus93/blueroute/commit/a2e47930fbd36391b64decb5b347a478b0588410), [exact-head CI 39430820625](https://github.com/ekkus93/blueroute/actions/runs/39430820625) **passed**. This is software-only deadline hardening, not an independently operated enrollment UI, live PAN TLS daemon runtime, production JoinNetwork, or physical Bluetooth acceptance; P7-003/P7-004 and associated hardware requirements remain open/deferred.
+
 **P7-003 revocation after mutual TLS but before Hello blocks key enrollment (software-only, 2026-10-19):**
 A synchronized two-peer localhost regression first discovers an untrusted
 certificate candidate, completes a real pinned mutual-TLS 1.3 handshake,
