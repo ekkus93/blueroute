@@ -15,8 +15,8 @@ fn listener_owner(byte: u8) -> (ObservedControlListener, SocketAddrV4) {
     let SocketAddr::V4(address) = socket.local_addr().unwrap() else {
         panic!("loopback test listener must be IPv4");
     };
-    let owner = ObservedControlListener::new(NetworkId::from_bytes([byte; 16]), address, socket)
-        .unwrap();
+    let owner =
+        ObservedControlListener::new(NetworkId::from_bytes([byte; 16]), address, socket).unwrap();
     (owner, address)
 }
 
@@ -31,7 +31,9 @@ fn ownership_loss_discards_all_queued_candidates_without_affecting_other_listene
     let mut queued = (0..4)
         .map(|_| {
             let mut socket = TcpStream::connect(address).unwrap();
-            socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
             socket.write_all(b"untrusted").unwrap();
             socket
         })
