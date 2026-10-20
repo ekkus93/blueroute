@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Mutex, MutexGuard};
+use std::time::Instant;
 
 use blueroute_core::{CoreError, ErrorKind, NetworkId, NodeId};
 use blueroute_linux::{BluetoothBackend, BluezBackend, NetworkMembershipStore, PeerHandle};
@@ -218,6 +219,25 @@ impl DurablePeerTrustOperations {
             verified_peer.node(),
             verified_peer.fingerprint(),
             confirmed_spki,
+            None,
+        )
+    }
+
+    /// Enforce the confirmation deadline under the durable trust/pin lock,
+    /// including after any wait for an in-process enrollment transaction.
+    /// Expired confirmation never authorizes a fresh persistent key pin.
+    pub fn enroll_key_after_independent_confirmation_until(
+        &self,
+        verified_peer: &crate::VerifiedControlTlsPeer,
+        confirmed_spki: SpkiSha256,
+        deadline: Instant,
+    ) -> Result<bool, CoreError> {
+        self.enroll_key_inner(
+            verified_peer.network(),
+            verified_peer.node(),
+            verified_peer.fingerprint(),
+            confirmed_spki,
+            Some(deadline),
         )
     }
 
@@ -231,7 +251,7 @@ impl DurablePeerTrustOperations {
         verified_tls_spki: SpkiSha256,
         confirmed_spki: SpkiSha256,
     ) -> Result<bool, CoreError> {
-        self.enroll_key_inner(network, node, verified_tls_spki, confirmed_spki)
+        self.enroll_key_inner(network, node, verified_tls_spki, confirmed_spki, None)
     }
 
     fn enroll_key_inner(
@@ -240,6 +260,7 @@ impl DurablePeerTrustOperations {
         node: NodeId,
         verified_tls_spki: SpkiSha256,
         confirmed_spki: SpkiSha256,
+        deadline: Option<Instant>,
     ) -> Result<bool, CoreError> {
         let _guard = self.lock_state()?;
         self.require_peer_approved(network, node)?;
@@ -256,6 +277,14 @@ impl DurablePeerTrustOperations {
             )
         })?;
         let mut pins = store.load()?;
+        // The outer transport check can expire while this operation waits on
+        // a concurrent trust/pin update. Recheck after locking and disk reads.
+        if deadline.is_some_and(|limit| Instant::now() >= limit) {
+            return Err(CoreError::new(
+                ErrorKind::AuthenticationFailed,
+                "confirmed enrollment deadline expired before durable key enrollment",
+            ));
+        }
         let changed = pins
             .enroll_verified(network, node, verified_tls_spki)
             .map_err(|_| {
@@ -265,6 +294,13 @@ impl DurablePeerTrustOperations {
                 )
             })?;
         if changed {
+            // Do not begin a persistent write using an expired confirmation.
+            if deadline.is_some_and(|limit| Instant::now() >= limit) {
+                return Err(CoreError::new(
+                    ErrorKind::AuthenticationFailed,
+                    "confirmed enrollment deadline expired before durable key enrollment",
+                ));
+            }
             store.save(&pins)?;
         }
         Ok(changed)
@@ -711,4 +747,55 @@ mod tests {
         trust.require_peer_approved(network, node).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
+    #[test]
+    fn confirmed_enrollment_expiring_while_waiting_for_state_lock_writes_no_pin() {
+        use std::sync::{Arc, mpsc};
+        use std::thread;
+        use std::time::Duration;
+
+        let (root, store) = temp_store("expired-lock-wait");
+        let network = NetworkId::from_bytes([0x91; 16]);
+        let node = NodeId::from_bytes([0x92; 16]);
+        let key = SpkiSha256::from_verified_certificate_digest([0x93; 32]).unwrap();
+        seed_current_network(&store, network);
+        let trust = Arc::new(DurablePeerTrustOperations::with_peer_pin_store(
+            store,
+            PeerPinStore::new(root.join("peer-keys")),
+        ));
+        futures_lite::future::block_on(trust.trust_peer(node)).unwrap();
+
+        let guard = trust.state_lock.lock().unwrap();
+        let expiry = Instant::now() + Duration::from_millis(25);
+        let copy = Arc::clone(&trust);
+        let (started_tx, started_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            copy.enroll_key_inner(network, node, key, key, Some(expiry))
+        });
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        thread::sleep(Duration::from_millis(70));
+        drop(guard);
+
+        assert_eq!(
+            worker.join().unwrap().unwrap_err().kind(),
+            ErrorKind::AuthenticationFailed
+        );
+        assert!(trust.pin_store.as_ref().unwrap().load().unwrap().is_empty());
+
+        // Only a fresh deadline may authorize the same independently
+        // approved and matching key after the contention clears.
+        assert_eq!(
+            trust.enroll_key_inner(
+                network,
+                node,
+                key,
+                key,
+                Some(Instant::now() + Duration::from_secs(5))
+            ),
+            Ok(true)
+        );
+        assert_eq!(trust.pin_store.as_ref().unwrap().load().unwrap().len(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
 }
