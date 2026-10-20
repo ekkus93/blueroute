@@ -83,3 +83,64 @@ fn preaccept_ownership_mismatch_retires_all_queued_sockets_without_reobserving()
         assert_eq!(after_retirement_observations, 0);
     }
 }
+
+#[test]
+fn preaccept_backend_failure_retires_queued_candidates_without_touching_other_listeners() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let SocketAddr::V4(endpoint) = listener.local_addr().unwrap() else {
+        panic!("loopback listener must be IPv4");
+    };
+    let mut owner = ObservedControlListener::new(network(7), endpoint, listener).unwrap();
+
+    let independent = TcpListener::bind("127.0.0.1:0").unwrap();
+    let other_endpoint = independent.local_addr().unwrap();
+    let queued = (0..3)
+        .map(|_| {
+            let socket = TcpStream::connect(endpoint).unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            socket
+        })
+        .collect::<Vec<_>>();
+
+    let mut observations = 0;
+    let error = owner
+        .poll_with_fresh_observations(|| {
+            observations += 1;
+            Err(blueroute_core::CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP ownership backend unavailable",
+            ))
+        })
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidState);
+    assert_eq!(observations, 1);
+    assert!(TcpStream::connect(endpoint).is_err());
+
+    for mut socket in queued {
+        match socket.read(&mut [0_u8; 1]) {
+            Ok(0) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    IoErrorKind::ConnectionReset
+                        | IoErrorKind::ConnectionAborted
+                        | IoErrorKind::BrokenPipe
+                ) => {}
+            other => panic!("untrusted candidate survived backend failure: {other:?}"),
+        }
+    }
+
+    assert_eq!(
+        owner
+            .poll_with_fresh_observations(|| panic!("retired listener must not reobserve"))
+            .unwrap_err()
+            .kind(),
+        ErrorKind::InvalidState
+    );
+
+    // A failure for one logical NAP must not close an unrelated listener.
+    let _independent_client = TcpStream::connect(other_endpoint).unwrap();
+    let _independent_accepted = independent.accept().unwrap();
+}
