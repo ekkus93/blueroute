@@ -1922,12 +1922,13 @@ mod tests {
                 } else {
                     assert_eq!(result.err().unwrap().kind(), ErrorKind::InvalidState);
                     let endpoint = bound_address.lock().unwrap().unwrap();
-                    assert!(TcpStream::connect(endpoint).is_err(),
-                        "mismatched or changed membership must close listener");
+                    assert!(
+                        TcpStream::connect(endpoint).is_err(),
+                        "mismatched or changed membership must close listener"
+                    );
                 }
                 fs::remove_dir_all(root).unwrap();
             }
         });
     }
-
 }
