@@ -81,3 +81,47 @@ fn simultaneous_initializations_converge_to_one_persisted_tls_identity() {
     );
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn conflicting_node_id_first_start_never_creates_two_local_tls_owners() {
+    // Two independent daemon processes can accidentally target the same
+    // state directory. Precisely one NodeId may claim the persisted key.
+    for trial in 0..4 {
+        let root = std::env::temp_dir().join(format!(
+            "blueroute-conflicting-control-identity-{}-{:?}-{trial}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        fs::create_dir(&root).unwrap();
+        let identity_dir = root.join("control-tls");
+        let gate = Arc::new(Barrier::new(2));
+        let ids = [NodeId::from_bytes([0x51; 16]), NodeId::from_bytes([0x52; 16])];
+        let handles: Vec<_> = ids
+            .into_iter()
+            .map(|node| {
+                let path = identity_dir.clone();
+                let gate = Arc::clone(&gate);
+                thread::spawn(move || {
+                    gate.wait();
+                    (node, ControlTlsIdentityStore::new(path)
+                        .load_or_create(node)
+                        .map(|identity| identity.fingerprint()))
+                })
+            })
+            .collect();
+        let results: Vec<_> = handles.into_iter().map(|handle| handle.join().unwrap()).collect();
+        let winners: Vec<_> = results.iter().filter(|(_, result)| result.is_ok()).collect();
+        assert_eq!(winners.len(), 1, "exactly one NodeId may own local TLS state");
+        let (winner, fingerprint) = winners[0];
+        let fingerprint = fingerprint.as_ref().unwrap();
+        let loser = if *winner == ids[0] { ids[1] } else { ids[0] };
+        assert!(ControlTlsIdentityStore::new(&identity_dir)
+            .load_or_create(loser)
+            .is_err());
+        let reopened = ControlTlsIdentityStore::new(&identity_dir)
+            .load_or_create(*winner)
+            .unwrap();
+        assert_eq!(&reopened.fingerprint(), fingerprint);
+        fs::remove_dir_all(root).unwrap();
+    }
+}
