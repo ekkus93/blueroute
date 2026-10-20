@@ -261,6 +261,9 @@ fn serialize_registry(registry: &MembershipRegistry) -> Result<String, CoreError
     output.push('\n');
 
     for membership in registry.networks() {
+        if membership.network_id == NetworkId::from_bytes([0; 16]) {
+            return Err(malformed_state("cannot persist an all-zero network identity"));
+        }
         let state = durable_state_code(membership.state)?;
         let encoded_name = encode_hex(membership.network_name.as_str().as_bytes());
         output.push_str(&format!(
@@ -269,6 +272,9 @@ fn serialize_registry(registry: &MembershipRegistry) -> Result<String, CoreError
         ));
 
         for peer in membership.peers() {
+            if peer.node_id == NodeId::from_bytes([0; 16]) {
+                return Err(malformed_state("cannot persist an all-zero peer identity"));
+            }
             output.push_str(&format!(
                 "peer\t{}\t{}\t{}\t{}\n",
                 membership.network_id,
@@ -323,6 +329,9 @@ fn parse_network_record<'a>(
     let network_id = required_field(fields, line_number, "network id")?
         .parse::<NetworkId>()
         .map_err(|error| malformed_value(line_number, "invalid network id", error))?;
+    if network_id == NetworkId::from_bytes([0; 16]) {
+        return Err(malformed_line(line_number, "all-zero network identity is invalid"));
+    }
     if registry.network(&network_id).is_some() {
         return Err(malformed_line(line_number, "duplicate network record"));
     }
@@ -355,6 +364,9 @@ fn parse_peer_record<'a>(
     let node_id = required_field(fields, line_number, "peer node id")?
         .parse::<NodeId>()
         .map_err(|error| malformed_value(line_number, "invalid peer node id", error))?;
+    if network_id == NetworkId::from_bytes([0; 16]) || node_id == NodeId::from_bytes([0; 16]) {
+        return Err(malformed_line(line_number, "all-zero network or peer identity is invalid"));
+    }
     let member = parse_bool(
         required_field(fields, line_number, "peer member flag")?,
         line_number,
@@ -534,6 +546,58 @@ mod tests {
 
     fn peer(value: u8) -> NodeId {
         NodeId::from_bytes([value; 16])
+    }
+
+    #[test]
+    fn zero_identities_cannot_be_saved_or_loaded_as_durable_membership() {
+        let directory = TestDirectory::new();
+        let path = directory.state_path();
+        let store = NetworkMembershipStore::new(&path);
+        let mut valid = network(3, "Valid network", true);
+        valid.trust_peer(peer(4));
+        let mut registry = MembershipRegistry::default();
+        registry.remember_network(valid);
+        store.save(&registry).unwrap();
+        let original = fs::read_to_string(&path).unwrap();
+
+        // A malformed in-memory registry cannot overwrite existing good state.
+        let mut zero_network = MembershipRegistry::default();
+        zero_network.remember_network(network(0, "Invalid network", true));
+        assert_eq!(
+            store.save(&zero_network).unwrap_err().kind(),
+            ErrorKind::PersistenceError
+        );
+        let mut invalid_peer = network(3, "Invalid peer", true);
+        invalid_peer.trust_peer(peer(0));
+        let mut zero_peer = MembershipRegistry::default();
+        zero_peer.remember_network(invalid_peer);
+        assert_eq!(
+            store.save(&zero_peer).unwrap_err().kind(),
+            ErrorKind::PersistenceError
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+
+        // Existing on-disk state is never silently accepted or rewritten
+        // when a syntactically valid identifier is the reserved zero sentinel.
+        let network_id = NetworkId::from_bytes([3; 16]).to_string();
+        let zero_network_id = NetworkId::from_bytes([0; 16]).to_string();
+        let invalid_network_file = original.replace(&network_id, &zero_network_id);
+        fs::write(&path, &invalid_network_file).unwrap();
+        assert_eq!(
+            store.load().unwrap_err().kind(),
+            ErrorKind::PersistenceError
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), invalid_network_file);
+
+        let invalid_peer_file = original.replace(&peer(4).to_string(), &peer(0).to_string());
+        fs::write(&path, &invalid_peer_file).unwrap();
+        assert_eq!(
+            store.load().unwrap_err().kind(),
+            ErrorKind::PersistenceError
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), invalid_peer_file);
+        fs::write(&path, &original).unwrap();
+        assert!(store.load().unwrap().network(&NetworkId::from_bytes([3; 16])).is_some());
     }
 
     #[test]
