@@ -1014,6 +1014,26 @@ IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
 
 ## P7-003 — Implement peer hello/capability exchange
 
+**P7-003 independently confirmed candidate → mutual-TLS/Hello → durable enrollment primitive (software only, 2026-10-19):**
+The new `apps/daemon/src/enrollment_transport.rs` composes the already-untrusted
+certificate-candidate preface with explicit out-of-band SPKI confirmation,
+existing durable same-network peer approval, a *fresh* mutually authenticated
+TLS 1.3 connection, an exporter-bound Hello/HelloAck transcript, and only then
+an owner-only durable peer-key pin write. On rejection it closes TCP without
+enrolling or granting membership. A real localhost two-peer integration test
+covers preapproval denial, mismatched confirmed fingerprint, successful
+mutual-TLS/Hello key-possession proof, and persisted approved pin. Source
+`73ea96fb7f924e611614a6834360aa82e5b43fc2` required a formatting
+follow-up `069eec766430d1c4601694711f7ea4bc3253831c` with
+[exact-head CI 39345052772](https://github.com/ekkus93/blueroute/actions/runs/39345052772)
+**passed** (format, locked workspace, Clippy, Rust tests, simulated socket
+and D-Bus integrations, packaging checks). **Remaining prerequisites:**
+a real PolicyKit-protected human key-confirmation UX/service, a daemon-owned
+PAN/TLS accept/connect/session supervisor, loss/reconnect lifecycle, and
+production P6-004 JoinNetwork wiring. The helper is not called by the live
+daemon and requires the caller to supply truly independent confirmation.
+P7-003/P7-004/P6-004 remain IN PROGRESS and hardware acceptance DEFERRED.
+
 **P7-003 valid-but-unapproved certificate preface rejection (software only, 2026-10-19):**
 Two real localhost TCP negative tests present syntactically valid X.509 certificates
 for (1) an unknown NodeId and (2) a known NodeId bearing a different SPKI key.
