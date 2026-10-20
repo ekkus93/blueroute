@@ -339,5 +339,4 @@ mod tests {
         assert!(trust.approved_control_pins(network()).unwrap().is_empty());
         fs::remove_dir_all(root).unwrap();
     }
-
 }
