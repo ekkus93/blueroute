@@ -1014,6 +1014,20 @@ IN PROGRESS and all three physical/end-to-end criteria remain unchecked.**
 
 ## P7-003 — Implement peer hello/capability exchange
 
+**P7-003 candidate-to-TLS key substitution regression (software only, 2026-10-19):**
+A second localhost integration test uses two independently generated certificates
+with the *same* NodeId but different public keys. It first discovers the
+untrusted candidate, then has the peer present a different certificate on
+the fresh mutual-TLS connection. The client's confirmed SPKI check rejects
+the substituted key, shuts down TCP, and leaves the durable enrollment pin
+store empty. Source `730d758bffdc40f04f441eac86cd4c733dc51243`
+required a rustfmt-only correction `b3ade2f8b6f7d7178f153998007e8e480d676ad9`;
+[exact-head CI 39345915243](https://github.com/ekkus93/blueroute/actions/runs/39345915243)
+**passed** formatting, Clippy, tests, and integrated checks.
+This is an authenticated localhost software test, not the human enrollment
+ceremony, a daemon-owned PAN listener, production join, or physical Bluetooth
+acceptance. P7-003/P7-004/P6-004 remain IN PROGRESS; hardware is DEFERRED.
+
 **P7-003 independently confirmed candidate → mutual-TLS/Hello → durable enrollment primitive (software only, 2026-10-19):**
 The new `apps/daemon/src/enrollment_transport.rs` composes the already-untrusted
 certificate-candidate preface with explicit out-of-band SPKI confirmation,
