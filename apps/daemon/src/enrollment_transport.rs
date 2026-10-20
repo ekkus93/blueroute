@@ -58,14 +58,9 @@ pub fn enroll_confirmed_control_candidate(
             ));
         }
     };
-    let (mut stream, observed_certificate) = connect_pinned_control_tls(
-        socket,
-        local,
-        network,
-        certificate.peer_pin(),
-        deadline,
-    )
-    .map_err(|error| authentication_error("confirmed peer TLS proof failed", error))?;
+    let (mut stream, observed_certificate) =
+        connect_pinned_control_tls(socket, local, network, certificate.peer_pin(), deadline)
+            .map_err(|error| authentication_error("confirmed peer TLS proof failed", error))?;
 
     // The authenticated result is opaque and can only come from the current
     // rustls connection, not a caller-supplied NodeId or fingerprint claim.
@@ -77,10 +72,8 @@ pub fn enroll_confirmed_control_candidate(
         deadline,
     );
     let result = match verified {
-        Ok(verified) => trust.enroll_key_after_independent_confirmation(
-            verified.peer(),
-            independently_confirmed,
-        ),
+        Ok(verified) => trust
+            .enroll_key_after_independent_confirmation(verified.peer(), independently_confirmed),
         Err(error) => Err(authentication_error(
             "confirmed peer TLS Hello exchange failed",
             error,
@@ -100,15 +93,15 @@ mod tests {
     use std::time::Duration;
 
     use blueroute_core::{
-        DisplayName, MembershipRegistry, MembershipState, NetworkId, NetworkMembership, NodeId,
-        NodeCapabilities,
+        DisplayName, MembershipRegistry, MembershipState, NetworkId, NetworkMembership,
+        NodeCapabilities, NodeId,
     };
     use blueroute_linux::NetworkMembershipStore;
 
     use super::*;
     use crate::{
-        PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer,
-        accept_pinned_control_tls, exchange_control_tls_candidate,
+        PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer, accept_pinned_control_tls,
+        exchange_control_tls_candidate,
     };
 
     static NEXT_TEST: AtomicUsize = AtomicUsize::new(0);
@@ -172,7 +165,9 @@ mod tests {
             // before sending TLS or even a second certificate preface.
             for _ in 0..2 {
                 let (mut denied, _) = listener.accept().unwrap();
-                denied.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                denied
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
                 assert_eq!(denied.read(&mut [0_u8; 1]).unwrap(), 0);
             }
 

@@ -3,12 +3,12 @@
 // Prepared for the future authenticated transport runtime. Keep this
 // fail-closed socket owner compiled and tested without treating it as wired.
 mod approved_transport;
-mod enrollment_transport;
 #[allow(dead_code)]
 mod attempt_socket;
 mod authorization;
 mod control_listener;
 mod control_tls;
+mod enrollment_transport;
 mod join_network;
 mod peer_pin_store;
 mod peer_trust;
@@ -26,7 +26,6 @@ pub use approved_transport::{
     accept_registered_control_session, accept_registered_from_durable_approval,
     connect_approved_control_session, connect_registered_control_session,
 };
-pub use enrollment_transport::enroll_confirmed_control_candidate;
 pub use authorization::{
     CommandAuthorization, INTERNET_SHARING_ACTION_ID, MODIFY_ACTION_ID, command_authorization,
     command_operation,
@@ -53,6 +52,7 @@ pub use control_tls::{
     exchange_control_tls_candidate, exchange_control_tls_certificate, export_control_session_id,
     verify_control_tls_peer,
 };
+pub use enrollment_transport::enroll_confirmed_control_candidate;
 pub use join_network::{
     JoinControlSession, JoinIpLease, JoinNetworkFuture, JoinNetworkOperations, JoinPanLink,
     JoinRuntime, LinuxJoinRuntime, TransactionalJoinNetworkOperations,
