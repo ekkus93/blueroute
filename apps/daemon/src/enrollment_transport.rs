@@ -355,4 +355,107 @@ mod tests {
         assert!(trust.approved_control_pins(network()).unwrap().is_empty());
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn authenticated_new_key_cannot_silently_replace_an_existing_pin() {
+        // A verified new key still must not overwrite a different durable
+        // pin for the same peer. Explicit rotation needs a separate ceremony.
+        let root = std::env::temp_dir().join(format!(
+            "blueroute-enrollment-pin-conflict-{}-{}",
+            std::process::id(),
+            NEXT_TEST.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let store = NetworkMembershipStore::new(root.join("membership"));
+        let mut membership =
+            NetworkMembership::new(network(), DisplayName::new("Pin conflict test").unwrap());
+        membership.state = MembershipState::Member;
+        let mut registry = MembershipRegistry::default();
+        registry.remember_network(membership);
+        store.save(&registry).unwrap();
+        let trust = DurablePeerTrustOperations::with_peer_pin_store(
+            store,
+            PeerPinStore::new(root.join("pins")),
+        );
+        futures_lite::future::block_on(trust.trust_peer(node(3))).unwrap();
+
+        let client = LocalControlTlsIdentity::generate(node(2)).unwrap();
+        let original = LocalControlTlsIdentity::generate(node(3)).unwrap();
+        let replacement = LocalControlTlsIdentity::generate(node(3)).unwrap();
+        let original_pin =
+            PinnedControlTlsPeer::new(network(), node(3), original.fingerprint()).unwrap();
+        assert_ne!(original.fingerprint(), replacement.fingerprint());
+        // This synthetic policy-only seed is not a production TLS enrollment.
+        assert_eq!(
+            trust.enroll_verified_key(
+                network(),
+                node(3),
+                original.fingerprint(),
+                original.fingerprint(),
+            ),
+            Ok(true)
+        );
+
+        let replacement_key = replacement.fingerprint();
+        let client_pin =
+            PinnedControlTlsPeer::new(network(), client.node(), client.fingerprint()).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_thread = thread::spawn(move || {
+            let (first, _) = listener.accept().unwrap();
+            exchange_control_tls_candidate(
+                first,
+                &replacement,
+                network(),
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap();
+            let (second, _) = listener.accept().unwrap();
+            let (mut stream, certificate) = accept_pinned_control_tls(
+                second,
+                &replacement,
+                network(),
+                &[client_pin],
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap();
+            let authenticated = stream
+                .exchange_authenticated_hello(
+                    network(),
+                    &replacement,
+                    &certificate,
+                    facts(),
+                    Instant::now() + Duration::from_secs(5),
+                )
+                .unwrap();
+            assert_eq!(authenticated.peer().node(), client_pin.node());
+            stream.close();
+        });
+
+        let candidate = exchange_control_tls_candidate(
+            TcpStream::connect(addr).unwrap(),
+            &client,
+            network(),
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+        assert_eq!(candidate.fingerprint(), replacement_key);
+        assert_eq!(
+            enroll_confirmed_control_candidate(
+                TcpStream::connect(addr).unwrap(),
+                &client,
+                candidate,
+                replacement_key,
+                &trust,
+                facts(),
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap_err()
+            .kind(),
+            ErrorKind::AuthenticationFailed
+        );
+        server_thread.join().unwrap();
+        assert_eq!(trust.approved_control_pins(network()).unwrap(), vec![original_pin]);
+        fs::remove_dir_all(root).unwrap();
+    }
 }
