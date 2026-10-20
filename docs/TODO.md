@@ -1352,6 +1352,8 @@ P7-003/P7-004/P6-004 remain IN PROGRESS; hardware acceptance is DEFERRED.
 
 ## P7-004 — Implement control-session lifecycle
 
+**P7-004 pre-accept ownership-drift queue isolation (software only, 2026-10-20):** A new localhost integration regression covers missing local network, wrong-network observation, and NAP endpoint drift before TCP acceptance. All queued unauthenticated candidates are discarded, the listener cannot be revived, and a retired listener performs no further backend observation. Source commit `95ce423d70ac35900524cd7daeb31c5cf10b0e1e`, formatting correction `1ecbcce89078c630cf45eae0c8103b7dc196fdea`, [exact-head CI 39498913530](https://github.com/ekkus93/blueroute/actions/runs/39498913530) **passed**. This is not daemon-owned PAN accept-loop integration, independently confirmed enrollment, authenticated production JoinNetwork, or physical Bluetooth acceptance; P7-003/P7-004/P6-004 remain OPEN and hardware acceptance DEFERRED.
+
 **P7-004 post-TLS listener-release registry replacement regression (software only, 2026-10-19):**
 A real localhost mutual-TLS integration regression now simulates loss of the
 original registered exporter generation after handshake and admission, then
