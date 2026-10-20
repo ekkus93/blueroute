@@ -43,6 +43,15 @@ pub fn enroll_confirmed_control_candidate(
 ) -> Result<bool, CoreError> {
     let network = candidate.network();
     let node = candidate.node();
+    // A stale operator decision is not authorization for an unbounded future
+    // handshake. Expiry is checked again immediately before pin persistence.
+    if Instant::now() >= deadline {
+        let _ = socket.shutdown(Shutdown::Both);
+        return Err(CoreError::new(
+            ErrorKind::AuthenticationFailed,
+            "confirmed enrollment deadline expired before TLS proof",
+        ));
+    }
     if let Err(error) = trust.require_peer_approved(network, node) {
         let _ = socket.shutdown(Shutdown::Both);
         return Err(error);
@@ -72,6 +81,10 @@ pub fn enroll_confirmed_control_candidate(
         deadline,
     );
     let result = match verified {
+        Ok(_) if Instant::now() >= deadline => Err(CoreError::new(
+            ErrorKind::AuthenticationFailed,
+            "confirmed enrollment deadline expired before durable key enrollment",
+        )),
         Ok(verified) => trust
             .enroll_key_after_independent_confirmation(verified.peer(), independently_confirmed),
         Err(error) => Err(authentication_error(
@@ -161,9 +174,9 @@ mod tests {
             )
             .unwrap();
 
-            // Unapproved NodeId and wrong independent comparison MUST fail
-            // before sending TLS or even a second certificate preface.
-            for _ in 0..2 {
+            // Unapproved NodeId, wrong independent comparison, and a stale
+            // deadline must fail before sending TLS or a second certificate.
+            for _ in 0..3 {
                 let (mut denied, _) = listener.accept().unwrap();
                 denied
                     .set_read_timeout(Some(Duration::from_secs(5)))
@@ -232,6 +245,24 @@ mod tests {
                 &trust,
                 facts(),
                 Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap_err()
+            .kind(),
+            ErrorKind::AuthenticationFailed
+        );
+        assert!(trust.approved_control_pins(network()).unwrap().is_empty());
+
+        // Even a correctly confirmed candidate cannot use an expired
+        // ceremony decision to begin or persist an enrollment.
+        assert_eq!(
+            enroll_confirmed_control_candidate(
+                TcpStream::connect(addr).unwrap(),
+                &client,
+                candidate.clone(),
+                expected_key,
+                &trust,
+                facts(),
+                Instant::now() - Duration::from_millis(1),
             )
             .unwrap_err()
             .kind(),
