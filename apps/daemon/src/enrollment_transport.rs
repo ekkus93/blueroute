@@ -303,6 +303,87 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
+    fn mutually_authenticated_tls_without_hello_cannot_persist_first_key() {
+        // A completed certificate proof is not sufficient. A peer that
+        // immediately closes before Hello/HelloAck must remain unenrolled.
+        let root = std::env::temp_dir().join(format!(
+            "blueroute-enrollment-no-hello-{}-{}",
+            std::process::id(),
+            NEXT_TEST.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let store = NetworkMembershipStore::new(root.join("membership"));
+        let mut membership =
+            NetworkMembership::new(network(), DisplayName::new("No Hello test").unwrap());
+        membership.state = MembershipState::Member;
+        let mut registry = MembershipRegistry::default();
+        registry.remember_network(membership);
+        store.save(&registry).unwrap();
+        let trust = DurablePeerTrustOperations::with_peer_pin_store(
+            store,
+            PeerPinStore::new(root.join("pins")),
+        );
+        futures_lite::future::block_on(trust.trust_peer(node(3))).unwrap();
+
+        let client = LocalControlTlsIdentity::generate(node(2)).unwrap();
+        let server = LocalControlTlsIdentity::generate(node(3)).unwrap();
+        let approved_key = server.fingerprint();
+        let client_pin =
+            PinnedControlTlsPeer::new(network(), client.node(), client.fingerprint()).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_thread = thread::spawn(move || {
+            let (discovery, _) = listener.accept().unwrap();
+            exchange_control_tls_candidate(
+                discovery,
+                &server,
+                network(),
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap();
+
+            let (socket, _) = listener.accept().unwrap();
+            let (mut tls, verified_certificate) = accept_pinned_control_tls(
+                socket,
+                &server,
+                network(),
+                &[client_pin],
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap();
+            assert_eq!(verified_certificate.node(), client_pin.node());
+            // Prove that mutual TLS finished, then refuse Hello and close.
+            tls.close();
+        });
+
+        let candidate = exchange_control_tls_candidate(
+            TcpStream::connect(addr).unwrap(),
+            &client,
+            network(),
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+        assert_eq!(candidate.fingerprint(), approved_key);
+        assert_eq!(
+            enroll_confirmed_control_candidate(
+                TcpStream::connect(addr).unwrap(),
+                &client,
+                candidate,
+                approved_key,
+                &trust,
+                facts(),
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap_err()
+            .kind(),
+            ErrorKind::AuthenticationFailed
+        );
+        server_thread.join().unwrap();
+        assert!(trust.approved_control_pins(network()).unwrap().is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn key_rotation_between_candidate_discovery_and_tls_never_enrolls() {
         // Two distinct certificates can claim the same canonical NodeId.
         // The independently confirmed first certificate is not proof that
