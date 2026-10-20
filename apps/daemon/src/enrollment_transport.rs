@@ -85,12 +85,11 @@ pub fn enroll_confirmed_control_candidate(
             ErrorKind::AuthenticationFailed,
             "confirmed enrollment deadline expired before durable key enrollment",
         )),
-        Ok(verified) => trust
-            .enroll_key_after_independent_confirmation_until(
-                verified.peer(),
-                independently_confirmed,
-                deadline,
-            ),
+        Ok(verified) => trust.enroll_key_after_independent_confirmation_until(
+            verified.peer(),
+            independently_confirmed,
+            deadline,
+        ),
         Err(error) => Err(authentication_error(
             "confirmed peer TLS Hello exchange failed",
             error,

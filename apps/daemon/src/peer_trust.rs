@@ -797,5 +797,4 @@ mod tests {
         assert_eq!(trust.pin_store.as_ref().unwrap().load().unwrap().len(), 1);
         fs::remove_dir_all(root).unwrap();
     }
-
 }
