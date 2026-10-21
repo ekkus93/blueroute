@@ -248,6 +248,7 @@ fn post_accept_durable_network_replacement_and_endpoint_drift_fail_closed() {
         assert_eq!(backend.calls.load(Ordering::SeqCst), 2);
 
         let registry = store.load().unwrap();
+
         if matches!(mode, ObservationMode::ReplaceNetworkDuringSecondObservation) {
             assert!(registry.network(&network(8)).is_some());
             assert!(registry.network(&network(7)).is_none());
@@ -302,4 +303,42 @@ fn endpoint_backend_failure_retires_queued_candidates_without_tls() {
     assert_closed(queued);
     assert!(TcpStream::connect(endpoint).is_err());
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn corrupt_durable_membership_retires_queued_listener_without_backend_or_repair() {
+    for (label, corrupt) in [
+        ("future-schema", b"BLUEROUTE_MEMBERSHIP_V999\n".as_slice()),
+        ("malformed-header", b"invalid membership header\n".as_slice()),
+        ("invalid-utf8", b"\xff\xfe".as_slice()),
+    ] {
+        let (root, store) = member_store(label);
+        fs::write(store.path(), corrupt).unwrap();
+        let original = fs::read(store.path()).unwrap();
+        let (mut owner, endpoint) = listener();
+        // The backend must not be consulted when durable membership cannot
+        // be authenticated. The queued unauthenticated socket must be closed.
+        let backend = probe(&store, endpoint, ObservationMode::BackendFailure);
+        let queued = TcpStream::connect(endpoint).unwrap();
+        let error = futures_lite::future::block_on(
+            owner.poll_from_durable_network_operations(&store, &backend),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::PersistenceError, "{label}");
+        assert_eq!(backend.calls.load(Ordering::SeqCst), 0, "{label}");
+        assert_closed(queued);
+        assert!(TcpStream::connect(endpoint).is_err(), "{label}");
+        assert_eq!(fs::read(store.path()).unwrap(), original, "{label}");
+        assert_eq!(
+            futures_lite::future::block_on(
+                owner.poll_from_durable_network_operations(&store, &backend)
+            )
+            .unwrap_err()
+            .kind(),
+            ErrorKind::InvalidState,
+            "{label}",
+        );
+        assert_eq!(backend.calls.load(Ordering::SeqCst), 0, "{label}");
+        fs::remove_dir_all(root).unwrap();
+    }
 }
