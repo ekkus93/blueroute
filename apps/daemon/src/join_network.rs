@@ -1066,15 +1066,19 @@ mod tests {
                 let network = NetworkId::from_bytes([0x69; 16]);
                 let mut runtime = FakeRuntime::successful();
                 runtime.lease_prefix_override = Some(
-                    blueroute_core::IpPrefix::new(address.parse().unwrap(), prefix_len)
-                        .unwrap(),
+                    blueroute_core::IpPrefix::new(address.parse().unwrap(), prefix_len).unwrap(),
                 );
                 let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime);
                 let error = operations.join_network(network).await.unwrap_err();
                 assert_eq!(error.kind(), ErrorKind::InvalidState);
                 assert_eq!(
                     operations.runtime.steps(),
-                    vec![Step::Preflight, Step::Panu, Step::Address, Step::DisconnectPanu]
+                    vec![
+                        Step::Preflight,
+                        Step::Panu,
+                        Step::Address,
+                        Step::DisconnectPanu
+                    ]
                 );
                 assert!(operations.store.load().unwrap().is_empty());
                 let retry = operations.join_network(network).await.unwrap_err();
