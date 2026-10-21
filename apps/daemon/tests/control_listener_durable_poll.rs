@@ -84,8 +84,10 @@ impl NetworkOperations for Probe {
                     ));
                 }
                 ObservationMode::ReplaceNetworkDuringSecondObservation if call == 2 => {
-                    let mut replacement =
-                        NetworkMembership::new(network(8), DisplayName::new("replacement").unwrap());
+                    let mut replacement = NetworkMembership::new(
+                        network(8),
+                        DisplayName::new("replacement").unwrap(),
+                    );
                     replacement.state = MembershipState::Member;
                     let mut registry = MembershipRegistry::default();
                     registry.remember_network(replacement);
@@ -212,8 +214,14 @@ fn membership_revocation_during_post_accept_backend_observation_retires_listener
 #[test]
 fn post_accept_durable_network_replacement_and_endpoint_drift_fail_closed() {
     for (label, mode) in [
-        ("replacement", ObservationMode::ReplaceNetworkDuringSecondObservation),
-        ("endpoint-drift", ObservationMode::EndpointDriftDuringSecondObservation),
+        (
+            "replacement",
+            ObservationMode::ReplaceNetworkDuringSecondObservation,
+        ),
+        (
+            "endpoint-drift",
+            ObservationMode::EndpointDriftDuringSecondObservation,
+        ),
     ] {
         let (root, store) = member_store(label);
         let (mut owner, endpoint) = listener();
