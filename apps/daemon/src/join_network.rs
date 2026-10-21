@@ -666,10 +666,7 @@ mod tests {
                             .lease_interface_override
                             .clone()
                             .unwrap_or_else(|| link.interface().clone()),
-                        prefix: self
-                            .lease_prefix_override
-                            .clone()
-                            .unwrap_or(plan.first_client),
+                        prefix: self.lease_prefix_override.unwrap_or(plan.first_client),
                         owner: self.lease_owner_override.unwrap_or(_network),
                     }))
                 }
