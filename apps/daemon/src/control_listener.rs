@@ -1490,15 +1490,13 @@ mod tests {
                     assert!(TcpStream::connect(addr).is_err());
                 } else if scenario == 15 {
                     let mut active = vec![result.unwrap()];
-                    let mut future = Box::pin(
-                        owner.supervise_registered_from_durable_network_operations(
+                    let mut future =
+                        Box::pin(owner.supervise_registered_from_durable_network_operations(
                             &mut active,
                             &durable_membership,
                             &backend,
-                        ),
-                    );
-                    let mut context =
-                        std::task::Context::from_waker(std::task::Waker::noop());
+                        ));
+                    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
                     assert!(matches!(
                         std::future::Future::poll(future.as_mut(), &mut context),
                         std::task::Poll::Pending,
