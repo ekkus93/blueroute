@@ -1,6 +1,6 @@
 # P7-004 — Durable control-endpoint and raw-bind gates (software only)
 
-**Date:** 2026-10-20 UTC (2026-10-20 PDT).  
+**Date:** 2026-10-21 UTC (2026-10-20 PDT).  
 **Scope:** `SingleStarNetworkOperations` control endpoint observation and legacy raw TCP listener binding.  
 **Repository:** `ekkus93/blueroute`; direct commits on `master`.
 
