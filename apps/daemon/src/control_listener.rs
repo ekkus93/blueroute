@@ -414,6 +414,43 @@ impl ObservedControlListener {
             }
         }
     }
+
+    /// Await an independent NAP/membership observation after pinned mutual
+    /// TLS, Hello, and registry admission, before handing an authenticated
+    /// session to the daemon. This is the asynchronous counterpart of
+    /// `release_registered_if_current` for real backend observers.
+    ///
+    /// Cancelling this future while the observation is pending drops the
+    /// owned authenticated session (closing TLS and retiring its exact
+    /// registry generation); it does not grant a session lease or retire
+    /// unrelated listener ownership. The next poll still needs fresh proof.
+    pub async fn release_registered_if_current_async<'a, F, Fut>(
+        &mut self,
+        session: crate::RegisteredControlSession<'a>,
+        observe: F,
+    ) -> Result<crate::RegisteredControlSession<'a>, CoreError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<(Option<NetworkId>, Option<SocketAddrV4>), CoreError>>,
+    {
+        // Reject retired/wrong-network ownership before starting an expensive
+        // backend observation. The session is dropped on every early return.
+        if self.listener.is_none() {
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP control listener has already been retired",
+            ));
+        }
+        if session.network() != self.network {
+            self.listener.take();
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "authenticated session network differs from NAP listener",
+            ));
+        }
+        let observation = observe().await;
+        self.release_registered_if_current(session, || observation)
+    }
 }
 
 #[cfg(test)]
@@ -1089,7 +1126,7 @@ mod tests {
                         .activate_after_authentication(key, [42; 16])
                         .unwrap();
                 }
-                let result = owner.release_registered_if_current(session, || match scenario {
+                let observe = || match scenario {
                     0 => Ok((Some(network(7)), Some(addr))),
                     1 => Ok((None, Some(addr))),
                     2 => Err(CoreError::new(
@@ -1102,7 +1139,19 @@ mod tests {
                         Some(network(7)),
                         Some(SocketAddrV4::new(*addr.ip(), addr.port().wrapping_add(1))),
                     )),
-                });
+                };
+                // Exercise both release boundaries against real localhost
+                // mutual TLS: the async path must preserve all existing
+                // revocation, stale-generation and NAP ownership gates.
+                let result = if matches!(scenario, 0 | 2 | 5 | 6) {
+                    futures_lite::future::block_on(
+                        owner.release_registered_if_current_async(session, || async move {
+                            observe()
+                        }),
+                    )
+                } else {
+                    owner.release_registered_if_current(session, observe)
+                };
                 if scenario == 0 {
                     let mut session = result.unwrap();
                     assert!(registry.lock().unwrap().get(key).is_some());
