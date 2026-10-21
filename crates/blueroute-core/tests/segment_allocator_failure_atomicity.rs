@@ -3,9 +3,7 @@
 
 use std::net::{IpAddr, Ipv4Addr};
 
-use blueroute_core::{
-    ErrorKind, IpPrefix, Ipv4AddressPool, SegmentId, SegmentIpv4Allocator,
-};
+use blueroute_core::{ErrorKind, IpPrefix, Ipv4AddressPool, SegmentId, SegmentIpv4Allocator};
 
 fn segment(value: u8) -> SegmentId {
     SegmentId::from_bytes([value; 16])
@@ -19,10 +17,16 @@ fn prefix(last: u8) -> IpPrefix {
 fn exhausted_pool_preserves_reservations_and_recovers_after_conflict_clears() {
     let pool = Ipv4AddressPool::new(Ipv4Addr::new(10, 201, 8, 0), 29, 30).unwrap();
     let mut allocator = SegmentIpv4Allocator::new(pool).unwrap();
-    assert_eq!(allocator.reserve_exact(segment(1), prefix(0), []).unwrap(), prefix(0));
+    assert_eq!(
+        allocator.reserve_exact(segment(1), prefix(0), []).unwrap(),
+        prefix(0)
+    );
 
     assert_eq!(
-        allocator.allocate(segment(2), [prefix(4)]).unwrap_err().kind(),
+        allocator
+            .allocate(segment(2), [prefix(4)])
+            .unwrap_err()
+            .kind(),
         ErrorKind::AddressConflict
     );
     assert_eq!(allocator.len(), 1);
