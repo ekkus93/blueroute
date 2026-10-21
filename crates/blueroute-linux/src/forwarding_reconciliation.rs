@@ -11,10 +11,11 @@ use crate::IpNetworkBackend;
 ///
 /// The caller must supply the complete, locally verified set of BlueRoute
 /// network topologies on this host, not a single network or untrusted peer
-/// advertisements. Forwarding is host-global: a loss in one network must not
-/// disable forwarding still required by another. An empty complete snapshot
-/// releases BlueRoute's lease. A nonempty snapshot missing the local node in
-/// every topology is invalid and never changes the backend.
+/// advertisements. Every included topology must contain the local node;
+/// silently skipping one could discard a forwarding requirement. Forwarding
+/// is host-global: a loss in one network must not disable forwarding still
+/// required by another. An empty complete snapshot releases BlueRoute's lease.
+/// Incomplete nonempty snapshots fail before changing the backend.
 ///
 /// The backend handles idempotence and preserves pre-existing host forwarding
 /// policy via its owned lease. Reconcile after topology changes and restart to
@@ -24,19 +25,15 @@ pub async fn reconcile_ipv4_forwarding(
     topologies: &[TopologyGraph],
     local: NodeId,
 ) -> Result<bool, CoreError> {
-    let mut saw_local = false;
     let mut desired = false;
     for topology in topologies {
-        if topology.node(&local).is_some() {
-            saw_local = true;
-            desired |= desired_ipv4_forwarding(topology, local)?;
+        if topology.node(&local).is_none() {
+            return Err(CoreError::new(
+                ErrorKind::InvalidInput,
+                "local node absent from a supplied BlueRoute network topology",
+            ));
         }
-    }
-    if !topologies.is_empty() && !saw_local {
-        return Err(CoreError::new(
-            ErrorKind::InvalidInput,
-            "local node absent from all supplied BlueRoute network topologies",
-        ));
+        desired |= desired_ipv4_forwarding(topology, local)?;
     }
     backend.set_ipv4_forwarding(desired).await?;
     Ok(desired)
@@ -203,6 +200,26 @@ mod tests {
         );
         assert!(!block_on(reconcile_ipv4_forwarding(&backend, &[], node(2))).unwrap());
         assert_eq!(*backend.applied.lock().unwrap(), [true, true, false, false]);
+    }
+
+    #[test]
+    fn incomplete_multi_network_snapshot_fails_before_mutating_forwarding() {
+        let backend = FakeBackend::default();
+        let active = graph_with_two_active_segments();
+        let unrelated = TopologyGraph::default();
+
+        for topologies in [
+            vec![active.clone(), unrelated.clone()],
+            vec![unrelated.clone(), active.clone()],
+        ] {
+            assert_eq!(
+                block_on(reconcile_ipv4_forwarding(&backend, &topologies, node(2)))
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::InvalidInput
+            );
+        }
+        assert!(backend.applied.lock().unwrap().is_empty());
     }
 
     #[test]
