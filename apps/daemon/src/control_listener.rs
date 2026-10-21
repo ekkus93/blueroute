@@ -1143,15 +1143,15 @@ mod tests {
                 // Exercise both release boundaries against real localhost
                 // mutual TLS: the async path must preserve all existing
                 // revocation, stale-generation and NAP ownership gates.
-                let result = if matches!(scenario, 0 | 2 | 5 | 6) {
-                    futures_lite::future::block_on(
-                        owner.release_registered_if_current_async(session, || async move {
-                            observe()
-                        }),
-                    )
-                } else {
-                    owner.release_registered_if_current(session, observe)
-                };
+                let result =
+                    if matches!(scenario, 0 | 2 | 5 | 6) {
+                        futures_lite::future::block_on(owner.release_registered_if_current_async(
+                            session,
+                            || async move { observe() },
+                        ))
+                    } else {
+                        owner.release_registered_if_current(session, observe)
+                    };
                 if scenario == 0 {
                     let mut session = result.unwrap();
                     assert!(registry.lock().unwrap().get(key).is_some());
