@@ -309,7 +309,10 @@ fn endpoint_backend_failure_retires_queued_candidates_without_tls() {
 fn corrupt_durable_membership_retires_queued_listener_without_backend_or_repair() {
     for (label, corrupt) in [
         ("future-schema", b"BLUEROUTE_MEMBERSHIP_V999\n".as_slice()),
-        ("malformed-header", b"invalid membership header\n".as_slice()),
+        (
+            "malformed-header",
+            b"invalid membership header\n".as_slice(),
+        ),
         ("invalid-utf8", b"\xff\xfe".as_slice()),
     ] {
         let (root, store) = member_store(label);
