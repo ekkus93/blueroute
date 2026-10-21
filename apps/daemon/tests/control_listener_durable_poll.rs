@@ -313,7 +313,11 @@ fn endpoint_backend_failure_retires_queued_candidates_without_tls() {
 fn corruption_during_post_accept_durable_observation_closes_candidate_without_repair() {
     let (root, store) = member_store("post-accept-corrupt");
     let (mut owner, endpoint) = listener();
-    let backend = probe(&store, endpoint, ObservationMode::CorruptDuringSecondObservation);
+    let backend = probe(
+        &store,
+        endpoint,
+        ObservationMode::CorruptDuringSecondObservation,
+    );
     let queued = TcpStream::connect(endpoint).unwrap();
 
     let error = futures_lite::future::block_on(
@@ -322,7 +326,10 @@ fn corruption_during_post_accept_durable_observation_closes_candidate_without_re
     .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::PersistenceError);
     assert_eq!(backend.calls.load(Ordering::SeqCst), 2);
-    assert_eq!(fs::read(store.path()).unwrap(), b"BLUEROUTE_MEMBERSHIP_V999\n");
+    assert_eq!(
+        fs::read(store.path()).unwrap(),
+        b"BLUEROUTE_MEMBERSHIP_V999\n"
+    );
     assert_closed(queued);
     assert!(TcpStream::connect(endpoint).is_err());
     assert_eq!(
