@@ -1432,6 +1432,28 @@ P7-003/P7-004/P6-004 remain IN PROGRESS; hardware acceptance is DEFERRED.
 ## P7-004 — Implement control-session lifecycle
 
 
+
+**P7-004 durable network+endpoint polling composition (software-only, 2026-10-21 UTC):**
+`ObservedControlListener::poll_from_durable_network_operations` now composes
+the current `NetworkMembershipStore` and the existing guarded
+`NetworkOperations::observed_owned_control_endpoint` callback. It reloads
+durable membership before and after each awaited backend query, repeats
+the distinct query after accepting an unauthenticated TCP candidate, and
+permanently retires the listener when membership is revoked/replaced,
+the backend errors, or ownership becomes inconsistent. Three loopback
+tests verify idle versus post-accept query counts, actual queued-socket EOF,
+mid-observation durable membership revocation, backend failure, and
+no revival or duplicate backend calls after listener retirement. Source
+[b555375b](https://github.com/ekkus93/blueroute/commit/b555375b43ec4518cc81a66de5957b127ff3029c),
+rustfmt correction [10cec898](https://github.com/ekkus93/blueroute/commit/10cec898a1bd2c50083c53702b03818deb0fd734);
+[exact-head CI 39542704054](https://github.com/ekkus93/blueroute/actions/runs/39542704054)
+**PASSED**. This is a software-only observation seam, not a running
+daemon-managed PAN accept loop or a durable TLS session lease. Every TCP
+candidate still requires enrolled mutual TLS, Hello/HelloAck, exact registry
+admission and continued loss/revocation monitoring. Independent key
+confirmation, production JoinNetwork and physical Bluetooth acceptance
+remain OPEN/DEFERRED.
+
 **P7-004 awaited post-TLS ownership release (software only, 2026-10-21 UTC):**
 `ObservedControlListener::release_registered_if_current_async` now awaits a
 fresh trusted NAP/membership observation after mutually authenticated TLS,
