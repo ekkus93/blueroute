@@ -1258,7 +1258,8 @@ mod tests {
                 Box::pin(async move {
                     let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
                     if self.scenario == 15 && call == 4 {
-                        return std::future::pending::<Result<Option<SocketAddrV4>, CoreError>>().await;
+                        return std::future::pending::<Result<Option<SocketAddrV4>, CoreError>>()
+                            .await;
                     }
                     match self.scenario {
                         14 if call == 3 => {
