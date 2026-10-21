@@ -388,26 +388,17 @@ impl ObservedControlListener {
         else {
             return Ok(None);
         };
-        let registered = crate::accept_registered_from_durable_approval(
-            socket,
-            local,
-            trust,
-            setup,
-            registry,
-        )
-        .map_err(|error| {
-            CoreError::with_diagnostic(
-                ErrorKind::AuthenticationFailed,
-                "inbound control TLS or session admission failed",
-                error.to_string(),
-            )
-        })?;
+        let registered =
+            crate::accept_registered_from_durable_approval(socket, local, trust, setup, registry)
+                .map_err(|error| {
+                CoreError::with_diagnostic(
+                    ErrorKind::AuthenticationFailed,
+                    "inbound control TLS or session admission failed",
+                    error.to_string(),
+                )
+            })?;
         let checked = self
-            .release_registered_from_durable_network_operations(
-                registered,
-                membership,
-                operations,
-            )
+            .release_registered_from_durable_network_operations(registered, membership, operations)
             .await?;
         Ok(Some(checked))
     }
@@ -1327,10 +1318,7 @@ mod tests {
                     })
                 };
                 let session = if scenario == 14 {
-                    assert_eq!(
-                        session.err().unwrap().kind(),
-                        ErrorKind::InvalidState,
-                    );
+                    assert_eq!(session.err().unwrap().kind(), ErrorKind::InvalidState,);
                     assert!(registry.lock().unwrap().is_empty());
                     return;
                 } else {
@@ -1397,7 +1385,11 @@ mod tests {
                 if scenario >= 7 {
                     assert_eq!(
                         backend.calls.load(Ordering::SeqCst),
-                        if scenario == 13 { 3 } else { usize::from(scenario != 8) },
+                        if scenario == 13 {
+                            3
+                        } else {
+                            usize::from(scenario != 8)
+                        },
                         "revoked membership must not query the backend",
                     );
                 }
