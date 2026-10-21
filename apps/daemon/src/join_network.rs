@@ -667,7 +667,9 @@ mod tests {
                     registry.remember_network(membership);
                     NetworkMembershipStore::new(path.clone()).save(&registry)?;
                 }
-                Ok(JoinControlSession::new(self.session_network_override.unwrap_or(network)))
+                Ok(JoinControlSession::new(
+                    self.session_network_override.unwrap_or(network),
+                ))
             })
         }
 
