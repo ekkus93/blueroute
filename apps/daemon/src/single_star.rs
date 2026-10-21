@@ -624,8 +624,40 @@ where
     }
 
     fn observed_owned_control_endpoint(&self) -> NetworkOperationFuture<'_, Option<SocketAddrV4>> {
-        self.runtime
-            .observed_owned_control_endpoint(self.config.clone())
+        Box::pin(async move {
+            // A live NAP backend alone does not establish durable membership.
+            // The caller must still recheck both facts before every accept.
+            let Some(network) = current_network(&self.store.load()?)? else {
+                return Ok(None);
+            };
+            let observed = self
+                .runtime
+                .observed_owned_control_endpoint(self.config.clone())
+                .await?;
+            if current_network(&self.store.load()?)? != Some(network) {
+                return Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "NAP control endpoint lost durable membership during observation",
+                ));
+            }
+            let Some(endpoint) = observed else {
+                return Ok(None);
+            };
+            let planned = Ipv4StarAddressPlan::for_network(network, self.config.ipv4_address_pool)?;
+            let std::net::IpAddr::V4(ip) = planned.host.address else {
+                return Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "NAP control host must have an IPv4 address",
+                ));
+            };
+            if endpoint != SocketAddrV4::new(ip, crate::CONTROL_TCP_PORT) {
+                return Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "NAP control endpoint does not match durable host network",
+                ));
+            }
+            Ok(Some(endpoint))
+        })
     }
 
     fn bind_owned_control_listener(&self) -> NetworkOperationFuture<'_, Option<TcpListener>> {
@@ -1926,6 +1958,116 @@ mod tests {
                         TcpStream::connect(endpoint).is_err(),
                         "mismatched or changed membership must close listener"
                     );
+                }
+                fs::remove_dir_all(root).unwrap();
+            }
+        });
+    }
+
+    #[test]
+    fn observed_control_endpoint_rechecks_durable_membership_and_network_identity() {
+        #[derive(Clone)]
+        struct EndpointRuntime {
+            endpoint: SocketAddrV4,
+            membership_path: std::path::PathBuf,
+            replace_membership: Option<NetworkId>,
+            observations: Arc<AtomicUsize>,
+        }
+
+        impl StarHostRuntime for EndpointRuntime {
+            fn observed_owned_control_endpoint(
+                &self,
+                _config: DaemonConfig,
+            ) -> NetworkOperationFuture<'_, Option<SocketAddrV4>> {
+                Box::pin(async move {
+                    self.observations.fetch_add(1, Ordering::SeqCst);
+                    if let Some(replacement) = self.replace_membership {
+                        let mut registry = MembershipRegistry::default();
+                        let mut member = NetworkMembership::new(
+                            replacement,
+                            DisplayName::new("Changed host").unwrap(),
+                        );
+                        member.state = MembershipState::Member;
+                        registry.remember_network(member);
+                        NetworkMembershipStore::new(&self.membership_path)
+                            .save(&registry)
+                            .unwrap();
+                    }
+                    Ok(Some(self.endpoint))
+                })
+            }
+
+            fn start_host(
+                &self,
+                _network: NetworkId,
+                _bridge: NetworkInterfaceHandle,
+                _address: InterfaceAddress,
+            ) -> NetworkOperationFuture<'_, ()> {
+                Box::pin(async { Ok(()) })
+            }
+
+            fn stop_host(
+                &self,
+                _network: NetworkId,
+                _bridge: NetworkInterfaceHandle,
+                _address: InterfaceAddress,
+            ) -> NetworkOperationFuture<'_, ()> {
+                Box::pin(async { Ok(()) })
+            }
+        }
+
+        futures_lite::future::block_on(async {
+            let network = NetworkId::from_bytes([0x91; 16]);
+            let other = NetworkId::from_bytes([0x92; 16]);
+            let config = DaemonConfig::default();
+            let planned =
+                Ipv4StarAddressPlan::for_network(network, config.ipv4_address_pool).unwrap();
+            let std::net::IpAddr::V4(ip) = planned.host.address else {
+                panic!("NAP host plan must be IPv4");
+            };
+            let expected = SocketAddrV4::new(ip, crate::CONTROL_TCP_PORT);
+            for scenario in 0..4 {
+                let (root, store) = temp_store("observed-durable-endpoint");
+                if scenario != 0 {
+                    let mut registry = MembershipRegistry::default();
+                    let mut member =
+                        NetworkMembership::new(network, DisplayName::new("Host").unwrap());
+                    member.state = MembershipState::Member;
+                    registry.remember_network(member);
+                    store.save(&registry).unwrap();
+                }
+                let observations = Arc::new(AtomicUsize::new(0));
+                let runtime = EndpointRuntime {
+                    endpoint: if scenario == 2 {
+                        SocketAddrV4::new(*expected.ip(), expected.port() + 1)
+                    } else {
+                        expected
+                    },
+                    membership_path: root.join("memberships-v1"),
+                    replace_membership: if scenario == 3 { Some(other) } else { None },
+                    observations: Arc::clone(&observations),
+                };
+                let operations = SingleStarNetworkOperations::with_runtime_and_generator(
+                    store,
+                    config.clone(),
+                    nap_capabilities(Some(true)),
+                    runtime,
+                    SequenceGenerator::new([]),
+                );
+                let result = operations.observed_owned_control_endpoint().await;
+                match scenario {
+                    0 => {
+                        assert!(result.unwrap().is_none());
+                        assert_eq!(observations.load(Ordering::SeqCst), 0);
+                    }
+                    1 => {
+                        assert_eq!(result.unwrap(), Some(expected));
+                        assert_eq!(observations.load(Ordering::SeqCst), 1);
+                    }
+                    _ => {
+                        assert_eq!(result.unwrap_err().kind(), ErrorKind::InvalidState);
+                        assert_eq!(observations.load(Ordering::SeqCst), 1);
+                    }
                 }
                 fs::remove_dir_all(root).unwrap();
             }
