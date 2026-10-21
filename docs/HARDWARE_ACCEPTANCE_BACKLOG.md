@@ -45,6 +45,9 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 
 ## Software-only control-session evidence (through 2026-10-21)
 
+- **P7-004 pre-poll supervision cancellation guard (software-only, 2026-10-21):** Session ownership is eagerly transferred when constructing the supervision future, not delayed until its first poll. Dropping the future before polling now closes registered TLS sockets and retires exact registry generations, with no backend observation. A real localhost authenticated peer regression passed [CI 39568421115](https://github.com/ekkus93/blueroute/actions/runs/39568421115) at `6bfa6aae2ea33f46b0de6174a911cc4e582ec2aa` (source `476d9e096bf3aa758ff602ed710d1907af928dd7`). This remains library-only, not a daemon-owned PAN/TLS continuous supervisor, operator enrollment UX, production JoinNetwork or hardware acceptance. P7-003/P7-004/P6-004 remain open; hardware deferred.
+
+
 - **P7-004 cancellation-safe authenticated NAP supervision tick (software-only, 2026-10-21):** A new explicit library tick re-observes durable membership and guarded endpoint while temporarily owning every authenticated session, so dropping/cancelling its future closes TLS sockets and retires exact registry slots. Matching observations preserve approved peers; revocation and NAP loss shut down affected owners. Real localhost mutual-TLS positive, post-revocation negative, and cancelled-pending-backend regression passed [exact-head CI 39566142513](https://github.com/ekkus93/blueroute/actions/runs/39566142513) at `a153f2a76b306b441185a11c5986d9f92e96a7f8` and [exact-head CI 39567081992](https://github.com/ekkus93/blueroute/actions/runs/39567081992) at `fee8152349cbe623f50e750ced42dc295462cf8a`. This remains library-only: daemon scheduling and live PAN/TLS session/reconnect lifecycle, independently confirmed enrollment, production JoinNetwork and physical Bluetooth acceptance stay OPEN/DEFERRED.
 
 
