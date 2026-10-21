@@ -52,11 +52,7 @@ fn add_duplicate(payload: &str, key: &str, value: &Value) -> String {
         payload.contains(&marker),
         "fixture is missing the {key} field"
     );
-    payload.replacen(
-        &marker,
-        &format!("{marker}{value},{marker}"),
-        1,
-    )
+    payload.replacen(&marker, &format!("{marker}{value},{marker}"), 1)
 }
 
 #[test]
