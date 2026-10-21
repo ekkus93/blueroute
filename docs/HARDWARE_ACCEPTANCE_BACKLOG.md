@@ -45,6 +45,9 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 
 ## Software-only control-session evidence (through 2026-10-21)
 
+- **P7-004 composed inbound NAP-TLS entry point (software-only, 2026-10-21):** The guarded library method now drives fresh durable NAP observations before/after TCP accept, durable enrolled pin mutual TLS 1.3 plus exporter-bound Hello/HelloAck, exact registry admission, then fresh durable ownership again before returning an authenticated session. A real localhost TLS regression rejects late persisted membership loss and retires the socket/registry generation. Implementation `97d49956bba304043faf4a315dbf725e53d78d7e`, formatting `38aae209aa06c3a5c39198fd2ca2f3a1a1a37fb5`, [exact-head CI 39565246797](https://github.com/ekkus93/blueroute/actions/runs/39565246797) passed. This method is **not wired to the running daemon** and does not qualify independent enrollment UI, PAN supervision/reconnect, production JoinNetwork or radio hardware. Keep P7-003/P7-004/P6-004 open and hardware deferred.
+
+
 - **P7-004 post-TLS durable NAP revalidation (software only; 2026-10-21):** A newly admitted mutual-TLS/Hello registered localhost session now requires fresh persisted network ownership and independent NAP endpoint observation before release to its caller; missing/corrupt/replaced membership, endpoint drift and backend failure deny the session and close its socket. Source `55a8c6ddedab61c4c330cf57cc04b1fe5dbebbe3`, formatted `7d27db827cbcc936b186abd0bc0be3fa795bbf7f`, [exact-head CI 39562530598](https://github.com/ekkus93/blueroute/actions/runs/39562530598) passed. This is NOT the running daemon's PAN/TLS transport, independently confirmed enrollment UX, production JoinNetwork, or Bluetooth hardware evidence; keep P7-003/P7-004/P6-004 open and physical acceptance deferred.
 
 
