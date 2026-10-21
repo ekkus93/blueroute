@@ -45,6 +45,9 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 
 ## Software-only control-session evidence (through 2026-10-21)
 
+- **P7-004 post-TLS durable NAP revalidation (software only; 2026-10-21):** A newly admitted mutual-TLS/Hello registered localhost session now requires fresh persisted network ownership and independent NAP endpoint observation before release to its caller; missing/corrupt/replaced membership, endpoint drift and backend failure deny the session and close its socket. Source `55a8c6ddedab61c4c330cf57cc04b1fe5dbebbe3`, formatted `7d27db827cbcc936b186abd0bc0be3fa795bbf7f`, [exact-head CI 39562530598](https://github.com/ekkus93/blueroute/actions/runs/39562530598) passed. This is NOT the running daemon's PAN/TLS transport, independently confirmed enrollment UX, production JoinNetwork, or Bluetooth hardware evidence; keep P7-003/P7-004/P6-004 open and physical acceptance deferred.
+
+
 - **P7-004 corrupt membership after TCP accept (software only, 2026-10-21):** A second guarded, awaited durable ownership read rejects an unsupported-schema membership mutation introduced after accepting an unauthenticated connection. The socket closes, listener retires, backend isn't called again, and corruption is not repaired. Source `4dd6f44e43e5e2284c1380afd16691c96acd7376`, rustfmt `2b2b9f5ca99e93ee0282c9f781c1de8a4d2b6a69`, [exact-head CI 39560630992](https://github.com/ekkus93/blueroute/actions/runs/39560630992) passed. **No new physical Bluetooth acceptance** and no enrollment UX, daemon PAN/TLS lifecycle or production P6-004 join; all remain open/deferred.
 
 
