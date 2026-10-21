@@ -45,6 +45,9 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 
 ## Software-only control-session evidence (through 2026-10-21)
 
+- **P7-004 corrupt membership after TCP accept (software only, 2026-10-21):** A second guarded, awaited durable ownership read rejects an unsupported-schema membership mutation introduced after accepting an unauthenticated connection. The socket closes, listener retires, backend isn't called again, and corruption is not repaired. Source `4dd6f44e43e5e2284c1380afd16691c96acd7376`, rustfmt `2b2b9f5ca99e93ee0282c9f781c1de8a4d2b6a69`, [exact-head CI 39560630992](https://github.com/ekkus93/blueroute/actions/runs/39560630992) passed. **No new physical Bluetooth acceptance** and no enrollment UX, daemon PAN/TLS lifecycle or production P6-004 join; all remain open/deferred.
+
+
 - **P7-004 corrupt durable membership gate (software-only, 2026-10-21):** Unsupported-schema, malformed-header, and invalid-UTF-8 durable NAP membership closes queued untrusted TCP and retires the listener before backend observation; no silent store repair. Added at `b3f9fc974993f0b1f78a0666f19d63b2e23def0b`, rustfmt corrected at `99b2c5591e7e165c107da577e92bdd6cb9cd9b17`, [exact-head CI 39559363392](https://github.com/ekkus93/blueroute/actions/runs/39559363392) passed. **Software regression only**: the independent enrollment UX, daemon-owned PAN/TLS lifetime, production P6-004 join, and hardware acceptance remain open/deferred.
 
 
