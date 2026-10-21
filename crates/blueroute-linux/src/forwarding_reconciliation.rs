@@ -150,9 +150,23 @@ mod tests {
         let backend = FakeBackend::default();
         let mut graph = graph_with_two_active_segments();
 
-        assert!(block_on(reconcile_ipv4_forwarding(&backend, std::slice::from_ref(&graph), node(2))).unwrap());
+        assert!(
+            block_on(reconcile_ipv4_forwarding(
+                &backend,
+                std::slice::from_ref(&graph),
+                node(2)
+            ))
+            .unwrap()
+        );
         graph.remove_link(&LinkId::from_bytes([2; 16]));
-        assert!(!block_on(reconcile_ipv4_forwarding(&backend, std::slice::from_ref(&graph), node(2))).unwrap());
+        assert!(
+            !block_on(reconcile_ipv4_forwarding(
+                &backend,
+                std::slice::from_ref(&graph),
+                node(2)
+            ))
+            .unwrap()
+        );
         assert_eq!(*backend.applied.lock().unwrap(), [true, false]);
     }
 
@@ -196,14 +210,25 @@ mod tests {
         let backend = FakeBackend::default();
         let graph = graph_with_two_active_segments();
         assert_eq!(
-            block_on(reconcile_ipv4_forwarding(&backend, std::slice::from_ref(&graph), node(4)))
-                .unwrap_err()
-                .kind(),
+            block_on(reconcile_ipv4_forwarding(
+                &backend,
+                std::slice::from_ref(&graph),
+                node(4)
+            ))
+            .unwrap_err()
+            .kind(),
             ErrorKind::InvalidInput
         );
         assert!(backend.applied.lock().unwrap().is_empty());
 
-        assert!(!block_on(reconcile_ipv4_forwarding(&backend, std::slice::from_ref(&graph), node(1))).unwrap());
+        assert!(
+            !block_on(reconcile_ipv4_forwarding(
+                &backend,
+                std::slice::from_ref(&graph),
+                node(1)
+            ))
+            .unwrap()
+        );
         assert_eq!(*backend.applied.lock().unwrap(), [false]);
     }
 
@@ -215,9 +240,13 @@ mod tests {
         };
         let graph = graph_with_two_active_segments();
         assert_eq!(
-            block_on(reconcile_ipv4_forwarding(&backend, std::slice::from_ref(&graph), node(2)))
-                .unwrap_err()
-                .kind(),
+            block_on(reconcile_ipv4_forwarding(
+                &backend,
+                std::slice::from_ref(&graph),
+                node(2)
+            ))
+            .unwrap_err()
+            .kind(),
             ErrorKind::NetworkBackendUnavailable
         );
         assert!(backend.applied.lock().unwrap().is_empty());
