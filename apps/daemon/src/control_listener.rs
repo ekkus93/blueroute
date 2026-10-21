@@ -7,9 +7,11 @@
 use std::future::Future;
 use std::io::ErrorKind as IoErrorKind;
 use std::net::{IpAddr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
+use std::sync::{Arc, Mutex};
 
 use blueroute_core::{CoreError, DaemonConfig, ErrorKind, Ipv4StarAddressPlan, NetworkId};
 use blueroute_linux::{InterfaceAddress, NetworkInterfaceHandle, NetworkMembershipStore};
+use blueroute_protocol::session::ControlSessionRegistry;
 
 /// Reserved daemon-to-daemon control port from P7-001.
 pub const CONTROL_TCP_PORT: u16 = 46071;
@@ -345,6 +347,69 @@ impl ObservedControlListener {
             observe_durable_owned_endpoint(expected_network, membership, operations)
         })
         .await
+    }
+
+    /// Drive one guarded inbound handshake against the running daemon's
+    /// durable NAP membership, enrolled pins, mutual TLS 1.3, Hello/HelloAck,
+    /// and exact-generation authenticated session registry.
+    ///
+    /// Fresh membership and guarded endpoint observations run both before
+    /// and after accepting an *untrusted* TCP candidate and once more after
+    /// full TLS registration. A failed handshake never grants membership.
+    /// A normal invalid peer closes only its socket; lost local ownership
+    /// retires the NAP listener. No caller-provided remote identity is trusted.
+    ///
+    /// This is a bounded synchronous TLS handshake inside an async method:
+    /// the future must be driven by a dedicated daemon worker, not the D-Bus
+    /// event loop. The returned session requires ongoing ownership, PAN-loss,
+    /// idle-deadline and revocation supervision. This method is not a running
+    /// daemon accept loop and does not enable JoinNetwork.
+    pub async fn poll_registered_from_durable_network_operations<'a>(
+        &mut self,
+        membership: &NetworkMembershipStore,
+        operations: &dyn crate::NetworkOperations,
+        local: &crate::LocalControlTlsIdentity,
+        trust: &'a crate::DurablePeerTrustOperations,
+        setup: crate::ApprovedControlSetup,
+        registry: Arc<Mutex<ControlSessionRegistry>>,
+    ) -> Result<Option<crate::RegisteredControlSession<'a>>, CoreError> {
+        // Refuse programming/configuration mismatches before an unauthenticated
+        // peer can be accepted or a TLS record can be exchanged.
+        if setup.network != self.network {
+            self.listener.take();
+            return Err(CoreError::new(
+                ErrorKind::InvalidInput,
+                "authenticated control setup targets a different NAP network",
+            ));
+        }
+        let Some(socket) = self
+            .poll_from_durable_network_operations(membership, operations)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let registered = crate::accept_registered_from_durable_approval(
+            socket,
+            local,
+            trust,
+            setup,
+            registry,
+        )
+        .map_err(|error| {
+            CoreError::with_diagnostic(
+                ErrorKind::AuthenticationFailed,
+                "inbound control TLS or session admission failed",
+                error.to_string(),
+            )
+        })?;
+        let checked = self
+            .release_registered_from_durable_network_operations(
+                registered,
+                membership,
+                operations,
+            )
+            .await?;
+        Ok(Some(checked))
     }
 
     /// Accept a candidate only if ownership survives a second independent
@@ -1144,8 +1209,11 @@ mod tests {
                 &self,
             ) -> NetworkOperationFuture<'_, Option<SocketAddrV4>> {
                 Box::pin(async move {
-                    self.calls.fetch_add(1, Ordering::SeqCst);
+                    let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
                     match self.scenario {
+                        14 if call == 3 => NetworkMembershipStore::new(self.membership_path.clone())
+                            .save(&MembershipRegistry::default())
+                            .unwrap(),
                         9 => fs::write(&self.membership_path, b"BLUEROUTE_MEMBERSHIP_V999\n")
                             .unwrap(),
                         11 => {
@@ -1188,7 +1256,7 @@ mod tests {
         // Existing TLS listener checks and fresh DURABLE post-TLS ownership
         // cases: stable, revoked before observation, corrupted during query,
         // endpoint drift, backend failure and revoked during query.
-        for scenario in 0_u8..13 {
+        for scenario in 0_u8..15 {
             let client = LocalControlTlsIdentity::generate(NodeId::from_bytes([11; 16])).unwrap();
             let server = LocalControlTlsIdentity::generate(NodeId::from_bytes([12; 16])).unwrap();
             let client_pin =
@@ -1226,18 +1294,48 @@ mod tests {
                     calls: AtomicUsize::new(0),
                 };
                 let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
-                let accepted = owner
-                    .poll_with_fresh_observations(|| Ok((Some(listener_network), Some(addr))))
-                    .unwrap()
-                    .unwrap();
-                let session = accept_registered_from_durable_approval(
-                    accepted,
-                    &server,
-                    &trust,
-                    setup(),
-                    Arc::clone(&registry),
-                )
-                .unwrap();
+                let session = if scenario >= 13 {
+                    futures_lite::future::block_on(
+                        owner.poll_registered_from_durable_network_operations(
+                            &durable_membership,
+                            &backend,
+                            &server,
+                            &trust,
+                            setup(),
+                            Arc::clone(&registry),
+                        ),
+                    )
+                } else {
+                    let accepted = owner
+                        .poll_with_fresh_observations(|| Ok((Some(listener_network), Some(addr))))
+                        .unwrap()
+                        .unwrap();
+                    accept_registered_from_durable_approval(
+                        accepted,
+                        &server,
+                        &trust,
+                        setup(),
+                        Arc::clone(&registry),
+                    )
+                    .map(Some)
+                    .map_err(|error| {
+                        CoreError::with_diagnostic(
+                            ErrorKind::AuthenticationFailed,
+                            "previous registered TLS setup failed",
+                            error.to_string(),
+                        )
+                    })
+                };
+                let session = if scenario == 14 {
+                    assert_eq!(
+                        session.err().unwrap().kind(),
+                        ErrorKind::InvalidState,
+                    );
+                    assert!(registry.lock().unwrap().is_empty());
+                    return;
+                } else {
+                    session.unwrap().unwrap()
+                };
                 let key = PeerSessionKey {
                     network: network(7),
                     peer: local_node,
@@ -1278,7 +1376,9 @@ mod tests {
                 // mutual TLS: the async path must preserve all existing
                 // revocation, stale-generation and NAP ownership gates.
                 let result =
-                    if scenario >= 7 {
+                    if scenario == 13 {
+                        Ok(session)
+                    } else if scenario >= 7 {
                         futures_lite::future::block_on(
                             owner.release_registered_from_durable_network_operations(
                                 session,
@@ -1297,11 +1397,11 @@ mod tests {
                 if scenario >= 7 {
                     assert_eq!(
                         backend.calls.load(Ordering::SeqCst),
-                        usize::from(scenario != 8),
+                        if scenario == 13 { 3 } else { usize::from(scenario != 8) },
                         "revoked membership must not query the backend",
                     );
                 }
-                if scenario == 0 || scenario == 7 {
+                if scenario == 0 || scenario == 7 || scenario == 13 {
                     let mut session = result.unwrap();
                     assert!(registry.lock().unwrap().get(key).is_some());
                     session.cancel();
