@@ -1202,9 +1202,11 @@ mod tests {
                 Box::pin(async move {
                     let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
                     match self.scenario {
-                        14 if call == 3 => NetworkMembershipStore::new(self.membership_path.clone())
-                            .save(&MembershipRegistry::default())
-                            .unwrap(),
+                        14 if call == 3 => {
+                            NetworkMembershipStore::new(self.membership_path.clone())
+                                .save(&MembershipRegistry::default())
+                                .unwrap()
+                        }
                         9 => fs::write(&self.membership_path, b"BLUEROUTE_MEMBERSHIP_V999\n")
                             .unwrap(),
                         11 => {
