@@ -57,6 +57,8 @@ enum ObservationMode {
     Stable,
     RevokeDuringSecondObservation,
     BackendFailure,
+    ReplaceNetworkDuringSecondObservation,
+    EndpointDriftDuringSecondObservation,
 }
 
 struct Probe {
@@ -81,9 +83,23 @@ impl NetworkOperations for Probe {
                         "injected trusted endpoint backend failure",
                     ));
                 }
+                ObservationMode::ReplaceNetworkDuringSecondObservation if call == 2 => {
+                    let mut replacement =
+                        NetworkMembership::new(network(8), DisplayName::new("replacement").unwrap());
+                    replacement.state = MembershipState::Member;
+                    let mut registry = MembershipRegistry::default();
+                    registry.remember_network(replacement);
+                    NetworkMembershipStore::new(self.membership_path.clone()).save(&registry)?;
+                }
                 _ => {}
             }
-            Ok(Some(self.endpoint))
+            let endpoint = match self.mode {
+                ObservationMode::EndpointDriftDuringSecondObservation if call == 2 => {
+                    SocketAddrV4::new(*self.endpoint.ip(), self.endpoint.port() ^ 1)
+                }
+                _ => self.endpoint,
+            };
+            Ok(Some(endpoint))
         })
     }
 
@@ -191,6 +207,47 @@ fn membership_revocation_during_post_accept_backend_observation_retires_listener
     );
     assert_eq!(backend.calls.load(Ordering::SeqCst), 2);
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn post_accept_durable_network_replacement_and_endpoint_drift_fail_closed() {
+    for (label, mode) in [
+        ("replacement", ObservationMode::ReplaceNetworkDuringSecondObservation),
+        ("endpoint-drift", ObservationMode::EndpointDriftDuringSecondObservation),
+    ] {
+        let (root, store) = member_store(label);
+        let (mut owner, endpoint) = listener();
+        let backend = probe(&store, endpoint, mode);
+        let mut queued = TcpStream::connect(endpoint).unwrap();
+        queued.write_all(b"u").unwrap();
+
+        let error = futures_lite::future::block_on(
+            owner.poll_from_durable_network_operations(&store, &backend),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidState);
+        assert_eq!(backend.calls.load(Ordering::SeqCst), 2);
+        assert_closed(queued);
+        assert!(TcpStream::connect(endpoint).is_err());
+        assert_eq!(
+            futures_lite::future::block_on(
+                owner.poll_from_durable_network_operations(&store, &backend)
+            )
+            .unwrap_err()
+            .kind(),
+            ErrorKind::InvalidState
+        );
+        assert_eq!(backend.calls.load(Ordering::SeqCst), 2);
+
+        let registry = store.load().unwrap();
+        if matches!(mode, ObservationMode::ReplaceNetworkDuringSecondObservation) {
+            assert!(registry.network(&network(8)).is_some());
+            assert!(registry.network(&network(7)).is_none());
+        } else {
+            assert!(registry.network(&network(7)).is_some());
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[test]
