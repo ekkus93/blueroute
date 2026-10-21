@@ -403,6 +403,62 @@ impl ObservedControlListener {
         Ok(Some(checked))
     }
 
+    /// One fail-closed supervision tick for already authenticated, registered
+    /// sessions on this owned NAP. Every tick reloads persisted membership,
+    /// obtains the independently guarded NAP endpoint and reloads membership
+    /// again; then it rechecks each live peer's current durable pin/approval.
+    ///
+    /// The active session vector is moved into this future BEFORE the awaited
+    /// backend observation. If the future is cancelled, its owned sessions
+    /// drop immediately, closing TLS sockets and retiring exact registry
+    /// generations. Revocation removes only that peer, while NAP ownership
+    /// loss or backend failure retires the listener and closes every session.
+    ///
+    /// This is a single bounded observation, not a timer, spawned task, live
+    /// daemon loop, reconnect owner or proof of Bluetooth/PAN operation.
+    /// Callers must run it regularly and supervise failure/rebind policy.
+    pub async fn supervise_registered_from_durable_network_operations<'a>(
+        &mut self,
+        sessions: &mut Vec<crate::RegisteredControlSession<'a>>,
+        membership: &NetworkMembershipStore,
+        operations: &dyn crate::NetworkOperations,
+    ) -> Result<usize, CoreError> {
+        // A pending future owns all session guards so cancellation cannot
+        // leave authenticated sockets live after supervision stops.
+        let mut owned = std::mem::take(sessions);
+        if self.listener.is_none() {
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP control listener has already been retired",
+            ));
+        }
+        match observe_durable_owned_endpoint(self.network, membership, operations).await {
+            Ok((Some(network), Some(endpoint)))
+                if network == self.network && endpoint == self.endpoint =>
+            {
+                // One revoked peer must not close other still-approved peers.
+                // A failed recheck retires its exact generation via Drop.
+                owned.retain_mut(|session| {
+                    session.network() == self.network && session.revalidate_approval().is_ok()
+                });
+                let active = owned.len();
+                *sessions = owned;
+                Ok(active)
+            }
+            Ok(_) => {
+                self.listener.take();
+                Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "active NAP listener lost durable network ownership",
+                ))
+            }
+            Err(error) => {
+                self.listener.take();
+                Err(error)
+            }
+        }
+    }
+
     /// Accept a candidate only if ownership survives a second independent
     /// observation after TCP accept. The recheck must query fresh local
     /// membership and the guarded network backend, not reuse the first
@@ -1395,7 +1451,41 @@ mod tests {
                         "revoked membership must not query the backend",
                     );
                 }
-                if scenario == 0 || scenario == 7 || scenario == 13 {
+                if scenario == 13 {
+                    let session = result.unwrap();
+                    let mut active = vec![session];
+                    assert!(registry.lock().unwrap().get(key).is_some());
+                    assert_eq!(
+                        futures_lite::future::block_on(
+                            owner.supervise_registered_from_durable_network_operations(
+                                &mut active,
+                                &durable_membership,
+                                &backend,
+                            )
+                        )
+                        .unwrap(),
+                        1,
+                    );
+                    assert_eq!(backend.calls.load(Ordering::SeqCst), 4);
+                    durable_membership
+                        .save(&MembershipRegistry::default())
+                        .unwrap();
+                    assert_eq!(
+                        futures_lite::future::block_on(
+                            owner.supervise_registered_from_durable_network_operations(
+                                &mut active,
+                                &durable_membership,
+                                &backend,
+                            )
+                        )
+                        .unwrap_err()
+                        .kind(),
+                        ErrorKind::InvalidState,
+                    );
+                    assert!(active.is_empty());
+                    assert_eq!(backend.calls.load(Ordering::SeqCst), 4);
+                    assert!(TcpStream::connect(addr).is_err());
+                } else if scenario == 0 || scenario == 7 {
                     let mut session = result.unwrap();
                     assert!(registry.lock().unwrap().get(key).is_some());
                     session.cancel();
