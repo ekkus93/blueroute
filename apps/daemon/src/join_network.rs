@@ -1122,22 +1122,14 @@ mod tests {
     fn wrong_private_star_address_or_prefix_never_commits_membership() {
         futures_lite::future::block_on(async {
             let network = NetworkId::from_bytes([0x69; 16]);
-            let planned = Ipv4StarAddressPlan::for_network(
-                network,
-                Ipv4AddressPool::default(),
-            )
-            .unwrap()
-            .first_client;
-            let different_private = blueroute_core::IpPrefix::new(
-                "192.168.43.2".parse().unwrap(),
-                planned.prefix_len,
-            )
-            .unwrap();
-            let wrong_prefix = blueroute_core::IpPrefix::new(
-                planned.address,
-                planned.prefix_len + 1,
-            )
-            .unwrap();
+            let planned = Ipv4StarAddressPlan::for_network(network, Ipv4AddressPool::default())
+                .unwrap()
+                .first_client;
+            let different_private =
+                blueroute_core::IpPrefix::new("192.168.43.2".parse().unwrap(), planned.prefix_len)
+                    .unwrap();
+            let wrong_prefix =
+                blueroute_core::IpPrefix::new(planned.address, planned.prefix_len + 1).unwrap();
             for (label, unexpected) in [
                 ("foreign-star", different_private),
                 ("wrong-prefix", wrong_prefix),
