@@ -894,6 +894,23 @@ independent enrollment UX, daemon-owned authenticated PAN/TLS session,
 production P6-004 JoinNetwork or physical Bluetooth qualification;
 P6-004/P7-003/P7-004 remain OPEN and hardware acceptance DEFERRED.
 
+
+**P6-004 foreign IP lease ownership guard (software only, 2026-10-21 UTC):**
+The transactional coordinator refuses to accept an IP lease whose durable owner
+network or interface differs from the requested network and established PANU
+link. Such a lease cannot authorize membership or be passed to an address
+removal operation that might affect foreign state. The known PANU link is
+disconnected; join attempts remain reserved pending separate P6-009 runtime
+reconciliation, even if PANU teardown succeeds. Deterministic negative tests
+cover both foreign-network and wrong-interface leases, no membership commit,
+no foreign address removal and refusal of a second join. Source
+[a5461036](https://github.com/ekkus93/blueroute/commit/a546103665472daa829194a805d7c125b309775c);
+[exact-head CI 39535526491](https://github.com/ekkus93/blueroute/actions/runs/39535526491)
+**PASSED**. This is simulated backend safety, not independently confirmed
+TLS enrollment, a daemon-managed PAN control session, production JoinNetwork
+or physical Bluetooth qualification; P6-004 and P7 authentication/runtime
+acceptance stay OPEN and hardware acceptance remains DEFERRED.
+
 ## P6-005 — Implement IPv4 allocation for one star
 
 - [x] select private subnet policy.
