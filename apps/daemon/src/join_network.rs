@@ -144,6 +144,7 @@ impl Drop for JoinTransitionGuard<'_> {
 pub struct TransactionalJoinNetworkOperations<R = LinuxJoinRuntime> {
     store: NetworkMembershipStore,
     runtime: R,
+    expected_ipv4_pool: Ipv4AddressPool,
     join_in_progress: AtomicBool,
 }
 
@@ -156,7 +157,8 @@ impl TransactionalJoinNetworkOperations<LinuxJoinRuntime> {
         store: NetworkMembershipStore,
         pool: Ipv4AddressPool,
     ) -> Result<Self, CoreError> {
-        Ok(Self::with_runtime(store, LinuxJoinRuntime::new(pool)?))
+        let runtime = LinuxJoinRuntime::new(pool)?;
+        Ok(Self::with_runtime_and_pool(store, runtime, pool))
     }
 }
 
@@ -165,9 +167,18 @@ where
     R: JoinRuntime,
 {
     pub fn with_runtime(store: NetworkMembershipStore, runtime: R) -> Self {
+        Self::with_runtime_and_pool(store, runtime, Ipv4AddressPool::default())
+    }
+
+    fn with_runtime_and_pool(
+        store: NetworkMembershipStore,
+        runtime: R,
+        expected_ipv4_pool: Ipv4AddressPool,
+    ) -> Self {
         Self {
             store,
             runtime,
+            expected_ipv4_pool,
             join_in_progress: AtomicBool::new(false),
         }
     }
@@ -233,6 +244,10 @@ where
                 };
             }
 
+            // Derive the exact address before permitting any runtime mutation.
+            // Once PANU setup starts, a mismatch must trigger quarantined cleanup.
+            let expected_client =
+                Ipv4StarAddressPlan::for_network(network, self.expected_ipv4_pool)?.first_client;
             self.runtime.preflight(network).await?;
             // PANU activation may have side effects even when its future
             // fails or is canceled. Never release ownership without cleanup.
@@ -280,6 +295,22 @@ where
                     CoreError::new(
                         ErrorKind::InvalidState,
                         "PANU join returned an invalid non-private-IPv4 IP lease",
+                    ),
+                    Ok(()),
+                    Ok(()),
+                    panu,
+                ));
+            }
+            // A private address from some other star (or a different prefix
+            // length within this star) does not establish this network's
+            // deterministic PANU lease. Treat it as an unknown backend side
+            // effect rather than attempting foreign-address cleanup.
+            if lease.address().prefix != expected_client {
+                let panu = self.runtime.disconnect_panu(link).await;
+                return Err(combine_rollback(
+                    CoreError::new(
+                        ErrorKind::AddressConflict,
+                        "PANU join IP lease differs from deterministic network address plan",
                     ),
                     Ok(()),
                     Ok(()),
@@ -1088,6 +1119,55 @@ mod tests {
     }
 
     #[test]
+    fn wrong_private_star_address_or_prefix_never_commits_membership() {
+        futures_lite::future::block_on(async {
+            let network = NetworkId::from_bytes([0x69; 16]);
+            let planned = Ipv4StarAddressPlan::for_network(
+                network,
+                Ipv4AddressPool::default(),
+            )
+            .unwrap()
+            .first_client;
+            let different_private = blueroute_core::IpPrefix::new(
+                "192.168.43.2".parse().unwrap(),
+                planned.prefix_len,
+            )
+            .unwrap();
+            let wrong_prefix = blueroute_core::IpPrefix::new(
+                planned.address,
+                planned.prefix_len + 1,
+            )
+            .unwrap();
+            for (label, unexpected) in [
+                ("foreign-star", different_private),
+                ("wrong-prefix", wrong_prefix),
+            ] {
+                assert_ne!(unexpected, planned);
+                let (root, store) = temp_store(label);
+                let mut runtime = FakeRuntime::successful();
+                runtime.lease_prefix_override = Some(unexpected);
+                let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime);
+                let error = operations.join_network(network).await.unwrap_err();
+                assert_eq!(error.kind(), ErrorKind::AddressConflict);
+                assert_eq!(
+                    operations.runtime.steps(),
+                    vec![
+                        Step::Preflight,
+                        Step::Panu,
+                        Step::Address,
+                        Step::DisconnectPanu,
+                    ]
+                );
+                assert!(operations.store.load().unwrap().is_empty());
+                let retry = operations.join_network(network).await.unwrap_err();
+                assert_eq!(retry.kind(), ErrorKind::InvalidState);
+                assert!(retry.message().contains("reconciliation"));
+                fs::remove_dir_all(root).unwrap();
+            }
+        });
+    }
+
+    #[test]
     fn control_failure_removes_ip_then_disconnects_panu() {
         futures_lite::future::block_on(async {
             let (root, store) = temp_store("control-failure");
@@ -1160,6 +1240,21 @@ mod tests {
             assert!(operations.store.load().unwrap().is_empty());
             fs::remove_dir_all(root).unwrap();
         });
+    }
+
+    #[test]
+    fn configured_ipv4_pool_is_retained_by_production_join_coordinator() {
+        let (root, store) = temp_store("custom-pool");
+        let pool = Ipv4AddressPool::new("192.168.200.0".parse().unwrap(), 24, 24).unwrap();
+        let operations = TransactionalJoinNetworkOperations::with_ipv4_pool(store, pool).unwrap();
+        assert_eq!(operations.expected_ipv4_pool, pool);
+        let error = futures_lite::future::block_on(
+            operations.join_network(NetworkId::from_bytes([0x47; 16])),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
+        assert!(operations.store.load().unwrap().is_empty());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
