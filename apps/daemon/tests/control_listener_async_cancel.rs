@@ -19,8 +19,7 @@ fn listener() -> (ObservedControlListener, SocketAddrV4) {
         panic!("loopback listener must be IPv4");
     };
     (
-        ObservedControlListener::new(NetworkId::from_bytes([7; 16]), endpoint, socket)
-            .unwrap(),
+        ObservedControlListener::new(NetworkId::from_bytes([7; 16]), endpoint, socket).unwrap(),
         endpoint,
     )
 }
@@ -95,10 +94,9 @@ fn cancellation_during_pre_accept_observation_cannot_bypass_next_fresh_gate() {
         let mut poll = Box::pin(owner.poll_with_async_observations(|| {
             observations += 1;
             async {
-                std::future::pending::<Result<
-                    (Option<NetworkId>, Option<SocketAddrV4>),
-                    blueroute_core::CoreError,
-                >>()
+                std::future::pending::<
+                    Result<(Option<NetworkId>, Option<SocketAddrV4>), blueroute_core::CoreError>,
+                >()
                 .await
             }
         }));
@@ -111,7 +109,10 @@ fn cancellation_during_pre_accept_observation_cannot_bypass_next_fresh_gate() {
     // Even a later valid snapshot cannot resurrect a retired listener.
     assert_eq!(
         owner
-            .poll_with_fresh_observations(|| Ok((Some(NetworkId::from_bytes([8; 16])), Some(endpoint))))
+            .poll_with_fresh_observations(|| Ok((
+                Some(NetworkId::from_bytes([8; 16])),
+                Some(endpoint)
+            )))
             .unwrap_err()
             .kind(),
         ErrorKind::InvalidState
