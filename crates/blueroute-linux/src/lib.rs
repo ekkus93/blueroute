@@ -3,6 +3,7 @@
 mod bluez;
 mod capability_report;
 mod forwarding;
+mod forwarding_reconciliation;
 mod identity;
 mod ipv4_observation;
 mod kernel_address;
@@ -20,6 +21,7 @@ pub use capability_report::{
     BluetoothControllerReport, CapabilityDiagnostic, CapabilityDiagnosticLevel,
     RuntimePrerequisite, SystemCapabilityProbe, SystemCapabilityReport, SystemSupportLevel,
 };
+pub use forwarding_reconciliation::reconcile_ipv4_forwarding;
 pub use identity::{NodeIdentityGenerator, NodeIdentityStore, SystemNodeIdentityGenerator};
 pub use kernel_address::{KernelAddressBackend, KernelAddressLease};
 pub use membership_store::NetworkMembershipStore;
