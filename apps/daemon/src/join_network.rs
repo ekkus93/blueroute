@@ -265,6 +265,23 @@ where
                 }
             };
 
+            // A runtime session authenticated for another network must never
+            // authorize durable membership in the requested network. Reject
+            // the mismatch before persistence and roll back all owned resources.
+            if session.network() != network {
+                let error = CoreError::new(
+                    ErrorKind::AuthenticationFailed,
+                    "authenticated control session belongs to a different BlueRoute network",
+                );
+                let (error, clean) = self
+                    .rollback_after_control(error, session, lease, link)
+                    .await;
+                if clean {
+                    transition.reconciled();
+                }
+                return Err(error);
+            }
+
             let mut registry = match self.store.load() {
                 Ok(registry) => registry,
                 Err(error) => {
@@ -523,6 +540,7 @@ mod tests {
         steps: Mutex<Vec<Step>>,
         fail_address: bool,
         fail_control: bool,
+        session_network_override: Option<NetworkId>,
         concurrent_member: Option<(std::path::PathBuf, NetworkId)>,
         pause_preflight: bool,
         pause_rollback_until: Option<std::sync::Arc<AtomicBool>>,
@@ -534,6 +552,7 @@ mod tests {
                 steps: Mutex::new(Vec::new()),
                 fail_address: false,
                 fail_control: false,
+                session_network_override: None,
                 concurrent_member: None,
                 pause_preflight: false,
                 pause_rollback_until: None,
@@ -648,7 +667,7 @@ mod tests {
                     registry.remember_network(membership);
                     NetworkMembershipStore::new(path.clone()).save(&registry)?;
                 }
-                Ok(JoinControlSession::new(network))
+                Ok(JoinControlSession::new(self.session_network_override.unwrap_or(network)))
             })
         }
 
@@ -761,6 +780,7 @@ mod tests {
         let release = Arc::new(AtomicBool::new(false));
         let runtime = FakeRuntime {
             fail_control: true,
+            session_network_override: None,
             pause_rollback_until: Some(Arc::clone(&release)),
             ..FakeRuntime::successful()
         };
@@ -829,6 +849,7 @@ mod tests {
         let release = Arc::new(AtomicBool::new(false));
         let runtime = FakeRuntime {
             fail_control: true,
+            session_network_override: None,
             pause_rollback_until: Some(Arc::clone(&release)),
             ..FakeRuntime::successful()
         };
@@ -896,6 +917,7 @@ mod tests {
                 steps: Mutex::new(Vec::new()),
                 fail_address: true,
                 fail_control: false,
+                session_network_override: None,
                 concurrent_member: None,
                 pause_preflight: false,
                 pause_rollback_until: None,
@@ -941,6 +963,7 @@ mod tests {
                 steps: Mutex::new(Vec::new()),
                 fail_address: false,
                 fail_control: true,
+                session_network_override: None,
                 concurrent_member: None,
                 pause_preflight: false,
                 pause_rollback_until: None,
@@ -970,6 +993,40 @@ mod tests {
     }
 
     #[test]
+    fn mismatched_control_network_rolls_back_without_committing_membership() {
+        futures_lite::future::block_on(async {
+            let (root, store) = temp_store("wrong-control-network");
+            let network = NetworkId::from_bytes([0x46; 16]);
+            let mut runtime = FakeRuntime::successful();
+            runtime.session_network_override = Some(NetworkId::from_bytes([0x77; 16]));
+            let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime);
+
+            let error = operations.join_network(network).await.unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::AuthenticationFailed);
+            assert_eq!(
+                operations.runtime.steps(),
+                vec![
+                    Step::Preflight,
+                    Step::Panu,
+                    Step::Address,
+                    Step::Control,
+                    Step::StopControl,
+                    Step::RemoveAddress,
+                    Step::DisconnectPanu,
+                ]
+            );
+            assert!(operations.store.load().unwrap().is_empty());
+            // A complete rollback releases the guard for a later attempt,
+            // but it cannot convert a wrong-network session into success.
+            operations.runtime.steps.lock().unwrap().clear();
+            let repeated_error = operations.join_network(network).await.unwrap_err();
+            assert_eq!(repeated_error.kind(), ErrorKind::AuthenticationFailed);
+            assert!(operations.store.load().unwrap().is_empty());
+            fs::remove_dir_all(root).unwrap();
+        });
+    }
+
+    #[test]
     fn production_preflight_blocks_before_unsafe_partial_join() {
         let (root, store) = temp_store("blocked");
         let operations = TransactionalJoinNetworkOperations::new(store);
@@ -993,6 +1050,7 @@ mod tests {
                 steps: Mutex::new(Vec::new()),
                 fail_address: false,
                 fail_control: false,
+                session_network_override: None,
                 concurrent_member: Some((store.path().to_owned(), concurrent_network)),
                 pause_preflight: false,
                 pause_rollback_until: None,
