@@ -248,6 +248,23 @@ where
                     return Err(combine_rollback(error, Ok(()), Ok(()), panu));
                 }
             };
+            // A lease attributed to another network or PAN interface is not
+            // proof of a BlueRoute-owned address. Never commit membership or
+            // ask the runtime to remove that potentially foreign address.
+            // The unknown IP mutation requires explicit reconciliation even
+            // after disconnecting the known PANU link.
+            if lease.address().owner != network || lease.interface() != link.interface() {
+                let panu = self.runtime.disconnect_panu(link).await;
+                return Err(combine_rollback(
+                    CoreError::new(
+                        ErrorKind::InvalidState,
+                        "PANU join returned an IP lease with mismatched network or interface ownership",
+                    ),
+                    Ok(()),
+                    Ok(()),
+                    panu,
+                ));
+            }
             let session = match self
                 .runtime
                 .start_control_session(network, &link, &lease)
@@ -541,6 +558,8 @@ mod tests {
         fail_address: bool,
         fail_control: bool,
         session_network_override: Option<NetworkId>,
+        lease_owner_override: Option<NetworkId>,
+        lease_interface_override: Option<NetworkInterfaceHandle>,
         concurrent_member: Option<(std::path::PathBuf, NetworkId)>,
         pause_preflight: bool,
         pause_rollback_until: Option<std::sync::Arc<AtomicBool>>,
@@ -553,6 +572,8 @@ mod tests {
                 fail_address: false,
                 fail_control: false,
                 session_network_override: None,
+                lease_owner_override: None,
+                lease_interface_override: None,
                 concurrent_member: None,
                 pause_preflight: false,
                 pause_rollback_until: None,
@@ -618,9 +639,12 @@ mod tests {
                         Ipv4StarAddressPlan::for_network(_network, Ipv4AddressPool::default())
                             .unwrap();
                     Ok(JoinIpLease::new(InterfaceAddress {
-                        interface: link.interface().clone(),
+                        interface: self
+                            .lease_interface_override
+                            .clone()
+                            .unwrap_or_else(|| link.interface().clone()),
                         prefix: plan.first_client,
-                        owner: _network,
+                        owner: self.lease_owner_override.unwrap_or(_network),
                     }))
                 }
             })
@@ -783,6 +807,8 @@ mod tests {
         let runtime = FakeRuntime {
             fail_control: true,
             session_network_override: None,
+            lease_owner_override: None,
+            lease_interface_override: None,
             pause_rollback_until: Some(Arc::clone(&release)),
             ..FakeRuntime::successful()
         };
@@ -852,6 +878,8 @@ mod tests {
         let runtime = FakeRuntime {
             fail_control: true,
             session_network_override: None,
+            lease_owner_override: None,
+            lease_interface_override: None,
             pause_rollback_until: Some(Arc::clone(&release)),
             ..FakeRuntime::successful()
         };
@@ -920,6 +948,8 @@ mod tests {
                 fail_address: true,
                 fail_control: false,
                 session_network_override: None,
+                lease_owner_override: None,
+                lease_interface_override: None,
                 concurrent_member: None,
                 pause_preflight: false,
                 pause_rollback_until: None,
@@ -957,6 +987,45 @@ mod tests {
     }
 
     #[test]
+    fn foreign_ip_lease_never_authorizes_membership_or_foreign_cleanup() {
+        futures_lite::future::block_on(async {
+            for scenario in 0..2 {
+                let (root, store) = temp_store(&format!("lease-mismatch-{scenario}"));
+                let network = NetworkId::from_bytes([0x69; 16]);
+                let mut runtime = FakeRuntime::successful();
+                if scenario == 0 {
+                    runtime.lease_owner_override = Some(NetworkId::from_bytes([0x70; 16]));
+                } else {
+                    runtime.lease_interface_override =
+                        Some(NetworkInterfaceHandle::new("foreign-ip").unwrap());
+                }
+                let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime);
+
+                let error = operations.join_network(network).await.unwrap_err();
+                assert_eq!(error.kind(), ErrorKind::InvalidState);
+                assert_eq!(
+                    operations.runtime.steps(),
+                    vec![
+                        Step::Preflight,
+                        Step::Panu,
+                        Step::Address,
+                        Step::DisconnectPanu,
+                    ]
+                );
+                assert!(operations.store.load().unwrap().is_empty());
+                // Removing this unverified lease could mutate a foreign owner.
+                // Even successful PANU teardown does not prove the address
+                // safe, so another join requires explicit reconciliation.
+                let error = operations.join_network(network).await.unwrap_err();
+                assert_eq!(error.kind(), ErrorKind::InvalidState);
+                assert!(error.message().contains("reconciliation"));
+                assert_eq!(operations.runtime.steps().len(), 4);
+                fs::remove_dir_all(root).unwrap();
+            }
+        });
+    }
+
+    #[test]
     fn control_failure_removes_ip_then_disconnects_panu() {
         futures_lite::future::block_on(async {
             let (root, store) = temp_store("control-failure");
@@ -966,6 +1035,8 @@ mod tests {
                 fail_address: false,
                 fail_control: true,
                 session_network_override: None,
+                lease_owner_override: None,
+                lease_interface_override: None,
                 concurrent_member: None,
                 pause_preflight: false,
                 pause_rollback_until: None,
@@ -1053,6 +1124,8 @@ mod tests {
                 fail_address: false,
                 fail_control: false,
                 session_network_override: None,
+                lease_owner_override: None,
+                lease_interface_override: None,
                 concurrent_member: Some((store.path().to_owned(), concurrent_network)),
                 pause_preflight: false,
                 pause_rollback_until: None,
