@@ -1257,6 +1257,9 @@ mod tests {
             ) -> NetworkOperationFuture<'_, Option<SocketAddrV4>> {
                 Box::pin(async move {
                     let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+                    if self.scenario == 15 && call == 4 {
+                        return std::future::pending::<Result<Option<SocketAddrV4>, CoreError>>().await;
+                    }
                     match self.scenario {
                         14 if call == 3 => {
                             NetworkMembershipStore::new(self.membership_path.clone())
@@ -1305,7 +1308,7 @@ mod tests {
         // Existing TLS listener checks and fresh DURABLE post-TLS ownership
         // cases: stable, revoked before observation, corrupted during query,
         // endpoint drift, backend failure and revoked during query.
-        for scenario in 0_u8..15 {
+        for scenario in 0_u8..16 {
             let client = LocalControlTlsIdentity::generate(NodeId::from_bytes([11; 16])).unwrap();
             let server = LocalControlTlsIdentity::generate(NodeId::from_bytes([12; 16])).unwrap();
             let client_pin =
@@ -1422,7 +1425,7 @@ mod tests {
                 // mutual TLS: the async path must preserve all existing
                 // revocation, stale-generation and NAP ownership gates.
                 let result =
-                    if scenario == 13 {
+                    if scenario == 13 || scenario == 15 {
                         Ok(session)
                     } else if scenario >= 7 {
                         futures_lite::future::block_on(
@@ -1443,7 +1446,7 @@ mod tests {
                 if scenario >= 7 {
                     assert_eq!(
                         backend.calls.load(Ordering::SeqCst),
-                        if scenario == 13 {
+                        if scenario == 13 || scenario == 15 {
                             3
                         } else {
                             usize::from(scenario != 8)
@@ -1485,6 +1488,28 @@ mod tests {
                     assert!(active.is_empty());
                     assert_eq!(backend.calls.load(Ordering::SeqCst), 4);
                     assert!(TcpStream::connect(addr).is_err());
+                } else if scenario == 15 {
+                    let mut active = vec![result.unwrap()];
+                    let mut future = Box::pin(
+                        owner.supervise_registered_from_durable_network_operations(
+                            &mut active,
+                            &durable_membership,
+                            &backend,
+                        ),
+                    );
+                    let mut context =
+                        std::task::Context::from_waker(std::task::Waker::noop());
+                    assert!(matches!(
+                        std::future::Future::poll(future.as_mut(), &mut context),
+                        std::task::Poll::Pending,
+                    ));
+                    // Cancelling the future must close the owned TLS socket and
+                    // release its exact registry slot rather than grant a
+                    // permanent authorization lease.
+                    drop(future);
+                    assert!(active.is_empty());
+                    assert!(registry.lock().unwrap().get(key).is_none());
+                    assert_eq!(backend.calls.load(Ordering::SeqCst), 4);
                 } else if scenario == 0 || scenario == 7 {
                     let mut session = result.unwrap();
                     assert!(registry.lock().unwrap().get(key).is_some());
