@@ -911,6 +911,25 @@ TLS enrollment, a daemon-managed PAN control session, production JoinNetwork
 or physical Bluetooth qualification; P6-004 and P7 authentication/runtime
 acceptance stay OPEN and hardware acceptance remains DEFERRED.
 
+
+**P6-004 private-IPv4 lease validation (software only, 2026-10-21 UTC):**
+The generic join coordinator rejects a returned IP lease whose address is
+public IPv4, loopback IPv4 or IPv6, even if its network and interface owners
+match the established PANU link. The coordinator does not promote such a lease
+to an authenticated control session or persist membership. It disconnects
+the known PANU link but quarantines the unknown IP side effect: subsequent
+join attempts require separate P6-009 ownership reconciliation rather than
+blindly removing an untrusted address. Three deterministic fake-runtime
+negative regressions cover public, loopback and IPv6 leases, absent control
+setup/address deletion and fail-closed retries. Source
+[311be72d](https://github.com/ekkus93/blueroute/commit/311be72d31dea419669b316b776955cdcb4c1cf4),
+rustfmt [d517434c](https://github.com/ekkus93/blueroute/commit/d517434c9f7ad404087696e11239ae3dfc1219dc),
+Clippy correction [d5ba57f5](https://github.com/ekkus93/blueroute/commit/d5ba57f53152e81f4447d13826b3f229583cd39e);
+[exact-head CI 39541029380](https://github.com/ekkus93/blueroute/actions/runs/39541029380)
+**PASSED**. This is a simulated v1 private-IPv4 boundary, not authenticated
+daemon/PAN integration or production P6-004 JoinNetwork. P6-004/P7-003/P7-004
+remain OPEN and hardware acceptance DEFERRED.
+
 ## P6-005 — Implement IPv4 allocation for one star
 
 - [x] select private subnet policy.
@@ -1390,6 +1409,23 @@ enable production JoinNetwork, or establish physical Bluetooth acceptance.
 P7-003/P7-004/P6-004 remain IN PROGRESS; hardware acceptance is DEFERRED.
 
 ## P7-004 — Implement control-session lifecycle
+
+
+**P7-004 awaited post-TLS ownership release (software only, 2026-10-21 UTC):**
+`ObservedControlListener::release_registered_if_current_async` now awaits a
+fresh trusted NAP/membership observation after mutually authenticated TLS,
+Hello/HelloAck and registry admission, before releasing a registered session.
+It preserves the synchronous post-handshake durable trust/revocation and exact
+registry generation checks; pending cancellation drops the owned session
+without granting an enduring network lease. Existing localhost TLS cases
+exercise matching, backend-error, revocation and replacement-generation
+releases across the synchronous and asynchronous boundaries. Source
+[98e5e088](https://github.com/ekkus93/blueroute/commit/98e5e088181e6789b8c32e843ab79ef2245d58af),
+[exact-head CI 39538729269](https://github.com/ekkus93/blueroute/actions/runs/39538729269)
+**PASSED**. This is a reusable, unwired listener/session boundary, not a
+daemon-managed PAN accept loop, independently confirmed key enrollment,
+production JoinNetwork or physical Bluetooth acceptance. P7-003/P7-004/P6-004
+remain OPEN and hardware acceptance DEFERRED.
 
 **P7-004 awaited-observation cancellation safety (software only, 2026-10-21 UTC):** New loopback integration regressions prove that cancelling an asynchronous NAP ownership poll during its first observation cannot accept a queued TCP candidate, and cancelling during the post-accept observation drops the unauthenticated accepted socket. A later poll must independently reobserve ownership and retire the listener and queued sockets on drift; cancellation never confers trust or membership. Implemented at `89b6953dc78dff59751f8936c5546212a4be0159`, formatted at `408aa521673875252cc32ea171319479b6543601`, and qualified by [exact-head CI 39538082393](https://github.com/ekkus93/blueroute/actions/runs/39538082393) (**passed**). This is not a daemon-wired PAN listener, independently confirmed enrollment, a production JoinNetwork path or physical Bluetooth evidence; P7-003/P7-004/P6-004 remain IN PROGRESS and physical acceptance DEFERRED.
 
