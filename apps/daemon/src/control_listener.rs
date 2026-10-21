@@ -318,23 +318,31 @@ impl ObservedControlListener {
         operations: &dyn crate::NetworkOperations,
     ) -> Result<Option<TcpStream>, CoreError> {
         let expected_network = self.network;
-        self.poll_with_async_observations(|| async {
-            let before = crate::current_network(&membership.load()?)?;
-            // Once durable ownership is already absent, retire immediately.
-            // A stale listener must not wait on (or trigger) a backend query
-            // before closing queued unauthenticated TCP candidates.
-            if before != Some(expected_network) {
-                return Ok((before, None));
-            }
-            let endpoint = operations.observed_owned_control_endpoint().await?;
-            let after = crate::current_network(&membership.load()?)?;
-            if before != after {
-                return Err(CoreError::new(
-                    ErrorKind::InvalidState,
-                    "NAP ownership changed during durable backend observation",
-                ));
-            }
-            Ok((after, endpoint))
+        self.poll_with_async_observations(|| {
+            observe_durable_owned_endpoint(expected_network, membership, operations)
+        })
+        .await
+    }
+
+    /// Revalidate the durable local network and backend-owned NAP endpoint
+    /// AFTER the real pinned TLS handshake, authenticated Hello/HelloAck and
+    /// exact-generation session registry admission. This is the production-
+    /// oriented composition of the post-TLS release gate with the same fresh
+    /// durable observation used for the pre-accept gate.
+    ///
+    /// On failure the registered TLS owner is dropped (closing the socket
+    /// and retiring only its generation). Ownership drift also permanently
+    /// retires the listener. This is not a daemon runtime supervisor: callers
+    /// must continue monitoring ownership, revocation and PAN loss.
+    pub async fn release_registered_from_durable_network_operations<'a>(
+        &mut self,
+        session: crate::RegisteredControlSession<'a>,
+        membership: &NetworkMembershipStore,
+        operations: &dyn crate::NetworkOperations,
+    ) -> Result<crate::RegisteredControlSession<'a>, CoreError> {
+        let expected_network = self.network;
+        self.release_registered_if_current_async(session, || {
+            observe_durable_owned_endpoint(expected_network, membership, operations)
         })
         .await
     }
@@ -488,6 +496,29 @@ impl ObservedControlListener {
         let observation = observe().await;
         self.release_registered_if_current(session, || observation)
     }
+}
+
+/// Read local durable NAP ownership on both sides of an independently
+/// guarded backend endpoint observation. Called before raw TCP accept and
+/// after authenticated TLS registration; neither snapshot is a lasting lease.
+async fn observe_durable_owned_endpoint(
+    expected_network: NetworkId,
+    membership: &NetworkMembershipStore,
+    operations: &dyn crate::NetworkOperations,
+) -> Result<(Option<NetworkId>, Option<SocketAddrV4>), CoreError> {
+    let before = crate::current_network(&membership.load()?)?;
+    if before != Some(expected_network) {
+        return Ok((before, None));
+    }
+    let endpoint = operations.observed_owned_control_endpoint().await?;
+    let after = crate::current_network(&membership.load()?)?;
+    if before != after {
+        return Err(CoreError::new(
+            ErrorKind::InvalidState,
+            "NAP ownership changed during durable backend observation",
+        ));
+    }
+    Ok((after, endpoint))
 }
 
 #[cfg(test)]
@@ -1041,13 +1072,15 @@ mod tests {
 
         use crate::{
             ApprovedControlSetup, DurablePeerTrustOperations, LocalControlTlsIdentity,
-            PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer,
+            NetworkOperationFuture, NetworkOperations, PeerPinStore, PeerTrustOperations,
+            PinnedControlTlsPeer,
             accept_registered_from_durable_approval, connect_approved_control_session,
         };
         use blueroute_core::{
             DisplayName, MembershipRegistry, MembershipState, NetworkMembership, NodeId,
         };
         use blueroute_linux::NetworkMembershipStore;
+        use blueroute_protocol::NetworkSummary;
         use blueroute_protocol::control::HelloFacts;
         use blueroute_protocol::session::{
             ConnectionDeadline, ConnectionStage, ControlSessionRegistry, PeerSessionKey,
@@ -1100,9 +1133,65 @@ mod tests {
             }
         }
 
-        // Match, lost host, backend failure, wrong network, endpoint drift,
-        // revoked trust, and a replaced registry generation.
-        for scenario in 0_u8..7 {
+        struct DurableObservationProbe {
+            endpoint: SocketAddrV4,
+            membership_path: std::path::PathBuf,
+            scenario: u8,
+            calls: AtomicUsize,
+        }
+        impl NetworkOperations for DurableObservationProbe {
+            fn observed_owned_control_endpoint(
+                &self,
+            ) -> NetworkOperationFuture<'_, Option<SocketAddrV4>> {
+                Box::pin(async move {
+                    self.calls.fetch_add(1, Ordering::SeqCst);
+                    match self.scenario {
+                        9 => fs::write(
+                            &self.membership_path,
+                            b"BLUEROUTE_MEMBERSHIP_V999\\n",
+                        )
+                        .unwrap(),
+                        11 => {
+                            return Err(CoreError::new(
+                                ErrorKind::InvalidState,
+                                "backend ownership observation failed after TLS",
+                            ));
+                        }
+                        12 => NetworkMembershipStore::new(self.membership_path.clone())
+                            .save(&MembershipRegistry::default())
+                            .unwrap(),
+                        _ => {}
+                    }
+                    if self.scenario == 10 {
+                        return Ok(Some(SocketAddrV4::new(
+                            *self.endpoint.ip(),
+                            self.endpoint.port() ^ 1,
+                        )));
+                    }
+                    Ok(Some(self.endpoint))
+                })
+            }
+            fn create_network(&self, _: DisplayName) -> NetworkOperationFuture<'_, NetworkId> {
+                Box::pin(async { unreachable!("observation-only probe") })
+            }
+            fn leave_network(&self) -> NetworkOperationFuture<'_, ()> {
+                Box::pin(async { unreachable!("observation-only probe") })
+            }
+            fn list_networks(&self) -> NetworkOperationFuture<'_, Vec<NetworkSummary>> {
+                Box::pin(async { unreachable!("observation-only probe") })
+            }
+            fn start_discovery(&self) -> NetworkOperationFuture<'_, ()> {
+                Box::pin(async { unreachable!("observation-only probe") })
+            }
+            fn stop_discovery(&self) -> NetworkOperationFuture<'_, ()> {
+                Box::pin(async { unreachable!("observation-only probe") })
+            }
+        }
+
+        // Existing TLS listener checks and fresh DURABLE post-TLS ownership
+        // cases: stable, revoked before observation, corrupted during query,
+        // endpoint drift, backend failure and revoked during query.
+        for scenario in 0_u8..13 {
             let client = LocalControlTlsIdentity::generate(NodeId::from_bytes([11; 16])).unwrap();
             let server = LocalControlTlsIdentity::generate(NodeId::from_bytes([12; 16])).unwrap();
             let client_pin =
@@ -1132,6 +1221,15 @@ mod tests {
             let local_node = client.node();
             let server_thread = thread::spawn(move || {
                 let trust = approved_trust(&server_dir, client_pin);
+                let durable_membership = NetworkMembershipStore::new(
+                    server_dir.join("membership"),
+                );
+                let backend = DurableObservationProbe {
+                    endpoint: addr,
+                    membership_path: durable_membership.path().to_owned(),
+                    scenario,
+                    calls: AtomicUsize::new(0),
+                };
                 let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
                 let accepted = owner
                     .poll_with_fresh_observations(|| Ok((Some(listener_network), Some(addr))))
@@ -1152,6 +1250,8 @@ mod tests {
                 assert!(registry.lock().unwrap().get(key).is_some());
                 if scenario == 5 {
                     futures_lite::future::block_on(trust.forget_peer(local_node)).unwrap();
+                } else if scenario == 8 {
+                    durable_membership.save(&MembershipRegistry::default()).unwrap();
                 } else if scenario == 6 {
                     // Simulate a newer independently admitted generation while
                     // the original TLS owner is waiting for listener release.
@@ -1180,19 +1280,40 @@ mod tests {
                 // Exercise both release boundaries against real localhost
                 // mutual TLS: the async path must preserve all existing
                 // revocation, stale-generation and NAP ownership gates.
-                let result =
-                    if matches!(scenario, 0 | 2 | 5 | 6) {
-                        futures_lite::future::block_on(owner.release_registered_if_current_async(
+                let result = if scenario >= 7 {
+                    futures_lite::future::block_on(
+                        owner.release_registered_from_durable_network_operations(
                             session,
-                            || async move { observe() },
-                        ))
-                    } else {
-                        owner.release_registered_if_current(session, observe)
-                    };
-                if scenario == 0 {
+                            &durable_membership,
+                            &backend,
+                        ),
+                    )
+                } else if matches!(scenario, 0 | 2 | 5 | 6) {
+                    futures_lite::future::block_on(owner.release_registered_if_current_async(
+                        session,
+                        || async move { observe() },
+                    ))
+                } else {
+                    owner.release_registered_if_current(session, observe)
+                };
+                if scenario >= 7 {
+                    assert_eq!(
+                        backend.calls.load(Ordering::SeqCst),
+                        usize::from(scenario != 8),
+                        "revoked membership must not query the backend",
+                    );
+                }
+                if scenario == 0 || scenario == 7 {
                     let mut session = result.unwrap();
                     assert!(registry.lock().unwrap().get(key).is_some());
                     session.cancel();
+                } else if scenario == 9 {
+                    assert_eq!(result.err().unwrap().kind(), ErrorKind::PersistenceError);
+                    assert_eq!(
+                        fs::read(durable_membership.path()).unwrap(),
+                        b"BLUEROUTE_MEMBERSHIP_V999\\n",
+                    );
+                    assert!(TcpStream::connect(addr).is_err());
                 } else if scenario == 5 || scenario == 6 {
                     assert_eq!(
                         result.err().unwrap().kind(),
