@@ -43,7 +43,11 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 | P16-007 | Actual PANU-only/client-only device can join without NAP role | Software test simulated policy restrictions. |
 | P17-005, P17-006 | Final tested-support matrix, multi-controller evidence and v1 physical signoff | Draft docs and software-ready release candidate only; not final release. |
 
-## Software-only control-session evidence (through 2026-10-16)
+## Software-only control-session evidence (through 2026-10-21)
+
+- **P7-004 awaited fresh NAP listener observations (software only, 2026-10-21 UTC):** The guarded TCP listener now accepts an async observation callback and rechecks independently observed local NAP ownership before accept and again after accepting an untrusted candidate. Drift, failed observations and retired-listener reuse fail closed, with actual localhost socket EOF and deterministic regression tests. Code commit `89c34c49d71d72b414db1dcfc66a5b7729c0beab` passed [exact-head CI 39526519606](https://github.com/ekkus93/blueroute/actions/runs/39526519606); the authoritative TODO evidence commit `dd4d9166e3fb813550e681679a43d26e667cd3a1` passed [exact-head CI 39526773877](https://github.com/ekkus93/blueroute/actions/runs/39526773877). This is not a live daemon/PAN accept loop, independent enrollment ceremony, production JoinNetwork, or physical Bluetooth proof. All corresponding hardware acceptance remains deferred.
+
+
 
 - **P7-004 bounded authenticated Goodbye TLS close-notify (software only, 2026-10-16):** The registered/active control transport now carries the caller's absolute Goodbye deadline into the TLS close-notify flush, rejecting expired budgets instead of silently blocking under a restored socket timeout. An expired-deadline socket regression and existing mutual-TLS/Goodbye tests passed [exact-head CI 38974842950](https://github.com/ekkus93/blueroute/actions/runs/38974842950) at `f9e75e4302cd3e3df0b0c9f977086ceb36e1ae9d`. See [evidence](P7-004-CLOSE-NOTIFY-DEADLINE-EVIDENCE-2026-10-16.md). This is **not** a live PAN daemon listener, independently approved key enrollment, production JoinNetwork, or physical Bluetooth acceptance.
 
