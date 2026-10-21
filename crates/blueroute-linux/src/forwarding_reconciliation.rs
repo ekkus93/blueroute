@@ -3,23 +3,41 @@
 //! This is a software integration boundary. It does not authenticate topology
 //! claims, install routes, or establish physical Bluetooth connectivity.
 
-use blueroute_core::{CoreError, NodeId, TopologyGraph, desired_ipv4_forwarding};
+use blueroute_core::{CoreError, ErrorKind, NodeId, TopologyGraph, desired_ipv4_forwarding};
 
 use crate::IpNetworkBackend;
 
 /// Apply the forwarding decision to an ownership-aware Linux network backend.
 ///
-/// The caller must provide locally verified active PAN topology, not raw peer
-/// advertisements. The backend is responsible for idempotence and for preserving
-/// pre-existing host forwarding policy via its owned lease. Reconciliation is
-/// deliberately repeated after topology changes and daemon restart to repair
-/// observed drift; a missing local node fails before any backend mutation.
+/// The caller must supply the complete, locally verified set of BlueRoute
+/// network topologies on this host, not a single network or untrusted peer
+/// advertisements. Forwarding is host-global: a loss in one network must not
+/// disable forwarding still required by another. An empty complete snapshot
+/// releases BlueRoute's lease. A nonempty snapshot missing the local node in
+/// every topology is invalid and never changes the backend.
+///
+/// The backend handles idempotence and preserves pre-existing host forwarding
+/// policy via its owned lease. Reconcile after topology changes and restart to
+/// repair observed drift.
 pub async fn reconcile_ipv4_forwarding(
     backend: &impl IpNetworkBackend,
-    topology: &TopologyGraph,
+    topologies: &[TopologyGraph],
     local: NodeId,
 ) -> Result<bool, CoreError> {
-    let desired = desired_ipv4_forwarding(topology, local)?;
+    let mut saw_local = false;
+    let mut desired = false;
+    for topology in topologies {
+        if topology.node(&local).is_some() {
+            saw_local = true;
+            desired |= desired_ipv4_forwarding(topology, local)?;
+        }
+    }
+    if !topologies.is_empty() && !saw_local {
+        return Err(CoreError::new(
+            ErrorKind::InvalidInput,
+            "local node absent from all supplied BlueRoute network topologies",
+        ));
+    }
     backend.set_ipv4_forwarding(desired).await?;
     Ok(desired)
 }
@@ -132,10 +150,45 @@ mod tests {
         let backend = FakeBackend::default();
         let mut graph = graph_with_two_active_segments();
 
-        assert!(block_on(reconcile_ipv4_forwarding(&backend, &graph, node(2))).unwrap());
+        assert!(block_on(reconcile_ipv4_forwarding(&backend, std::slice::from_ref(&graph), node(2))).unwrap());
         graph.remove_link(&LinkId::from_bytes([2; 16]));
-        assert!(!block_on(reconcile_ipv4_forwarding(&backend, &graph, node(2))).unwrap());
+        assert!(!block_on(reconcile_ipv4_forwarding(&backend, std::slice::from_ref(&graph), node(2))).unwrap());
         assert_eq!(*backend.applied.lock().unwrap(), [true, false]);
+    }
+
+    #[test]
+    fn host_wide_aggregation_preserves_other_networks_and_releases_last_lease() {
+        let backend = FakeBackend::default();
+        let active = graph_with_two_active_segments();
+        let mut inactive = active.clone();
+        inactive.remove_link(&LinkId::from_bytes([2; 16]));
+
+        assert!(
+            block_on(reconcile_ipv4_forwarding(
+                &backend,
+                &[inactive.clone(), active.clone()],
+                node(2),
+            ))
+            .unwrap()
+        );
+        assert!(
+            block_on(reconcile_ipv4_forwarding(
+                &backend,
+                &[active, inactive.clone()],
+                node(2),
+            ))
+            .unwrap()
+        );
+        assert!(
+            !block_on(reconcile_ipv4_forwarding(
+                &backend,
+                std::slice::from_ref(&inactive),
+                node(2),
+            ))
+            .unwrap()
+        );
+        assert!(!block_on(reconcile_ipv4_forwarding(&backend, &[], node(2))).unwrap());
+        assert_eq!(*backend.applied.lock().unwrap(), [true, true, false, false]);
     }
 
     #[test]
@@ -143,14 +196,14 @@ mod tests {
         let backend = FakeBackend::default();
         let graph = graph_with_two_active_segments();
         assert_eq!(
-            block_on(reconcile_ipv4_forwarding(&backend, &graph, node(4)))
+            block_on(reconcile_ipv4_forwarding(&backend, std::slice::from_ref(&graph), node(4)))
                 .unwrap_err()
                 .kind(),
             ErrorKind::InvalidInput
         );
         assert!(backend.applied.lock().unwrap().is_empty());
 
-        assert!(!block_on(reconcile_ipv4_forwarding(&backend, &graph, node(1))).unwrap());
+        assert!(!block_on(reconcile_ipv4_forwarding(&backend, std::slice::from_ref(&graph), node(1))).unwrap());
         assert_eq!(*backend.applied.lock().unwrap(), [false]);
     }
 
@@ -162,7 +215,7 @@ mod tests {
         };
         let graph = graph_with_two_active_segments();
         assert_eq!(
-            block_on(reconcile_ipv4_forwarding(&backend, &graph, node(2)))
+            block_on(reconcile_ipv4_forwarding(&backend, std::slice::from_ref(&graph), node(2)))
                 .unwrap_err()
                 .kind(),
             ErrorKind::NetworkBackendUnavailable
