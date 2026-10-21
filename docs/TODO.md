@@ -930,6 +930,27 @@ Clippy correction [d5ba57f5](https://github.com/ekkus93/blueroute/commit/d5ba57f
 daemon/PAN integration or production P6-004 JoinNetwork. P6-004/P7-003/P7-004
 remain OPEN and hardware acceptance DEFERRED.
 
+
+**P6-004 deterministic PANU IPv4 lease verification (software only, 2026-10-21 UTC):**
+The transactional coordinator now derives the exact expected `first_client`
+address/prefix for the requested `NetworkId` using its configured
+`Ipv4AddressPool` **before** runtime mutations. After PANU/IP setup, a
+same-owner same-interface private IPv4 lease from another star or with a
+different prefix length is rejected as `AddressConflict`; the unknown
+address is not blindly removed, the known PANU link is disconnected, no
+control session starts and no membership is persisted. Retry remains
+blocked pending separate P6-009 reconciliation. Two deterministic negative
+tests cover foreign-star and wrong-prefix leases; a custom-pool test checks
+the production coordinator preserves its supplied configuration and
+still fails closed on unimplemented authenticated join. Source
+[77325b34](https://github.com/ekkus93/blueroute/commit/77325b34107da51647b5119deebb56c37583f95e),
+rustfmt fix [3bef80f4](https://github.com/ekkus93/blueroute/commit/3bef80f4c64f6e0c238b466832f9a1e5f3e37f57),
+[exact-head CI 39541783338](https://github.com/ekkus93/blueroute/actions/runs/39541783338)
+**PASSED**. This is software-only deterministic IP ownership validation, not
+a live authenticated daemon/PAN TLS session, independently verified key
+enrollment, production JoinNetwork or physical Bluetooth acceptance.
+P6-004/P7-003/P7-004 stay OPEN and hardware acceptance remains DEFERRED.
+
 ## P6-005 — Implement IPv4 allocation for one star
 
 - [x] select private subnet policy.
