@@ -1073,8 +1073,8 @@ mod tests {
         use crate::{
             ApprovedControlSetup, DurablePeerTrustOperations, LocalControlTlsIdentity,
             NetworkOperationFuture, NetworkOperations, PeerPinStore, PeerTrustOperations,
-            PinnedControlTlsPeer,
-            accept_registered_from_durable_approval, connect_approved_control_session,
+            PinnedControlTlsPeer, accept_registered_from_durable_approval,
+            connect_approved_control_session,
         };
         use blueroute_core::{
             DisplayName, MembershipRegistry, MembershipState, NetworkMembership, NodeId,
@@ -1146,11 +1146,8 @@ mod tests {
                 Box::pin(async move {
                     self.calls.fetch_add(1, Ordering::SeqCst);
                     match self.scenario {
-                        9 => fs::write(
-                            &self.membership_path,
-                            b"BLUEROUTE_MEMBERSHIP_V999\\n",
-                        )
-                        .unwrap(),
+                        9 => fs::write(&self.membership_path, b"BLUEROUTE_MEMBERSHIP_V999\n")
+                            .unwrap(),
                         11 => {
                             return Err(CoreError::new(
                                 ErrorKind::InvalidState,
@@ -1221,9 +1218,7 @@ mod tests {
             let local_node = client.node();
             let server_thread = thread::spawn(move || {
                 let trust = approved_trust(&server_dir, client_pin);
-                let durable_membership = NetworkMembershipStore::new(
-                    server_dir.join("membership"),
-                );
+                let durable_membership = NetworkMembershipStore::new(server_dir.join("membership"));
                 let backend = DurableObservationProbe {
                     endpoint: addr,
                     membership_path: durable_membership.path().to_owned(),
@@ -1251,7 +1246,9 @@ mod tests {
                 if scenario == 5 {
                     futures_lite::future::block_on(trust.forget_peer(local_node)).unwrap();
                 } else if scenario == 8 {
-                    durable_membership.save(&MembershipRegistry::default()).unwrap();
+                    durable_membership
+                        .save(&MembershipRegistry::default())
+                        .unwrap();
                 } else if scenario == 6 {
                     // Simulate a newer independently admitted generation while
                     // the original TLS owner is waiting for listener release.
@@ -1280,22 +1277,23 @@ mod tests {
                 // Exercise both release boundaries against real localhost
                 // mutual TLS: the async path must preserve all existing
                 // revocation, stale-generation and NAP ownership gates.
-                let result = if scenario >= 7 {
-                    futures_lite::future::block_on(
-                        owner.release_registered_from_durable_network_operations(
+                let result =
+                    if scenario >= 7 {
+                        futures_lite::future::block_on(
+                            owner.release_registered_from_durable_network_operations(
+                                session,
+                                &durable_membership,
+                                &backend,
+                            ),
+                        )
+                    } else if matches!(scenario, 0 | 2 | 5 | 6) {
+                        futures_lite::future::block_on(owner.release_registered_if_current_async(
                             session,
-                            &durable_membership,
-                            &backend,
-                        ),
-                    )
-                } else if matches!(scenario, 0 | 2 | 5 | 6) {
-                    futures_lite::future::block_on(owner.release_registered_if_current_async(
-                        session,
-                        || async move { observe() },
-                    ))
-                } else {
-                    owner.release_registered_if_current(session, observe)
-                };
+                            || async move { observe() },
+                        ))
+                    } else {
+                        owner.release_registered_if_current(session, observe)
+                    };
                 if scenario >= 7 {
                     assert_eq!(
                         backend.calls.load(Ordering::SeqCst),
@@ -1311,7 +1309,7 @@ mod tests {
                     assert_eq!(result.err().unwrap().kind(), ErrorKind::PersistenceError);
                     assert_eq!(
                         fs::read(durable_membership.path()).unwrap(),
-                        b"BLUEROUTE_MEMBERSHIP_V999\\n",
+                        b"BLUEROUTE_MEMBERSHIP_V999\n",
                     );
                     assert!(TcpStream::connect(addr).is_err());
                 } else if scenario == 5 || scenario == 6 {
