@@ -1907,6 +1907,8 @@ DEFERRED.
 
 **Software model qualified:** `crates/blueroute-core/src/forwarding_policy.rs` passed [exact-head CI 38478135480](https://github.com/ekkus93/blueroute/actions/runs/38478135480) at `167221e`. Unknown routing capability denies forwarding, a single L2 PAN star does not request global IPv4 forwarding, and disconnected/failed links cannot sustain forwarding intent. This is not a kernel/sysctl integration or real Bluetooth acceptance.
 
+**P8-003 forwarding-policy/Linux-backend reconciliation seam (software-only, 2026-10-21 UTC):** `crates/blueroute-linux/src/forwarding_reconciliation.rs` now composes the locally observed topology forwarding policy with the existing `IpNetworkBackend::set_ipv4_forwarding` ownership-aware lease boundary. Three deterministic fake-backend regressions cover two-segment enable, link-loss release, unknown local identity, non-routing-capable local nodes, and propagation of backend failures. Source `5b505a368f8756565de5fed19ab93e5ca47cb9b8`; [exact-head CI 39606935261](https://github.com/ekkus93/blueroute/actions/runs/39606935261) **passed**. This is a callable integration seam, **not** a running daemon topology watcher, physical Linux sysctl/namespace qualification, PAN traffic, authenticated route distribution, or complete P8-003 acceptance; leave remaining checkboxes open.
+
 
 **Acceptance**
 
