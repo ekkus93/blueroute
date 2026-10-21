@@ -4,6 +4,7 @@
 //! observed NetworkManager-owned addresses. It does not authenticate a peer,
 //! begin accepting sockets, activate JoinNetwork, or prove Bluetooth traffic.
 
+use std::future::Future;
 use std::io::ErrorKind as IoErrorKind;
 use std::net::{IpAddr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
 
@@ -263,6 +264,44 @@ impl ObservedControlListener {
         self.accept_with_revalidation(network, endpoint, observe)
     }
 
+    /// Async equivalent of fresh observation polling for NetworkManager and
+    /// durable-membership providers that must be awaited. No queued TCP
+    /// candidate is released without two distinct completed observations.
+    /// The first observation is also required on an idle poll; a failed
+    /// observation retires the listener. An accepted candidate is dropped
+    /// and the listener retired if the second observation fails or changes.
+    ///
+    /// This remains a snapshot gate for *untrusted* TCP. The caller must
+    /// recheck ownership and enrolled pins after mutual TLS/Hello and while
+    /// the authenticated session remains active. Dropping this future during
+    /// the second observation drops the accepted candidate, not a session.
+    pub async fn poll_with_async_observations<F, Fut>(
+        &mut self,
+        mut observe: F,
+    ) -> Result<Option<TcpStream>, CoreError>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = Result<(Option<NetworkId>, Option<SocketAddrV4>), CoreError>>,
+    {
+        if self.listener.is_none() {
+            return Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "NAP control listener has already been retired",
+            ));
+        }
+        let (network, endpoint) = match observe().await {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                self.listener.take();
+                return Err(error);
+            }
+        };
+        let Some(socket) = self.accept_if_current(network, endpoint)? else {
+            return Ok(None);
+        };
+        self.finish_accepted_observation(socket, observe().await)
+    }
+
     /// Accept a candidate only if ownership survives a second independent
     /// observation after TCP accept. The recheck must query fresh local
     /// membership and the guarded network backend, not reuse the first
@@ -283,7 +322,17 @@ impl ObservedControlListener {
         let Some(socket) = self.accept_if_current(observed_network, observed_endpoint)? else {
             return Ok(None);
         };
-        match reobserve() {
+        self.finish_accepted_observation(socket, reobserve())
+    }
+
+    /// Common terminal gate for synchronous and asynchronous post-accept
+    /// observations. Both sockets are closed on ownership loss or error.
+    fn finish_accepted_observation(
+        &mut self,
+        socket: TcpStream,
+        observation: Result<(Option<NetworkId>, Option<SocketAddrV4>), CoreError>,
+    ) -> Result<Option<TcpStream>, CoreError> {
+        match observation {
             Ok((Some(network), Some(endpoint)))
                 if network == self.network && endpoint == self.endpoint =>
             {
@@ -304,6 +353,7 @@ impl ObservedControlListener {
             }
         }
     }
+
     /// Release a registered, mutually authenticated session to the daemon
     /// only if its logical network and the freshly observed NAP endpoint still
     /// match after TLS/Hello and registry admission. A changed host can never
@@ -697,6 +747,124 @@ mod tests {
         assert_eq!(observations, 2);
         assert_eq!(remote.read(&mut [0_u8; 1]).unwrap(), 0);
         assert!(TcpStream::connect(addr).is_err());
+    }
+
+    #[test]
+    fn async_fresh_observation_polls_idle_once_and_accepted_candidate_twice() {
+        futures_lite::future::block_on(async {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = match listener.local_addr().unwrap() {
+                SocketAddr::V4(addr) => addr,
+                SocketAddr::V6(_) => panic!("test listener must be IPv4"),
+            };
+            let mut owner = ObservedControlListener::new(network(7), addr, listener).unwrap();
+            let mut observations = 0;
+            assert!(
+                owner
+                    .poll_with_async_observations(|| {
+                        observations += 1;
+                        async { Ok((Some(network(7)), Some(addr))) }
+                    })
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            assert_eq!(observations, 1);
+
+            let mut remote = TcpStream::connect(addr).unwrap();
+            remote.write_all(b"x").unwrap();
+            let mut accepted = owner
+                .poll_with_async_observations(|| {
+                    observations += 1;
+                    async { Ok((Some(network(7)), Some(addr))) }
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(observations, 3);
+            let mut byte = [0; 1];
+            accepted.read_exact(&mut byte).unwrap();
+            assert_eq!(&byte, b"x");
+            // A successful observation is not TLS or membership proof.
+        });
+    }
+
+    #[test]
+    fn async_post_accept_drift_and_observation_failure_close_both_sockets() {
+        futures_lite::future::block_on(async {
+            for fail_observation in [false, true] {
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                let addr = match listener.local_addr().unwrap() {
+                    SocketAddr::V4(addr) => addr,
+                    SocketAddr::V6(_) => panic!("test listener must be IPv4"),
+                };
+                let mut owner = ObservedControlListener::new(network(7), addr, listener).unwrap();
+                let mut remote = TcpStream::connect(addr).unwrap();
+                remote
+                    .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+                    .unwrap();
+                let mut observations = 0;
+                let error = owner
+                    .poll_with_async_observations(|| {
+                        observations += 1;
+                        let index = observations;
+                        async move {
+                            if index == 1 {
+                                Ok((Some(network(7)), Some(addr)))
+                            } else if fail_observation {
+                                Err(CoreError::new(
+                                    ErrorKind::InvalidState,
+                                    "asynchronous ownership observation failed",
+                                ))
+                            } else {
+                                Ok((Some(network(8)), Some(addr)))
+                            }
+                        }
+                    })
+                    .await
+                    .err()
+                    .unwrap();
+                assert_eq!(error.kind(), ErrorKind::InvalidState);
+                assert_eq!(observations, 2);
+                assert_eq!(remote.read(&mut [0_u8; 1]).unwrap(), 0);
+                assert!(TcpStream::connect(addr).is_err());
+                assert_eq!(
+                    owner
+                        .poll_with_async_observations(|| async {
+                            Ok((Some(network(7)), Some(addr)))
+                        })
+                        .await
+                        .err()
+                        .unwrap()
+                        .kind(),
+                    ErrorKind::InvalidState
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn async_idle_observation_error_retires_listener_without_accepting() {
+        futures_lite::future::block_on(async {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = match listener.local_addr().unwrap() {
+                SocketAddr::V4(addr) => addr,
+                SocketAddr::V6(_) => panic!("test listener must be IPv4"),
+            };
+            let mut owner = ObservedControlListener::new(network(7), addr, listener).unwrap();
+            let error = owner
+                .poll_with_async_observations(|| async {
+                    Err(CoreError::new(
+                        ErrorKind::InvalidState,
+                        "backend unavailable during async observation",
+                    ))
+                })
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(error.kind(), ErrorKind::InvalidState);
+            assert!(TcpStream::connect(addr).is_err());
+        });
     }
 
     #[test]
