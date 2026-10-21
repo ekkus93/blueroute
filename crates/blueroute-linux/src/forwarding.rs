@@ -461,12 +461,14 @@ mod tests {
             controller: paths.controller(),
         };
 
-        assert!(block_on(reconcile_ipv4_forwarding(
-            &backend,
-            &[active.clone(), inactive.clone()],
-            router_node(2),
-        ))
-        .unwrap());
+        assert!(
+            block_on(reconcile_ipv4_forwarding(
+                &backend,
+                &[active.clone(), inactive.clone()],
+                router_node(2),
+            ))
+            .unwrap()
+        );
         assert!(read_forwarding_value(&paths.sysctl).unwrap());
         assert_eq!(
             read_lease(&paths.lease).unwrap(),
@@ -492,21 +494,25 @@ mod tests {
         let restarted = LeaseBackend {
             controller: paths.controller(),
         };
-        assert!(block_on(reconcile_ipv4_forwarding(
-            &restarted,
-            &[inactive.clone(), active],
-            router_node(2),
-        ))
-        .unwrap());
+        assert!(
+            block_on(reconcile_ipv4_forwarding(
+                &restarted,
+                &[inactive.clone(), active],
+                router_node(2),
+            ))
+            .unwrap()
+        );
         assert!(read_forwarding_value(&paths.sysctl).unwrap());
 
         // Losing the last routing network releases only the BlueRoute lease.
-        assert!(!block_on(reconcile_ipv4_forwarding(
-            &restarted,
-            &[inactive],
-            router_node(2),
-        ))
-        .unwrap());
+        assert!(
+            !block_on(reconcile_ipv4_forwarding(
+                &restarted,
+                &[inactive],
+                router_node(2),
+            ))
+            .unwrap()
+        );
         assert!(!read_forwarding_value(&paths.sysctl).unwrap());
         assert!(!paths.lease.exists());
     }
@@ -517,22 +523,19 @@ mod tests {
         let backend = LeaseBackend {
             controller: paths.controller(),
         };
-        assert!(block_on(reconcile_ipv4_forwarding(
-            &backend,
-            &[router_graph()],
-            router_node(2),
-        ))
-        .unwrap());
+        assert!(
+            block_on(reconcile_ipv4_forwarding(
+                &backend,
+                &[router_graph()],
+                router_node(2),
+            ))
+            .unwrap()
+        );
         assert_eq!(
             read_lease(&paths.lease).unwrap(),
             Some(ForwardingLease { baseline: true })
         );
-        assert!(!block_on(reconcile_ipv4_forwarding(
-            &backend,
-            &[],
-            router_node(2),
-        ))
-        .unwrap());
+        assert!(!block_on(reconcile_ipv4_forwarding(&backend, &[], router_node(2),)).unwrap());
         assert!(read_forwarding_value(&paths.sysctl).unwrap());
         assert!(!paths.lease.exists());
     }
