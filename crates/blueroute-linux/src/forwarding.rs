@@ -323,7 +323,16 @@ mod tests {
     use std::os::unix::fs::symlink;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use blueroute_core::{
+        CapabilitySource, LinkHealth, LinkId, LinkState, NodeCapabilities, NodeId, PanLink,
+        PanSegment, SegmentId, Sourced, TopologyGraph,
+    };
+    use futures_lite::future::block_on;
+
     use super::*;
+    use crate::{
+        BackendFuture, InterfaceAddress, IpNetworkBackend, LinuxRoute, reconcile_ipv4_forwarding,
+    };
 
     struct TestPaths {
         root: PathBuf,
@@ -361,6 +370,171 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
         }
+    }
+
+    // Exercise the actual file-backed Linux forwarding lease through the
+    // topology reconciliation entry point, not just a mock boolean backend.
+    struct LeaseBackend {
+        controller: ForwardingController,
+    }
+
+    impl IpNetworkBackend for LeaseBackend {
+        fn addresses(&self) -> BackendFuture<'_, Vec<InterfaceAddress>> {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+
+        fn ensure_address(&self, _address: InterfaceAddress) -> BackendFuture<'_, ()> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn remove_address(&self, _address: InterfaceAddress) -> BackendFuture<'_, ()> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn routes(&self) -> BackendFuture<'_, Vec<LinuxRoute>> {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+
+        fn ensure_route(&self, _route: LinuxRoute) -> BackendFuture<'_, ()> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn remove_route(&self, _route: LinuxRoute) -> BackendFuture<'_, ()> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn set_ipv4_forwarding(&self, enabled: bool) -> BackendFuture<'_, ()> {
+            Box::pin(async move { self.controller.set(enabled) })
+        }
+    }
+
+    fn router_node(value: u8) -> NodeId {
+        NodeId::from_bytes([value; 16])
+    }
+
+    fn router_graph() -> TopologyGraph {
+        let mut graph = TopologyGraph::default();
+        for value in 1..=3 {
+            graph.add_node(
+                router_node(value),
+                NodeCapabilities {
+                    routing: if value == 2 {
+                        Some(Sourced::new(true, CapabilitySource::Configured))
+                    } else {
+                        None
+                    },
+                    ..NodeCapabilities::default()
+                },
+            );
+        }
+        for (segment, nap) in [(1, 1), (2, 2)] {
+            graph
+                .add_segment(PanSegment::new(
+                    SegmentId::from_bytes([segment; 16]),
+                    router_node(nap),
+                ))
+                .unwrap();
+        }
+        for (id, segment, nap, panu) in [(1, 1, 1, 2), (2, 2, 2, 3)] {
+            graph
+                .add_link(PanLink {
+                    id: LinkId::from_bytes([id; 16]),
+                    segment_id: SegmentId::from_bytes([segment; 16]),
+                    nap: router_node(nap),
+                    panu: router_node(panu),
+                    state: LinkState::Active,
+                    health: LinkHealth::Healthy,
+                    cost: 1,
+                })
+                .unwrap();
+        }
+        graph
+    }
+
+    #[test]
+    fn topology_reconciliation_preserves_lease_across_restart_and_network_loss() {
+        let paths = TestPaths::new(false);
+        let active = router_graph();
+        let mut inactive = active.clone();
+        inactive.remove_link(&LinkId::from_bytes([2; 16]));
+        let backend = LeaseBackend {
+            controller: paths.controller(),
+        };
+
+        assert!(block_on(reconcile_ipv4_forwarding(
+            &backend,
+            &[active.clone(), inactive.clone()],
+            router_node(2),
+        ))
+        .unwrap());
+        assert!(read_forwarding_value(&paths.sysctl).unwrap());
+        assert_eq!(
+            read_lease(&paths.lease).unwrap(),
+            Some(ForwardingLease { baseline: false })
+        );
+
+        // An incomplete observation must not release an existing host-wide lease.
+        assert_eq!(
+            block_on(reconcile_ipv4_forwarding(
+                &backend,
+                &[inactive.clone(), TopologyGraph::default()],
+                router_node(2),
+            ))
+            .unwrap_err()
+            .kind(),
+            ErrorKind::InvalidInput
+        );
+        assert!(read_forwarding_value(&paths.sysctl).unwrap());
+        assert!(paths.lease.exists());
+
+        // Simulate an external sysctl reset and a fresh backend after daemon restart.
+        fs::write(&paths.sysctl, "0\n").unwrap();
+        let restarted = LeaseBackend {
+            controller: paths.controller(),
+        };
+        assert!(block_on(reconcile_ipv4_forwarding(
+            &restarted,
+            &[inactive.clone(), active],
+            router_node(2),
+        ))
+        .unwrap());
+        assert!(read_forwarding_value(&paths.sysctl).unwrap());
+
+        // Losing the last routing network releases only the BlueRoute lease.
+        assert!(!block_on(reconcile_ipv4_forwarding(
+            &restarted,
+            &[inactive],
+            router_node(2),
+        ))
+        .unwrap());
+        assert!(!read_forwarding_value(&paths.sysctl).unwrap());
+        assert!(!paths.lease.exists());
+    }
+
+    #[test]
+    fn topology_reconciliation_preserves_foreign_forwarding_baseline() {
+        let paths = TestPaths::new(true);
+        let backend = LeaseBackend {
+            controller: paths.controller(),
+        };
+        assert!(block_on(reconcile_ipv4_forwarding(
+            &backend,
+            &[router_graph()],
+            router_node(2),
+        ))
+        .unwrap());
+        assert_eq!(
+            read_lease(&paths.lease).unwrap(),
+            Some(ForwardingLease { baseline: true })
+        );
+        assert!(!block_on(reconcile_ipv4_forwarding(
+            &backend,
+            &[],
+            router_node(2),
+        ))
+        .unwrap());
+        assert!(read_forwarding_value(&paths.sysctl).unwrap());
+        assert!(!paths.lease.exists());
     }
 
     #[test]
