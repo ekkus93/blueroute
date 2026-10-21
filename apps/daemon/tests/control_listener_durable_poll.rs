@@ -259,6 +259,35 @@ fn post_accept_durable_network_replacement_and_endpoint_drift_fail_closed() {
 }
 
 #[test]
+fn already_revoked_durable_membership_retires_without_backend_query() {
+    let (root, store) = member_store("already-revoked");
+    store.save(&MembershipRegistry::default()).unwrap();
+    let (mut owner, endpoint) = listener();
+    // If this backend is invoked it returns an error; no query is justified
+    // once durable local membership already disproves listener ownership.
+    let backend = probe(&store, endpoint, ObservationMode::BackendFailure);
+    let queued = TcpStream::connect(endpoint).unwrap();
+    let error = futures_lite::future::block_on(
+        owner.poll_from_durable_network_operations(&store, &backend),
+    )
+    .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidState);
+    assert_eq!(backend.calls.load(Ordering::SeqCst), 0);
+    assert_closed(queued);
+    assert!(TcpStream::connect(endpoint).is_err());
+    assert_eq!(
+        futures_lite::future::block_on(
+            owner.poll_from_durable_network_operations(&store, &backend)
+        )
+        .unwrap_err()
+        .kind(),
+        ErrorKind::InvalidState
+    );
+    assert_eq!(backend.calls.load(Ordering::SeqCst), 0);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn endpoint_backend_failure_retires_queued_candidates_without_tls() {
     let (root, store) = member_store("backend");
     let (mut owner, endpoint) = listener();

@@ -317,8 +317,15 @@ impl ObservedControlListener {
         membership: &NetworkMembershipStore,
         operations: &dyn crate::NetworkOperations,
     ) -> Result<Option<TcpStream>, CoreError> {
+        let expected_network = self.network;
         self.poll_with_async_observations(|| async {
             let before = crate::current_network(&membership.load()?)?;
+            // Once durable ownership is already absent, retire immediately.
+            // A stale listener must not wait on (or trigger) a backend query
+            // before closing queued unauthenticated TCP candidates.
+            if before != Some(expected_network) {
+                return Ok((before, None));
+            }
             let endpoint = operations.observed_owned_control_endpoint().await?;
             let after = crate::current_network(&membership.load()?)?;
             if before != after {
