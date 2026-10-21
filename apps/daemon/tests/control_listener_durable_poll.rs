@@ -14,9 +14,7 @@ use blueroute_core::{
     CoreError, DisplayName, ErrorKind, MembershipRegistry, MembershipState, NetworkId,
     NetworkMembership,
 };
-use blueroute_daemon::{
-    NetworkOperationFuture, NetworkOperations, ObservedControlListener,
-};
+use blueroute_daemon::{NetworkOperationFuture, NetworkOperations, ObservedControlListener};
 use blueroute_linux::NetworkMembershipStore;
 use blueroute_protocol::NetworkSummary;
 
@@ -167,7 +165,11 @@ fn durable_poll_checks_idle_once_and_accepted_candidate_twice() {
 fn membership_revocation_during_post_accept_backend_observation_retires_listener() {
     let (root, store) = member_store("revoked");
     let (mut owner, endpoint) = listener();
-    let backend = probe(&store, endpoint, ObservationMode::RevokeDuringSecondObservation);
+    let backend = probe(
+        &store,
+        endpoint,
+        ObservationMode::RevokeDuringSecondObservation,
+    );
     let queued = TcpStream::connect(endpoint).unwrap();
     let error = futures_lite::future::block_on(
         owner.poll_from_durable_network_operations(&store, &backend),
