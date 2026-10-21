@@ -9,7 +9,7 @@ use std::io::ErrorKind as IoErrorKind;
 use std::net::{IpAddr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
 
 use blueroute_core::{CoreError, DaemonConfig, ErrorKind, Ipv4StarAddressPlan, NetworkId};
-use blueroute_linux::{InterfaceAddress, NetworkInterfaceHandle};
+use blueroute_linux::{InterfaceAddress, NetworkInterfaceHandle, NetworkMembershipStore};
 
 /// Reserved daemon-to-daemon control port from P7-001.
 pub const CONTROL_TCP_PORT: u16 = 46071;
@@ -300,6 +300,36 @@ impl ObservedControlListener {
             return Ok(None);
         };
         self.finish_accepted_observation(socket, observe().await)
+    }
+
+    /// Prefer this entry point when polling against the running daemon's
+    /// durable membership store and network backend. Each asynchronous
+    /// observation reloads membership before AND after the independently
+    /// guarded backend endpoint read. An absent, replaced, corrupt or
+    /// concurrently changing local network permanently retires this listener.
+    ///
+    /// The two observations around TCP accept remain distinct. A returned
+    /// socket is still untrusted and must pass enrolled mutual TLS/Hello,
+    /// registry admission, and post-handshake ownership revalidation.
+    /// This does not run a daemon accept loop or keep active sessions alive.
+    pub async fn poll_from_durable_network_operations(
+        &mut self,
+        membership: &NetworkMembershipStore,
+        operations: &dyn crate::NetworkOperations,
+    ) -> Result<Option<TcpStream>, CoreError> {
+        self.poll_with_async_observations(|| async {
+            let before = crate::current_network(&membership.load()?)?;
+            let endpoint = operations.observed_owned_control_endpoint().await?;
+            let after = crate::current_network(&membership.load()?)?;
+            if before != after {
+                return Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "NAP ownership changed during durable backend observation",
+                ));
+            }
+            Ok((after, endpoint))
+        })
+        .await
     }
 
     /// Accept a candidate only if ownership survives a second independent

@@ -1,0 +1,209 @@
+//! P7-004 real durable-membership and guarded endpoint polling composition.
+//!
+//! Loopback-only software tests: no independent enrollment, live PAN,
+//! authenticated daemon TLS supervision, or production JoinNetwork evidence.
+
+use std::fs;
+use std::io::{ErrorKind as IoErrorKind, Read, Write};
+use std::net::{SocketAddr, SocketAddrV4, TcpListener, TcpStream};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+use blueroute_core::{
+    CoreError, DisplayName, ErrorKind, MembershipRegistry, MembershipState, NetworkId,
+    NetworkMembership,
+};
+use blueroute_daemon::{
+    NetworkOperationFuture, NetworkOperations, ObservedControlListener,
+};
+use blueroute_linux::NetworkMembershipStore;
+use blueroute_protocol::NetworkSummary;
+
+static NEXT_TEST: AtomicUsize = AtomicUsize::new(0);
+
+fn network(value: u8) -> NetworkId {
+    NetworkId::from_bytes([value; 16])
+}
+
+fn member_store(label: &str) -> (PathBuf, NetworkMembershipStore) {
+    let root = std::env::temp_dir().join(format!(
+        "blueroute-durable-listener-{label}-{}-{}",
+        std::process::id(),
+        NEXT_TEST.fetch_add(1, Ordering::Relaxed),
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let store = NetworkMembershipStore::new(root.join("membership"));
+    let mut membership =
+        NetworkMembership::new(network(7), DisplayName::new("NAP poll test").unwrap());
+    membership.state = MembershipState::Member;
+    let mut registry = MembershipRegistry::default();
+    registry.remember_network(membership);
+    store.save(&registry).unwrap();
+    (root, store)
+}
+
+fn listener() -> (ObservedControlListener, SocketAddrV4) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let SocketAddr::V4(endpoint) = listener.local_addr().unwrap() else {
+        panic!("loopback listener must be IPv4");
+    };
+    (
+        ObservedControlListener::new(network(7), endpoint, listener).unwrap(),
+        endpoint,
+    )
+}
+
+#[derive(Clone, Copy)]
+enum ObservationMode {
+    Stable,
+    RevokeDuringSecondObservation,
+    BackendFailure,
+}
+
+struct Probe {
+    endpoint: SocketAddrV4,
+    membership_path: PathBuf,
+    mode: ObservationMode,
+    calls: AtomicUsize,
+}
+
+impl NetworkOperations for Probe {
+    fn observed_owned_control_endpoint(&self) -> NetworkOperationFuture<'_, Option<SocketAddrV4>> {
+        Box::pin(async move {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+            match self.mode {
+                ObservationMode::RevokeDuringSecondObservation if call == 2 => {
+                    NetworkMembershipStore::new(self.membership_path.clone())
+                        .save(&MembershipRegistry::default())?;
+                }
+                ObservationMode::BackendFailure => {
+                    return Err(CoreError::new(
+                        ErrorKind::InvalidState,
+                        "injected trusted endpoint backend failure",
+                    ));
+                }
+                _ => {}
+            }
+            Ok(Some(self.endpoint))
+        })
+    }
+
+    fn create_network(&self, _: DisplayName) -> NetworkOperationFuture<'_, NetworkId> {
+        Box::pin(async { unreachable!("test only observes endpoints") })
+    }
+    fn leave_network(&self) -> NetworkOperationFuture<'_, ()> {
+        Box::pin(async { unreachable!("test only observes endpoints") })
+    }
+    fn list_networks(&self) -> NetworkOperationFuture<'_, Vec<NetworkSummary>> {
+        Box::pin(async { unreachable!("test only observes endpoints") })
+    }
+    fn start_discovery(&self) -> NetworkOperationFuture<'_, ()> {
+        Box::pin(async { unreachable!("test only observes endpoints") })
+    }
+    fn stop_discovery(&self) -> NetworkOperationFuture<'_, ()> {
+        Box::pin(async { unreachable!("test only observes endpoints") })
+    }
+}
+
+fn probe(store: &NetworkMembershipStore, endpoint: SocketAddrV4, mode: ObservationMode) -> Probe {
+    Probe {
+        endpoint,
+        membership_path: store.path().to_owned(),
+        mode,
+        calls: AtomicUsize::new(0),
+    }
+}
+
+fn assert_closed(mut stream: TcpStream) {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    match stream.read(&mut [0_u8; 1]) {
+        Ok(0) => {}
+        Err(error)
+            if matches!(
+                error.kind(),
+                IoErrorKind::ConnectionReset
+                    | IoErrorKind::ConnectionAborted
+                    | IoErrorKind::BrokenPipe
+            ) => {}
+        other => panic!("untrusted candidate survived retirement: {other:?}"),
+    }
+}
+
+#[test]
+fn durable_poll_checks_idle_once_and_accepted_candidate_twice() {
+    let (root, store) = member_store("stable");
+    let (mut owner, endpoint) = listener();
+    let backend = probe(&store, endpoint, ObservationMode::Stable);
+    assert!(
+        futures_lite::future::block_on(
+            owner.poll_from_durable_network_operations(&store, &backend)
+        )
+        .unwrap()
+        .is_none()
+    );
+    assert_eq!(backend.calls.load(Ordering::SeqCst), 1);
+
+    let mut client = TcpStream::connect(endpoint).unwrap();
+    client.write_all(b"u").unwrap();
+    let mut accepted = futures_lite::future::block_on(
+        owner.poll_from_durable_network_operations(&store, &backend),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(backend.calls.load(Ordering::SeqCst), 3);
+    let mut read = [0_u8; 1];
+    accepted.read_exact(&mut read).unwrap();
+    assert_eq!(&read, b"u");
+    drop(accepted);
+    drop(client);
+    drop(owner);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn membership_revocation_during_post_accept_backend_observation_retires_listener() {
+    let (root, store) = member_store("revoked");
+    let (mut owner, endpoint) = listener();
+    let backend = probe(&store, endpoint, ObservationMode::RevokeDuringSecondObservation);
+    let queued = TcpStream::connect(endpoint).unwrap();
+    let error = futures_lite::future::block_on(
+        owner.poll_from_durable_network_operations(&store, &backend),
+    )
+    .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidState);
+    assert_eq!(backend.calls.load(Ordering::SeqCst), 2);
+    assert!(store.load().unwrap().is_empty());
+    assert_closed(queued);
+    assert!(TcpStream::connect(endpoint).is_err());
+    // A retired listener never invokes another backend or revives on rollback.
+    assert_eq!(
+        futures_lite::future::block_on(
+            owner.poll_from_durable_network_operations(&store, &backend)
+        )
+        .unwrap_err()
+        .kind(),
+        ErrorKind::InvalidState
+    );
+    assert_eq!(backend.calls.load(Ordering::SeqCst), 2);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn endpoint_backend_failure_retires_queued_candidates_without_tls() {
+    let (root, store) = member_store("backend");
+    let (mut owner, endpoint) = listener();
+    let backend = probe(&store, endpoint, ObservationMode::BackendFailure);
+    let queued = TcpStream::connect(endpoint).unwrap();
+    let error = futures_lite::future::block_on(
+        owner.poll_from_durable_network_operations(&store, &backend),
+    )
+    .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidState);
+    assert_eq!(backend.calls.load(Ordering::SeqCst), 1);
+    assert_closed(queued);
+    assert!(TcpStream::connect(endpoint).is_err());
+    fs::remove_dir_all(root).unwrap();
+}
