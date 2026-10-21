@@ -115,3 +115,43 @@ fn deterministic_mutations_never_panic_or_recover_from_rejection() {
         );
     }
 }
+
+#[test]
+fn every_truncated_valid_transcript_fails_closed_at_eof() {
+    // Exhaustively exercise every EOF position, including exact boundaries
+    // between otherwise valid frames. Only a complete Goodbye permits a
+    // graceful EOF; incomplete data must permanently retire the parser.
+    let mut wire = Vec::new();
+    for envelope in [
+        frame(3, ControlMessage::Heartbeat),
+        frame(4, ControlMessage::Heartbeat),
+        frame(5, ControlMessage::Goodbye),
+    ] {
+        wire.extend_from_slice(&encode_control_frame(&envelope).unwrap());
+    }
+
+    for cut in 0..wire.len() {
+        for width in [1_usize, 3, 17, wire.len()] {
+            let mut session = stream();
+            for chunk in wire[..cut].chunks(width) {
+                session.feed(chunk).unwrap();
+            }
+            assert!(
+                session.finish().is_err(),
+                "truncated transcript accepted at byte {cut}, chunk width {width}"
+            );
+            assert_eq!(
+                session.feed(&wire),
+                Err(SessionStreamError::Poisoned),
+                "parser recovered after truncated EOF at byte {cut}"
+            );
+        }
+    }
+
+    let mut complete = stream();
+    for chunk in wire.chunks(3) {
+        complete.feed(chunk).unwrap();
+    }
+    assert_eq!(complete.finish(), Ok(()));
+    assert_eq!(complete.feed(&wire), Err(SessionStreamError::Poisoned));
+}
