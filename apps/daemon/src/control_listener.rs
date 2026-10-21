@@ -417,15 +417,16 @@ impl ObservedControlListener {
     /// This is a single bounded observation, not a timer, spawned task, live
     /// daemon loop, reconnect owner or proof of Bluetooth/PAN operation.
     /// Callers must run it regularly and supervise failure/rebind policy.
-    pub async fn supervise_registered_from_durable_network_operations<'a>(
-        &mut self,
-        sessions: &mut Vec<crate::RegisteredControlSession<'a>>,
-        membership: &NetworkMembershipStore,
-        operations: &dyn crate::NetworkOperations,
-    ) -> Result<usize, CoreError> {
-        // A pending future owns all session guards so cancellation cannot
-        // leave authenticated sockets live after supervision stops.
+    pub fn supervise_registered_from_durable_network_operations<'a, 'b>(
+        &'b mut self,
+        sessions: &'b mut Vec<crate::RegisteredControlSession<'a>>,
+        membership: &'b NetworkMembershipStore,
+        operations: &'b dyn crate::NetworkOperations,
+    ) -> impl Future<Output = Result<usize, CoreError>> + 'b {
+        // Take ownership eagerly, on future creation (before its first poll).
+        // Even a never-polled abandoned tick cannot strand live TLS sockets.
         let mut owned = std::mem::take(sessions);
+        async move {
         if self.listener.is_none() {
             return Err(CoreError::new(
                 ErrorKind::InvalidState,
@@ -456,6 +457,7 @@ impl ObservedControlListener {
                 self.listener.take();
                 Err(error)
             }
+        }
         }
     }
 
@@ -1309,7 +1311,7 @@ mod tests {
         // Existing TLS listener checks and fresh DURABLE post-TLS ownership
         // cases: stable, revoked before observation, corrupted during query,
         // endpoint drift, backend failure and revoked during query.
-        for scenario in 0_u8..16 {
+        for scenario in 0_u8..17 {
             let client = LocalControlTlsIdentity::generate(NodeId::from_bytes([11; 16])).unwrap();
             let server = LocalControlTlsIdentity::generate(NodeId::from_bytes([12; 16])).unwrap();
             let client_pin =
@@ -1426,7 +1428,7 @@ mod tests {
                 // mutual TLS: the async path must preserve all existing
                 // revocation, stale-generation and NAP ownership gates.
                 let result =
-                    if scenario == 13 || scenario == 15 {
+                    if matches!(scenario, 13 | 15 | 16) {
                         Ok(session)
                     } else if scenario >= 7 {
                         futures_lite::future::block_on(
@@ -1447,7 +1449,7 @@ mod tests {
                 if scenario >= 7 {
                     assert_eq!(
                         backend.calls.load(Ordering::SeqCst),
-                        if scenario == 13 || scenario == 15 {
+                        if matches!(scenario, 13 | 15 | 16) {
                             3
                         } else {
                             usize::from(scenario != 8)
@@ -1509,6 +1511,19 @@ mod tests {
                     assert!(active.is_empty());
                     assert!(registry.lock().unwrap().get(key).is_none());
                     assert_eq!(backend.calls.load(Ordering::SeqCst), 4);
+                } else if scenario == 16 {
+                    let mut active = vec![result.unwrap()];
+                    // Future construction must take the registered session
+                    // even if nobody ever polls the future.
+                    let unpolled = owner.supervise_registered_from_durable_network_operations(
+                        &mut active,
+                        &durable_membership,
+                        &backend,
+                    );
+                    drop(unpolled);
+                    assert!(active.is_empty());
+                    assert!(registry.lock().unwrap().get(key).is_none());
+                    assert_eq!(backend.calls.load(Ordering::SeqCst), 3);
                 } else if scenario == 0 || scenario == 7 {
                     let mut session = result.unwrap();
                     assert!(registry.lock().unwrap().get(key).is_some());
