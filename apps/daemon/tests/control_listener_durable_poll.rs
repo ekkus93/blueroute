@@ -58,6 +58,7 @@ enum ObservationMode {
     RevokeDuringSecondObservation,
     BackendFailure,
     ReplaceNetworkDuringSecondObservation,
+    CorruptDuringSecondObservation,
     EndpointDriftDuringSecondObservation,
 }
 
@@ -92,6 +93,9 @@ impl NetworkOperations for Probe {
                     let mut registry = MembershipRegistry::default();
                     registry.remember_network(replacement);
                     NetworkMembershipStore::new(self.membership_path.clone()).save(&registry)?;
+                }
+                ObservationMode::CorruptDuringSecondObservation if call == 2 => {
+                    fs::write(&self.membership_path, b"BLUEROUTE_MEMBERSHIP_V999\n").unwrap();
                 }
                 _ => {}
             }
@@ -302,6 +306,34 @@ fn endpoint_backend_failure_retires_queued_candidates_without_tls() {
     assert_eq!(backend.calls.load(Ordering::SeqCst), 1);
     assert_closed(queued);
     assert!(TcpStream::connect(endpoint).is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn corruption_during_post_accept_durable_observation_closes_candidate_without_repair() {
+    let (root, store) = member_store("post-accept-corrupt");
+    let (mut owner, endpoint) = listener();
+    let backend = probe(&store, endpoint, ObservationMode::CorruptDuringSecondObservation);
+    let queued = TcpStream::connect(endpoint).unwrap();
+
+    let error = futures_lite::future::block_on(
+        owner.poll_from_durable_network_operations(&store, &backend),
+    )
+    .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::PersistenceError);
+    assert_eq!(backend.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(fs::read(store.path()).unwrap(), b"BLUEROUTE_MEMBERSHIP_V999\n");
+    assert_closed(queued);
+    assert!(TcpStream::connect(endpoint).is_err());
+    assert_eq!(
+        futures_lite::future::block_on(
+            owner.poll_from_durable_network_operations(&store, &backend)
+        )
+        .unwrap_err()
+        .kind(),
+        ErrorKind::InvalidState,
+    );
+    assert_eq!(backend.calls.load(Ordering::SeqCst), 2);
     fs::remove_dir_all(root).unwrap();
 }
 
