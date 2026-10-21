@@ -45,6 +45,9 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 
 ## Software-only control-session evidence (through 2026-10-21)
 
+- **P7-004 corrupt durable membership gate (software-only, 2026-10-21):** Unsupported-schema, malformed-header, and invalid-UTF-8 durable NAP membership closes queued untrusted TCP and retires the listener before backend observation; no silent store repair. Added at `b3f9fc974993f0b1f78a0666f19d63b2e23def0b`, rustfmt corrected at `99b2c5591e7e165c107da577e92bdd6cb9cd9b17`, [exact-head CI 39559363392](https://github.com/ekkus93/blueroute/actions/runs/39559363392) passed. **Software regression only**: the independent enrollment UX, daemon-owned PAN/TLS lifetime, production P6-004 join, and hardware acceptance remain open/deferred.
+
+
 - **P7-004 awaited fresh NAP listener observations (software only, 2026-10-21 UTC):** The guarded TCP listener now accepts an async observation callback and rechecks independently observed local NAP ownership before accept and again after accepting an untrusted candidate. Drift, failed observations and retired-listener reuse fail closed, with actual localhost socket EOF and deterministic regression tests. Code commit `89c34c49d71d72b414db1dcfc66a5b7729c0beab` passed [exact-head CI 39526519606](https://github.com/ekkus93/blueroute/actions/runs/39526519606); the authoritative TODO evidence commit `dd4d9166e3fb813550e681679a43d26e667cd3a1` passed [exact-head CI 39526773877](https://github.com/ekkus93/blueroute/actions/runs/39526773877). This is not a live daemon/PAN accept loop, independent enrollment ceremony, production JoinNetwork, or physical Bluetooth proof. All corresponding hardware acceptance remains deferred.
 
 
