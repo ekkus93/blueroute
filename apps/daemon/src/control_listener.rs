@@ -427,37 +427,37 @@ impl ObservedControlListener {
         // Even a never-polled abandoned tick cannot strand live TLS sockets.
         let mut owned = std::mem::take(sessions);
         async move {
-        if self.listener.is_none() {
-            return Err(CoreError::new(
-                ErrorKind::InvalidState,
-                "NAP control listener has already been retired",
-            ));
-        }
-        match observe_durable_owned_endpoint(self.network, membership, operations).await {
-            Ok((Some(network), Some(endpoint)))
-                if network == self.network && endpoint == self.endpoint =>
-            {
-                // One revoked peer must not close other still-approved peers.
-                // A failed recheck retires its exact generation via Drop.
-                owned.retain_mut(|session| {
-                    session.network() == self.network && session.revalidate_approval().is_ok()
-                });
-                let active = owned.len();
-                *sessions = owned;
-                Ok(active)
-            }
-            Ok(_) => {
-                self.listener.take();
-                Err(CoreError::new(
+            if self.listener.is_none() {
+                return Err(CoreError::new(
                     ErrorKind::InvalidState,
-                    "active NAP listener lost durable network ownership",
-                ))
+                    "NAP control listener has already been retired",
+                ));
             }
-            Err(error) => {
-                self.listener.take();
-                Err(error)
+            match observe_durable_owned_endpoint(self.network, membership, operations).await {
+                Ok((Some(network), Some(endpoint)))
+                    if network == self.network && endpoint == self.endpoint =>
+                {
+                    // One revoked peer must not close other still-approved peers.
+                    // A failed recheck retires its exact generation via Drop.
+                    owned.retain_mut(|session| {
+                        session.network() == self.network && session.revalidate_approval().is_ok()
+                    });
+                    let active = owned.len();
+                    *sessions = owned;
+                    Ok(active)
+                }
+                Ok(_) => {
+                    self.listener.take();
+                    Err(CoreError::new(
+                        ErrorKind::InvalidState,
+                        "active NAP listener lost durable network ownership",
+                    ))
+                }
+                Err(error) => {
+                    self.listener.take();
+                    Err(error)
+                }
             }
-        }
         }
     }
 
