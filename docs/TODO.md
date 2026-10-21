@@ -879,6 +879,21 @@ including formatting, Clippy, Rust/workspace tests and broker checks.
 This is a qualified rollback safety regression, **not** a live daemon
 control session, production JoinNetwork or Bluetooth hardware acceptance.
 
+
+**P6-004 wrong-network authenticated-session rejection (software only, 2026-10-21 UTC):**
+The transactional join coordinator now independently verifies that a returned
+authenticated control session belongs to the requested `NetworkId` *before*
+persisting membership. Wrong-network session handles produce
+`AuthenticationFailed` and run reverse-order control/IP/PANU cleanup; a
+deterministic fake-runtime negative test proves no membership commit and a
+clean retry guard. Source [433e6e9c](https://github.com/ekkus93/blueroute/commit/433e6e9c2e6daca9643b1521683e1219f0f92b9d),
+rustfmt fix [94d0a83e](https://github.com/ekkus93/blueroute/commit/94d0a83e8a739ceb85ec7a177a27ec28686463ff),
+[exact-head CI 39534920061](https://github.com/ekkus93/blueroute/actions/runs/39534920061)
+**PASSED**. This proves only a simulated join transaction boundary, not an
+independent enrollment UX, daemon-owned authenticated PAN/TLS session,
+production P6-004 JoinNetwork or physical Bluetooth qualification;
+P6-004/P7-003/P7-004 remain OPEN and hardware acceptance DEFERRED.
+
 ## P6-005 — Implement IPv4 allocation for one star
 
 - [x] select private subnet policy.
