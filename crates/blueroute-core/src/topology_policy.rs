@@ -134,8 +134,17 @@ pub fn select_nap_hubs(inputs: &TopologyPolicyInputs) -> Result<NapSelection, Co
                     Some((
                         *peer,
                         CandidateLink {
+                            // Never rank a link using one endpoint's optimistic
+                            // quality or cost estimate. Unknown quality stays
+                            // unknown; path cost uses the worse observation.
+                            path_cost: link.path_cost.max(reverse.path_cost),
+                            quality: match (link.quality, reverse.quality) {
+                                (Some(local), Some(remote)) => {
+                                    Some(LinkQuality::new(local.score.min(remote.score)))
+                                }
+                                _ => None,
+                            },
                             stable: link.stable && reverse.stable,
-                            ..*link
                         },
                     ))
                 })
@@ -447,5 +456,53 @@ mod tests {
             .stable = true;
         let recovered = select_nap_hubs(&inputs).unwrap();
         assert_eq!(recovered.stars[0].clients, vec![node(2)]);
+    }
+
+    #[test]
+    fn client_quality_requires_reciprocal_observation_at_capacity() {
+        let mut inputs = TopologyPolicyInputs {
+            candidates: BTreeMap::from([
+                (node(1), candidate(1, true, false, Some(1))),
+                (node(2), candidate(2, false, true, None)),
+                (node(3), candidate(3, false, true, None)),
+            ]),
+        };
+        connect(&mut inputs, 1, 2, 1);
+        connect(&mut inputs, 1, 3, 2);
+        inputs.candidates.get_mut(&node(1)).unwrap().neighbors.get_mut(&node(2)).unwrap().quality =
+            Some(LinkQuality::new(95));
+        inputs.candidates.get_mut(&node(3)).unwrap().neighbors.get_mut(&node(1)).unwrap().quality =
+            Some(LinkQuality::new(60));
+        inputs.candidates.get_mut(&node(1)).unwrap().neighbors.get_mut(&node(3)).unwrap().quality =
+            Some(LinkQuality::new(60));
+
+        // A one-sided high score is unknown, not proof of a better link.
+        assert_eq!(select_nap_hubs(&inputs).unwrap().stars[0].clients, vec![node(3)]);
+        inputs.candidates.get_mut(&node(2)).unwrap().neighbors.get_mut(&node(1)).unwrap().quality =
+            Some(LinkQuality::new(10));
+        assert_eq!(select_nap_hubs(&inputs).unwrap().stars[0].clients, vec![node(3)]);
+
+        // A newly corroborated high score can win, without bypassing capacity.
+        inputs.candidates.get_mut(&node(2)).unwrap().neighbors.get_mut(&node(1)).unwrap().quality =
+            Some(LinkQuality::new(90));
+        assert_eq!(select_nap_hubs(&inputs).unwrap().stars[0].clients, vec![node(2)]);
+    }
+
+    #[test]
+    fn client_cost_uses_worse_endpoint_observation() {
+        let mut inputs = TopologyPolicyInputs {
+            candidates: BTreeMap::from([
+                (node(1), candidate(1, true, false, Some(1))),
+                (node(2), candidate(2, false, true, None)),
+                (node(3), candidate(3, false, true, None)),
+            ]),
+        };
+        connect(&mut inputs, 1, 2, 1);
+        connect(&mut inputs, 1, 3, 10);
+        inputs.candidates.get_mut(&node(2)).unwrap().neighbors.get_mut(&node(1)).unwrap().path_cost = 100;
+        assert_eq!(select_nap_hubs(&inputs).unwrap().stars[0].clients, vec![node(3)]);
+
+        inputs.candidates.get_mut(&node(2)).unwrap().neighbors.get_mut(&node(1)).unwrap().path_cost = 1;
+        assert_eq!(select_nap_hubs(&inputs).unwrap().stars[0].clients, vec![node(2)]);
     }
 }
