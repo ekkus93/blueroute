@@ -2104,6 +2104,8 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 - Noisy metrics do not trigger continuous rebuild.
 
+**P9-006 known-good hub continuity regression (software-only, 2026-10-22 UTC):** `select_nap_hubs` now prefers an already-working hub over an unproven replacement when both cover the same number of clients; explicit adapter-unusable evidence still forces replacement selection. The deterministic test covers both the continuity and failover cases, without enabling unauthenticated peer claims, bypassing the independent stability gate, or representing actual BlueZ operations. Implemented at `b7b13b957759c74bd66f00636f04fbbb2bba5ed3`, [exact-head CI 39808573904](https://github.com/ekkus93/blueroute/actions/runs/39808573904) **passed** (format, Clippy, Rust tests and integration). Full daemon lifecycle integration and physical hub-loss acceptance remain OPEN; do not mark P9-006 or P9-005 complete.
+
 **SOFTWARE PARTIAL (2026-10-16):** `topology_stability.rs` provides deterministic cost-improvement hysteresis, minimum dwell, bounded failure backoff and clock-regression rejection. Tests passed [CI 38999358388](https://github.com/ekkus93/blueroute/actions/runs/38999358388). Daemon integration and physical acceptance remain open.
 
 ---
