@@ -448,5 +448,4 @@ mod tests {
         let recovered = select_nap_hubs(&inputs).unwrap();
         assert_eq!(recovered.stars[0].clients, vec![node(2)]);
     }
-
 }
