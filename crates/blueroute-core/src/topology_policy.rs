@@ -498,7 +498,11 @@ mod tests {
         // Without an incumbent, mutual quality breaks the equal-coverage tie.
         assert_eq!(select_nap_hubs(&inputs).unwrap().stars[0].hub, node(1));
 
-        inputs.candidates.get_mut(&node(2)).unwrap().currently_hosting = true;
+        inputs
+            .candidates
+            .get_mut(&node(2))
+            .unwrap()
+            .currently_hosting = true;
         // A working incumbent still wins, preventing quality-driven churn.
         assert_eq!(select_nap_hubs(&inputs).unwrap().stars[0].hub, node(2));
     }
