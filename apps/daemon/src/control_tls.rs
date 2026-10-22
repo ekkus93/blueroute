@@ -1185,6 +1185,18 @@ impl ActiveControlSession<'_> {
         &mut self,
         now_ms: u64,
     ) -> Result<ControlSessionRead, ControlSessionError> {
+        self.receive_next_with_budget_at(now_ms, Duration::MAX)
+    }
+
+    /// Poll authenticated TLS without monopolizing the daemon worker for
+    /// the full peer idle timeout. Only complete replay-checked inbound
+    /// frames renew the idle deadline; a short socket timeout does not.
+    /// A read completing with bytes after its slice deadline fails closed.
+    pub fn receive_next_with_budget_at(
+        &mut self,
+        now_ms: u64,
+        max_wait: Duration,
+    ) -> Result<ControlSessionRead, ControlSessionError> {
         if self.terminal {
             return Err(ControlSessionError::Ingress(
                 crate::PinnedIngressError::Terminal,
@@ -1209,7 +1221,13 @@ impl ActiveControlSession<'_> {
             return Err(ControlSessionError::Ingress(error));
         }
 
-        let timeout = Duration::from_millis(expires_ms - now_ms);
+        let idle_remaining = Duration::from_millis(expires_ms - now_ms);
+        let timeout = idle_remaining.min(max_wait);
+        if timeout.is_zero() {
+            self.terminal = true;
+            self.stream.close();
+            return Err(ControlSessionError::IdleDeadlineExpired);
+        }
         if let Err(error) = self.stream.socket.set_read_timeout(Some(timeout)) {
             self.terminal = true;
             self.stream.close();
@@ -1222,7 +1240,17 @@ impl ActiveControlSession<'_> {
         let read_finished = Instant::now();
         // The completion time, not the caller's pre-read time, determines
         // whether a late-arriving frame may refresh the idle deadline.
-        if read_finished >= read_deadline {
+        if read_finished >= read_deadline
+            && !matches!(
+                &read_result,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                    )
+            )
+        {
+            // A late plaintext completion must never refresh peer liveness.
             let _ = self.ingress.receive_verified_plaintext(&[], expires_ms);
             self.terminal = true;
             self.stream.close();
@@ -1230,7 +1258,12 @@ impl ActiveControlSession<'_> {
         }
         let elapsed_ms = read_finished.duration_since(read_started).as_millis();
         let elapsed_ms = u64::try_from(elapsed_ms).unwrap_or(u64::MAX);
-        let observed_now_ms = now_ms.saturating_add(elapsed_ms);
+        let observed_now_ms = if read_finished >= read_deadline && timeout == idle_remaining {
+            // Millisecond rounding must not extend the true idle deadline.
+            expires_ms
+        } else {
+            now_ms.saturating_add(elapsed_ms)
+        };
         match read_result {
             Ok(0) => {
                 self.terminal = true;

@@ -147,8 +147,18 @@ impl<'a> RegisteredControlSession<'a> {
         &mut self,
         now_ms: u64,
     ) -> Result<ControlSessionRead, ControlSessionError> {
+        self.receive_next_with_budget_at(now_ms, std::time::Duration::MAX)
+    }
+
+    /// Bounded polling preserves exact-generation retirement and durable
+    /// approval checks while allowing other peers to be supervised fairly.
+    pub fn receive_next_with_budget_at(
+        &mut self,
+        now_ms: u64,
+        max_wait: std::time::Duration,
+    ) -> Result<ControlSessionRead, ControlSessionError> {
         self.ensure_active_registration()?;
-        let result = self.session.receive_next_at(now_ms);
+        let result = self.session.receive_next_with_budget_at(now_ms, max_wait);
         if result.is_err() || matches!(&result, Ok(ControlSessionRead::Closed)) {
             self.close_and_retire();
         } else {

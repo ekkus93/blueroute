@@ -1,9 +1,9 @@
 //! P7-004 daemon-owned inbound NAP/TLS listener (software-first).
 //!
 //! An independent worker keeps synchronous TLS I/O off the D-Bus executor.
-//! Only durable enrolled pins can pass TLS and Hello. Until frame/heartbeat
-//! processing is wired, bounded leases close sessions proactively. This
-//! does not enable production JoinNetwork or prove Bluetooth radio behavior.
+//! Only durable enrolled pins can pass TLS and Hello. Active sessions poll
+//! replay-checked Heartbeat/Goodbye under bounded per-peer read slices.
+//! This does not enable production JoinNetwork or prove Bluetooth radio behavior.
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use blueroute_core::{NetworkId, NodeCapabilities};
 use blueroute_linux::NetworkMembershipStore;
-use blueroute_protocol::control::HelloFacts;
+use blueroute_protocol::control::{ControlMessage, HelloFacts};
 use blueroute_protocol::session::{ConnectionDeadline, ConnectionStage, ControlSessionRegistry};
 use futures_lite::future;
 
@@ -19,12 +19,16 @@ use crate::{
     ApprovedControlSetup, DurablePeerTrustOperations, LocalControlTlsIdentity, NetworkOperations,
     ObservedControlListener, RegisteredControlSession, current_network,
 };
+use crate::control_tls::ControlSessionRead;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const REBIND_INTERVAL: Duration = Duration::from_secs(2);
-const MAX_UNSUPERVISED_LIFETIME: Duration = Duration::from_secs(15);
 const MAX_OWNED_SESSIONS: usize = 32;
+const SESSION_READ_SLICE: Duration = Duration::from_millis(10);
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+const HEARTBEAT_WRITE_BUDGET: Duration = Duration::from_millis(100);
 const GOODBYE_WRITE_BUDGET: Duration = Duration::from_millis(100);
+const ACTIVE_CLOCK_BASE_MS: u64 = 3;
 
 /// The caller must retain the handle for the daemon lifetime. No active NAP
 /// means no listener. A new host is discovered via a fresh guarded bind.
@@ -41,8 +45,8 @@ pub fn spawn_daemon_control_worker(
 }
 
 fn control_setup(network: NetworkId, capabilities: NodeCapabilities) -> ApprovedControlSetup {
-    // Session reads are not yet daemon-wired: the actual lifetime is limited
-    // by the wall-clock lease below, not this provisional Active deadline.
+    // This Active clock is advanced by the verified inbound frame reader.
+    // Its 30-second idle expiry is never refreshed by an empty socket poll.
     let mut active_deadline = ConnectionDeadline::new(0);
     active_deadline
         .advance(ConnectionStage::TlsHandshake, 1)
@@ -66,11 +70,19 @@ fn control_setup(network: NetworkId, capabilities: NodeCapabilities) -> Approved
     }
 }
 
-// Reject elapsed or regressed leases. No late registration can extend a
-// different peer's lifetime; a replacement exporter has a distinct ID.
-fn lease_is_current(admitted: Instant, now: Instant) -> bool {
-    now.checked_duration_since(admitted)
-        .is_some_and(|elapsed| elapsed < MAX_UNSUPERVISED_LIFETIME)
+// Map each verified generation's admission Instant onto the Active
+// ConnectionDeadline's logical clock. A regressed or overflowing clock
+// cannot grant extra session lifetime.
+fn session_clock_ms(admitted: Instant, now: Instant) -> Option<u64> {
+    let elapsed = now.checked_duration_since(admitted)?;
+    u64::try_from(elapsed.as_millis())
+        .ok()?
+        .checked_add(ACTIVE_CLOCK_BASE_MS)
+}
+
+fn heartbeat_due(last_sent: Instant, now: Instant) -> bool {
+    now.checked_duration_since(last_sent)
+        .is_some_and(|elapsed| elapsed >= HEARTBEAT_INTERVAL)
 }
 
 fn run_worker(
@@ -84,27 +96,54 @@ fn run_worker(
     let mut listener: Option<ObservedControlListener> = None;
     let mut sessions: Vec<RegisteredControlSession<'_>> = Vec::new();
     let mut registered_at: BTreeMap<[u8; 16], Instant> = BTreeMap::new();
+    let mut heartbeat_sent_at: BTreeMap<[u8; 16], Instant> = BTreeMap::new();
     loop {
-        // Each actual TLS generation owns its own strict deadline. A newly
-        // admitted peer cannot borrow time from another active peer.
-        let now = Instant::now();
+        // Read each authenticated generation for at most one short slice,
+        // allowing other peers and fresh NAP observations to make progress.
+        // The ingress layer enforces the full idle deadline, replay and pins.
         sessions.retain_mut(|session| {
-            let admitted = registered_at.get(session.session_id()).copied();
-            if admitted.is_some_and(|start| lease_is_current(start, now)) {
-                return true;
+            let id = *session.session_id();
+            let Some(admitted) = registered_at.get(&id).copied() else {
+                return false;
+            };
+            let Some(now_ms) = session_clock_ms(admitted, Instant::now()) else {
+                return false;
+            };
+            match session.receive_next_with_budget_at(now_ms, SESSION_READ_SLICE) {
+                Ok(ControlSessionRead::Frames(frames)) => {
+                    if frames.iter().any(|frame| matches!(frame.message, ControlMessage::Goodbye)) {
+                        // A peer-requested shutdown is terminal for this
+                        // generation. Reply best-effort, then close and retire.
+                        if let Some(deadline) = Instant::now().checked_add(GOODBYE_WRITE_BUDGET) {
+                            let _ = session.send_goodbye_until(deadline);
+                        }
+                        return false;
+                    }
+                }
+                Ok(ControlSessionRead::Idle) => {}
+                Ok(ControlSessionRead::Closed) | Err(_) => return false,
             }
-            // Only a known expired lease can send a best-effort Goodbye.
-            // Unknown or regressed leases close silently and fail closed.
-            if admitted.is_some_and(|start| {
-                now.checked_duration_since(start)
-                    .is_some_and(|elapsed| elapsed >= MAX_UNSUPERVISED_LIFETIME)
-            }) && let Some(deadline) = Instant::now().checked_add(GOODBYE_WRITE_BUDGET)
-            {
-                let _ = session.send_goodbye_until(deadline);
+            let now = Instant::now();
+            let Some(last_sent) = heartbeat_sent_at.get(&id).copied() else {
+                return false;
+            };
+            if heartbeat_due(last_sent, now) {
+                let Some(deadline) = now.checked_add(HEARTBEAT_WRITE_BUDGET) else {
+                    return false;
+                };
+                if session.send_heartbeat_until(deadline).is_err() {
+                    return false;
+                }
+                heartbeat_sent_at.insert(id, Instant::now());
             }
-            false
+            true
         });
         registered_at.retain(|session_id, _| {
+            sessions
+                .iter()
+                .any(|session| session.session_id() == session_id)
+        });
+        heartbeat_sent_at.retain(|session_id, _| {
             sessions
                 .iter()
                 .any(|session| session.session_id() == session_id)
@@ -112,6 +151,7 @@ fn run_worker(
         if listener.is_none() {
             sessions.clear();
             registered_at.clear();
+            heartbeat_sent_at.clear();
             match future::block_on(operations.bind_guarded_control_listener()) {
                 Ok(Some(bound)) => listener = Some(bound),
                 Ok(None) => {}
@@ -133,6 +173,7 @@ fn run_worker(
             eprintln!("BlueRoute NAP listener retired: {:?}", error.kind());
             sessions.clear();
             registered_at.clear();
+            heartbeat_sent_at.clear();
             listener = None;
             thread::sleep(REBIND_INTERVAL);
             continue;
@@ -140,6 +181,11 @@ fn run_worker(
         // Revocation may have removed a session during the fresh durability
         // recheck. Release its matching provisional lease as well.
         registered_at.retain(|session_id, _| {
+            sessions
+                .iter()
+                .any(|session| session.session_id() == session_id)
+        });
+        heartbeat_sent_at.retain(|session_id, _| {
             sessions
                 .iter()
                 .any(|session| session.session_id() == session_id)
@@ -158,7 +204,9 @@ fn run_worker(
                     Arc::clone(&registry),
                 )) {
                     Ok(Some(registered)) => {
-                        registered_at.insert(*registered.session_id(), Instant::now());
+                        let admitted = Instant::now();
+                        registered_at.insert(*registered.session_id(), admitted);
+                        heartbeat_sent_at.insert(*registered.session_id(), admitted);
                         sessions.push(registered);
                     }
                     Ok(None) => {}
@@ -167,6 +215,7 @@ fn run_worker(
             } else {
                 sessions.clear();
                 registered_at.clear();
+                heartbeat_sent_at.clear();
                 listener = None;
             }
         }
@@ -179,14 +228,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn provisional_tls_leases_are_per_generation_and_fail_closed_at_deadline() {
+    fn active_tls_clocks_are_per_generation_and_fail_closed_on_regression() {
         let first = Instant::now();
         let second = first + Duration::from_secs(10);
-        let check = first + MAX_UNSUPERVISED_LIFETIME;
-        assert!(!lease_is_current(first, check));
-        assert!(lease_is_current(second, check));
-        assert!(lease_is_current(second, second));
-        assert!(!lease_is_current(second, first));
+        let check = second + Duration::from_secs(5);
+        assert_eq!(session_clock_ms(first, check), Some(15_003));
+        assert_eq!(session_clock_ms(second, check), Some(5_003));
+        assert_eq!(session_clock_ms(second, second), Some(3));
+        assert_eq!(session_clock_ms(second, first), None);
+    }
+
+    #[test]
+    fn heartbeat_schedule_is_bounded_and_rejects_regressed_time() {
+        let sent = Instant::now();
+        assert!(!heartbeat_due(sent, sent));
+        assert!(!heartbeat_due(sent, sent + HEARTBEAT_INTERVAL - Duration::from_millis(1)));
+        assert!(heartbeat_due(sent, sent + HEARTBEAT_INTERVAL));
+        assert!(!heartbeat_due(sent, sent - Duration::from_millis(1)));
     }
 
     #[test]
