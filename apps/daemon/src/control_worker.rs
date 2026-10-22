@@ -95,9 +95,10 @@ fn run_worker(
             }
             // Only a known expired lease can send a best-effort Goodbye.
             // Unknown or regressed leases close silently and fail closed.
-            if admitted.is_some_and(|start| now.checked_duration_since(start)
-                .is_some_and(|elapsed| elapsed >= MAX_UNSUPERVISED_LIFETIME))
-            {
+            if admitted.is_some_and(|start| {
+                now.checked_duration_since(start)
+                    .is_some_and(|elapsed| elapsed >= MAX_UNSUPERVISED_LIFETIME)
+            }) {
                 if let Some(deadline) = Instant::now().checked_add(GOODBYE_WRITE_BUDGET) {
                     let _ = session.send_goodbye_until(deadline);
                 }
