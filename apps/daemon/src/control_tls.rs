@@ -1256,6 +1256,25 @@ impl ActiveControlSession<'_> {
             self.stream.close();
             return Err(ControlSessionError::IdleDeadlineExpired);
         }
+        // A full-idle-budget socket timeout is terminal even when the OS
+        // wakes a fraction of a millisecond before the requested timeout.
+        // Rounding elapsed time down must never renew an expired peer lease.
+        // Short bounded polls, by contrast, remain non-terminal.
+        if timeout == idle_remaining
+            && matches!(
+                &read_result,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                    )
+            )
+        {
+            let _ = self.ingress.receive_verified_plaintext(&[], expires_ms);
+            self.terminal = true;
+            self.stream.close();
+            return Err(ControlSessionError::IdleDeadlineExpired);
+        }
         let elapsed_ms = read_finished.duration_since(read_started).as_millis();
         let elapsed_ms = u64::try_from(elapsed_ms).unwrap_or(u64::MAX);
         let observed_now_ms = if read_finished >= read_deadline && timeout == idle_remaining {
