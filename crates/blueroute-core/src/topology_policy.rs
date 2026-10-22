@@ -153,10 +153,13 @@ pub fn select_nap_hubs(inputs: &TopologyPolicyInputs) -> Result<NapSelection, Co
                 .power_state
                 .as_ref()
                 .is_some_and(|power| matches!(power.value, PowerState::AcPowered));
+            // For equal client coverage, retaining a currently working hub
+            // avoids needless role churn. An unusable incumbent was filtered
+            // above, so failover still selects another capable hub.
             let score = (
                 clients.len(),
-                stable,
                 candidate.currently_hosting,
+                stable,
                 ac_power,
                 candidate.gateway_preferred,
                 Reverse(cost),
@@ -363,5 +366,38 @@ mod tests {
         assert_eq!(selected.stars[0].clients, vec![node(2)]);
         assert!(selected.unserved.contains(&node(3)));
         assert!(!selected.unserved.contains(&node(1)));
+    }
+
+    #[test]
+    fn known_good_hub_wins_equal_coverage_but_unusable_host_fails_over() {
+        let mut inputs = TopologyPolicyInputs {
+            candidates: BTreeMap::from([
+                (node(1), candidate(1, true, false, Some(1))),
+                (node(2), candidate(2, true, false, Some(1))),
+                (node(3), candidate(3, false, true, None)),
+            ]),
+        };
+        connect(&mut inputs, 1, 3, 10);
+        connect(&mut inputs, 2, 3, 1);
+        let incumbent = inputs.candidates.get_mut(&node(1)).unwrap();
+        incumbent.currently_hosting = true;
+        incumbent.neighbors.get_mut(&node(3)).unwrap().stable = false;
+
+        let proposal = select_nap_hubs(&inputs).unwrap();
+        assert_eq!(proposal.stars.len(), 1);
+        assert_eq!(proposal.stars[0].hub, node(1));
+        assert_eq!(proposal.stars[0].clients, vec![node(3)]);
+
+        // Retention cannot override an affirmative capability/health denial.
+        inputs
+            .candidates
+            .get_mut(&node(1))
+            .unwrap()
+            .capabilities
+            .adapter_usable = Some(Sourced::new(false, CapabilitySource::Measured));
+        let recovered = select_nap_hubs(&inputs).unwrap();
+        assert_eq!(recovered.stars.len(), 1);
+        assert_eq!(recovered.stars[0].hub, node(2));
+        assert_eq!(recovered.stars[0].clients, vec![node(3)]);
     }
 }
