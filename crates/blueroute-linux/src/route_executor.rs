@@ -380,4 +380,57 @@ mod tests {
         assert!(backend.routes.contains(&unexpected));
         assert!(backend.routes.contains(&first));
     }
+
+    #[test]
+    fn reported_success_without_effect_cannot_claim_stale_route_removal() {
+        let stale_route = route(1, 15, 2);
+        let mut backend = FakeKernel::new(vec![stale_route.clone()]);
+        backend.ignore_write = true;
+
+        assert_eq!(
+            execute_linux_route_reconciliation(network(1), &[], &mut backend)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::RouteFailure
+        );
+        assert_eq!(backend.routes, vec![stale_route.clone()]);
+        assert_eq!(
+            backend.writes,
+            vec![LinuxRouteChange::Remove(stale_route)]
+        );
+    }
+
+    #[test]
+    fn stale_route_removal_respects_privileged_compare_and_swap_failure() {
+        let stale_route = route(1, 15, 2);
+        let mut backend = FakeKernel::new(vec![stale_route.clone()]);
+        backend.race_before_write = true;
+
+        assert_eq!(
+            execute_linux_route_reconciliation(network(1), &[], &mut backend)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidState
+        );
+        assert_eq!(backend.routes, vec![stale_route]);
+        assert!(backend.writes.is_empty());
+    }
+
+    #[test]
+    fn foreign_route_arrival_blocks_stale_route_cleanup_before_any_write() {
+        let stale_route = route(1, 15, 2);
+        let foreign_route = route(2, 90, 91);
+        let mut backend = FakeKernel::new(vec![stale_route.clone()]);
+        backend.inject_on_read = Some((2, foreign_route.clone()));
+
+        assert_eq!(
+            execute_linux_route_reconciliation(network(1), &[], &mut backend)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidState
+        );
+        assert!(backend.routes.contains(&stale_route));
+        assert!(backend.routes.contains(&foreign_route));
+        assert!(backend.writes.is_empty());
+    }
 }
