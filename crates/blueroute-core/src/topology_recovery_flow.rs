@@ -661,6 +661,104 @@ mod tests {
     }
 
     #[test]
+    fn observed_nap_to_panu_demotion_never_triggers_false_recovery() {
+        let mut inputs = policy();
+        inputs.candidates.get_mut(&id(1)).unwrap().capabilities.panu =
+            Some(Sourced::new(true, CapabilitySource::Measured));
+        let mut tracker = HubLossTracker::new(5).unwrap();
+        let mut retry = HubRecoveryRetryState::new(retry_policy()).unwrap();
+        let mut pan = FakePan::hosted();
+        assert!(
+            execute_confirmed_hub_loss_recovery_with_backoff(
+                &inputs,
+                &mut tracker,
+                &mut retry,
+                0,
+                &mut pan,
+            )
+            .unwrap()
+            .is_none()
+        );
+
+        // The former NAP is still independently observed, now as a PANU.
+        pan.links = BTreeSet::from([link(2, 1), link(2, 4)]);
+        for now in [1, 7, 20] {
+            assert!(
+                execute_confirmed_hub_loss_recovery_with_backoff(
+                    &inputs,
+                    &mut tracker,
+                    &mut retry,
+                    now,
+                    &mut pan,
+                )
+                .unwrap()
+                .is_none()
+            );
+        }
+        assert!(pan.operations.is_empty());
+        assert_eq!(retry.consecutive_failures(), 0);
+    }
+
+    #[test]
+    fn observed_panu_return_clears_confirmed_loss_retry_history() {
+        let mut inputs = policy();
+        inputs.candidates.get_mut(&id(1)).unwrap().capabilities.panu =
+            Some(Sourced::new(true, CapabilitySource::Measured));
+        let mut tracker = HubLossTracker::new(5).unwrap();
+        let mut retry = HubRecoveryRetryState::new(retry_policy()).unwrap();
+        let mut pan = FakePan::hosted();
+        execute_confirmed_hub_loss_recovery_with_backoff(
+            &inputs,
+            &mut tracker,
+            &mut retry,
+            0,
+            &mut pan,
+        )
+        .unwrap();
+        pan.links.clear();
+        execute_confirmed_hub_loss_recovery_with_backoff(
+            &inputs,
+            &mut tracker,
+            &mut retry,
+            1,
+            &mut pan,
+        )
+        .unwrap();
+        pan.fail_connect = Some(link(2, 3));
+        assert!(
+            execute_confirmed_hub_loss_recovery_with_backoff(
+                &inputs,
+                &mut tracker,
+                &mut retry,
+                6,
+                &mut pan,
+            )
+            .is_err()
+        );
+        assert_eq!(retry.consecutive_failures(), 1);
+
+        // The missing node is now observed as a PANU on a different NAP.
+        // Neither the old failure nor a pending retry may mutate its links.
+        pan.links = BTreeSet::from([link(2, 1), link(2, 4)]);
+        for now in [7, 8] {
+            assert!(
+                execute_confirmed_hub_loss_recovery_with_backoff(
+                    &inputs,
+                    &mut tracker,
+                    &mut retry,
+                    now,
+                    &mut pan,
+                )
+                .unwrap()
+                .is_none()
+            );
+        }
+        assert!(pan.operations.is_empty());
+        assert_eq!(retry.consecutive_failures(), 0);
+        assert_eq!(retry.last_failure_ms(), None);
+    }
+
+    #[test]
     fn intentional_removal_does_not_trigger_recovery() {
         let inputs = policy();
         let mut tracker = HubLossTracker::new(5).unwrap();
