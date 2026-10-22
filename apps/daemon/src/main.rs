@@ -76,7 +76,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let network_operations = Arc::new(SingleStarNetworkOperations::new(
         NetworkMembershipStore::new(membership_path),
         config,
-        capabilities,
+        capabilities.clone(),
     ));
     if let Err(error) = network_operations.reconcile_on_startup().await {
         if status.health == HealthLevel::Healthy {
