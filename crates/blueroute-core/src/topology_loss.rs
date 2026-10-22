@@ -84,6 +84,19 @@ impl HubLossTracker {
             self.missing_since.remove(hub);
             self.lost_hubs.remove(hub);
         }
+        // A previously observed NAP can legitimately become a PANU client
+        // during an independently observed role change. The node is still
+        // reachable, so it must not be declared lost or excluded from
+        // recovery planning. Re-arm hub-loss detection if it hosts again.
+        let demoted: Vec<_> = self
+            .seen_hubs
+            .difference(&active)
+            .filter(|hub| clients.contains(hub))
+            .copied()
+            .collect();
+        for hub in demoted {
+            self.forget_hub(hub);
+        }
         for hub in self.seen_hubs.difference(&active) {
             if self.lost_hubs.contains(hub) {
                 continue;
@@ -221,6 +234,32 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn observed_hub_to_client_role_change_does_not_invent_node_loss() {
+        let mut tracker = HubLossTracker::new(5).unwrap();
+        let hosting = BTreeSet::from([link(1, 3), link(2, 4)]);
+        let demoted = BTreeSet::from([link(2, 1), link(2, 4)]);
+        let surviving = BTreeSet::from([link(2, 4)]);
+
+        assert!(tracker.observe(0, &hosting).unwrap().is_empty());
+        assert!(tracker.observe(1, &demoted).unwrap().is_empty());
+        assert!(tracker.observe(7, &demoted).unwrap().is_empty());
+        // A demoted hub is no longer tracked as failed, even after it
+        // disappears as a client; a new positive hub observation re-arms it.
+        assert!(tracker.observe(8, &surviving).unwrap().is_empty());
+        assert!(tracker.observe(9, &hosting).unwrap().is_empty());
+        assert!(tracker.observe(10, &surviving).unwrap().is_empty());
+        assert_eq!(
+            tracker.observe(15, &surviving).unwrap(),
+            BTreeSet::from([id(1)])
+        );
+
+        // Even a confirmed lost hub is no longer absent once it is
+        // independently observed as a PANU client on another hub.
+        assert!(tracker.observe(16, &demoted).unwrap().is_empty());
+        assert!(tracker.observe(17, &surviving).unwrap().is_empty());
     }
 
     #[test]
