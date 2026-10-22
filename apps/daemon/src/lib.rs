@@ -7,8 +7,8 @@ mod approved_transport;
 mod attempt_socket;
 mod authorization;
 mod control_listener;
-mod control_worker;
 mod control_tls;
+mod control_worker;
 mod enrollment_transport;
 mod join_network;
 mod peer_pin_store;
@@ -41,7 +41,6 @@ use blueroute_protocol::{
     DiagnosticSnapshot, Event, NodeSummary, ProtocolCodecError, Response, SystemDiagnosticMetadata,
     decode_command, encode_event, encode_response,
 };
-pub use control_worker::spawn_daemon_control_worker;
 pub use control_listener::{
     CONTROL_TCP_PORT, ObservedControlListener, bind_owned_nap_control_listener,
     owned_nap_control_address,
@@ -54,6 +53,7 @@ pub use control_tls::{
     exchange_control_tls_candidate, exchange_control_tls_certificate, export_control_session_id,
     verify_control_tls_peer,
 };
+pub use control_worker::spawn_daemon_control_worker;
 pub use enrollment_transport::enroll_confirmed_control_candidate;
 pub use join_network::{
     JoinControlSession, JoinIpLease, JoinNetworkFuture, JoinNetworkOperations, JoinPanLink,

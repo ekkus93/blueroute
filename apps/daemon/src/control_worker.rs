@@ -15,8 +15,8 @@ use blueroute_protocol::session::{ConnectionDeadline, ConnectionStage, ControlSe
 use futures_lite::future;
 
 use crate::{
-    ApprovedControlSetup, DurablePeerTrustOperations, LocalControlTlsIdentity,
-    NetworkOperations, ObservedControlListener, RegisteredControlSession, current_network,
+    ApprovedControlSetup, DurablePeerTrustOperations, LocalControlTlsIdentity, NetworkOperations,
+    ObservedControlListener, RegisteredControlSession, current_network,
 };
 
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -42,9 +42,15 @@ fn control_setup(network: NetworkId, capabilities: NodeCapabilities) -> Approved
     // Session reads are not yet daemon-wired: the actual lifetime is limited
     // by the wall-clock lease below, not this provisional Active deadline.
     let mut active_deadline = ConnectionDeadline::new(0);
-    active_deadline.advance(ConnectionStage::TlsHandshake, 1).expect("stage");
-    active_deadline.advance(ConnectionStage::Hello, 2).expect("stage");
-    active_deadline.advance(ConnectionStage::Active, 3).expect("stage");
+    active_deadline
+        .advance(ConnectionStage::TlsHandshake, 1)
+        .expect("stage");
+    active_deadline
+        .advance(ConnectionStage::Hello, 2)
+        .expect("stage");
+    active_deadline
+        .advance(ConnectionStage::Active, 3)
+        .expect("stage");
     ApprovedControlSetup {
         network,
         facts: HelloFacts {
@@ -80,7 +86,7 @@ fn run_worker(
             sessions.clear();
             match future::block_on(operations.bind_guarded_control_listener()) {
                 Ok(Some(bound)) => listener = Some(bound),
-                Ok(None) => {},
+                Ok(None) => {}
                 Err(error) => eprintln!("BlueRoute NAP listener bind denied: {:?}", error.kind()),
             }
             if listener.is_none() {
@@ -89,11 +95,13 @@ fn run_worker(
             }
         }
         let owner = listener.as_mut().expect("checked bound listener");
-        if let Err(error) = future::block_on(
-            owner.supervise_registered_from_durable_network_operations(
-                &mut sessions, &membership, operations.as_ref(),
-            ),
-        ) {
+        if let Err(error) =
+            future::block_on(owner.supervise_registered_from_durable_network_operations(
+                &mut sessions,
+                &membership,
+                operations.as_ref(),
+            ))
+        {
             eprintln!("BlueRoute NAP listener retired: {:?}", error.kind());
             sessions.clear();
             listener = None;
@@ -106,11 +114,15 @@ fn run_worker(
             let expected = membership.load().and_then(|saved| current_network(&saved));
             if let Ok(Some(network)) = expected {
                 match future::block_on(owner.poll_registered_from_durable_network_operations(
-                    &membership, operations.as_ref(), &local, trust.as_ref(),
-                    control_setup(network, capabilities.clone()), Arc::clone(&registry),
+                    &membership,
+                    operations.as_ref(),
+                    &local,
+                    trust.as_ref(),
+                    control_setup(network, capabilities.clone()),
+                    Arc::clone(&registry),
                 )) {
                     Ok(Some(registered)) => sessions.push(registered),
-                    Ok(None) => {},
+                    Ok(None) => {}
                     Err(error) => eprintln!("BlueRoute inbound TLS denied: {:?}", error.kind()),
                 }
             } else {
