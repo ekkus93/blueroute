@@ -394,10 +394,7 @@ mod tests {
             ErrorKind::RouteFailure
         );
         assert_eq!(backend.routes, vec![stale_route.clone()]);
-        assert_eq!(
-            backend.writes,
-            vec![LinuxRouteChange::Remove(stale_route)]
-        );
+        assert_eq!(backend.writes, vec![LinuxRouteChange::Remove(stale_route)]);
     }
 
     #[test]
