@@ -4,6 +4,7 @@
 //! Only durable enrolled pins can pass TLS and Hello. Until frame/heartbeat
 //! processing is wired, bounded leases close sessions proactively. This
 //! does not enable production JoinNetwork or prove Bluetooth radio behavior.
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -64,6 +65,13 @@ fn control_setup(network: NetworkId, capabilities: NodeCapabilities) -> Approved
     }
 }
 
+// Reject elapsed or regressed leases. No late registration can extend a
+// different peer's lifetime; a replacement exporter has a distinct ID.
+fn lease_is_current(admitted: Instant, now: Instant) -> bool {
+    now.checked_duration_since(admitted)
+        .is_some_and(|elapsed| elapsed < MAX_UNSUPERVISED_LIFETIME)
+}
+
 fn run_worker(
     membership: NetworkMembershipStore,
     operations: Arc<dyn NetworkOperations>,
@@ -74,16 +82,22 @@ fn run_worker(
     let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
     let mut listener: Option<ObservedControlListener> = None;
     let mut sessions: Vec<RegisteredControlSession<'_>> = Vec::new();
-    let mut window_started = Instant::now();
+    let mut registered_at: BTreeMap<[u8; 16], Instant> = BTreeMap::new();
     loop {
-        // A registered stream is NOT a permanent permission: drop all owners
-        // before the unresolved inbound heartbeat/idle lifecycle can lapse.
-        if window_started.elapsed() >= MAX_UNSUPERVISED_LIFETIME {
-            sessions.clear();
-            window_started = Instant::now();
-        }
+        // Each actual TLS generation owns its own strict deadline. A newly
+        // admitted peer cannot borrow time from another active peer.
+        let now = Instant::now();
+        sessions.retain(|session| {
+            registered_at
+                .get(session.session_id())
+                .is_some_and(|admitted| lease_is_current(*admitted, now))
+        });
+        registered_at.retain(|session_id, _| {
+            sessions.iter().any(|session| session.session_id() == session_id)
+        });
         if listener.is_none() {
             sessions.clear();
+            registered_at.clear();
             match future::block_on(operations.bind_guarded_control_listener()) {
                 Ok(Some(bound)) => listener = Some(bound),
                 Ok(None) => {}
@@ -104,10 +118,16 @@ fn run_worker(
         {
             eprintln!("BlueRoute NAP listener retired: {:?}", error.kind());
             sessions.clear();
+            registered_at.clear();
             listener = None;
             thread::sleep(REBIND_INTERVAL);
             continue;
         }
+        // Revocation may have removed a session during the fresh durability
+        // recheck. Release its matching provisional lease as well.
+        registered_at.retain(|session_id, _| {
+            sessions.iter().any(|session| session.session_id() == session_id)
+        });
         if sessions.len() < MAX_OWNED_SESSIONS {
             // Never take a peer-provided network as the expected identity.
             // Listener admission rechecks this durable value on each gate.
@@ -121,12 +141,16 @@ fn run_worker(
                     control_setup(network, capabilities.clone()),
                     Arc::clone(&registry),
                 )) {
-                    Ok(Some(registered)) => sessions.push(registered),
+                    Ok(Some(registered)) => {
+                        registered_at.insert(*registered.session_id(), Instant::now());
+                        sessions.push(registered);
+                    }
                     Ok(None) => {}
                     Err(error) => eprintln!("BlueRoute inbound TLS denied: {:?}", error.kind()),
                 }
             } else {
                 sessions.clear();
+                registered_at.clear();
                 listener = None;
             }
         }
@@ -137,6 +161,17 @@ fn run_worker(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provisional_tls_leases_are_per_generation_and_fail_closed_at_deadline() {
+        let first = Instant::now();
+        let second = first + Duration::from_secs(10);
+        let check = first + MAX_UNSUPERVISED_LIFETIME;
+        assert!(!lease_is_current(first, check));
+        assert!(lease_is_current(second, check));
+        assert!(lease_is_current(second, second));
+        assert!(!lease_is_current(second, first));
+    }
 
     #[test]
     fn provisional_hello_has_no_invented_neighbors_or_segment() {
