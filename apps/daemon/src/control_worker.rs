@@ -98,7 +98,8 @@ fn run_worker(
             if admitted.is_some_and(|start| {
                 now.checked_duration_since(start)
                     .is_some_and(|elapsed| elapsed >= MAX_UNSUPERVISED_LIFETIME)
-            }) && let Some(deadline) = Instant::now().checked_add(GOODBYE_WRITE_BUDGET) {
+            }) && let Some(deadline) = Instant::now().checked_add(GOODBYE_WRITE_BUDGET)
+            {
                 let _ = session.send_goodbye_until(deadline);
             }
             false
