@@ -7,6 +7,7 @@ mod approved_transport;
 mod attempt_socket;
 mod authorization;
 mod control_listener;
+mod control_worker;
 mod control_tls;
 mod enrollment_transport;
 mod join_network;
@@ -40,6 +41,7 @@ use blueroute_protocol::{
     DiagnosticSnapshot, Event, NodeSummary, ProtocolCodecError, Response, SystemDiagnosticMetadata,
     decode_command, encode_event, encode_response,
 };
+pub use control_worker::spawn_daemon_control_worker;
 pub use control_listener::{
     CONTROL_TCP_PORT, ObservedControlListener, bind_owned_nap_control_listener,
     owned_nap_control_address,

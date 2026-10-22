@@ -6,6 +6,7 @@ use blueroute_core::{DaemonConfig, HealthLevel};
 use blueroute_daemon::{
     ControlTlsIdentityStore, DaemonService, DurablePeerTrustOperations, NetworkOperations,
     PeerPinStore, SingleStarNetworkOperations, TransactionalJoinNetworkOperations, current_network,
+    spawn_daemon_control_worker,
 };
 use blueroute_linux::{
     NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
@@ -108,6 +109,8 @@ async fn run() -> Result<(), Box<dyn Error>> {
             })
             .collect(),
     };
+    let worker_network_operations: Arc<dyn NetworkOperations> = network_operations.clone();
+    let worker_peer_trust = peer_trust_operations.clone();
     let service = DaemonService::with_operations(status, network_operations, peer_trust_operations)
         .with_join_network_operations(join_network_operations)
         .with_system_diagnostics(system_diagnostics)
@@ -118,6 +121,16 @@ async fn run() -> Result<(), Box<dyn Error>> {
         .serve_at(DBUS_OBJECT_PATH, service)?
         .build()
         .await?;
+
+    // Run blocking mutual-TLS I/O off the D-Bus executor. No remote session
+    // authorizes network membership until production JoinNetwork is integrated.
+    let _control_worker = spawn_daemon_control_worker(
+        NetworkMembershipStore::new(network_membership_path(&state_directory)),
+        worker_network_operations,
+        worker_peer_trust,
+        local_control_tls_identity,
+        capabilities,
+    )?;
 
     future::pending::<()>().await;
     Ok(())
