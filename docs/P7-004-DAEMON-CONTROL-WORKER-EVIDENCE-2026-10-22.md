@@ -16,6 +16,14 @@ The worker opportunistically calls `bind_guarded_control_listener`: no local act
 
 The worker caps retained authenticated sessions at 32 and closes each session on its own 15-second monotonic time budget, independent of when other sessions were admitted. An expired or regressed lease retires only its exact registered TLS generation. An additional deterministic unit test verifies that expiry of one peer's provisional lease does not shorten a newer peer's lease, and that regressed time is rejected. This **is not yet** a full liveness protocol: the daemon does not consume Heartbeat/Goodbye frames, maintain per-peer active deadlines, or route authorized control messages over these sessions. The interval is provisional fail-closed protection against indefinite session ownership, not a claim of usable stable peer connectivity.
 
+## Bounded authenticated expiry teardown follow-up (2026-10-22)
+
+On a *known* elapsed 15-second provisional lease, the daemon worker now attempts an authenticated, best-effort Goodbye with a 100 ms absolute write budget before dropping that registered TLS owner. The writer rechecks durable peer approval; even on a failed or timed-out write, dropping the owner closes its TCP socket and retires only the exact registry generation. Missing lease metadata and regressed clocks close silently rather than sending traffic. This is an orderly-teardown improvement, **not** active inbound Heartbeat/Goodbye processing or liveness qualification.
+
+- Source: `4e6d4e03fff7c2d5795c3b5184696257802d7a60`; formatting/compilation/Clippy corrections through `a2d43ca6cd90b4d345367325a2a165b5c6ebbac5`.
+- [Exact-head CI 39864751716](https://github.com/ekkus93/blueroute/actions/runs/39864751716): **passed** (locked Rust formatting, workspace check, Clippy and tests).
+- P7-004 and P6-004 remain **IN PROGRESS**, physical acceptance **DEFERRED**.
+
 ## Remaining required P7/P6 work
 
 1. Design and wire independently user-confirmed SPKI enrollment end to end through a permission-gated daemon/CLI or desktop ceremony, with explicit negative-authentication and revocation tests. NodeId trust alone is insufficient.
