@@ -15,11 +15,11 @@ use blueroute_protocol::control::{ControlMessage, HelloFacts};
 use blueroute_protocol::session::{ConnectionDeadline, ConnectionStage, ControlSessionRegistry};
 use futures_lite::future;
 
+use crate::control_tls::ControlSessionRead;
 use crate::{
     ApprovedControlSetup, DurablePeerTrustOperations, LocalControlTlsIdentity, NetworkOperations,
     ObservedControlListener, RegisteredControlSession, current_network,
 };
-use crate::control_tls::ControlSessionRead;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const REBIND_INTERVAL: Duration = Duration::from_secs(2);
@@ -111,7 +111,10 @@ fn run_worker(
             };
             match session.receive_next_with_budget_at(now_ms, SESSION_READ_SLICE) {
                 Ok(ControlSessionRead::Frames(frames)) => {
-                    if frames.iter().any(|frame| matches!(frame.message, ControlMessage::Goodbye)) {
+                    if frames
+                        .iter()
+                        .any(|frame| matches!(frame.message, ControlMessage::Goodbye))
+                    {
                         // A peer-requested shutdown is terminal for this
                         // generation. Reply best-effort, then close and retire.
                         if let Some(deadline) = Instant::now().checked_add(GOODBYE_WRITE_BUDGET) {
@@ -242,7 +245,10 @@ mod tests {
     fn heartbeat_schedule_is_bounded_and_rejects_regressed_time() {
         let sent = Instant::now();
         assert!(!heartbeat_due(sent, sent));
-        assert!(!heartbeat_due(sent, sent + HEARTBEAT_INTERVAL - Duration::from_millis(1)));
+        assert!(!heartbeat_due(
+            sent,
+            sent + HEARTBEAT_INTERVAL - Duration::from_millis(1)
+        ));
         assert!(heartbeat_due(sent, sent + HEARTBEAT_INTERVAL));
         assert!(!heartbeat_due(sent, sent - Duration::from_millis(1)));
     }
