@@ -93,7 +93,9 @@ fn run_worker(
                 .is_some_and(|admitted| lease_is_current(*admitted, now))
         });
         registered_at.retain(|session_id, _| {
-            sessions.iter().any(|session| session.session_id() == session_id)
+            sessions
+                .iter()
+                .any(|session| session.session_id() == session_id)
         });
         if listener.is_none() {
             sessions.clear();
@@ -126,7 +128,9 @@ fn run_worker(
         // Revocation may have removed a session during the fresh durability
         // recheck. Release its matching provisional lease as well.
         registered_at.retain(|session_id, _| {
-            sessions.iter().any(|session| session.session_id() == session_id)
+            sessions
+                .iter()
+                .any(|session| session.session_id() == session_id)
         });
         if sessions.len() < MAX_OWNED_SESSIONS {
             // Never take a peer-provided network as the expected identity.
