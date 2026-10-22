@@ -124,11 +124,20 @@ pub fn select_nap_hubs(inputs: &TopologyPolicyInputs) -> Result<NapSelection, Co
                         || remote.capabilities.can_join_pan() != Some(true)
                         || remote.capabilities.adapter_usable.as_ref().map(|v| v.value)
                             != Some(true)
-                        || !remote.neighbors.contains_key(id)
                     {
                         return None;
                     }
-                    Some((*peer, *link))
+                    let reverse = remote.neighbors.get(id)?;
+                    // A path is known stable only when both observed ends
+                    // report stability. A one-sided optimistic observation
+                    // must not displace a reciprocally stable client.
+                    Some((
+                        *peer,
+                        CandidateLink {
+                            stable: link.stable && reverse.stable,
+                            ..*link
+                        },
+                    ))
                 })
                 .collect();
             clients.sort_by_key(|(peer, link)| {
@@ -400,4 +409,44 @@ mod tests {
         assert_eq!(recovered.stars[0].hub, node(2));
         assert_eq!(recovered.stars[0].clients, vec![node(3)]);
     }
+    #[test]
+    fn stable_client_preference_requires_reciprocal_observation() {
+        let mut inputs = TopologyPolicyInputs {
+            candidates: BTreeMap::from([
+                (node(1), candidate(1, true, false, Some(1))),
+                (node(2), candidate(2, false, true, None)),
+                (node(3), candidate(3, false, true, None)),
+            ]),
+        };
+        connect(&mut inputs, 1, 2, 1);
+        connect(&mut inputs, 1, 3, 10);
+
+        // The hub sees both links as stable, but the first client does not.
+        // Prefer the more expensive reciprocally stable path at capacity one.
+        inputs
+            .candidates
+            .get_mut(&node(2))
+            .unwrap()
+            .neighbors
+            .get_mut(&node(1))
+            .unwrap()
+            .stable = false;
+        let selected = select_nap_hubs(&inputs).unwrap();
+        assert_eq!(selected.stars.len(), 1);
+        assert_eq!(selected.stars[0].clients, vec![node(3)]);
+        assert!(selected.unserved.contains(&node(2)));
+
+        // A confirmed reciprocal observation restores the lower-cost choice.
+        inputs
+            .candidates
+            .get_mut(&node(2))
+            .unwrap()
+            .neighbors
+            .get_mut(&node(1))
+            .unwrap()
+            .stable = true;
+        let recovered = select_nap_hubs(&inputs).unwrap();
+        assert_eq!(recovered.stars[0].clients, vec![node(2)]);
+    }
+
 }
