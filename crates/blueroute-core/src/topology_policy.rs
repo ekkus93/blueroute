@@ -166,6 +166,13 @@ pub fn select_nap_hubs(inputs: &TopologyPolicyInputs) -> Result<NapSelection, Co
                 .iter()
                 .map(|(_, link)| u64::from(link.path_cost))
                 .sum();
+            // Among equally covering, non-incumbent proposals, favor links
+            // with independently corroborated quality. Missing reciprocal
+            // measurements contribute zero; they are never assumed healthy.
+            let quality: u64 = clients
+                .iter()
+                .map(|(_, link)| u64::from(link.quality.map_or(0, |value| value.score)))
+                .sum();
             let ac_power = candidate
                 .capabilities
                 .power_state
@@ -178,6 +185,7 @@ pub fn select_nap_hubs(inputs: &TopologyPolicyInputs) -> Result<NapSelection, Co
                 clients.len(),
                 candidate.currently_hosting,
                 stable,
+                quality,
                 ac_power,
                 candidate.gateway_preferred,
                 Reverse(cost),
@@ -456,6 +464,43 @@ mod tests {
             .stable = true;
         let recovered = select_nap_hubs(&inputs).unwrap();
         assert_eq!(recovered.stars[0].clients, vec![node(2)]);
+    }
+
+    fn set_quality(inputs: &mut TopologyPolicyInputs, a: u8, b: u8, score: u8) {
+        inputs
+            .candidates
+            .get_mut(&node(a))
+            .unwrap()
+            .neighbors
+            .get_mut(&node(b))
+            .unwrap()
+            .quality = Some(LinkQuality::new(score));
+    }
+
+    #[test]
+    fn equal_coverage_hubs_prefer_reciprocal_quality_but_retain_incumbent() {
+        let mut inputs = TopologyPolicyInputs {
+            candidates: BTreeMap::from([
+                (node(1), candidate(1, true, false, Some(1))),
+                (node(2), candidate(2, true, false, Some(1))),
+                (node(3), candidate(3, false, true, None)),
+            ]),
+        };
+        connect(&mut inputs, 1, 3, 1);
+        connect(&mut inputs, 2, 3, 50);
+        set_quality(&mut inputs, 2, 3, 70);
+        set_quality(&mut inputs, 3, 2, 70);
+        set_quality(&mut inputs, 1, 3, 95);
+        // One optimistic endpoint cannot beat corroborated quality.
+        assert_eq!(select_nap_hubs(&inputs).unwrap().stars[0].hub, node(2));
+
+        set_quality(&mut inputs, 3, 1, 90);
+        // Without an incumbent, mutual quality breaks the equal-coverage tie.
+        assert_eq!(select_nap_hubs(&inputs).unwrap().stars[0].hub, node(1));
+
+        inputs.candidates.get_mut(&node(2)).unwrap().currently_hosting = true;
+        // A working incumbent still wins, preventing quality-driven churn.
+        assert_eq!(select_nap_hubs(&inputs).unwrap().stars[0].hub, node(2));
     }
 
     #[test]
