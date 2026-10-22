@@ -26,6 +26,10 @@ regression checks demotion, elapsed confirmation intervals, re-arming,
 genuine subsequent loss, and recovery of a previously confirmed missing hub
 as a client.
 
+## End-to-end software recovery-flow regressions
+
+Two additional fake-PAN recovery-flow tests at `9cb397ff4b0a199dbb67ff79524e8ae34186ac52` verify that a NAP observed as a PANU client never triggers spurious link mutations after the hub-loss debounce window, and that a confirmed-loss reconnect failure is retired (including retry history) when that same node subsequently appears as an observed PANU. [Exact-head CI 39856832473](https://github.com/ekkus93/blueroute/actions/runs/39856832473) **passed** (format, locked workspace, Clippy, Rust tests and integration). These tests use a fake PAN operator, not a real BlueZ controller.
+
 ## Boundaries
 
 This is a pure software policy over independently observed PAN links.
