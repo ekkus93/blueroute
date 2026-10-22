@@ -24,6 +24,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const REBIND_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_UNSUPERVISED_LIFETIME: Duration = Duration::from_secs(15);
 const MAX_OWNED_SESSIONS: usize = 32;
+const GOODBYE_WRITE_BUDGET: Duration = Duration::from_millis(100);
 
 /// The caller must retain the handle for the daemon lifetime. No active NAP
 /// means no listener. A new host is discovered via a fresh guarded bind.
@@ -88,9 +89,20 @@ fn run_worker(
         // admitted peer cannot borrow time from another active peer.
         let now = Instant::now();
         sessions.retain(|session| {
-            registered_at
-                .get(session.session_id())
-                .is_some_and(|admitted| lease_is_current(*admitted, now))
+            let admitted = registered_at.get(session.session_id()).copied();
+            if admitted.is_some_and(|start| lease_is_current(start, now)) {
+                return true;
+            }
+            // Only a known expired lease can send a best-effort Goodbye.
+            // Unknown or regressed leases close silently and fail closed.
+            if admitted.is_some_and(|start| now.checked_duration_since(start)
+                .is_some_and(|elapsed| elapsed >= MAX_UNSUPERVISED_LIFETIME))
+            {
+                if let Some(deadline) = Instant::now().checked_add(GOODBYE_WRITE_BUDGET) {
+                    let _ = session.send_goodbye_until(deadline);
+                }
+            }
+            false
         });
         registered_at.retain(|session_id, _| {
             sessions
