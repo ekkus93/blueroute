@@ -88,7 +88,7 @@ fn run_worker(
         // Each actual TLS generation owns its own strict deadline. A newly
         // admitted peer cannot borrow time from another active peer.
         let now = Instant::now();
-        sessions.retain(|session| {
+        sessions.retain_mut(|session| {
             let admitted = registered_at.get(session.session_id()).copied();
             if admitted.is_some_and(|start| lease_is_current(start, now)) {
                 return true;
