@@ -469,23 +469,62 @@ mod tests {
         };
         connect(&mut inputs, 1, 2, 1);
         connect(&mut inputs, 1, 3, 2);
-        inputs.candidates.get_mut(&node(1)).unwrap().neighbors.get_mut(&node(2)).unwrap().quality =
-            Some(LinkQuality::new(95));
-        inputs.candidates.get_mut(&node(3)).unwrap().neighbors.get_mut(&node(1)).unwrap().quality =
-            Some(LinkQuality::new(60));
-        inputs.candidates.get_mut(&node(1)).unwrap().neighbors.get_mut(&node(3)).unwrap().quality =
-            Some(LinkQuality::new(60));
+        inputs
+            .candidates
+            .get_mut(&node(1))
+            .unwrap()
+            .neighbors
+            .get_mut(&node(2))
+            .unwrap()
+            .quality = Some(LinkQuality::new(95));
+        inputs
+            .candidates
+            .get_mut(&node(3))
+            .unwrap()
+            .neighbors
+            .get_mut(&node(1))
+            .unwrap()
+            .quality = Some(LinkQuality::new(60));
+        inputs
+            .candidates
+            .get_mut(&node(1))
+            .unwrap()
+            .neighbors
+            .get_mut(&node(3))
+            .unwrap()
+            .quality = Some(LinkQuality::new(60));
 
         // A one-sided high score is unknown, not proof of a better link.
-        assert_eq!(select_nap_hubs(&inputs).unwrap().stars[0].clients, vec![node(3)]);
-        inputs.candidates.get_mut(&node(2)).unwrap().neighbors.get_mut(&node(1)).unwrap().quality =
-            Some(LinkQuality::new(10));
-        assert_eq!(select_nap_hubs(&inputs).unwrap().stars[0].clients, vec![node(3)]);
+        assert_eq!(
+            select_nap_hubs(&inputs).unwrap().stars[0].clients,
+            vec![node(3)]
+        );
+        inputs
+            .candidates
+            .get_mut(&node(2))
+            .unwrap()
+            .neighbors
+            .get_mut(&node(1))
+            .unwrap()
+            .quality = Some(LinkQuality::new(10));
+        assert_eq!(
+            select_nap_hubs(&inputs).unwrap().stars[0].clients,
+            vec![node(3)]
+        );
 
         // A newly corroborated high score can win, without bypassing capacity.
-        inputs.candidates.get_mut(&node(2)).unwrap().neighbors.get_mut(&node(1)).unwrap().quality =
-            Some(LinkQuality::new(90));
-        assert_eq!(select_nap_hubs(&inputs).unwrap().stars[0].clients, vec![node(2)]);
+        inputs
+            .candidates
+            .get_mut(&node(2))
+            .unwrap()
+            .neighbors
+            .get_mut(&node(1))
+            .unwrap()
+            .quality = Some(LinkQuality::new(90));
+        assert_eq!(
+            select_nap_hubs(&inputs).unwrap().stars[0].clients,
+            vec![node(2)]
+        );
     }
 
     #[test]
@@ -499,10 +538,30 @@ mod tests {
         };
         connect(&mut inputs, 1, 2, 1);
         connect(&mut inputs, 1, 3, 10);
-        inputs.candidates.get_mut(&node(2)).unwrap().neighbors.get_mut(&node(1)).unwrap().path_cost = 100;
-        assert_eq!(select_nap_hubs(&inputs).unwrap().stars[0].clients, vec![node(3)]);
+        inputs
+            .candidates
+            .get_mut(&node(2))
+            .unwrap()
+            .neighbors
+            .get_mut(&node(1))
+            .unwrap()
+            .path_cost = 100;
+        assert_eq!(
+            select_nap_hubs(&inputs).unwrap().stars[0].clients,
+            vec![node(3)]
+        );
 
-        inputs.candidates.get_mut(&node(2)).unwrap().neighbors.get_mut(&node(1)).unwrap().path_cost = 1;
-        assert_eq!(select_nap_hubs(&inputs).unwrap().stars[0].clients, vec![node(2)]);
+        inputs
+            .candidates
+            .get_mut(&node(2))
+            .unwrap()
+            .neighbors
+            .get_mut(&node(1))
+            .unwrap()
+            .path_cost = 1;
+        assert_eq!(
+            select_nap_hubs(&inputs).unwrap().stars[0].clients,
+            vec![node(2)]
+        );
     }
 }
