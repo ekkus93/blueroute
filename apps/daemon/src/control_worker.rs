@@ -798,6 +798,9 @@ mod tests {
         };
         worker.shutdown().unwrap();
         completion.recv_timeout(Duration::from_secs(1)).unwrap();
+    }
+
+    #[test]
     fn drop_requests_cancellation_without_joining_daemon_executor() {
         use std::sync::mpsc;
 
