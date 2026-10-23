@@ -47,7 +47,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P0-001 | `[x]` | Workspace structure is complete and `cargo check --workspace --locked` is green on `master`. |
 | P0-002 | `[-]` | Toolchain/development policy documented; clean supported Debian validation pending. |
 | P0-003 | `[x]` | Rust formatting/lint policy is configured; `cargo fmt --all -- --check` and locked Clippy with `-D warnings` are green on `master`. |
-| P0-004 | `[-]` | CI runs on pull requests and `master`; green master execution and formatting-failure detection are proven, while an intentional test-failure probe is still pending. |
+| P0-004 | `[-]` | CI runs on pull requests and `master`; formatting failure was previously demonstrated, and a deliberately failing *ignored* Rust integration test is now verified as a failure signal by the live CI workflow ([exact-head CI 39920496143](https://github.com/ekkus93/blueroute/actions/runs/39920496143) passed at `0706756c`). Frontend-specific checks remain pending frontend introduction. |
 | P0-005 | `[x]` | Development documentation complete. |
 | P1-001..P1-007 | `[ ]` | **HARDWARE DEFERRED** for remaining characterization; preserve relevant prior hardware evidence, but do not claim these specific P1 criteria satisfied without linked results. Software can proceed. |
 | P1-008 | `[x]` | Capability-matrix format complete. |
@@ -222,6 +222,8 @@ The initial software/packaging baseline is Debian 13 with BlueZ, NetworkManager,
 
 - CI runs on pull requests and `master`.
 - Deliberate formatting/test failures are detected.
+
+**P0-004 deliberate Rust test-failure CI probe (software-only, 2026-10-23):** Added `crates/blueroute-protocol/tests/ci_failure_probe.rs`, with one ignored test that always panics when invoked directly, plus a dedicated CI step which runs **only** that test, asserts Cargo returns failure, and checks the expected named test actually reported `FAILED` and `1 failed` rather than accepting an arbitrary command error. Ordinary `cargo test --workspace --locked` skips the ignored fixture and stays green. Implementation `0706756c37826dff9692487ca08f138ba5b861a9`, [exact-head CI 39920496143](https://github.com/ekkus93/blueroute/actions/runs/39920496143) **passed**, including the expected-failure verification step. See [CI negative-probe evidence](P0-004-CI-NEGATIVE-TEST-EVIDENCE-2026-10-23.md). This qualifies the **Rust** failure-detection acceptance without deliberately breaking the required green `master` CI; frontend checks remain deferred until frontend code is present, so P0-004 stays IN PROGRESS.
 
 ## P0-005 — Add development documentation
 
