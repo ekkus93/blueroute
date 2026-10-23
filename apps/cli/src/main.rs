@@ -1441,8 +1441,7 @@ mod tests {
         let mut version_drift = snapshot.clone();
         version_drift.api_version = ApiVersion::new(1, 0);
         assert!(
-            verify_local_key(&status, &version_drift, Some(network), node, &digest, true)
-                .is_err(),
+            verify_local_key(&status, &version_drift, Some(network), node, &digest, true).is_err(),
             "cross-version status/diagnostics snapshots must not verify an identity"
         );
         let mut zero_network_status = status.clone();
