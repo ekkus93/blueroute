@@ -725,7 +725,7 @@ mod tests {
             assert!(Instant::now() < deadline);
             thread::sleep(Duration::from_millis(5));
         };
-        NetworkMembershipStore::new(path)
+        NetworkMembershipStore::new(path.clone())
             .save(&blueroute_core::MembershipRegistry::default())
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(4);
@@ -739,7 +739,16 @@ mod tests {
         let count = operations.binds.load(Ordering::SeqCst);
         thread::sleep(REBIND_INTERVAL + Duration::from_millis(300));
         assert_eq!(operations.binds.load(Ordering::SeqCst), count);
+        save_host_membership(&path);
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while operations.binds.load(Ordering::SeqCst) == count {
+            assert!(Instant::now() < deadline, "restored host must rebind");
+            thread::sleep(Duration::from_millis(10));
+        }
+        let replacement = operations.endpoint.lock().unwrap().unwrap();
+        assert!(std::net::TcpListener::bind(replacement).is_err());
         worker.shutdown().unwrap();
+        assert!(std::net::TcpListener::bind(replacement).is_ok());
     }
 
     #[test]
