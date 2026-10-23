@@ -5,6 +5,7 @@
 //! replay-checked Heartbeat/Goodbye under bounded per-peer read slices.
 //! This does not enable production JoinNetwork or prove Bluetooth radio behavior.
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -30,18 +31,56 @@ const HEARTBEAT_WRITE_BUDGET: Duration = Duration::from_millis(100);
 const GOODBYE_WRITE_BUDGET: Duration = Duration::from_millis(100);
 const ACTIVE_CLOCK_BASE_MS: u64 = 3;
 
-/// The caller must retain the handle for the daemon lifetime. No active NAP
-/// means no listener. A new host is discovered via a fresh guarded bind.
+/// A daemon-lifetime owner for the NAP control worker.
+///
+/// Drop requests cancellation and wakes the worker's idle park. Call
+/// `shutdown` to also wait for the worker to close all owned TLS sessions.
+/// An in-flight bounded handshake or backend observation may delay the join.
+pub struct DaemonControlWorker {
+    stop: Arc<AtomicBool>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl DaemonControlWorker {
+    fn request_stop(&self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(handle) = &self.handle {
+            handle.thread().unpark();
+        }
+    }
+
+    /// Request orderly teardown and wait for the worker thread to finish.
+    pub fn shutdown(mut self) -> thread::Result<()> {
+        self.request_stop();
+        self.handle.take().expect("worker handle").join()
+    }
+}
+
+impl Drop for DaemonControlWorker {
+    fn drop(&mut self) {
+        // Do not block an async daemon executor on thread shutdown in Drop.
+        self.request_stop();
+    }
+}
+
+/// Retain this owner for the daemon lifetime. No active NAP means no
+/// listener; a newly hosted NAP is discovered by a fresh guarded bind.
 pub fn spawn_daemon_control_worker(
     membership: NetworkMembershipStore,
     operations: Arc<dyn NetworkOperations>,
     trust: Arc<DurablePeerTrustOperations>,
     local: LocalControlTlsIdentity,
     capabilities: NodeCapabilities,
-) -> std::io::Result<JoinHandle<()>> {
-    thread::Builder::new()
+) -> std::io::Result<DaemonControlWorker> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let worker_stop = Arc::clone(&stop);
+    let handle = thread::Builder::new()
         .name("blueroute-control-tls".to_owned())
-        .spawn(move || run_worker(membership, operations, trust, local, capabilities))
+        .spawn(move || run_worker(membership, operations, trust, local, capabilities, worker_stop))?;
+    Ok(DaemonControlWorker {
+        stop,
+        handle: Some(handle),
+    })
 }
 
 fn control_setup(network: NetworkId, capabilities: NodeCapabilities) -> ApprovedControlSetup {
@@ -91,13 +130,14 @@ fn run_worker(
     trust: Arc<DurablePeerTrustOperations>,
     local: LocalControlTlsIdentity,
     capabilities: NodeCapabilities,
+    stop: Arc<AtomicBool>,
 ) {
     let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
     let mut listener: Option<ObservedControlListener> = None;
     let mut sessions: Vec<RegisteredControlSession<'_>> = Vec::new();
     let mut registered_at: BTreeMap<[u8; 16], Instant> = BTreeMap::new();
     let mut heartbeat_sent_at: BTreeMap<[u8; 16], Instant> = BTreeMap::new();
-    loop {
+    while !stop.load(Ordering::Acquire) {
         if listener.is_none() {
             sessions.clear();
             registered_at.clear();
@@ -108,7 +148,7 @@ fn run_worker(
                 Err(error) => eprintln!("BlueRoute NAP listener bind denied: {:?}", error.kind()),
             }
             if listener.is_none() {
-                thread::sleep(REBIND_INTERVAL);
+                thread::park_timeout(REBIND_INTERVAL);
                 continue;
             }
         }
@@ -125,8 +165,11 @@ fn run_worker(
             registered_at.clear();
             heartbeat_sent_at.clear();
             listener = None;
-            thread::sleep(REBIND_INTERVAL);
+            thread::park_timeout(REBIND_INTERVAL);
             continue;
+        }
+        if stop.load(Ordering::Acquire) {
+            break;
         }
         // Revocation may have removed a session during the fresh durability
         // recheck. Release its matching provisional lease as well.
@@ -147,6 +190,9 @@ fn run_worker(
         // allowing other peers and fresh NAP observations to make progress.
         // The ingress layer enforces the full idle deadline, replay and pins.
         sessions.retain_mut(|session| {
+            if stop.load(Ordering::Acquire) {
+                return false;
+            }
             let id = *session.session_id();
             let Some(admitted) = registered_at.get(&id).copied() else {
                 return false;
@@ -197,6 +243,9 @@ fn run_worker(
                 .any(|session| session.session_id() == session_id)
         });
 
+        if stop.load(Ordering::Acquire) {
+            break;
+        }
         if sessions.len() < MAX_OWNED_SESSIONS {
             // Never take a peer-provided network as the expected identity.
             // Listener admission rechecks this durable value on each gate.
@@ -226,13 +275,54 @@ fn run_worker(
                 listener = None;
             }
         }
-        thread::sleep(POLL_INTERVAL);
+        thread::park_timeout(POLL_INTERVAL);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shutdown_wakes_parked_worker_and_joins_without_waiting_for_poll_timeout() {
+        use std::sync::mpsc;
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&stop);
+        let (finished, completion) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            while !observed.load(Ordering::Acquire) {
+                thread::park_timeout(Duration::from_secs(60));
+            }
+            finished.send(()).unwrap();
+        });
+        let worker = DaemonControlWorker {
+            stop,
+            handle: Some(handle),
+        };
+        worker.shutdown().unwrap();
+        completion.recv_timeout(Duration::from_secs(1)).unwrap();
+    }
+
+    #[test]
+    fn drop_requests_cancellation_without_joining_daemon_executor() {
+        use std::sync::mpsc;
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&stop);
+        let (finished, completion) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            while !observed.load(Ordering::Acquire) {
+                thread::park_timeout(Duration::from_secs(60));
+            }
+            finished.send(()).unwrap();
+        });
+        drop(DaemonControlWorker {
+            stop,
+            handle: Some(handle),
+        });
+        completion.recv_timeout(Duration::from_secs(1)).unwrap();
+    }
 
     #[test]
     fn active_tls_clocks_are_per_generation_and_fail_closed_on_regression() {
