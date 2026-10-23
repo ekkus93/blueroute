@@ -139,7 +139,8 @@ fn run_worker(
             sessions
                 .iter()
                 .any(|session| session.session_id() == session_id)
-        });        // Validate durable NAP ownership before any authenticated peer I/O.
+        });
+        // Validate durable NAP ownership before any authenticated peer I/O.
         // A retired listener must close its sessions before the worker can
         // consume or emit a Heartbeat on an obsolete network interface.
         // Read each authenticated generation for at most one short slice,
