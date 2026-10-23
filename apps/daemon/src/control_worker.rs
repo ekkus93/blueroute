@@ -292,6 +292,81 @@ fn run_worker(
 mod tests {
     use super::*;
 
+    #[derive(Default)]
+    struct NoNapOperations {
+        bind_attempts: std::sync::atomic::AtomicUsize,
+    }
+
+    impl NetworkOperations for NoNapOperations {
+        fn bind_guarded_control_listener(
+            &self,
+        ) -> crate::NetworkOperationFuture<'_, Option<ObservedControlListener>> {
+            Box::pin(async move {
+                self.bind_attempts.fetch_add(1, Ordering::SeqCst);
+                Ok(None)
+            })
+        }
+
+        fn create_network(
+            &self,
+            _: blueroute_core::DisplayName,
+        ) -> crate::NetworkOperationFuture<'_, NetworkId> {
+            Box::pin(async { unreachable!("idle worker must not create networks") })
+        }
+
+        fn leave_network(&self) -> crate::NetworkOperationFuture<'_, ()> {
+            Box::pin(async { unreachable!("idle worker must not leave networks") })
+        }
+
+        fn list_networks(
+            &self,
+        ) -> crate::NetworkOperationFuture<'_, Vec<blueroute_protocol::NetworkSummary>> {
+            Box::pin(async { unreachable!("idle worker must not list networks") })
+        }
+
+        fn start_discovery(&self) -> crate::NetworkOperationFuture<'_, ()> {
+            Box::pin(async { unreachable!("idle worker must not discover peers") })
+        }
+
+        fn stop_discovery(&self) -> crate::NetworkOperationFuture<'_, ()> {
+            Box::pin(async { unreachable!("idle worker must not stop discovery") })
+        }
+    }
+
+    #[test]
+    fn running_worker_without_nap_stops_during_long_rebind_park() {
+        use blueroute_core::NodeId;
+
+        let path = std::env::temp_dir().join(format!(
+            "blueroute-control-idle-{}",
+            std::process::id()
+        ));
+        let operations = Arc::new(NoNapOperations::default());
+        let trust = Arc::new(DurablePeerTrustOperations::new(NetworkMembershipStore::new(
+            path.clone(),
+        )));
+        let local = LocalControlTlsIdentity::generate(NodeId::from_bytes([7; 16])).unwrap();
+        let worker = spawn_daemon_control_worker(
+            NetworkMembershipStore::new(path),
+            operations.clone(),
+            trust,
+            local,
+            NodeCapabilities::default(),
+        )
+        .unwrap();
+        let wait_until = Instant::now() + Duration::from_secs(2);
+        while operations.bind_attempts.load(Ordering::SeqCst) == 0 && Instant::now() < wait_until {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(operations.bind_attempts.load(Ordering::SeqCst) > 0);
+        let started = Instant::now();
+        worker.shutdown().unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "cancellation must wake the worker rather than waiting for its 2-second rebind park"
+        );
+    }
+
     #[test]
     fn shutdown_wakes_parked_worker_and_joins_without_waiting_for_poll_timeout() {
         use std::sync::mpsc;
