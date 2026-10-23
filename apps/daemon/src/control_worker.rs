@@ -347,6 +347,7 @@ mod tests {
     struct HostedNapOperations {
         endpoint: Mutex<Option<std::net::SocketAddrV4>>,
         ownership_lost: AtomicBool,
+        binds: std::sync::atomic::AtomicUsize,
     }
 
     impl NetworkOperations for HostedNapOperations {
@@ -362,6 +363,7 @@ mod tests {
                     unreachable!("test binds IPv4 only");
                 };
                 *self.endpoint.lock().unwrap() = Some(endpoint);
+                self.binds.fetch_add(1, Ordering::SeqCst);
                 Ok(Some(ObservedControlListener::new(
                     NetworkId::from_bytes([7; 16]),
                     endpoint,
@@ -522,9 +524,29 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         // A new guard query must not rebind when the NAP is no longer owned.
+        let observed_binds = operations.binds.load(Ordering::SeqCst);
         thread::sleep(Duration::from_millis(300));
+        assert_eq!(operations.binds.load(Ordering::SeqCst), observed_binds);
         assert!(std::net::TcpListener::bind(endpoint).is_ok());
+
+        // Recovered local ownership requires a fresh independent guarded bind,
+        // not revival of a retired listener or its old session generations.
+        operations.ownership_lost.store(false, Ordering::Release);
+        let recovery_deadline = Instant::now() + Duration::from_secs(4);
+        loop {
+            if operations.binds.load(Ordering::SeqCst) > observed_binds {
+                break;
+            }
+            assert!(
+                Instant::now() < recovery_deadline,
+                "restored NAP ownership must permit a new guarded listener"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        let recovered = operations.endpoint.lock().unwrap().unwrap();
+        assert!(std::net::TcpListener::bind(recovered).is_err());
         worker.shutdown().unwrap();
+        assert!(std::net::TcpListener::bind(recovered).is_ok());
     }
 
     #[test]
