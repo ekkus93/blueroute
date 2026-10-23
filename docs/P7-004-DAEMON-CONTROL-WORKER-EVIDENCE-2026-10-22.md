@@ -44,3 +44,11 @@ The daemon worker now polls each registered, mutually authenticated TLS session 
 ## Boundaries
 
 This evidence qualifies source and CI only. It is **not** proof that a physical NAP binds, another node completes an authenticated handshake, application traffic traverses Bluetooth, or daemon JoinNetwork is functional. Do not mark physical criteria complete.
+
+## Cancellation-aware daemon worker ownership (2026-10-22)
+
+The daemon now retains a `DaemonControlWorker` owner instead of a bare detached `JoinHandle`. Dropping it sets a release-ordered atomic stop request and unparks the dedicated TLS thread without synchronously blocking the D-Bus executor. An explicit `shutdown()` method requests stop and joins the worker. Both the 250 ms supervision interval and the 2-second rebind interval are interruptible parks; the loop checks cancellation before session I/O and new inbound TLS admission. When the loop exits, its registered session vector and owned listener are dropped, closing exact-generation sockets and releasing the listener. Two deterministic thread tests verify wakeable shutdown and nonjoining RAII drop.
+
+- Source: `89ca005cc73f02161703fb4d7b0385c95f207c77`; rustfmt correction: `5a2a9a2885cb55e9f111d569c7f8f40869f11ee2`.
+- [Exact-head CI 39877640079](https://github.com/ekkus93/blueroute/actions/runs/39877640079) **passed** (formatting, locked Rust checks, Clippy, tests and integration gates).
+- Limitation: already-running TLS handshake or backend observation may delay cancellation; no real daemon restart, PAN detach, physical radio or production JoinNetwork acceptance is claimed.
