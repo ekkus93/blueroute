@@ -467,6 +467,9 @@ fn format_local_key(
     let node = local_node
         .filter(|node| *node != NodeId::from_bytes([0; 16]))
         .ok_or("daemon has no valid local NodeId")?;
+    if network == Some(NetworkId::from_bytes([0; 16])) {
+        return Err("daemon supplied an invalid zero NetworkId");
+    }
     let fingerprint = SpkiSha256::parse_canonical_hex(
         fingerprint.ok_or("daemon has no local TLS public-key fingerprint")?,
     )
@@ -508,6 +511,8 @@ fn verify_local_key(
     // is checked against BOTH daemon observations, never an advertisement.
     if node == NodeId::from_bytes([0; 16])
         || status.local_node != Some(node)
+        || status.api_version != snapshot.api_version
+        || status.current_network == Some(NetworkId::from_bytes([0; 16]))
         || status.current_network != snapshot.current_network
         || network.is_some_and(|expected| {
             expected == NetworkId::from_bytes([0; 16]) || status.current_network != Some(expected)
@@ -743,8 +748,10 @@ fn run(args: &[String]) -> i32 {
                     .map_err(CliFailure::from)
                     .and_then(|response| match response {
                         Response::Diagnostics(snapshot) => {
-                            if status.current_network != snapshot.current_network {
-                                Err("daemon network changed during local-key inspection".into())
+                            if status.api_version != snapshot.api_version
+                                || status.current_network != snapshot.current_network
+                            {
+                                Err("daemon status and diagnostics changed during local-key inspection".into())
                             } else {
                                 format_local_key(
                                     status.local_node,
@@ -1322,6 +1329,16 @@ mod tests {
             )
             .is_err()
         );
+        assert!(
+            format_local_key(
+                Some(node),
+                Some(NetworkId::from_bytes([0; 16])),
+                Some(&digest),
+                true,
+            )
+            .is_err(),
+            "a malformed daemon network must not be displayed as an approved identity"
+        );
         assert!(format_local_key(Some(node), Some(network), None, true).is_err());
         assert!(format_local_key(Some(node), Some(network), Some(&"00".repeat(32)), true).is_err());
         assert!(format_local_key(Some(node), Some(network), Some(&"AB".repeat(32)), true).is_err());
@@ -1420,6 +1437,29 @@ mod tests {
                 true
             )
             .is_err()
+        );
+        let mut version_drift = snapshot.clone();
+        version_drift.api_version = ApiVersion::new(1, 0);
+        assert!(
+            verify_local_key(&status, &version_drift, Some(network), node, &digest, true)
+                .is_err(),
+            "cross-version status/diagnostics snapshots must not verify an identity"
+        );
+        let mut zero_network_status = status.clone();
+        zero_network_status.current_network = Some(NetworkId::from_bytes([0; 16]));
+        let mut zero_network_snapshot = snapshot.clone();
+        zero_network_snapshot.current_network = zero_network_status.current_network;
+        assert!(
+            verify_local_key(
+                &zero_network_status,
+                &zero_network_snapshot,
+                None,
+                node,
+                &digest,
+                true,
+            )
+            .is_err(),
+            "even without --network, an invalid local network must fail closed"
         );
         let mut bad_key = snapshot.clone();
         bad_key.local_control_tls_spki_sha256 = None;
