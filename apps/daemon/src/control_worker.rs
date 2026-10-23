@@ -465,6 +465,75 @@ mod tests {
     }
 
     #[test]
+    fn running_worker_rejects_unenrolled_tcp_without_changing_membership() {
+        use std::io::Read;
+        use blueroute_core::{
+            DisplayName, MembershipRegistry, MembershipState, NetworkMembership, NodeId,
+        };
+
+        let path = std::env::temp_dir().join(format!(
+            "blueroute-control-unauthorized-{}",
+            std::process::id()
+        ));
+        let store = NetworkMembershipStore::new(path.clone());
+        let network = NetworkId::from_bytes([7; 16]);
+        let mut membership =
+            NetworkMembership::new(network, DisplayName::new("Test host").unwrap());
+        membership.state = MembershipState::Member;
+        let mut registry = MembershipRegistry::default();
+        registry.remember_network(membership);
+        store.save(&registry).unwrap();
+
+        let verify = NetworkMembershipStore::new(path.clone());
+        let operations = Arc::new(HostedNapOperations::default());
+        // No durable enrolled key store: an incoming TCP source is not a peer.
+        let trust = Arc::new(DurablePeerTrustOperations::new(
+            NetworkMembershipStore::new(path),
+        ));
+        let local = LocalControlTlsIdentity::generate(NodeId::from_bytes([8; 16])).unwrap();
+        let worker = spawn_daemon_control_worker(
+            store,
+            operations.clone(),
+            trust,
+            local,
+            NodeCapabilities::default(),
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let endpoint = loop {
+            if let Some(endpoint) = *operations.endpoint.lock().unwrap() {
+                break endpoint;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "worker did not start NAP listener"
+            );
+            thread::sleep(Duration::from_millis(5));
+        };
+
+        let mut untrusted = std::net::TcpStream::connect(endpoint).unwrap();
+        untrusted
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut byte = [0_u8; 1];
+        assert_eq!(
+            untrusted.read(&mut byte).unwrap(),
+            0,
+            "non-enrolled TCP source must be rejected without a TLS session"
+        );
+        assert_eq!(
+            current_network(&verify.load().unwrap()).unwrap(),
+            Some(network)
+        );
+        assert!(
+            std::net::TcpListener::bind(endpoint).is_err(),
+            "denying one peer must preserve the owned NAP listener"
+        );
+        worker.shutdown().unwrap();
+        assert!(std::net::TcpListener::bind(endpoint).is_ok());
+    }
+
+    #[test]
     fn live_listener_retires_when_guarded_nap_ownership_disappears() {
         use blueroute_core::{
             DisplayName, MembershipRegistry, MembershipState, NetworkMembership, NodeId,
