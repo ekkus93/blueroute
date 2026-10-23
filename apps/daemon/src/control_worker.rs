@@ -337,14 +337,12 @@ mod tests {
     fn running_worker_without_nap_stops_during_long_rebind_park() {
         use blueroute_core::NodeId;
 
-        let path = std::env::temp_dir().join(format!(
-            "blueroute-control-idle-{}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("blueroute-control-idle-{}", std::process::id()));
         let operations = Arc::new(NoNapOperations::default());
-        let trust = Arc::new(DurablePeerTrustOperations::new(NetworkMembershipStore::new(
-            path.clone(),
-        )));
+        let trust = Arc::new(DurablePeerTrustOperations::new(
+            NetworkMembershipStore::new(path.clone()),
+        ));
         let local = LocalControlTlsIdentity::generate(NodeId::from_bytes([7; 16])).unwrap();
         let worker = spawn_daemon_control_worker(
             NetworkMembershipStore::new(path),
