@@ -52,3 +52,10 @@ The daemon now retains a `DaemonControlWorker` owner instead of a bare detached 
 - Source: `89ca005cc73f02161703fb4d7b0385c95f207c77`; rustfmt correction: `5a2a9a2885cb55e9f111d569c7f8f40869f11ee2`.
 - [Exact-head CI 39877640079](https://github.com/ekkus93/blueroute/actions/runs/39877640079) **passed** (formatting, locked Rust checks, Clippy, tests and integration gates).
 - Limitation: already-running TLS handshake or backend observation may delay cancellation; no real daemon restart, PAN detach, physical radio or production JoinNetwork acceptance is claimed.
+
+## Actual idle worker lifecycle regression (2026-10-22)
+
+A fake `NetworkOperations` implementation returns no active NAP while counting real guarded bind attempts. The test starts `spawn_daemon_control_worker` with a generated local TLS identity and durable trust service, waits until the actual worker has entered its no-NAP rebind path, and asserts `shutdown()` wakes and joins within one second rather than waiting the two-second rebind interval. This qualifies actual thread cancellation in the idle/no-NAP path, not a running system-D-Bus daemon, active mutual-TLS teardown or a physical PAN.
+
+- Test source `83057c125d6a8360389ea782a7bf7fec3a26da70`; formatting correction `b23136286aaf42175f16233ee93ee21251871e81`.
+- [Exact-head CI 39878309790](https://github.com/ekkus93/blueroute/actions/runs/39878309790) **passed**.
