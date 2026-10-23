@@ -98,6 +98,50 @@ fn run_worker(
     let mut registered_at: BTreeMap<[u8; 16], Instant> = BTreeMap::new();
     let mut heartbeat_sent_at: BTreeMap<[u8; 16], Instant> = BTreeMap::new();
     loop {
+        if listener.is_none() {
+            sessions.clear();
+            registered_at.clear();
+            heartbeat_sent_at.clear();
+            match future::block_on(operations.bind_guarded_control_listener()) {
+                Ok(Some(bound)) => listener = Some(bound),
+                Ok(None) => {}
+                Err(error) => eprintln!("BlueRoute NAP listener bind denied: {:?}", error.kind()),
+            }
+            if listener.is_none() {
+                thread::sleep(REBIND_INTERVAL);
+                continue;
+            }
+        }
+        let owner = listener.as_mut().expect("checked bound listener");
+        if let Err(error) =
+            future::block_on(owner.supervise_registered_from_durable_network_operations(
+                &mut sessions,
+                &membership,
+                operations.as_ref(),
+            ))
+        {
+            eprintln!("BlueRoute NAP listener retired: {:?}", error.kind());
+            sessions.clear();
+            registered_at.clear();
+            heartbeat_sent_at.clear();
+            listener = None;
+            thread::sleep(REBIND_INTERVAL);
+            continue;
+        }
+        // Revocation may have removed a session during the fresh durability
+        // recheck. Release its matching provisional lease as well.
+        registered_at.retain(|session_id, _| {
+            sessions
+                .iter()
+                .any(|session| session.session_id() == session_id)
+        });
+        heartbeat_sent_at.retain(|session_id, _| {
+            sessions
+                .iter()
+                .any(|session| session.session_id() == session_id)
+        });        // Validate durable NAP ownership before any authenticated peer I/O.
+        // A retired listener must close its sessions before the worker can
+        // consume or emit a Heartbeat on an obsolete network interface.
         // Read each authenticated generation for at most one short slice,
         // allowing other peers and fresh NAP observations to make progress.
         // The ingress layer enforces the full idle deadline, replay and pins.
@@ -151,48 +195,7 @@ fn run_worker(
                 .iter()
                 .any(|session| session.session_id() == session_id)
         });
-        if listener.is_none() {
-            sessions.clear();
-            registered_at.clear();
-            heartbeat_sent_at.clear();
-            match future::block_on(operations.bind_guarded_control_listener()) {
-                Ok(Some(bound)) => listener = Some(bound),
-                Ok(None) => {}
-                Err(error) => eprintln!("BlueRoute NAP listener bind denied: {:?}", error.kind()),
-            }
-            if listener.is_none() {
-                thread::sleep(REBIND_INTERVAL);
-                continue;
-            }
-        }
-        let owner = listener.as_mut().expect("checked bound listener");
-        if let Err(error) =
-            future::block_on(owner.supervise_registered_from_durable_network_operations(
-                &mut sessions,
-                &membership,
-                operations.as_ref(),
-            ))
-        {
-            eprintln!("BlueRoute NAP listener retired: {:?}", error.kind());
-            sessions.clear();
-            registered_at.clear();
-            heartbeat_sent_at.clear();
-            listener = None;
-            thread::sleep(REBIND_INTERVAL);
-            continue;
-        }
-        // Revocation may have removed a session during the fresh durability
-        // recheck. Release its matching provisional lease as well.
-        registered_at.retain(|session_id, _| {
-            sessions
-                .iter()
-                .any(|session| session.session_id() == session_id)
-        });
-        heartbeat_sent_at.retain(|session_id, _| {
-            sessions
-                .iter()
-                .any(|session| session.session_id() == session_id)
-        });
+
         if sessions.len() < MAX_OWNED_SESSIONS {
             // Never take a peer-provided network as the expected identity.
             // Listener admission rechecks this durable value on each gate.
