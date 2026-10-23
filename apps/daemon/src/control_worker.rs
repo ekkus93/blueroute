@@ -341,6 +341,111 @@ mod tests {
         }
     }
 
+    /// A real loopback socket models an already-owned NAP listener. It is
+    /// never evidence of Bluetooth transport or peer enrollment.
+    #[derive(Default)]
+    struct HostedNapOperations {
+        endpoint: Mutex<Option<std::net::SocketAddrV4>>,
+    }
+
+    impl NetworkOperations for HostedNapOperations {
+        fn bind_guarded_control_listener(
+            &self,
+        ) -> crate::NetworkOperationFuture<'_, Option<ObservedControlListener>> {
+            Box::pin(async move {
+                let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+                let std::net::SocketAddr::V4(endpoint) = listener.local_addr().unwrap() else {
+                    unreachable!("test binds IPv4 only");
+                };
+                *self.endpoint.lock().unwrap() = Some(endpoint);
+                Ok(Some(ObservedControlListener::new(
+                    NetworkId::from_bytes([7; 16]),
+                    endpoint,
+                    listener,
+                )?))
+            })
+        }
+
+        fn observed_owned_control_endpoint(
+            &self,
+        ) -> crate::NetworkOperationFuture<'_, Option<std::net::SocketAddrV4>> {
+            Box::pin(async move { Ok(*self.endpoint.lock().unwrap()) })
+        }
+
+        fn create_network(
+            &self,
+            _: blueroute_core::DisplayName,
+        ) -> crate::NetworkOperationFuture<'_, NetworkId> {
+            Box::pin(async { unreachable!("worker must not create networks") })
+        }
+
+        fn leave_network(&self) -> crate::NetworkOperationFuture<'_, ()> {
+            Box::pin(async { unreachable!("worker must not leave networks") })
+        }
+
+        fn list_networks(
+            &self,
+        ) -> crate::NetworkOperationFuture<'_, Vec<blueroute_protocol::NetworkSummary>> {
+            Box::pin(async { unreachable!("worker must not list networks") })
+        }
+
+        fn start_discovery(&self) -> crate::NetworkOperationFuture<'_, ()> {
+            Box::pin(async { unreachable!("worker must not discover peers") })
+        }
+
+        fn stop_discovery(&self) -> crate::NetworkOperationFuture<'_, ()> {
+            Box::pin(async { unreachable!("worker must not stop discovery") })
+        }
+    }
+
+    #[test]
+    fn shutdown_releases_actual_guarded_listener_socket() {
+        use blueroute_core::{DisplayName, MembershipRegistry, MembershipState, NetworkMembership, NodeId};
+
+        let path = std::env::temp_dir().join(format!(
+            "blueroute-control-hosted-{}",
+            std::process::id()
+        ));
+        let store = NetworkMembershipStore::new(path.clone());
+        let network = NetworkId::from_bytes([7; 16]);
+        let mut membership = NetworkMembership::new(network, DisplayName::new("Test host").unwrap());
+        membership.state = MembershipState::Member;
+        let mut registry = MembershipRegistry::default();
+        registry.remember_network(membership);
+        store.save(&registry).unwrap();
+
+        let operations = Arc::new(HostedNapOperations::default());
+        let trust = Arc::new(DurablePeerTrustOperations::new(NetworkMembershipStore::new(path)));
+        let local = LocalControlTlsIdentity::generate(NodeId::from_bytes([8; 16])).unwrap();
+        let worker = spawn_daemon_control_worker(
+            store,
+            operations.clone(),
+            trust,
+            local,
+            NodeCapabilities::default(),
+        )
+        .unwrap();
+        let wait_until = Instant::now() + Duration::from_secs(2);
+        let endpoint = loop {
+            if let Some(endpoint) = *operations.endpoint.lock().unwrap() {
+                break endpoint;
+            }
+            assert!(Instant::now() < wait_until, "worker did not bind a test listener");
+            thread::sleep(Duration::from_millis(5));
+        };
+        assert!(
+            std::net::TcpListener::bind(endpoint).is_err(),
+            "worker must retain its active guarded listener"
+        );
+        let started = Instant::now();
+        worker.shutdown().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(
+            std::net::TcpListener::bind(endpoint).is_ok(),
+            "shutdown must release the real listening socket"
+        );
+    }
+
     #[test]
     fn running_worker_without_nap_stops_during_long_rebind_park() {
         use blueroute_core::NodeId;
