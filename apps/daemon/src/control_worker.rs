@@ -172,7 +172,14 @@ fn run_worker(
             if stop.load(Ordering::Acquire) {
                 break;
             }
-            match future::block_on(operations.bind_guarded_control_listener()) {
+            let bound = future::block_on(operations.bind_guarded_control_listener());
+            // Shutdown can race an awaited backend bind. Its newly owned TCP
+            // listener must be dropped without further membership observations
+            // or session admission once cancellation was requested.
+            if stop.load(Ordering::Acquire) {
+                break;
+            }
+            match bound {
                 Ok(Some(bound)) => {
                     // A durable leave or network switch can race the backend
                     // bind. Drop the newly bound TCP socket before handing it
@@ -399,6 +406,8 @@ mod tests {
         endpoint: Mutex<Option<std::net::SocketAddrV4>>,
         ownership_lost: AtomicBool,
         binds: std::sync::atomic::AtomicUsize,
+        observed_endpoints: std::sync::atomic::AtomicUsize,
+        bind_gate: Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>>,
     }
 
     impl NetworkOperations for HostedNapOperations {
@@ -415,6 +424,10 @@ mod tests {
                 };
                 *self.endpoint.lock().unwrap() = Some(endpoint);
                 self.binds.fetch_add(1, Ordering::SeqCst);
+                if let Some((entered, release)) = self.bind_gate.lock().unwrap().take() {
+                    entered.send(()).unwrap();
+                    release.recv_timeout(Duration::from_secs(5)).unwrap();
+                }
                 Ok(Some(ObservedControlListener::new(
                     NetworkId::from_bytes([7; 16]),
                     endpoint,
@@ -427,6 +440,7 @@ mod tests {
             &self,
         ) -> crate::NetworkOperationFuture<'_, Option<std::net::SocketAddrV4>> {
             Box::pin(async move {
+                self.observed_endpoints.fetch_add(1, Ordering::SeqCst);
                 if self.ownership_lost.load(Ordering::Acquire) {
                     Ok(None)
                 } else {
@@ -765,6 +779,55 @@ mod tests {
         assert!(std::net::TcpListener::bind(replacement).is_err());
         worker.shutdown().unwrap();
         assert!(std::net::TcpListener::bind(replacement).is_ok());
+    }
+
+    #[test]
+    fn cancellation_during_nap_bind_closes_socket_before_any_observation() {
+        use blueroute_core::NodeId;
+        use std::sync::mpsc;
+
+        let path = std::env::temp_dir().join(format!(
+            "blueroute-worker-cancel-during-bind-{}",
+            std::process::id()
+        ));
+        save_host_membership(&path);
+        let operations = Arc::new(HostedNapOperations::default());
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        *operations.bind_gate.lock().unwrap() = Some((entered_tx, release_rx));
+        let trust = Arc::new(DurablePeerTrustOperations::new(
+            NetworkMembershipStore::new(path.clone()),
+        ));
+        let local = LocalControlTlsIdentity::generate(NodeId::from_bytes([8; 16])).unwrap();
+        let worker = spawn_daemon_control_worker(
+            NetworkMembershipStore::new(path),
+            operations.clone(),
+            trust,
+            local,
+            NodeCapabilities::default(),
+        )
+        .unwrap();
+
+        // The fake backend owns a real listening socket while its bind
+        // future is paused. A cancellation request here is deterministic,
+        // not a test of thread scheduling or radio behavior.
+        entered_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        let endpoint = operations.endpoint.lock().unwrap().unwrap();
+        assert!(std::net::TcpListener::bind(endpoint).is_err());
+        worker.request_stop();
+        release_tx.send(()).unwrap();
+        worker.shutdown().unwrap();
+
+        assert_eq!(operations.binds.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            operations.observed_endpoints.load(Ordering::SeqCst),
+            0,
+            "cancelled bind must not proceed to guarded NAP observation"
+        );
+        assert!(
+            std::net::TcpListener::bind(endpoint).is_ok(),
+            "cancellation must release a TCP listener returned by the backend"
+        );
     }
 
     #[test]
