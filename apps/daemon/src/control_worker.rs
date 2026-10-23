@@ -400,22 +400,25 @@ mod tests {
 
     #[test]
     fn shutdown_releases_actual_guarded_listener_socket() {
-        use blueroute_core::{DisplayName, MembershipRegistry, MembershipState, NetworkMembership, NodeId};
+        use blueroute_core::{
+            DisplayName, MembershipRegistry, MembershipState, NetworkMembership, NodeId,
+        };
 
-        let path = std::env::temp_dir().join(format!(
-            "blueroute-control-hosted-{}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("blueroute-control-hosted-{}", std::process::id()));
         let store = NetworkMembershipStore::new(path.clone());
         let network = NetworkId::from_bytes([7; 16]);
-        let mut membership = NetworkMembership::new(network, DisplayName::new("Test host").unwrap());
+        let mut membership =
+            NetworkMembership::new(network, DisplayName::new("Test host").unwrap());
         membership.state = MembershipState::Member;
         let mut registry = MembershipRegistry::default();
         registry.remember_network(membership);
         store.save(&registry).unwrap();
 
         let operations = Arc::new(HostedNapOperations::default());
-        let trust = Arc::new(DurablePeerTrustOperations::new(NetworkMembershipStore::new(path)));
+        let trust = Arc::new(DurablePeerTrustOperations::new(
+            NetworkMembershipStore::new(path),
+        ));
         let local = LocalControlTlsIdentity::generate(NodeId::from_bytes([8; 16])).unwrap();
         let worker = spawn_daemon_control_worker(
             store,
@@ -430,7 +433,10 @@ mod tests {
             if let Some(endpoint) = *operations.endpoint.lock().unwrap() {
                 break endpoint;
             }
-            assert!(Instant::now() < wait_until, "worker did not bind a test listener");
+            assert!(
+                Instant::now() < wait_until,
+                "worker did not bind a test listener"
+            );
             thread::sleep(Duration::from_millis(5));
         };
         assert!(
