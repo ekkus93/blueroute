@@ -295,6 +295,7 @@ mod tests {
     #[derive(Default)]
     struct NoNapOperations {
         bind_attempts: std::sync::atomic::AtomicUsize,
+        fail_bind: AtomicBool,
     }
 
     impl NetworkOperations for NoNapOperations {
@@ -303,7 +304,14 @@ mod tests {
         ) -> crate::NetworkOperationFuture<'_, Option<ObservedControlListener>> {
             Box::pin(async move {
                 self.bind_attempts.fetch_add(1, Ordering::SeqCst);
-                Ok(None)
+                if self.fail_bind.load(Ordering::SeqCst) {
+                    Err(blueroute_core::CoreError::new(
+                        blueroute_core::ErrorKind::InvalidState,
+                        "simulated transient NAP bind failure",
+                    ))
+                } else {
+                    Ok(None)
+                }
             })
         }
 
@@ -362,6 +370,57 @@ mod tests {
         assert!(
             started.elapsed() < Duration::from_secs(1),
             "cancellation must wake the worker rather than waiting for its 2-second rebind park"
+        );
+    }
+
+    #[test]
+    fn worker_retries_transient_bind_failure_and_shutdown_wakes_rebind_park() {
+        use blueroute_core::NodeId;
+
+        let path = std::env::temp_dir().join(format!(
+            "blueroute-control-bind-error-{}",
+            std::process::id()
+        ));
+        let operations = Arc::new(NoNapOperations::default());
+        operations.fail_bind.store(true, Ordering::SeqCst);
+        let trust = Arc::new(DurablePeerTrustOperations::new(
+            NetworkMembershipStore::new(path.clone()),
+        ));
+        let local = LocalControlTlsIdentity::generate(NodeId::from_bytes([8; 16])).unwrap();
+        let worker = spawn_daemon_control_worker(
+            NetworkMembershipStore::new(path),
+            operations.clone(),
+            trust,
+            local,
+            NodeCapabilities::default(),
+        )
+        .unwrap();
+
+        let first_attempt = Instant::now() + Duration::from_secs(2);
+        while operations.bind_attempts.load(Ordering::SeqCst) == 0
+            && Instant::now() < first_attempt
+        {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(operations.bind_attempts.load(Ordering::SeqCst) > 0);
+        // The initial error must not permanently poison the worker. A fresh
+        // observation after the bounded rebind delay can return no NAP.
+        operations.fail_bind.store(false, Ordering::SeqCst);
+        let retry_deadline = Instant::now() + Duration::from_secs(4);
+        while operations.bind_attempts.load(Ordering::SeqCst) < 2
+            && Instant::now() < retry_deadline
+        {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            operations.bind_attempts.load(Ordering::SeqCst) >= 2,
+            "a transient bind error must not disable later guarded observations"
+        );
+        let started = Instant::now();
+        worker.shutdown().unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "shutdown must interrupt the rebind park after recovery"
         );
     }
 
