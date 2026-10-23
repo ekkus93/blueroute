@@ -56,9 +56,7 @@ impl NetworkOperations for StaleNap {
         })
     }
 
-    fn observed_owned_control_endpoint(
-        &self,
-    ) -> NetworkOperationFuture<'_, Option<SocketAddrV4>> {
+    fn observed_owned_control_endpoint(&self) -> NetworkOperationFuture<'_, Option<SocketAddrV4>> {
         Box::pin(async move { Ok(*self.endpoint.lock().unwrap()) })
     }
 
