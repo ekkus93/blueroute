@@ -700,7 +700,8 @@ mod tests {
     fn durable_leave_retires_stale_nap_listener() {
         use blueroute_core::NodeId;
         let path = std::env::temp_dir().join(format!(
-            "blueroute-control-durable-leave-{}", std::process::id()
+            "blueroute-control-durable-leave-{}",
+            std::process::id()
         ));
         save_host_membership(&path);
         let operations = Arc::new(HostedNapOperations::default());
@@ -709,9 +710,13 @@ mod tests {
         ));
         let local = LocalControlTlsIdentity::generate(NodeId::from_bytes([8; 16])).unwrap();
         let worker = spawn_daemon_control_worker(
-            NetworkMembershipStore::new(path.clone()), operations.clone(), trust,
-            local, NodeCapabilities::default(),
-        ).unwrap();
+            NetworkMembershipStore::new(path.clone()),
+            operations.clone(),
+            trust,
+            local,
+            NodeCapabilities::default(),
+        )
+        .unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);
         let endpoint = loop {
             if let Some(endpoint) = *operations.endpoint.lock().unwrap() {
@@ -720,12 +725,15 @@ mod tests {
             assert!(Instant::now() < deadline);
             thread::sleep(Duration::from_millis(5));
         };
-        NetworkMembershipStore::new(path).save(
-            &blueroute_core::MembershipRegistry::default()
-        ).unwrap();
+        NetworkMembershipStore::new(path)
+            .save(&blueroute_core::MembershipRegistry::default())
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(4);
         while std::net::TcpListener::bind(endpoint).is_err() {
-            assert!(Instant::now() < deadline, "durable leave must close listener");
+            assert!(
+                Instant::now() < deadline,
+                "durable leave must close listener"
+            );
             thread::sleep(Duration::from_millis(10));
         }
         let count = operations.binds.load(Ordering::SeqCst);
