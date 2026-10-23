@@ -59,3 +59,11 @@ A fake `NetworkOperations` implementation returns no active NAP while counting r
 
 - Test source `83057c125d6a8360389ea782a7bf7fec3a26da70`; formatting correction `b23136286aaf42175f16233ee93ee21251871e81`.
 - [Exact-head CI 39878309790](https://github.com/ekkus93/blueroute/actions/runs/39878309790) **passed**.
+
+## Transient guarded-bind failure and recovery (software-only, 2026-10-22)
+
+A real `DaemonControlWorker` fault-injection regression makes its fake NAP backend reject the first guarded listener bind, then removes the injected error. The worker must retry the guarded bind after its bounded rebind interval, return to the no-NAP state without manufacturing a listener, and respond to explicit shutdown within one second rather than waiting for another two-second park. This exercises the actual worker thread and error-recovery path, not just an isolated cancellation helper.
+
+- Source regression: `7b4361f0aad4547133a754aca2e07a4cd0726fd9`; rustfmt correction: `0b0628bcd82b5a6bd72e64dbba765cb2ce8eff6d`.
+- [Exact-head CI 39882693630](https://github.com/ekkus93/blueroute/actions/runs/39882693630) **passed** formatting, locked workspace compilation, Clippy and tests. An intermediate formatting-only failure at CI 39882582646 was corrected before qualification.
+- Still open: active authenticated multi-peer daemon lifecycle, revocation and reconnect fault injection, independent enrollment UX, PANU/production JoinNetwork, and physical Bluetooth acceptance. P7-004 remains **IN PROGRESS** and physical acceptance **DEFERRED**.
