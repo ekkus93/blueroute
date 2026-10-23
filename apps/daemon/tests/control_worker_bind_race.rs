@@ -21,10 +21,7 @@ use blueroute_linux::NetworkMembershipStore;
 use blueroute_protocol::NetworkSummary;
 
 fn save_host(path: &Path, network: NetworkId) {
-    let mut host = NetworkMembership::new(
-        network,
-        DisplayName::new("Bind race test").unwrap(),
-    );
+    let mut host = NetworkMembership::new(network, DisplayName::new("Bind race test").unwrap());
     host.state = MembershipState::Member;
     let mut registry = MembershipRegistry::default();
     registry.remember_network(host);

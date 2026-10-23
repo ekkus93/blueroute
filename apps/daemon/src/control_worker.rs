@@ -181,7 +181,9 @@ fn run_worker(
                     // supervision tick also checks the observed NAP endpoint.
                     match membership.load().and_then(|saved| current_network(&saved)) {
                         Ok(Some(network)) if network == bound.network() => listener = Some(bound),
-                        Ok(_) => eprintln!("BlueRoute NAP listener bind raced durable network change"),
+                        Ok(_) => {
+                            eprintln!("BlueRoute NAP listener bind raced durable network change")
+                        }
                         Err(error) => eprintln!(
                             "BlueRoute NAP listener post-bind membership denied: {:?}",
                             error.kind()
