@@ -173,7 +173,21 @@ fn run_worker(
                 break;
             }
             match future::block_on(operations.bind_guarded_control_listener()) {
-                Ok(Some(bound)) => listener = Some(bound),
+                Ok(Some(bound)) => {
+                    // A durable leave or network switch can race the backend
+                    // bind. Drop the newly bound TCP socket before handing it
+                    // to the supervisor unless its local network still agrees
+                    // with a *fresh* durable membership read. The subsequent
+                    // supervision tick also checks the observed NAP endpoint.
+                    match membership.load().and_then(|saved| current_network(&saved)) {
+                        Ok(Some(network)) if network == bound.network() => listener = Some(bound),
+                        Ok(_) => eprintln!("BlueRoute NAP listener bind raced durable network change"),
+                        Err(error) => eprintln!(
+                            "BlueRoute NAP listener post-bind membership denied: {:?}",
+                            error.kind()
+                        ),
+                    }
+                }
                 Ok(None) => {}
                 Err(error) => eprintln!("BlueRoute NAP listener bind denied: {:?}", error.kind()),
             }
