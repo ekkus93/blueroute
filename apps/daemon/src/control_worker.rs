@@ -76,7 +76,16 @@ pub fn spawn_daemon_control_worker(
     let worker_stop = Arc::clone(&stop);
     let handle = thread::Builder::new()
         .name("blueroute-control-tls".to_owned())
-        .spawn(move || run_worker(membership, operations, trust, local, capabilities, worker_stop))?;
+        .spawn(move || {
+            run_worker(
+                membership,
+                operations,
+                trust,
+                local,
+                capabilities,
+                worker_stop,
+            )
+        })?;
     Ok(DaemonControlWorker {
         stop,
         handle: Some(handle),
