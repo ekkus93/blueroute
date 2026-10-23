@@ -81,8 +81,12 @@ enum PeerCommand {
         #[arg(long)]
         network: Option<String>,
     },
-    Trust { node: String },
-    Forget { node: String },
+    Trust {
+        node: String,
+    },
+    Forget {
+        node: String,
+    },
 }
 #[derive(Debug, Subcommand)]
 enum DiscoverCommand {
@@ -94,26 +98,60 @@ enum DiscoverCommand {
 enum Operation {
     Help,
     Version,
-    Status { json: bool },
-    Capabilities { json: bool },
-    Diagnostics { json: bool, summary: bool },
-    LocalKey { json: bool },
+    Status {
+        json: bool,
+    },
+    Capabilities {
+        json: bool,
+    },
+    Diagnostics {
+        json: bool,
+        summary: bool,
+    },
+    LocalKey {
+        json: bool,
+    },
     VerifyLocalKey {
         network: Option<NetworkId>,
         node: NodeId,
         fingerprint: String,
         json: bool,
     },
-    NetworkList { json: bool },
-    NodeList { json: bool },
-    NodeShow { node: NodeId, json: bool },
-    TrustPeer { node: NodeId, json: bool },
-    ForgetPeer { node: NodeId, json: bool },
-    CreateNetwork { name: DisplayName, json: bool },
-    JoinNetwork { network: NetworkId, json: bool },
-    LeaveNetwork { json: bool },
-    StartDiscovery { json: bool },
-    StopDiscovery { json: bool },
+    NetworkList {
+        json: bool,
+    },
+    NodeList {
+        json: bool,
+    },
+    NodeShow {
+        node: NodeId,
+        json: bool,
+    },
+    TrustPeer {
+        node: NodeId,
+        json: bool,
+    },
+    ForgetPeer {
+        node: NodeId,
+        json: bool,
+    },
+    CreateNetwork {
+        name: DisplayName,
+        json: bool,
+    },
+    JoinNetwork {
+        network: NetworkId,
+        json: bool,
+    },
+    LeaveNetwork {
+        json: bool,
+    },
+    StartDiscovery {
+        json: bool,
+    },
+    StopDiscovery {
+        json: bool,
+    },
 }
 
 // Reject the all-zero sentinel before sending node-directed mutations to D-Bus.
@@ -192,11 +230,12 @@ fn parse(args: &[String]) -> Result<Operation, String> {
             command: PeerCommand::LocalKey,
         }) => Operation::LocalKey { json },
         Some(CliCommand::Peer {
-            command: PeerCommand::VerifyLocalKey {
-                network,
-                node,
-                fingerprint,
-            },
+            command:
+                PeerCommand::VerifyLocalKey {
+                    network,
+                    node,
+                    fingerprint,
+                },
         }) => Operation::VerifyLocalKey {
             network: network
                 .as_deref()
@@ -471,8 +510,7 @@ fn verify_local_key(
         || status.local_node != Some(node)
         || status.current_network != snapshot.current_network
         || network.is_some_and(|expected| {
-            expected == NetworkId::from_bytes([0; 16])
-                || status.current_network != Some(expected)
+            expected == NetworkId::from_bytes([0; 16]) || status.current_network != Some(expected)
         })
     {
         return Err("independently supplied identity tuple does not match this daemon");
@@ -716,7 +754,7 @@ fn run(args: &[String]) -> i32 {
                                 )
                                 .map_err(CliFailure::from)
                             }
-                        },
+                        }
                         _ => Err("daemon returned an unexpected local-key response".into()),
                     })
             }),
@@ -731,15 +769,10 @@ fn run(args: &[String]) -> i32 {
                 futures_lite::future::block_on(client.request(&Command::GetDiagnostics))
                     .map_err(CliFailure::from)
                     .and_then(|response| match response {
-                        Response::Diagnostics(snapshot) => verify_local_key(
-                            &status,
-                            &snapshot,
-                            network,
-                            node,
-                            &fingerprint,
-                            json,
-                        )
-                        .map_err(CliFailure::from),
+                        Response::Diagnostics(snapshot) => {
+                            verify_local_key(&status, &snapshot, network, node, &fingerprint, json)
+                                .map_err(CliFailure::from)
+                        }
                         _ => Err("daemon returned an unexpected local-key response".into()),
                     })
             }),
@@ -1323,7 +1356,8 @@ mod tests {
             topology: None,
             recent_errors: Vec::new(),
         };
-        let json = verify_local_key(&status, &snapshot, Some(network), node, &digest, true).unwrap();
+        let json =
+            verify_local_key(&status, &snapshot, Some(network), node, &digest, true).unwrap();
         let result: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(result["matches"], true);
         assert_eq!(result["enrollment_performed"], false);
@@ -1331,16 +1365,43 @@ mod tests {
         assert_eq!(result["network_id"], network.to_string());
         assert_eq!(result["local_node"], node.to_string());
         assert_eq!(result["spki_sha256"], digest);
-        let human = verify_local_key(&status, &snapshot, Some(network), node, &digest, false).unwrap();
+        let human =
+            verify_local_key(&status, &snapshot, Some(network), node, &digest, false).unwrap();
         assert!(human.contains("does not enroll or authorize"));
 
         let wrong_network = NetworkId::from_bytes([8; 16]);
         let wrong_node = NodeId::from_bytes([6; 16]);
-        assert!(verify_local_key(&status, &snapshot, Some(wrong_network), node, &digest, true).is_err());
-        assert!(verify_local_key(&status, &snapshot, Some(network), wrong_node, &digest, true).is_err());
-        assert!(verify_local_key(&status, &snapshot, Some(network), node, &"cd".repeat(32), true).is_err());
-        assert!(verify_local_key(&status, &snapshot, Some(network), node, &"AB".repeat(32), true).is_err());
-        assert!(verify_local_key(&status, &snapshot, Some(network), node, "invalid", true).is_err());
+        assert!(
+            verify_local_key(&status, &snapshot, Some(wrong_network), node, &digest, true).is_err()
+        );
+        assert!(
+            verify_local_key(&status, &snapshot, Some(network), wrong_node, &digest, true).is_err()
+        );
+        assert!(
+            verify_local_key(
+                &status,
+                &snapshot,
+                Some(network),
+                node,
+                &"cd".repeat(32),
+                true
+            )
+            .is_err()
+        );
+        assert!(
+            verify_local_key(
+                &status,
+                &snapshot,
+                Some(network),
+                node,
+                &"AB".repeat(32),
+                true
+            )
+            .is_err()
+        );
+        assert!(
+            verify_local_key(&status, &snapshot, Some(network), node, "invalid", true).is_err()
+        );
 
         let mut drift = snapshot.clone();
         drift.current_network = Some(wrong_network);
@@ -1349,7 +1410,17 @@ mod tests {
         assert!(verify_local_key(&status, &drift, Some(network), node, &digest, true).is_err());
         let mut no_membership = status.clone();
         no_membership.current_network = None;
-        assert!(verify_local_key(&no_membership, &snapshot, Some(network), node, &digest, true).is_err());
+        assert!(
+            verify_local_key(
+                &no_membership,
+                &snapshot,
+                Some(network),
+                node,
+                &digest,
+                true
+            )
+            .is_err()
+        );
         let mut bad_key = snapshot.clone();
         bad_key.local_control_tls_spki_sha256 = None;
         assert!(verify_local_key(&status, &bad_key, Some(network), node, &digest, true).is_err());
@@ -1360,13 +1431,23 @@ mod tests {
         joiner_status.current_network = None;
         let mut joiner_snapshot = snapshot;
         joiner_snapshot.current_network = None;
-        let json = verify_local_key(&joiner_status, &joiner_snapshot, None, node, &digest, true)
-            .unwrap();
+        let json =
+            verify_local_key(&joiner_status, &joiner_snapshot, None, node, &digest, true).unwrap();
         let result: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(result["matches"], true);
         assert_eq!(result["network_id"], serde_json::Value::Null);
         assert_eq!(result["network_verified"], false);
-        assert!(verify_local_key(&joiner_status, &joiner_snapshot, Some(network), node, &digest, true).is_err());
+        assert!(
+            verify_local_key(
+                &joiner_status,
+                &joiner_snapshot,
+                Some(network),
+                node,
+                &digest,
+                true
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -1392,7 +1473,12 @@ mod tests {
             })
         );
         assert_eq!(
-            parse(&args(&["peer", "verify-local-key", &node.to_string(), &fingerprint])),
+            parse(&args(&[
+                "peer",
+                "verify-local-key",
+                &node.to_string(),
+                &fingerprint
+            ])),
             Ok(Operation::VerifyLocalKey {
                 network: None,
                 node,
@@ -1404,9 +1490,26 @@ mod tests {
             args(&["peer", "verify-local-key"]),
             args(&["peer", "verify-local-key", &node.to_string()]),
             args(&["peer", "verify-local-key", &node.to_string(), "invalid"]),
-            args(&["peer", "verify-local-key", &node.to_string(), &"AB".repeat(32)]),
-            args(&["peer", "verify-local-key", &node.to_string(), &fingerprint, "--network", &NetworkId::from_bytes([0; 16]).to_string()]),
-            args(&["peer", "verify-local-key", &NodeId::from_bytes([0; 16]).to_string(), &fingerprint]),
+            args(&[
+                "peer",
+                "verify-local-key",
+                &node.to_string(),
+                &"AB".repeat(32),
+            ]),
+            args(&[
+                "peer",
+                "verify-local-key",
+                &node.to_string(),
+                &fingerprint,
+                "--network",
+                &NetworkId::from_bytes([0; 16]).to_string(),
+            ]),
+            args(&[
+                "peer",
+                "verify-local-key",
+                &NodeId::from_bytes([0; 16]).to_string(),
+                &fingerprint,
+            ]),
         ] {
             assert!(parse(&invalid).is_err());
         }
