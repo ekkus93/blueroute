@@ -397,8 +397,7 @@ mod tests {
         .unwrap();
 
         let first_attempt = Instant::now() + Duration::from_secs(2);
-        while operations.bind_attempts.load(Ordering::SeqCst) == 0
-            && Instant::now() < first_attempt
+        while operations.bind_attempts.load(Ordering::SeqCst) == 0 && Instant::now() < first_attempt
         {
             thread::sleep(Duration::from_millis(5));
         }
@@ -407,8 +406,7 @@ mod tests {
         // observation after the bounded rebind delay can return no NAP.
         operations.fail_bind.store(false, Ordering::SeqCst);
         let retry_deadline = Instant::now() + Duration::from_secs(4);
-        while operations.bind_attempts.load(Ordering::SeqCst) < 2
-            && Instant::now() < retry_deadline
+        while operations.bind_attempts.load(Ordering::SeqCst) < 2 && Instant::now() < retry_deadline
         {
             thread::sleep(Duration::from_millis(10));
         }
