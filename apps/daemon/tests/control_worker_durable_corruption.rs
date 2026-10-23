@@ -42,9 +42,7 @@ impl NetworkOperations for StaleNap {
         })
     }
 
-    fn observed_owned_control_endpoint(
-        &self,
-    ) -> NetworkOperationFuture<'_, Option<SocketAddrV4>> {
+    fn observed_owned_control_endpoint(&self) -> NetworkOperationFuture<'_, Option<SocketAddrV4>> {
         Box::pin(async move { Ok(*self.endpoint.lock().unwrap()) })
     }
 
@@ -56,9 +54,7 @@ impl NetworkOperations for StaleNap {
         Box::pin(async { unreachable!("control worker must not leave a network") })
     }
 
-    fn list_networks(
-        &self,
-    ) -> NetworkOperationFuture<'_, Vec<blueroute_protocol::NetworkSummary>> {
+    fn list_networks(&self) -> NetworkOperationFuture<'_, Vec<blueroute_protocol::NetworkSummary>> {
         Box::pin(async { unreachable!("control worker must not list networks") })
     }
 
@@ -110,7 +106,10 @@ fn malformed_durable_host_retires_listener_and_requires_explicit_repair() {
         if let Some(address) = *backend.endpoint.lock().unwrap() {
             break address;
         }
-        assert!(Instant::now() < deadline, "worker must bind the initial NAP");
+        assert!(
+            Instant::now() < deadline,
+            "worker must bind the initial NAP"
+        );
         thread::sleep(Duration::from_millis(5));
     };
     assert!(TcpListener::bind(original).is_err());
