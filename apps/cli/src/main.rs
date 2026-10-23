@@ -456,6 +456,27 @@ fn format_diagnostics_summary(snapshot: &DiagnosticSnapshot) -> String {
     )
 }
 
+/// The daemon's public identity is read through two separate API calls.
+/// Re-read status after diagnostics so an intervening daemon restart, node
+/// switch or network transition cannot silently produce a mixed tuple.
+/// This is still a best-effort local snapshot, not a signed peer transcript.
+fn require_stable_local_identity(
+    before: &DaemonStatus,
+    diagnostics: &DiagnosticSnapshot,
+    after: &DaemonStatus,
+) -> Result<(), &'static str> {
+    if before.api_version != diagnostics.api_version
+        || before.api_version != after.api_version
+        || before.local_node != after.local_node
+        || before.current_network != diagnostics.current_network
+        || before.current_network != after.current_network
+    {
+        Err("daemon identity changed during local-key inspection")
+    } else {
+        Ok(())
+    }
+}
+
 /// Public local identity for out-of-band comparison. It is neither a trust
 /// decision nor evidence of a remote certificate's private-key possession.
 fn format_local_key(
@@ -748,19 +769,17 @@ fn run(args: &[String]) -> i32 {
                     .map_err(CliFailure::from)
                     .and_then(|response| match response {
                         Response::Diagnostics(snapshot) => {
-                            if status.api_version != snapshot.api_version
-                                || status.current_network != snapshot.current_network
-                            {
-                                Err("daemon status and diagnostics changed during local-key inspection".into())
-                            } else {
-                                format_local_key(
-                                    status.local_node,
-                                    status.current_network,
-                                    snapshot.local_control_tls_spki_sha256.as_deref(),
-                                    json,
-                                )
-                                .map_err(CliFailure::from)
-                            }
+                            let after = futures_lite::future::block_on(client.status())
+                                .map_err(CliFailure::from)?;
+                            require_stable_local_identity(&status, &snapshot, &after)
+                                .map_err(CliFailure::from)?;
+                            format_local_key(
+                                status.local_node,
+                                status.current_network,
+                                snapshot.local_control_tls_spki_sha256.as_deref(),
+                                json,
+                            )
+                            .map_err(CliFailure::from)
                         }
                         _ => Err("daemon returned an unexpected local-key response".into()),
                     })
@@ -777,6 +796,10 @@ fn run(args: &[String]) -> i32 {
                     .map_err(CliFailure::from)
                     .and_then(|response| match response {
                         Response::Diagnostics(snapshot) => {
+                            let after = futures_lite::future::block_on(client.status())
+                                .map_err(CliFailure::from)?;
+                            require_stable_local_identity(&status, &snapshot, &after)
+                                .map_err(CliFailure::from)?;
                             verify_local_key(&status, &snapshot, network, node, &fingerprint, json)
                                 .map_err(CliFailure::from)
                         }
@@ -1388,6 +1411,19 @@ mod tests {
 
         let wrong_network = NetworkId::from_bytes([8; 16]);
         let wrong_node = NodeId::from_bytes([6; 16]);
+        assert!(require_stable_local_identity(&status, &snapshot, &status).is_ok());
+        let mut late_status = status.clone();
+        late_status.current_network = Some(wrong_network);
+        assert!(require_stable_local_identity(&status, &snapshot, &late_status).is_err());
+        late_status = status.clone();
+        late_status.local_node = Some(wrong_node);
+        assert!(require_stable_local_identity(&status, &snapshot, &late_status).is_err());
+        late_status = status.clone();
+        late_status.api_version = ApiVersion::new(1, 0);
+        assert!(require_stable_local_identity(&status, &snapshot, &late_status).is_err());
+        let mut mixed_diagnostics = snapshot.clone();
+        mixed_diagnostics.api_version = ApiVersion::new(1, 0);
+        assert!(require_stable_local_identity(&status, &mixed_diagnostics, &status).is_err());
         assert!(
             verify_local_key(&status, &snapshot, Some(wrong_network), node, &digest, true).is_err()
         );
