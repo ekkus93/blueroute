@@ -346,6 +346,7 @@ mod tests {
     #[derive(Default)]
     struct HostedNapOperations {
         endpoint: Mutex<Option<std::net::SocketAddrV4>>,
+        ownership_lost: AtomicBool,
     }
 
     impl NetworkOperations for HostedNapOperations {
@@ -353,6 +354,9 @@ mod tests {
             &self,
         ) -> crate::NetworkOperationFuture<'_, Option<ObservedControlListener>> {
             Box::pin(async move {
+                if self.ownership_lost.load(Ordering::Acquire) {
+                    return Ok(None);
+                }
                 let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
                 let std::net::SocketAddr::V4(endpoint) = listener.local_addr().unwrap() else {
                     unreachable!("test binds IPv4 only");
@@ -369,7 +373,13 @@ mod tests {
         fn observed_owned_control_endpoint(
             &self,
         ) -> crate::NetworkOperationFuture<'_, Option<std::net::SocketAddrV4>> {
-            Box::pin(async move { Ok(*self.endpoint.lock().unwrap()) })
+            Box::pin(async move {
+                if self.ownership_lost.load(Ordering::Acquire) {
+                    Ok(None)
+                } else {
+                    Ok(*self.endpoint.lock().unwrap())
+                }
+            })
         }
 
         fn create_network(
@@ -450,6 +460,71 @@ mod tests {
             std::net::TcpListener::bind(endpoint).is_ok(),
             "shutdown must release the real listening socket"
         );
+    }
+
+    #[test]
+    fn live_listener_retires_when_guarded_nap_ownership_disappears() {
+        use blueroute_core::{
+            DisplayName, MembershipRegistry, MembershipState, NetworkMembership, NodeId,
+        };
+
+        let path = std::env::temp_dir().join(format!(
+            "blueroute-control-ownership-loss-{}",
+            std::process::id()
+        ));
+        let store = NetworkMembershipStore::new(path.clone());
+        let network = NetworkId::from_bytes([7; 16]);
+        let mut membership =
+            NetworkMembership::new(network, DisplayName::new("Test host").unwrap());
+        membership.state = MembershipState::Member;
+        let mut registry = MembershipRegistry::default();
+        registry.remember_network(membership);
+        store.save(&registry).unwrap();
+
+        let operations = Arc::new(HostedNapOperations::default());
+        let trust = Arc::new(DurablePeerTrustOperations::new(
+            NetworkMembershipStore::new(path),
+        ));
+        let local = LocalControlTlsIdentity::generate(NodeId::from_bytes([8; 16])).unwrap();
+        let worker = spawn_daemon_control_worker(
+            store,
+            operations.clone(),
+            trust,
+            local,
+            NodeCapabilities::default(),
+        )
+        .unwrap();
+
+        let wait_until = Instant::now() + Duration::from_secs(2);
+        let endpoint = loop {
+            if let Some(endpoint) = *operations.endpoint.lock().unwrap() {
+                break endpoint;
+            }
+            assert!(
+                Instant::now() < wait_until,
+                "NAP test listener was never bound"
+            );
+            thread::sleep(Duration::from_millis(5));
+        };
+        assert!(std::net::TcpListener::bind(endpoint).is_err());
+        operations.ownership_lost.store(true, Ordering::Release);
+
+        let release_deadline = Instant::now() + Duration::from_secs(4);
+        loop {
+            if let Ok(probe) = std::net::TcpListener::bind(endpoint) {
+                drop(probe);
+                break;
+            }
+            assert!(
+                Instant::now() < release_deadline,
+                "loss of trusted NAP ownership must retire the bound TCP listener"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        // A new guard query must not rebind when the NAP is no longer owned.
+        thread::sleep(Duration::from_millis(300));
+        assert!(std::net::TcpListener::bind(endpoint).is_ok());
+        worker.shutdown().unwrap();
     }
 
     #[test]
