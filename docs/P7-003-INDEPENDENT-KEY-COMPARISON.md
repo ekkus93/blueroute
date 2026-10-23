@@ -43,3 +43,11 @@ The command rejects noncanonical fingerprints, zero identities, missing daemon k
 ## Deterministic software evidence
 
 The CLI unit tests cover canonical input parsing, optional/required network modes, network drift between daemon status and diagnostics, missing key material, wrong NodeId/fingerprint, zero identities, pre-join identity-only success and explicit non-enrollment output. The exact-head CI run includes locked formatting/build/Clippy, Rust tests and existing D-Bus/socket/package integration checks. These do not substitute for an independent human confirmation or physical PAN test.
+
+## Multi-read daemon consistency guard (2026-10-23)
+
+Both local identity commands obtain daemon status, read diagnostics and **re-read daemon status** before reporting a successful identity comparison. They fail closed if the local NodeId, NetworkId or API version changes between status reads, or if the diagnostics snapshot disagrees on NetworkId/API version. A daemon-reported all-zero NetworkId is rejected even when the prospective joiner intentionally omits `--network`; `None` remains permitted for a not-yet-joined PANU. This prevents the CLI from silently presenting an obviously mixed tuple when a daemon restart or network transition occurs during inspection.
+
+Implementation: `184eabd27666837e77a33dbd597a4d9c1971b479` (formatting corrected at `ee4cd6b9d4bef81ee904a05841a7d894c16c7371`) and `3c7d881ccd722705be1955c33b48d0b408fc5490`. Exact-head CI [39923758373](https://github.com/ekkus93/blueroute/actions/runs/39923758373) and [39924091796](https://github.com/ekkus93/blueroute/actions/runs/39924091796) **passed** the locked workspace, formatting, Clippy, tests, D-Bus and packaging checks.
+
+**Limit:** Three local reads do not constitute an atomic snapshot or a cryptographically signed transcript, and cannot rule out an ABA transition that restores exactly the original state. No remote peer authentication, private-key possession, durable pin enrollment or physical Bluetooth acceptance follows from a local CLI comparison. The independent operator confirmation and production enrollment workflow remain open.
