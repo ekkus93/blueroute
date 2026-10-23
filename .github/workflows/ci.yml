@@ -49,6 +49,21 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --locked
 
+      - name: Verify CI recognizes an intentional failing Rust test
+        run: |
+          failure_log="$(mktemp)"
+          trap 'rm -f "$failure_log"' EXIT
+          if cargo test -p blueroute-protocol --test ci_failure_probe --locked -- --ignored --exact deliberate_ci_failure_probe >"$failure_log" 2>&1; then
+            echo "::error::The deliberately failing Rust regression unexpectedly passed"
+            exit 1
+          fi
+          if ! grep -Fq 'test deliberate_ci_failure_probe ... FAILED' "$failure_log" || ! grep -Fq '1 failed' "$failure_log"; then
+            cat "$failure_log"
+            echo "::error::Cargo failed for a reason other than the expected test assertion"
+            exit 1
+          fi
+          echo "Expected Rust assertion failure was detected; normal workspace tests remain green."
+
       - name: Run P6-006 simulated socket contract tests
         run: python3 -m unittest discover -s scripts -p 'test_p6_006_*.py' -v
 
