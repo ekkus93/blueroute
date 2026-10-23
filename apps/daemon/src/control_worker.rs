@@ -151,6 +151,24 @@ fn run_worker(
             sessions.clear();
             registered_at.clear();
             heartbeat_sent_at.clear();
+            // A backend may still report a stale owned NAP after a local
+            // leave or corrupted membership state. Never bind a TCP ingress
+            // listener until durable local-host membership is valid.
+            match membership.load().and_then(|saved| current_network(&saved)) {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    thread::park_timeout(REBIND_INTERVAL);
+                    continue;
+                }
+                Err(error) => {
+                    eprintln!("BlueRoute NAP membership preflight denied: {:?}", error.kind());
+                    thread::park_timeout(REBIND_INTERVAL);
+                    continue;
+                }
+            }
+            if stop.load(Ordering::Acquire) {
+                break;
+            }
             match future::block_on(operations.bind_guarded_control_listener()) {
                 Ok(Some(bound)) => listener = Some(bound),
                 Ok(None) => {}
@@ -292,6 +310,20 @@ fn run_worker(
 mod tests {
     use super::*;
 
+    fn save_host_membership(path: &std::path::Path) {
+        use blueroute_core::{DisplayName, MembershipRegistry, MembershipState, NetworkMembership};
+        let mut membership = NetworkMembership::new(
+            NetworkId::from_bytes([7; 16]),
+            DisplayName::new("Test host").unwrap(),
+        );
+        membership.state = MembershipState::Member;
+        let mut registry = MembershipRegistry::default();
+        registry.remember_network(membership);
+        NetworkMembershipStore::new(path.to_path_buf())
+            .save(&registry)
+            .unwrap();
+    }
+
     #[derive(Default)]
     struct NoNapOperations {
         bind_attempts: std::sync::atomic::AtomicUsize,
@@ -408,6 +440,49 @@ mod tests {
         fn stop_discovery(&self) -> crate::NetworkOperationFuture<'_, ()> {
             Box::pin(async { unreachable!("worker must not stop discovery") })
         }
+    }
+
+    #[test]
+    fn worker_does_not_bind_stale_nap_without_durable_host_membership() {
+        use blueroute_core::NodeId;
+
+        let path = std::env::temp_dir().join(format!(
+            "blueroute-control-unowned-prebind-{}",
+            std::process::id()
+        ));
+        let operations = Arc::new(NoNapOperations::default());
+        let trust = Arc::new(DurablePeerTrustOperations::new(
+            NetworkMembershipStore::new(path.clone()),
+        ));
+        let local = LocalControlTlsIdentity::generate(NodeId::from_bytes([8; 16])).unwrap();
+        let worker = spawn_daemon_control_worker(
+            NetworkMembershipStore::new(path.clone()),
+            operations.clone(),
+            trust,
+            local,
+            NodeCapabilities::default(),
+        )
+        .unwrap();
+
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(
+            operations.bind_attempts.load(Ordering::SeqCst),
+            0,
+            "a stale backend NAP cannot open control ingress without durable membership"
+        );
+
+        // A valid hosted membership becomes eligible on the next bounded
+        // rebind tick; the initial denial must not permanently poison startup.
+        save_host_membership(&path);
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while operations.bind_attempts.load(Ordering::SeqCst) == 0 {
+            assert!(
+                Instant::now() < deadline,
+                "fresh durable membership should permit a guarded bind attempt"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        worker.shutdown().unwrap();
     }
 
     #[test]
@@ -624,6 +699,7 @@ mod tests {
 
         let path =
             std::env::temp_dir().join(format!("blueroute-control-idle-{}", std::process::id()));
+        save_host_membership(&path);
         let operations = Arc::new(NoNapOperations::default());
         let trust = Arc::new(DurablePeerTrustOperations::new(
             NetworkMembershipStore::new(path.clone()),
@@ -658,6 +734,7 @@ mod tests {
             "blueroute-control-bind-error-{}",
             std::process::id()
         ));
+        save_host_membership(&path);
         let operations = Arc::new(NoNapOperations::default());
         operations.fail_bind.store(true, Ordering::SeqCst);
         let trust = Arc::new(DurablePeerTrustOperations::new(
