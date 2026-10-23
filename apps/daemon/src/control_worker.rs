@@ -466,10 +466,10 @@ mod tests {
 
     #[test]
     fn running_worker_rejects_unenrolled_tcp_without_changing_membership() {
-        use std::io::Read;
         use blueroute_core::{
             DisplayName, MembershipRegistry, MembershipState, NetworkMembership, NodeId,
         };
+        use std::io::Read;
 
         let path = std::env::temp_dir().join(format!(
             "blueroute-control-unauthorized-{}",
