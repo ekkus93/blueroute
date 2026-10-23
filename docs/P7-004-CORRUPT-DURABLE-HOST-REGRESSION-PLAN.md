@@ -1,6 +1,6 @@
 # P7-004 — Corrupt durable host membership regression plan
 
-**Status:** Planned software regression, not completed acceptance. Physical Bluetooth testing remains deferred.
+**Status:** SOFTWARE REGRESSION IMPLEMENTED, exact-head CI 39905110475 passed at 4e56e5edc52694b091996dc5eb5775d057f37b58. See P7-004-CORRUPT-DURABLE-HOST-REGRESSION-EVIDENCE-2026-10-22.md. Physical acceptance remains deferred.
 
 ## Security invariant
 
