@@ -62,6 +62,7 @@ pub use join_network::{
 };
 pub use outbound_control::{
     PanuControlRoute, connect_registered_panu_control_session, planned_panu_control_endpoint,
+    supervise_registered_panu_control_session,
 };
 pub use peer_pin_store::PeerPinStore;
 pub use peer_trust::{
