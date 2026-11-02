@@ -1150,7 +1150,9 @@ mod tests {
         attacker
             .set_read_timeout(Some(Duration::from_secs(3)))
             .unwrap();
-        attacker.write_all(b"not-a-valid-TLS-client-record").unwrap();
+        attacker
+            .write_all(b"not-a-valid-TLS-client-record")
+            .unwrap();
         attacker.shutdown(std::net::Shutdown::Write).unwrap();
         let mut received = [0_u8; 64];
         loop {
