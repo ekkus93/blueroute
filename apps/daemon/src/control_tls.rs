@@ -34,6 +34,9 @@ use zeroize::Zeroize;
 static TLS13_ONLY: [&SupportedProtocolVersion; 1] = [&rustls::version::TLS13];
 const MAX_CERTIFICATE_BYTES: usize = 16 * 1024;
 const MAX_PRIVATE_KEY_BYTES: usize = 16 * 1024;
+// A certificate preface is unauthenticated discovery evidence, not a reusable
+// enrollment authorization. A fresh candidate must be acquired after this age.
+const MAX_ENROLLMENT_CANDIDATE_AGE: Duration = Duration::from_secs(300);
 const CERTIFICATE_PREFACE: &[u8] = b"BLUEROUTE-CONTROL-CERT-V1\0";
 const IDENTITY_FILE: &str = "control-tls-identity-v1";
 const IDENTITY_HEADER: &[u8] = b"BLUEROUTE_CONTROL_TLS_IDENTITY_V1\0";
@@ -350,6 +353,7 @@ pub struct ControlTlsCertificateCandidate {
     node: NodeId,
     certificate: CertificateDer<'static>,
     fingerprint: SpkiSha256,
+    observed_at: Instant,
 }
 
 impl ControlTlsCertificateCandidate {
@@ -371,6 +375,14 @@ impl ControlTlsCertificateCandidate {
         self,
         independently_confirmed: SpkiSha256,
     ) -> Result<PinnedControlTlsCertificate, ControlTlsError> {
+        // A new confirmation deadline cannot revive a stale, untrusted
+        // certificate candidate. Clones retain the original observation time.
+        if !matches!(
+            Instant::now().checked_duration_since(self.observed_at),
+            Some(age) if age < MAX_ENROLLMENT_CANDIDATE_AGE
+        ) {
+            return Err(ControlTlsError::EnrollmentCandidateExpired);
+        }
         if independently_confirmed != self.fingerprint {
             return Err(ControlTlsError::FingerprintMismatch);
         }
@@ -680,6 +692,7 @@ fn exchange_control_tls_candidate_inner(
         node,
         certificate,
         fingerprint,
+        observed_at: Instant::now(),
     })
 }
 
@@ -1443,6 +1456,7 @@ pub enum ControlTlsError {
     ExporterMismatch,
     CertificateExchangeFailed,
     CertificateExchangeDeadlineExpired,
+    EnrollmentCandidateExpired,
 }
 
 impl fmt::Display for ControlTlsError {
@@ -1468,6 +1482,9 @@ impl fmt::Display for ControlTlsError {
             Self::CertificateExchangeFailed => "control certificate exchange failed",
             Self::CertificateExchangeDeadlineExpired => {
                 "control certificate exchange deadline expired"
+            }
+            Self::EnrollmentCandidateExpired => {
+                "untrusted enrollment candidate has expired; discover the peer again"
             }
         })
     }
@@ -1894,6 +1911,42 @@ mod tests {
         // The remotely supplied candidate becomes a rustls trust input only
         // after the existing independently approved SPKI pin matches.
         let _client_config = client.client_config(network(9), &pinned_server).unwrap();
+    }
+
+    #[test]
+    fn expired_enrollment_candidate_cannot_be_revived_by_new_confirmation() {
+        let (client, server) = make_tls_pair();
+        let expected = server.fingerprint();
+        let (client_socket, server_socket) = stream_pair();
+        let server_thread = thread::spawn(move || {
+            exchange_control_tls_candidate(
+                server_socket,
+                &server,
+                network(9),
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap();
+        });
+        let candidate = exchange_control_tls_candidate(
+            client_socket,
+            &client,
+            network(9),
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+        server_thread.join().unwrap();
+
+        // Even an exactly matching independently provided key does not
+        // authorize a candidate that has outlived its observation window.
+        let mut stale = candidate.clone();
+        stale.observed_at = Instant::now() - MAX_ENROLLMENT_CANDIDATE_AGE - Duration::from_secs(1);
+        assert_eq!(
+            stale.confirm_fingerprint(expected).unwrap_err(),
+            ControlTlsError::EnrollmentCandidateExpired
+        );
+        // A cloned candidate cannot gain a new lifetime from a later caller
+        // deadline. A genuinely fresh candidate still permits confirmation.
+        assert!(candidate.confirm_fingerprint(expected).is_ok());
     }
 
     #[test]
