@@ -1495,7 +1495,9 @@ mod tests {
             drop(recovered);
             drop(hostile);
             assert_eq!(host_trust.approved_control_pins(network).unwrap().len(), 1);
-            let saved = NetworkMembershipStore::new(host_path.clone()).load().unwrap();
+            let saved = NetworkMembershipStore::new(host_path.clone())
+                .load()
+                .unwrap();
             assert_eq!(current_network(&saved).unwrap(), Some(network));
             assert!(std::net::TcpListener::bind(endpoint).is_err());
         }
