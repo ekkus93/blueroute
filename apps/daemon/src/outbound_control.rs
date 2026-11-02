@@ -107,11 +107,12 @@ fn require_live_panu_lease(
     // sufficient evidence of a unique PANU source.
     if active.iter().any(|prefix| {
         prefix.prefix.address == lease.address().prefix.address
-            && prefix.interface.as_ref() != Some(lease.interface())
+            && (prefix.interface.as_ref() != Some(lease.interface())
+                || prefix.prefix != lease.address().prefix)
     }) {
         return Err(CoreError::new(
             ErrorKind::InvalidState,
-            "PANU control source address is active on an ambiguous interface",
+            "PANU control source address has ambiguous active interface or prefix",
         ));
     }
     Ok(())
@@ -171,6 +172,14 @@ pub fn connect_registered_panu_control_session<'a>(
     let owned = future::block_on(backend.addresses())?;
     let active = future::block_on(backend.active_ipv4_prefixes_with_interfaces())?;
     require_live_panu_lease(route.lease, &owned, &active)?;
+    // NetworkManager observations may block. Approval or the enrolled key
+    // could have been revoked while those backend calls were pending. Recheck
+    // durable authorization immediately before allowing any TCP SYN.
+    trust.require_approved_pinned_tls_peer(
+        setup.network,
+        expected.node(),
+        expected.fingerprint(),
+    )?;
 
     let IpAddr::V4(source_ip) = route.lease.address().prefix.address else {
         return Err(CoreError::new(
@@ -248,6 +257,7 @@ mod tests {
     #[test]
     fn planned_target_is_exact_host_port_for_owned_panu_lease() {
         let network = NetworkId::from_bytes([0x4a; 16]);
+
         let (link, lease, pool) = fixtures(network);
         let target = planned_panu_control_endpoint(network, &link, &lease, pool).unwrap();
         let plan = Ipv4StarAddressPlan::for_network(network, pool).unwrap();
@@ -409,6 +419,22 @@ mod tests {
         });
         assert_eq!(
             require_live_panu_lease(&lease, &owned, &different_mask_active)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidState
+        );
+
+        // Even if the duplicate is on the *same* PANU interface, an
+        // additional /32 assignment of the same host IP is not the exact
+        // exclusive lease we approved. The active observation must fail
+        // closed instead of accepting the first matching /24 entry.
+        let mut different_mask_same_interface = active.clone();
+        different_mask_same_interface.push(ActiveIpv4Prefix {
+            interface: Some(link.interface().clone()),
+            prefix: overlapping_prefix,
+        });
+        assert_eq!(
+            require_live_panu_lease(&lease, &owned, &different_mask_same_interface)
                 .unwrap_err()
                 .kind(),
             ErrorKind::InvalidState
