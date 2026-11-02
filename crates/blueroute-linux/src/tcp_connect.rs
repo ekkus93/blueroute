@@ -9,10 +9,10 @@ use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4, TcpStream};
 use std::time::Instant;
 
-use rustix::event::{poll, PollFd, PollFlags};
+use rustix::event::{PollFd, PollFlags, poll};
 use rustix::io::Errno;
-use rustix::net::{bind, connect, socket_with, AddressFamily, SocketFlags, SocketType};
 use rustix::net::sockopt::socket_error;
+use rustix::net::{AddressFamily, SocketFlags, SocketType, bind, connect, socket_with};
 use rustix::timespec::Timespec;
 
 /// Open a TCP stream from the exact locally owned IPv4 address by a monotonic
@@ -26,7 +26,10 @@ pub fn connect_tcp_from_ipv4(
     deadline: Instant,
 ) -> io::Result<TcpStream> {
     fn timeout() -> io::Error {
-        io::Error::new(io::ErrorKind::TimedOut, "source-bound TCP dial deadline expired")
+        io::Error::new(
+            io::ErrorKind::TimedOut,
+            "source-bound TCP dial deadline expired",
+        )
     }
 
     if Instant::now() >= deadline {
@@ -101,7 +104,10 @@ mod tests {
         )
         .unwrap();
         let (accepted, remote) = listener.accept().unwrap();
-        assert_eq!(stream.local_addr().unwrap().ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(
+            stream.local_addr().unwrap().ip(),
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
+        );
         assert_eq!(remote.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
         drop(accepted);
     }
