@@ -85,10 +85,9 @@ fn require_live_panu_lease(
     // ambiguous snapshots rather than allowing a source-bound SYN to escape
     // through an unintended route. Compare the host IP, not the full prefix:
     // an overlapping /24 and /30 can assign the same IPv4 source address.
-    if owned
-        .iter()
-        .any(|address| address.prefix.address == lease.address().prefix.address && address != lease.address())
-    {
+    if owned.iter().any(|address| {
+        address.prefix.address == lease.address().prefix.address && address != lease.address()
+    }) {
         return Err(CoreError::new(
             ErrorKind::InvalidState,
             "PANU control source address has conflicting NetworkManager ownership",
@@ -388,11 +387,8 @@ mod tests {
         // A duplicate host IP with a different subnet mask is still a
         // duplicate source address. The old whole-IpPrefix comparison would
         // incorrectly accept both of these ambiguous snapshots.
-        let overlapping_prefix = blueroute_core::IpPrefix::new(
-            lease.address().prefix.address,
-            24,
-        )
-        .unwrap();
+        let overlapping_prefix =
+            blueroute_core::IpPrefix::new(lease.address().prefix.address, 24).unwrap();
         assert_ne!(overlapping_prefix, lease.address().prefix);
         let mut different_mask_owned = owned.clone();
         different_mask_owned.push(InterfaceAddress {
