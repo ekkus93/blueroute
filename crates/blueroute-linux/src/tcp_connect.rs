@@ -61,13 +61,13 @@ fn connect_tcp_impl(
     }
     // Linux IFNAMSIZ is 16 bytes including the terminating NUL. Reject
     // malformed opaque interface names before allocating a socket or dialing.
-    if let Some(name) = interface {
-        if name.is_empty() || name.len() >= 16 || name.as_bytes().contains(&0) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid Linux network device name for PANU TCP bind",
-            ));
-        }
+    if let Some(name) = interface
+        && (name.is_empty() || name.len() >= 16 || name.as_bytes().contains(&0))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid Linux network device name for PANU TCP bind",
+        ));
     }
     let fd = socket_with(
         AddressFamily::INET,
