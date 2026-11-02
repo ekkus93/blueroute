@@ -1414,7 +1414,7 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         };
 
-        for attack in 0..9 {
+        for attack in 0..14 {
             let socket = std::net::TcpStream::connect(endpoint).unwrap();
             let (mut hostile, certificate) = crate::connect_pinned_control_tls(
                 socket,
@@ -1503,6 +1503,32 @@ mod tests {
                     let mut payload = serde_json::to_vec(&envelope).unwrap();
                     payload.extend_from_slice(b"trailing-garbage");
                     write_raw_frame(&mut hostile, &payload);
+                }
+                9 => {
+                    // A zero-byte body cannot advance authenticated liveness.
+                    hostile.write_all(&0_u32.to_be_bytes()).unwrap();
+                }
+                10 => {
+                    // TLS authentication does not make arbitrary bytes UTF-8.
+                    write_raw_frame(&mut hostile, &[0xff, 0xfe, 0xfd]);
+                }
+                11 => {
+                    // A valid JSON document with the wrong root type is not
+                    // a control envelope.
+                    write_raw_frame(&mut hostile, b"[]");
+                }
+                12 => {
+                    // The sequence number must be an integer, not a string.
+                    let mut value = serde_json::to_value(&envelope).unwrap();
+                    value["sequence"] = serde_json::json!("3");
+                    write_raw_frame(&mut hostile, &serde_json::to_vec(&value).unwrap());
+                }
+                13 => {
+                    // An authenticated sender cannot add critical envelope
+                    // fields to silently change control-plane semantics.
+                    let mut value = serde_json::to_value(&envelope).unwrap();
+                    value["route_authority"] = serde_json::json!(true);
+                    write_raw_frame(&mut hostile, &serde_json::to_vec(&value).unwrap());
                 }
                 _ => unreachable!(),
             }
