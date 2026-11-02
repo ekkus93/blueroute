@@ -802,6 +802,20 @@ This is the first complete product slice.
 
 ## P6-004 — Implement join-network operation
 
+**P6-004 matching PANU teardown groundwork (software-only, 2026-11-02):**
+`LinuxJoinRuntime::disconnect_panu` now uses the production BlueZ backend
+instead of returning `CapabilityUnavailable`. Before calling BlueZ Network1
+Disconnect, `disconnect_matching_panu` re-observes the live PANU attachment:
+an already-absent link is an idempotent success; a matching peer and interface
+may be disconnected; a different peer or replacement interface fails closed.
+Deterministic regressions reject mismatched/invalid attachments and preserve
+absent-link no-op behavior. Implementation `d36c2b7`, formatting fixes
+`c672987` and `671b2cf`; [exact-head CI 41514233093](https://github.com/ekkus93/blueroute/actions/runs/41514233093)
+**passed**. This is only one rollback primitive, not a proven atomic BlueZ
+ownership lease: concurrent replacement, restart reconciliation, production
+PANU establishment, verified enrollment, control-session lifecycle, and
+physical join acceptance remain OPEN. Production preflight remains fail-closed.
+
 **Dependency:** The existing transactional coordinator, fail-closed state handling, rollback tests and authorization are implemented (see `docs/P6-004-JOIN-ORCHESTRATION.md`). The production `JoinNetwork` preflight *intentionally* returns `CapabilityUnavailable` until authenticated P7-001..P7-004 control sessions are available. Address assignment groundwork from P6-005 is complete but production join is not. Do not equate an acceptance-probe PANU connection with an authenticated member.
 
 - [x] implement transaction/rollback and authorization orchestration groundwork.
