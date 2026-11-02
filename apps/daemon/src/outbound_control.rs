@@ -65,8 +65,9 @@ pub fn planned_panu_control_endpoint(
 
 /// Require a fresh NetworkManager ownership snapshot *and* a kernel-facing
 /// active-prefix observation for the exact PANU lease. A configured but inactive
-/// profile, an address on another interface, or unknown interface provenance
-/// must never authorize a TCP dial. This is a pre-dial guard, not a substitute
+/// profile, a duplicate source address on another interface or network, or
+/// unknown interface provenance must never authorize a TCP dial.
+/// This is a pre-dial guard, not a substitute
 /// for continuous link supervision or binding the socket to a device.
 fn require_live_panu_lease(
     lease: &JoinIpLease,
@@ -79,6 +80,18 @@ fn require_live_panu_lease(
             "PANU control source address is not currently owned by BlueRoute",
         ));
     }
+    // A matching lease does not prove exclusive ownership: the same address
+    // may also be assigned to a foreign network or interface. Reject such
+    // ambiguous snapshots rather than allowing a source-bound SYN to escape
+    // through an unintended route.
+    if owned.iter().any(|address| {
+        address.prefix == lease.address().prefix && address != lease.address()
+    }) {
+        return Err(CoreError::new(
+            ErrorKind::InvalidState,
+            "PANU control source address has conflicting NetworkManager ownership",
+        ));
+    }
     if !active.iter().any(|prefix| {
         prefix.interface.as_ref() == Some(lease.interface())
             && prefix.prefix == lease.address().prefix
@@ -86,6 +99,18 @@ fn require_live_panu_lease(
         return Err(CoreError::new(
             ErrorKind::InvalidState,
             "PANU control source address is not active on the owned interface",
+        ));
+    }
+    // The expected interface may be present alongside an unexpected (or
+    // unidentifiable) interface with the same address. Presence alone is not
+    // sufficient evidence of a unique PANU source.
+    if active.iter().any(|prefix| {
+        prefix.prefix == lease.address().prefix
+            && prefix.interface.as_ref() != Some(lease.interface())
+    }) {
+        return Err(CoreError::new(
+            ErrorKind::InvalidState,
+            "PANU control source address is active on an ambiguous interface",
         ));
     }
     Ok(())
@@ -306,6 +331,57 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn ambiguous_duplicate_panu_source_fails_closed_even_when_expected_lease_is_present() {
+        let network = NetworkId::from_bytes([0x53; 16]);
+        let (link, lease, _pool) = fixtures(network);
+        let owned = vec![lease.address().clone()];
+        let active = vec![ActiveIpv4Prefix {
+            interface: Some(link.interface().clone()),
+            prefix: lease.address().prefix,
+        }];
+        assert!(require_live_panu_lease(&lease, &owned, &active).is_ok());
+
+        let foreign_interface = NetworkInterfaceHandle::new("bnep-foreign").unwrap();
+        let mut duplicate_owned = owned.clone();
+        duplicate_owned.push(InterfaceAddress {
+            interface: foreign_interface.clone(),
+            ..lease.address().clone()
+        });
+        assert_eq!(
+            require_live_panu_lease(&lease, &duplicate_owned, &active)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidState
+        );
+
+        let mut foreign_owner = owned.clone();
+        foreign_owner.push(InterfaceAddress {
+            owner: NetworkId::from_bytes([0x54; 16]),
+            ..lease.address().clone()
+        });
+        assert_eq!(
+            require_live_panu_lease(&lease, &foreign_owner, &active)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidState
+        );
+
+        for interface in [Some(foreign_interface), None] {
+            let mut ambiguous_active = active.clone();
+            ambiguous_active.push(ActiveIpv4Prefix {
+                interface,
+                prefix: lease.address().prefix,
+            });
+            assert_eq!(
+                require_live_panu_lease(&lease, &owned, &ambiguous_active)
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::InvalidState
+            );
+        }
     }
 
     #[test]
