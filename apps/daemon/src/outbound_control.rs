@@ -15,8 +15,8 @@ use blueroute_linux::{
     ActiveIpv4Prefix, InterfaceAddress, IpNetworkBackend, IpNetworkObservationBackend,
     NetworkManagerBackend, connect_tcp_from_ipv4,
 };
-use futures_lite::future;
 use blueroute_protocol::session::ControlSessionRegistry;
+use futures_lite::future;
 
 use crate::{
     ApprovedControlSetup, CONTROL_TCP_PORT, DurablePeerTrustOperations, JoinIpLease, JoinPanLink,
@@ -273,33 +273,39 @@ mod tests {
 
         assert!(require_live_panu_lease(&lease, &[], &active).is_err());
         assert!(require_live_panu_lease(&lease, &owned, &[]).is_err());
-        assert!(require_live_panu_lease(
-            &lease,
-            &owned,
-            &[ActiveIpv4Prefix {
-                interface: None,
-                prefix: lease.address().prefix,
-            }],
-        )
-        .is_err());
-        assert!(require_live_panu_lease(
-            &lease,
-            &owned,
-            &[ActiveIpv4Prefix {
-                interface: Some(NetworkInterfaceHandle::new("bnep-foreign").unwrap()),
-                prefix: lease.address().prefix,
-            }],
-        )
-        .is_err());
-        assert!(require_live_panu_lease(
-            &lease,
-            &[InterfaceAddress {
-                owner: NetworkId::from_bytes([0x52; 16]),
-                ..lease.address().clone()
-            }],
-            &active,
-        )
-        .is_err());
+        assert!(
+            require_live_panu_lease(
+                &lease,
+                &owned,
+                &[ActiveIpv4Prefix {
+                    interface: None,
+                    prefix: lease.address().prefix,
+                }],
+            )
+            .is_err()
+        );
+        assert!(
+            require_live_panu_lease(
+                &lease,
+                &owned,
+                &[ActiveIpv4Prefix {
+                    interface: Some(NetworkInterfaceHandle::new("bnep-foreign").unwrap()),
+                    prefix: lease.address().prefix,
+                }],
+            )
+            .is_err()
+        );
+        assert!(
+            require_live_panu_lease(
+                &lease,
+                &[InterfaceAddress {
+                    owner: NetworkId::from_bytes([0x52; 16]),
+                    ..lease.address().clone()
+                }],
+                &active,
+            )
+            .is_err()
+        );
     }
 
     #[test]
