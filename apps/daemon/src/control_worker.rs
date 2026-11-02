@@ -1046,6 +1046,25 @@ mod tests {
     }
 
     #[test]
+    fn running_worker_rejects_split_invalid_json_without_dropping_other_peer() {
+        use std::io::Write;
+
+        assert_authenticated_malformed_peer_isolation("split-invalid-json", |hostile| {
+            // The length prefix is valid, but the JSON body is deliberately
+            // malformed. Delay its delivery across worker polls to exercise
+            // the buffered authenticated-frame path, not just header checks.
+            let body = b"{invalid-json";
+            hostile
+                .write_all(&(body.len() as u32).to_be_bytes())
+                .unwrap();
+            hostile.flush().unwrap();
+            thread::sleep(Duration::from_millis(400));
+            let _ = hostile.write_all(body);
+            let _ = hostile.flush();
+        });
+    }
+
+    #[test]
     fn running_worker_closes_authenticated_session_on_nap_ownership_loss() {
         use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
         use blueroute_core::NodeId;
