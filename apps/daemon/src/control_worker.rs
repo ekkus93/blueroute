@@ -1103,7 +1103,7 @@ mod tests {
         let client_trust = DurablePeerTrustOperations::with_peer_pin_store(
             NetworkMembershipStore::new(client_path),
             PeerPinStore::new(root.join("client-pins")),
-        ));
+        );
         // Synthetic fixture pins stand in for independently confirmed enrollment;
         // the test still proves actual mutual TLS and exporter-bound Hello.
         future::block_on(host_trust.trust_peer(client.node())).unwrap();
