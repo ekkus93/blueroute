@@ -58,6 +58,14 @@ pub fn planned_panu_control_endpoint(
     Ok(SocketAddrV4::new(host, CONTROL_TCP_PORT))
 }
 
+/// PANU route provenance supplied by the join runtime, not a remote peer.
+/// This is revalidated at every outbound dial.
+pub struct PanuControlRoute<'a> {
+    pub link: &'a JoinPanLink,
+    pub lease: &'a JoinIpLease,
+    pub pool: Ipv4AddressPool,
+}
+
 /// Dial the planned NAP endpoint and return a registered, authenticated
 /// control session, never an unverified TCP socket.
 ///
@@ -71,16 +79,14 @@ pub fn planned_panu_control_endpoint(
 /// observation, link-loss supervision and joiner enrollment are still required
 /// before wiring this into production JoinNetwork.
 pub fn connect_registered_panu_control_session<'a>(
-    link: &JoinPanLink,
-    lease: &JoinIpLease,
-    pool: Ipv4AddressPool,
+    route: PanuControlRoute<'_>,
     local: &LocalControlTlsIdentity,
     expected: PinnedControlTlsPeer,
     trust: &'a DurablePeerTrustOperations,
     setup: ApprovedControlSetup,
     registry: Arc<Mutex<ControlSessionRegistry>>,
 ) -> Result<RegisteredControlSession<'a>, CoreError> {
-    let endpoint = planned_panu_control_endpoint(setup.network, link, lease, pool)?;
+    let endpoint = planned_panu_control_endpoint(setup.network, route.link, route.lease, route.pool)?;
     if expected.network() != setup.network || expected.node() == local.node() {
         return Err(CoreError::new(
             ErrorKind::AuthenticationFailed,
@@ -117,7 +123,7 @@ pub fn connect_registered_panu_control_session<'a>(
             error.to_string(),
         )
     })?;
-    if source.ip() != lease.address().prefix.address {
+    if source.ip() != route.lease.address().prefix.address {
         let _ = socket.shutdown(Shutdown::Both);
         return Err(CoreError::new(
             ErrorKind::InvalidState,
@@ -238,9 +244,11 @@ mod tests {
             active_deadline: deadline,
         };
         let error = connect_registered_panu_control_session(
-            &link,
-            &lease,
-            pool,
+            PanuControlRoute {
+                link: &link,
+                lease: &lease,
+                pool,
+            },
             &local,
             expected,
             &trust,
