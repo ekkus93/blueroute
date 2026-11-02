@@ -598,7 +598,6 @@ mod tests {
         let client_trust = DurablePeerTrustOperations::with_peer_pin_store(
             client_store,
             PeerPinStore::new(root.join("client-pins")),
-
         );
 
         // These local fixtures emulate completed enrollment. Production can
@@ -1199,7 +1198,6 @@ mod tests {
                 Err(error) => {
                     assert!(
                         Instant::now() < retry_until,
-
                         "running worker did not retire the Goodbye generation: {error:?}"
                     );
                     thread::sleep(Duration::from_millis(50));
@@ -1392,7 +1390,9 @@ mod tests {
 
         fn write_raw_frame(stream: &mut impl std::io::Write, payload: &[u8]) {
             assert!(payload.len() <= blueroute_protocol::control::MAX_CONTROL_FRAME_BYTES);
-            stream.write_all(&(payload.len() as u32).to_be_bytes()).unwrap();
+            stream
+                .write_all(&(payload.len() as u32).to_be_bytes())
+                .unwrap();
             stream.write_all(payload).unwrap();
         }
 
@@ -1841,7 +1841,6 @@ mod tests {
     }
 
     #[test]
-
     fn durable_leave_retires_stale_nap_listener() {
         use blueroute_core::NodeId;
         let path = std::env::temp_dir().join(format!(
