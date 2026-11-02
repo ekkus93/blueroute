@@ -37,7 +37,7 @@ pub use route_projection::{
 };
 pub use route_reconciliation::{LinuxRouteReconciliationPlan, plan_linux_route_reconciliation};
 pub use secret_store::SecretFileStore;
-pub use tcp_connect::connect_tcp_from_ipv4;
+pub use tcp_connect::{connect_tcp_from_ipv4, connect_tcp_from_ipv4_on_device};
 
 use std::future::Future;
 use std::net::IpAddr;

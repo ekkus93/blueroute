@@ -15,6 +15,8 @@ use rustix::net::sockopt::socket_error;
 use rustix::net::{AddressFamily, SocketFlags, SocketType, bind, connect, socket_with};
 use rustix::time::Timespec;
 
+use crate::NetworkInterfaceHandle;
+
 /// Open a TCP stream from the exact locally owned IPv4 address by a monotonic
 /// deadline. A missing source address fails before any outbound TCP connect.
 ///
@@ -23,6 +25,28 @@ use rustix::time::Timespec;
 pub fn connect_tcp_from_ipv4(
     source: Ipv4Addr,
     destination: SocketAddrV4,
+    deadline: Instant,
+) -> io::Result<TcpStream> {
+    connect_tcp_impl(source, destination, None, deadline)
+}
+
+/// Bind the TCP socket to both the exact source IPv4 address and the Linux
+/// network device before sending a SYN. A missing device or insufficient
+/// privilege fails closed; callers must not retry through an unbound socket.
+/// The device is a locally observed PANU interface, never peer-supplied.
+pub fn connect_tcp_from_ipv4_on_device(
+    source: Ipv4Addr,
+    destination: SocketAddrV4,
+    interface: &NetworkInterfaceHandle,
+    deadline: Instant,
+) -> io::Result<TcpStream> {
+    connect_tcp_impl(source, destination, Some(interface.as_str()), deadline)
+}
+
+fn connect_tcp_impl(
+    source: Ipv4Addr,
+    destination: SocketAddrV4,
+    interface: Option<&str>,
     deadline: Instant,
 ) -> io::Result<TcpStream> {
     fn timeout() -> io::Error {
@@ -35,6 +59,16 @@ pub fn connect_tcp_from_ipv4(
     if Instant::now() >= deadline {
         return Err(timeout());
     }
+    // Linux IFNAMSIZ is 16 bytes including the terminating NUL. Reject
+    // malformed opaque interface names before allocating a socket or dialing.
+    if let Some(name) = interface {
+        if name.is_empty() || name.len() >= 16 || name.as_bytes().contains(&0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid Linux network device name for PANU TCP bind",
+            ));
+        }
+    }
     let fd = socket_with(
         AddressFamily::INET,
         SocketType::STREAM,
@@ -42,6 +76,13 @@ pub fn connect_tcp_from_ipv4(
         None,
     )
     .map_err(io::Error::from)?;
+    if let Some(name) = interface {
+        // SO_BINDTODEVICE is set on the still-unconnected socket. Even if
+        // NetworkManager changes its routing snapshot, a SYN cannot silently
+        // fall back to a foreign interface. The kernel may deny this option
+        // without sufficient privilege; that is a terminal pre-dial failure.
+        socket2::SockRef::from(&fd).bind_device(Some(name.as_bytes()))?;
+    }
     bind(&fd, &SocketAddrV4::new(source, 0)).map_err(io::Error::from)?;
     if Instant::now() >= deadline {
         return Err(timeout());
@@ -120,6 +161,65 @@ mod tests {
             Instant::now() + Duration::from_secs(2),
         );
         assert!(result.is_err(), "unassigned source must not dial");
+    }
+
+    #[test]
+    fn missing_or_malformed_device_cannot_fall_back_to_unbound_tcp() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let destination = match listener.local_addr().unwrap() {
+            std::net::SocketAddr::V4(address) => address,
+            _ => unreachable!(),
+        };
+        let deadline = Instant::now() + Duration::from_secs(3);
+        for name in ["br-no-such-dev", "lo\0foreign", "interface-name-too-long"] {
+            let device = NetworkInterfaceHandle::new(name).unwrap();
+            let error = connect_tcp_from_ipv4_on_device(
+                Ipv4Addr::LOCALHOST,
+                destination,
+                &device,
+                deadline,
+            )
+            .unwrap_err();
+            if name == "br-no-such-dev" {
+                assert_ne!(error.kind(), io::ErrorKind::TimedOut);
+            } else {
+                assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+            }
+            assert_eq!(
+                listener.accept().unwrap_err().kind(),
+                io::ErrorKind::WouldBlock,
+                "invalid device must not send a SYN to the listener",
+            );
+        }
+    }
+
+    #[test]
+    fn loopback_device_binding_is_preserved_when_kernel_allows_it() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let destination = match listener.local_addr().unwrap() {
+            std::net::SocketAddr::V4(address) => address,
+            _ => unreachable!(),
+        };
+        let device = NetworkInterfaceHandle::new("lo").unwrap();
+        let stream = match connect_tcp_from_ipv4_on_device(
+            Ipv4Addr::LOCALHOST,
+            destination,
+            &device,
+            Instant::now() + Duration::from_secs(3),
+        ) {
+            Ok(stream) => stream,
+            // Some CI runners do not grant SO_BINDTODEVICE. Refusal is safe:
+            // production must never retry without device binding.
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => return,
+            Err(error) => panic!("loopback device bind failed: {error}"),
+        };
+        assert_eq!(
+            stream.local_addr().unwrap().ip(),
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
+        );
+        let (_, remote) = listener.accept().unwrap();
+        assert_eq!(remote.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
     }
 
     #[test]

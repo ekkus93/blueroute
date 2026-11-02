@@ -13,7 +13,7 @@ use std::time::Instant;
 use blueroute_core::{CoreError, ErrorKind, Ipv4AddressPool, Ipv4StarAddressPlan, NetworkId};
 use blueroute_linux::{
     ActiveIpv4Prefix, InterfaceAddress, IpNetworkBackend, IpNetworkObservationBackend,
-    NetworkManagerBackend, connect_tcp_from_ipv4,
+    NetworkManagerBackend, connect_tcp_from_ipv4_on_device,
 };
 use blueroute_protocol::session::ControlSessionRegistry;
 use futures_lite::future;
@@ -135,8 +135,8 @@ pub struct PanuControlRoute<'a> {
 /// recheck identity and approval. No caller may treat a successful TCP dial
 /// alone as network membership.
 ///
-/// Linux routing can change after a source-address check; live PAN ownership
-/// observation, link-loss supervision and joiner enrollment are still required
+/// The socket is additionally bound to the PANU device before connecting;
+/// link-loss supervision and joiner enrollment are still required
 /// before wiring this into production JoinNetwork.
 pub fn connect_registered_panu_control_session<'a>(
     route: PanuControlRoute<'_>,
@@ -190,10 +190,15 @@ pub fn connect_registered_panu_control_session<'a>(
     // Bind the source *before* connect. A post-connect source-address check
     // alone could already have sent an untrusted SYN over another interface.
     let socket =
-        connect_tcp_from_ipv4(source_ip, endpoint, setup.handshake_deadline).map_err(|error| {
+        connect_tcp_from_ipv4_on_device(
+            source_ip,
+            endpoint,
+            route.link.interface(),
+            setup.handshake_deadline,
+        ).map_err(|error| {
             CoreError::with_diagnostic(
                 ErrorKind::PanFailure,
-                "unable to dial the planned NAP control endpoint from the owned PANU address",
+                "unable to dial the planned NAP control endpoint from the owned PANU address and device",
                 error.to_string(),
             )
         })?;
