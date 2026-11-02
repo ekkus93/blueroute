@@ -47,12 +47,15 @@ impl NetworkOperations for SwitchingNap {
                 unreachable!("IPv4 test socket")
             };
             *self.endpoint.lock().unwrap() = Some(endpoint);
-            self.binds.fetch_add(1, Ordering::SeqCst);
             if self.switch_on_first_bind.swap(false, Ordering::SeqCst) {
                 // Inject an actual durable state change *after* the daemon's
                 // pre-bind check and while the backend still owns the socket.
                 save_host(&self.path, NetworkId::from_bytes([9; 16]));
             }
+            // Publish completion only after the durable switch is visible.
+            // Otherwise the test can read the old file between the counter
+            // increment and save_host, producing a false failure in CI.
+            self.binds.fetch_add(1, Ordering::SeqCst);
             Ok(Some(ObservedControlListener::new(
                 NetworkId::from_bytes([7; 16]),
                 endpoint,
