@@ -155,10 +155,7 @@ impl BluezBackend {
     /// outbound authenticated control socket. An absent link is not a usable
     /// transport, even if its NetworkManager address still appears active.
     /// This snapshot does not replace continuous PANU loss supervision.
-    pub async fn require_matching_panu(
-        &self,
-        expected: &PanAttachment,
-    ) -> Result<(), CoreError> {
+    pub async fn require_matching_panu(&self, expected: &PanAttachment) -> Result<(), CoreError> {
         validate_panu_attachment(expected)?;
         let peer = expected.peer.as_ref().expect("validated PANU peer");
         let observed = current_panu_attachment(&self.connection, peer).await?;
