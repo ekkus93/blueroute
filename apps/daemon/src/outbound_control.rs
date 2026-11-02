@@ -7,8 +7,10 @@
 //! production PANU discovery, pre-join enrollment and reconnect are still open.
 
 use std::net::{IpAddr, Shutdown, SocketAddrV4};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use blueroute_core::{CoreError, ErrorKind, Ipv4AddressPool, Ipv4StarAddressPlan, NetworkId};
 use blueroute_linux::{
@@ -352,6 +354,79 @@ fn cancel_on_failed_supervision<T>(
     result
 }
 
+
+/// Revalidate an already authenticated PANU owner once per bounded interval
+/// until the daemon requests shutdown or an ownership check fails.
+///
+/// This is a blocking worker-thread entry point, not a spawned daemon worker.
+/// It closes the exact registered TLS generation on *all* exit paths,
+/// including shutdown requested before the first tick or during observation.
+/// The caller must still implement bounded authenticated frame I/O, heartbeat
+/// handling, link-loss wakeups and reconnect orchestration separately; this
+/// function alone does not enable production JoinNetwork.
+pub fn run_registered_panu_supervision_until_stopped(
+    session: &mut RegisteredControlSession<'_>,
+    route: PanuControlRoute<'_>,
+    trust: &DurablePeerTrustOperations,
+    expected: &PinnedControlTlsPeer,
+    stop: &AtomicBool,
+) -> Result<(), CoreError> {
+    run_bounded_supervision_until_stopped(
+        session,
+        stop,
+        Duration::from_secs(1),
+        |session| {
+            supervise_registered_panu_control_session(
+                session,
+                PanuControlRoute {
+                    link: route.link,
+                    lease: route.lease,
+                    pool: route.pool,
+                },
+                trust,
+                expected,
+            )
+        },
+        RegisteredControlSession::cancel,
+    )
+}
+
+/// The scheduler and cancellation contract can be exercised without BlueZ,
+/// NetworkManager or real TLS. A spurious unpark cannot suppress the next
+/// observation; cancellation is checked both before and after each tick.
+fn run_bounded_supervision_until_stopped<T>(
+    owner: &mut T,
+    stop: &AtomicBool,
+    interval: Duration,
+    mut tick: impl FnMut(&mut T) -> Result<(), CoreError>,
+    cancel: impl FnOnce(&mut T),
+) -> Result<(), CoreError> {
+    debug_assert!(!interval.is_zero());
+    let outcome = loop {
+        if stop.load(Ordering::Acquire) {
+            break Ok(());
+        }
+        if let Err(error) = tick(owner) {
+            break Err(error);
+        }
+        if stop.load(Ordering::Acquire) {
+            break Ok(());
+        }
+        let next_tick = Instant::now() + interval;
+        while !stop.load(Ordering::Acquire) {
+            let remaining = next_tick.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            thread::park_timeout(remaining.min(Duration::from_millis(100)));
+        }
+    };
+    // Cancel even if the caller had requested shutdown before the first tick.
+    // For a real registered owner this shuts down TCP before registry removal.
+    cancel(owner);
+    outcome
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -436,6 +511,70 @@ mod tests {
         .unwrap();
         assert!(owner.live);
         assert_eq!(owner.cancels, 0);
+    }
+
+
+    #[test]
+    fn bounded_supervisor_retires_owner_on_prestart_and_mid_tick_stop() {
+        struct Owner {
+            ticks: usize,
+            cancels: usize,
+        }
+        for initially_stopped in [true, false] {
+            let stop = AtomicBool::new(initially_stopped);
+            let mut owner = Owner {
+                ticks: 0,
+                cancels: 0,
+            };
+            run_bounded_supervision_until_stopped(
+                &mut owner,
+                &stop,
+                Duration::from_millis(1),
+                |owner| {
+                    owner.ticks += 1;
+                    stop.store(true, Ordering::Release);
+                    Ok(())
+                },
+                |owner| owner.cancels += 1,
+            )
+            .unwrap();
+            assert_eq!(owner.ticks, usize::from(!initially_stopped));
+            assert_eq!(owner.cancels, 1);
+        }
+    }
+
+    #[test]
+    fn bounded_supervisor_rechecks_and_cancels_after_observation_failure() {
+        struct Owner {
+            ticks: usize,
+            cancels: usize,
+        }
+        let stop = AtomicBool::new(false);
+        let mut owner = Owner {
+            ticks: 0,
+            cancels: 0,
+        };
+        let error = run_bounded_supervision_until_stopped(
+            &mut owner,
+            &stop,
+            Duration::from_millis(1),
+            |owner| {
+                owner.ticks += 1;
+                if owner.ticks == 3 {
+                    Err(CoreError::new(
+                        ErrorKind::PanFailure,
+                        "injected replacement PANU attachment",
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+            |owner| owner.cancels += 1,
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::PanFailure);
+        assert_eq!(owner.ticks, 3);
+        assert_eq!(owner.cancels, 1);
     }
 
     fn fixtures(network: NetworkId) -> (JoinPanLink, JoinIpLease, Ipv4AddressPool) {
