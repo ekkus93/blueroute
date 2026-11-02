@@ -83,10 +83,11 @@ fn require_live_panu_lease(
     // A matching lease does not prove exclusive ownership: the same address
     // may also be assigned to a foreign network or interface. Reject such
     // ambiguous snapshots rather than allowing a source-bound SYN to escape
-    // through an unintended route.
+    // through an unintended route. Compare the host IP, not the full prefix:
+    // an overlapping /24 and /30 can assign the same IPv4 source address.
     if owned
         .iter()
-        .any(|address| address.prefix == lease.address().prefix && address != lease.address())
+        .any(|address| address.prefix.address == lease.address().prefix.address && address != lease.address())
     {
         return Err(CoreError::new(
             ErrorKind::InvalidState,
@@ -106,7 +107,7 @@ fn require_live_panu_lease(
     // unidentifiable) interface with the same address. Presence alone is not
     // sufficient evidence of a unique PANU source.
     if active.iter().any(|prefix| {
-        prefix.prefix == lease.address().prefix
+        prefix.prefix.address == lease.address().prefix.address
             && prefix.interface.as_ref() != Some(lease.interface())
     }) {
         return Err(CoreError::new(
@@ -383,6 +384,39 @@ mod tests {
                 ErrorKind::InvalidState
             );
         }
+
+        // A duplicate host IP with a different subnet mask is still a
+        // duplicate source address. The old whole-IpPrefix comparison would
+        // incorrectly accept both of these ambiguous snapshots.
+        let overlapping_prefix = blueroute_core::IpPrefix::new(
+            lease.address().prefix.address,
+            24,
+        )
+        .unwrap();
+        assert_ne!(overlapping_prefix, lease.address().prefix);
+        let mut different_mask_owned = owned.clone();
+        different_mask_owned.push(InterfaceAddress {
+            interface: NetworkInterfaceHandle::new("bnep-foreign-mask").unwrap(),
+            prefix: overlapping_prefix,
+            owner: network,
+        });
+        assert_eq!(
+            require_live_panu_lease(&lease, &different_mask_owned, &active)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidState
+        );
+        let mut different_mask_active = active.clone();
+        different_mask_active.push(ActiveIpv4Prefix {
+            interface: Some(NetworkInterfaceHandle::new("bnep-foreign-mask").unwrap()),
+            prefix: overlapping_prefix,
+        });
+        assert_eq!(
+            require_live_panu_lease(&lease, &owned, &different_mask_active)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidState
+        );
     }
 
     #[test]
