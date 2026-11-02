@@ -44,3 +44,20 @@ and production `LinuxJoinRuntime` join orchestration are still missing.
 The test uses synthetic PANU observations; it does not establish live
 Bluetooth behavior. Keep P7-003/P7-004/P6-004 open and physical acceptance
 deferred.
+
+## Follow-up: exact attachment loss detection
+
+The production BlueZ `subscribe_panu_events` initial snapshot and
+`BluezPanuSubscription::next_event` now compare the complete observed
+`PanAttachment` to the original subscription attachment, not just
+`is_some()` for that peer. A same-peer replacement on another `bnep`
+interface emits `PanuEvent::Lost` for the old attachment instead of
+silently retaining its generation. Missing and wrong-peer observations
+are also treated as nonmatching. This fixes an event-lifecycle gap that
+could otherwise preserve stale session ownership.
+
+- Commit: `388aceb53247f4ed30b1991cf24762b6294573d5`.
+- Exact-head CI: [41524752052](https://github.com/ekkus93/blueroute/actions/runs/41524752052), **passed**.
+- Scope: deterministic BlueZ attachment matching and event adapter;
+  continuous daemon outbound session supervision and real hardware
+  acceptance are still outstanding.
