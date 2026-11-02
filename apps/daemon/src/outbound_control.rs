@@ -14,8 +14,8 @@ use blueroute_core::{CoreError, ErrorKind, Ipv4AddressPool, Ipv4StarAddressPlan,
 use blueroute_protocol::session::ControlSessionRegistry;
 
 use crate::{
-    ApprovedControlSetup, DurablePeerTrustOperations, JoinIpLease, JoinPanLink,
-    LocalControlTlsIdentity, PinnedControlTlsPeer, RegisteredControlSession, CONTROL_TCP_PORT,
+    ApprovedControlSetup, CONTROL_TCP_PORT, DurablePeerTrustOperations, JoinIpLease, JoinPanLink,
+    LocalControlTlsIdentity, PinnedControlTlsPeer, RegisteredControlSession,
     connect_registered_control_session,
 };
 
@@ -102,13 +102,14 @@ pub fn connect_registered_panu_control_session<'a>(
                 "outbound control handshake deadline expired before TCP dial",
             )
         })?;
-    let socket = TcpStream::connect_timeout(&SocketAddr::V4(endpoint), budget).map_err(|error| {
-        CoreError::with_diagnostic(
-            ErrorKind::PanFailure,
-            "unable to dial the planned NAP control endpoint",
-            error.to_string(),
-        )
-    })?;
+    let socket =
+        TcpStream::connect_timeout(&SocketAddr::V4(endpoint), budget).map_err(|error| {
+            CoreError::with_diagnostic(
+                ErrorKind::PanFailure,
+                "unable to dial the planned NAP control endpoint",
+                error.to_string(),
+            )
+        })?;
     let source = socket.local_addr().map_err(|error| {
         CoreError::with_diagnostic(
             ErrorKind::PanFailure,
@@ -144,9 +145,7 @@ mod tests {
     use blueroute_protocol::control::HelloFacts;
     use blueroute_protocol::session::{ConnectionDeadline, ConnectionStage};
 
-    fn fixtures(
-        network: NetworkId,
-    ) -> (JoinPanLink, JoinIpLease, Ipv4AddressPool) {
+    fn fixtures(network: NetworkId) -> (JoinPanLink, JoinIpLease, Ipv4AddressPool) {
         let pool = Ipv4AddressPool::default();
         let peer = PeerHandle::new("/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF").unwrap();
         let interface = NetworkInterfaceHandle::new("bnep-test").unwrap();
@@ -183,7 +182,10 @@ mod tests {
         let network = NetworkId::from_bytes([0x4b; 16]);
         let other = NetworkId::from_bytes([0x4c; 16]);
         let (link, lease, pool) = fixtures(network);
-        assert!(planned_panu_control_endpoint(NetworkId::from_bytes([0; 16]), &link, &lease, pool).is_err());
+        assert!(
+            planned_panu_control_endpoint(NetworkId::from_bytes([0; 16]), &link, &lease, pool)
+                .is_err()
+        );
         assert!(planned_panu_control_endpoint(other, &link, &lease, pool).is_err());
 
         let wrong_owner = JoinIpLease::new(InterfaceAddress {
@@ -211,9 +213,12 @@ mod tests {
         let network = NetworkId::from_bytes([0x4d; 16]);
         let other = NetworkId::from_bytes([0x4e; 16]);
         let (link, lease, pool) = fixtures(network);
-        let local = LocalControlTlsIdentity::generate(blueroute_core::NodeId::from_bytes([1; 16])).unwrap();
-        let remote = LocalControlTlsIdentity::generate(blueroute_core::NodeId::from_bytes([2; 16])).unwrap();
-        let expected = PinnedControlTlsPeer::new(other, remote.node(), remote.fingerprint()).unwrap();
+        let local =
+            LocalControlTlsIdentity::generate(blueroute_core::NodeId::from_bytes([1; 16])).unwrap();
+        let remote =
+            LocalControlTlsIdentity::generate(blueroute_core::NodeId::from_bytes([2; 16])).unwrap();
+        let expected =
+            PinnedControlTlsPeer::new(other, remote.node(), remote.fingerprint()).unwrap();
         let trust = DurablePeerTrustOperations::new(NetworkMembershipStore::new(
             std::env::temp_dir().join("blueroute-outbound-test-nonexistent-membership"),
         ));
@@ -233,9 +238,17 @@ mod tests {
             active_deadline: deadline,
         };
         let error = connect_registered_panu_control_session(
-            &link, &lease, pool, &local, expected, &trust, setup,
+            &link,
+            &lease,
+            pool,
+            &local,
+            expected,
+            &trust,
+            setup,
             Arc::new(Mutex::new(ControlSessionRegistry::new())),
-        ).err().expect("wrong network pin must be denied before dialing");
+        )
+        .err()
+        .expect("wrong network pin must be denied before dialing");
         assert_eq!(error.kind(), ErrorKind::AuthenticationFailed);
     }
 }

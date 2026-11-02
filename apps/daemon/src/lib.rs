@@ -10,8 +10,8 @@ mod control_listener;
 mod control_tls;
 mod control_worker;
 mod enrollment_transport;
-mod outbound_control;
 mod join_network;
+mod outbound_control;
 mod peer_pin_store;
 mod peer_trust;
 mod pinned_ingress;
@@ -56,10 +56,12 @@ pub use control_tls::{
 };
 pub use control_worker::{DaemonControlWorker, spawn_daemon_control_worker};
 pub use enrollment_transport::enroll_confirmed_control_candidate;
-pub use outbound_control::{connect_registered_panu_control_session, planned_panu_control_endpoint};
 pub use join_network::{
     JoinControlSession, JoinIpLease, JoinNetworkFuture, JoinNetworkOperations, JoinPanLink,
     JoinRuntime, LinuxJoinRuntime, TransactionalJoinNetworkOperations,
+};
+pub use outbound_control::{
+    connect_registered_panu_control_session, planned_panu_control_endpoint,
 };
 pub use peer_pin_store::PeerPinStore;
 pub use peer_trust::{
