@@ -61,7 +61,7 @@ pub use join_network::{
     JoinRuntime, LinuxJoinRuntime, TransactionalJoinNetworkOperations,
 };
 pub use outbound_control::{
-    connect_registered_panu_control_session, planned_panu_control_endpoint,
+    PanuControlRoute, connect_registered_panu_control_session, planned_panu_control_endpoint,
 };
 pub use peer_pin_store::PeerPinStore;
 pub use peer_trust::{
