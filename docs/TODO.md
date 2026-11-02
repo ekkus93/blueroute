@@ -2211,10 +2211,12 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 - [x] create (`blueroute network create <name>`; typed daemon/PolicyKit command, validated display name).
 - [ ] join (production `JoinNetwork` must remain fail-closed until P7 TLS authentication).
-- [ ] leave (daemon leave operation currently pending).
+- [x] leave (`blueroute network leave` delegates to the PolicyKit-gated daemon `LeaveNetwork` command; owned local-host teardown is implemented under P6-008; joined-client leave remains pending P6-004).
 - [x] discover start/stop (typed daemon/PolicyKit commands).
 
 **Software partial:** argument validation and delegation pass exact-head [CI 38466994092](https://github.com/ekkus93/blueroute/actions/runs/38466994092) at `c786f77`; this is not physical PAN or authenticated join acceptance.
+
+**P10-003 leave-status reconciliation (2026-11-02):** The CLI parser, shared-client request, and daemon `LeaveNetwork` handler already implement local-host leave, as separately recorded under P6-008. The stale P10-003 leave checkbox is now marked implemented; it does **not** imply joined-client leave, production authenticated join, complete end-to-end lifecycle acceptance or physical Bluetooth qualification. [Exact-head CI 41432027050](https://github.com/ekkus93/blueroute/actions/runs/41432027050) passed on the inspected code revision.
 
 **Acceptance**
 
