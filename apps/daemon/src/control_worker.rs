@@ -752,7 +752,10 @@ mod tests {
             if let Some(endpoint) = *operations.endpoint.lock().unwrap() {
                 break endpoint;
             }
-            assert!(Instant::now() < ready_before, "guarded test NAP did not bind");
+            assert!(
+                Instant::now() < ready_before,
+                "guarded test NAP did not bind"
+            );
             thread::sleep(Duration::from_millis(5));
         };
         let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
@@ -785,11 +788,14 @@ mod tests {
         let started = Instant::now();
         let deadline = started + Duration::from_secs(4);
         loop {
-            let now_ms = ACTIVE_CLOCK_BASE_MS
-                + u64::try_from(started.elapsed().as_millis()).unwrap();
+            let now_ms =
+                ACTIVE_CLOCK_BASE_MS + u64::try_from(started.elapsed().as_millis()).unwrap();
             match first_session.receive_next_with_budget_at(now_ms, Duration::from_millis(80)) {
                 Ok(ControlSessionRead::Idle | ControlSessionRead::Frames(_)) => {
-                    assert!(Instant::now() < deadline, "revoked peer retained TLS socket");
+                    assert!(
+                        Instant::now() < deadline,
+                        "revoked peer retained TLS socket"
+                    );
                 }
                 Ok(ControlSessionRead::Closed) | Err(_) => break,
             }
@@ -807,8 +813,7 @@ mod tests {
         second_session
             .send_heartbeat_until(Instant::now() + Duration::from_secs(2))
             .unwrap();
-        let now_ms = ACTIVE_CLOCK_BASE_MS
-            + u64::try_from(started.elapsed().as_millis()).unwrap();
+        let now_ms = ACTIVE_CLOCK_BASE_MS + u64::try_from(started.elapsed().as_millis()).unwrap();
         assert!(matches!(
             second_session.receive_next_with_budget_at(now_ms, Duration::from_millis(80)),
             Ok(ControlSessionRead::Idle | ControlSessionRead::Frames(_))
@@ -818,11 +823,14 @@ mod tests {
         let started = Instant::now();
         let deadline = started + Duration::from_secs(4);
         loop {
-            let now_ms = ACTIVE_CLOCK_BASE_MS
-                + u64::try_from(started.elapsed().as_millis()).unwrap();
+            let now_ms =
+                ACTIVE_CLOCK_BASE_MS + u64::try_from(started.elapsed().as_millis()).unwrap();
             match second_session.receive_next_with_budget_at(now_ms, Duration::from_millis(80)) {
                 Ok(ControlSessionRead::Idle | ControlSessionRead::Frames(_)) => {
-                    assert!(Instant::now() < deadline, "shutdown retained second TLS socket");
+                    assert!(
+                        Instant::now() < deadline,
+                        "shutdown retained second TLS socket"
+                    );
                 }
                 Ok(ControlSessionRead::Closed) | Err(_) => break,
             }
