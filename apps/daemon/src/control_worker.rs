@@ -1142,6 +1142,29 @@ mod tests {
             );
             thread::sleep(Duration::from_millis(5));
         };
+        // A hostile unauthenticated TCP client can send an invalid TLS
+        // record. It must get EOF, not crash the worker, retire the NAP
+        // listener, or prevent a separately approved peer from connecting.
+        use std::io::{Read, Write};
+        let mut attacker = std::net::TcpStream::connect(endpoint).unwrap();
+        attacker
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        attacker.write_all(b"not-a-valid-TLS-client-record").unwrap();
+        attacker.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut received = [0_u8; 64];
+        loop {
+            match attacker.read(&mut received) {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(error) => panic!("malformed TLS client was not closed: {error}"),
+            }
+        }
+        assert!(
+            std::net::TcpListener::bind(endpoint).is_err(),
+            "malformed TLS input must not retire the host listener"
+        );
+
         let socket = std::net::TcpStream::connect(endpoint).unwrap();
         let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
         let mut session = crate::connect_registered_control_session(
