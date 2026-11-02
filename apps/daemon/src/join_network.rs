@@ -8,9 +8,9 @@ use blueroute_core::{
     MembershipState, NetworkId, NetworkMembership, ensure_ipv4_segment_available,
 };
 use blueroute_linux::{
-    InterfaceAddress, IpNetworkBackend, IpNetworkObservationBackend, NetworkInterfaceHandle,
-    BluezBackend, NetworkManagerBackend, NetworkMembershipStore, NetworkStateBackend, PanAttachment, PanRole,
-    PeerHandle,
+    BluezBackend, InterfaceAddress, IpNetworkBackend, IpNetworkObservationBackend,
+    NetworkInterfaceHandle, NetworkManagerBackend, NetworkMembershipStore, NetworkStateBackend,
+    PanAttachment, PanRole, PeerHandle,
 };
 
 use crate::current_network;
