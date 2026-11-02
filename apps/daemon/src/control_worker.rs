@@ -1011,3 +1011,97 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         }
         assert!(operations.bind_attempts.load(Ordering::SeqCst) > 0);
+        // The initial error must not permanently poison the worker. A fresh
+        // observation after the bounded rebind delay can return no NAP.
+        operations.fail_bind.store(false, Ordering::SeqCst);
+        let retry_deadline = Instant::now() + Duration::from_secs(4);
+        while operations.bind_attempts.load(Ordering::SeqCst) < 2 && Instant::now() < retry_deadline
+        {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            operations.bind_attempts.load(Ordering::SeqCst) >= 2,
+            "a transient bind error must not disable later guarded observations"
+        );
+        let started = Instant::now();
+        worker.shutdown().unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "shutdown must interrupt the rebind park after recovery"
+        );
+    }
+
+    #[test]
+    fn shutdown_wakes_parked_worker_and_joins_without_waiting_for_poll_timeout() {
+        use std::sync::mpsc;
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&stop);
+        let (finished, completion) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            while !observed.load(Ordering::Acquire) {
+                thread::park_timeout(Duration::from_secs(60));
+            }
+            finished.send(()).unwrap();
+        });
+        let worker = DaemonControlWorker {
+            stop,
+            handle: Some(handle),
+        };
+        worker.shutdown().unwrap();
+        completion.recv_timeout(Duration::from_secs(1)).unwrap();
+    }
+
+    #[test]
+    fn drop_requests_cancellation_without_joining_daemon_executor() {
+        use std::sync::mpsc;
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&stop);
+        let (finished, completion) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            while !observed.load(Ordering::Acquire) {
+                thread::park_timeout(Duration::from_secs(60));
+            }
+            finished.send(()).unwrap();
+        });
+        drop(DaemonControlWorker {
+            stop,
+            handle: Some(handle),
+        });
+        completion.recv_timeout(Duration::from_secs(1)).unwrap();
+    }
+
+    #[test]
+    fn active_tls_clocks_are_per_generation_and_fail_closed_on_regression() {
+        let first = Instant::now();
+        let second = first + Duration::from_secs(10);
+        let check = second + Duration::from_secs(5);
+        assert_eq!(session_clock_ms(first, check), Some(15_003));
+        assert_eq!(session_clock_ms(second, check), Some(5_003));
+        assert_eq!(session_clock_ms(second, second), Some(3));
+        assert_eq!(session_clock_ms(second, first), None);
+    }
+
+    #[test]
+    fn heartbeat_schedule_is_bounded_and_rejects_regressed_time() {
+        let sent = Instant::now();
+        assert!(!heartbeat_due(sent, sent));
+        assert!(!heartbeat_due(
+            sent,
+            sent + HEARTBEAT_INTERVAL - Duration::from_millis(1)
+        ));
+        assert!(heartbeat_due(sent, sent + HEARTBEAT_INTERVAL));
+        assert!(!heartbeat_due(sent, sent - Duration::from_millis(1)));
+    }
+
+    #[test]
+    fn provisional_hello_has_no_invented_neighbors_or_segment() {
+        let network = NetworkId::from_bytes([9; 16]);
+        let setup = control_setup(network, NodeCapabilities::default());
+        assert_eq!(setup.network, network);
+        assert!(setup.facts.direct_neighbors.is_empty());
+        assert_eq!(setup.facts.segment, None);
+        assert_eq!(setup.active_deadline.stage(), ConnectionStage::Active);
+    }
+}
