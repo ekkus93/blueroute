@@ -136,6 +136,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P10-004 | `[-]` | **IN PROGRESS:** explicit full-NodeId `peer trust`/`peer forget` invoke existing PolicyKit-protected D-Bus commands; tests and [CI 38466585585](https://github.com/ekkus93/blueroute/actions/runs/38466585585) at `8183225` passed. Pending requests/authenticated-join UX remain; trust is **not** TLS enrollment or membership. |
 | P10-005 | `[-]` | **SOFTWARE PARTIAL:** `blueroute diagnostics show` now renders typed daemon/system adapter, conditional interface, route, topology and observed-peer details in bounded human form, preserving JSON. The production daemon obtains BlueRoute-owned local interface/address records from the active NetworkManager host backend, isolating other networks, while leaving unknown observations unavailable. [Exact-head CI 39095752322](https://github.com/ekkus93/blueroute/actions/runs/39095752322) passed at `762d6081`. Full live route/topology and authenticated peer observation, detailed troubleshooting, physical acceptance remain OPEN. |
 | P10-006 | `[-]` | **IN PROGRESS:** CLI exit status 0/2/3 executable contract tests passed [CI 38693385185](https://github.com/ekkus93/blueroute/actions/runs/38693385185); exact typed D-Bus categories map `4` denied, `5` unsupported, `3` unavailable and `1` operational. Isolated real-broker CLI subprocess tests verify denial, unsupported and spoofed generic diagnostics with [exact-head CI 38695337220](https://github.com/ekkus93/blueroute/actions/runs/38695337220). Clap parsing is now implemented in commit `84f05a6`; remaining cross-command integration is still open. |
+| P17-001 | `[-]` | **SOFTWARE PARTIAL:** `docs/USER_GUIDE.md` covers Debian development installation, local CLI status, hosting/discovery, recovery and hardware-neutral compatibility; production authenticated join and GUI/TUI remain unavailable. |
 | All other tasks | `[ ]` | Not started unless explicitly documented in that task; remaining hardware acceptance is not a blocker for independent software work. |
 
 **P3-003 durable membership zero-identity rejection (software only, 2026-10-20):** The membership persistence codec now refuses reserved all-zero NetworkId and NodeId sentinels when saving in-memory records and when parsing durable records, including otherwise syntactically valid trusted peers. A regression verifies rejected saves do not overwrite existing good state, corrupt loaded state is not silently rewritten, and restored valid records still load. Source `4b303692c61638959d330b65f807714cecdfa899`, formatting follow-up `f3c76cf9e6ac104249615c8ebb0a910a45b1f65e`, [exact-head CI 39447633725](https://github.com/ekkus93/blueroute/actions/runs/39447633725) **passed**. This hardens local durable state only; it is not independent P7 enrollment UX, live daemon-owned authenticated PAN/TLS session supervision, production P6-004 JoinNetwork, or physical Bluetooth acceptance. Those gates remain OPEN/DEFERRED.
@@ -2870,11 +2871,13 @@ From clean supported Linux/Debian installs:
 
 ## P17-001 — User guide
 
-- [ ] install.
-- [ ] create/join/leave.
-- [ ] device status.
-- [ ] common recovery.
-- [ ] explain compatibility requirements without requiring PAN knowledge.
+- [x] install (current Debian development-package path and release limitations documented).
+- [ ] create/join/leave (host create/leave documented; production join and graphical workflow still unavailable).
+- [x] device status (available local-only CLI views and interpretation documented).
+- [x] common recovery (read-only checks and safe escalation documented).
+- [x] explain compatibility requirements without requiring PAN knowledge.
+
+**SOFTWARE PARTIAL (2026-11-01):** [USER_GUIDE.md](USER_GUIDE.md) covers the Debian development-package onboarding path, current CLI create/discovery/host-leave steps, local-only status, recovery, and capability-based compatibility. It explicitly states that production join, independently verified peer-key enrollment and desktop/TUI workflows are not available. Keep the lifecycle checkbox and task open until real authenticated join and the user-facing workflow exist.
 
 **Acceptance**
 
