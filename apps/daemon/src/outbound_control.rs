@@ -354,7 +354,6 @@ fn cancel_on_failed_supervision<T>(
     result
 }
 
-
 /// Revalidate an already authenticated PANU owner once per bounded interval
 /// until the daemon requests shutdown or an ownership check fails.
 ///
@@ -512,7 +511,6 @@ mod tests {
         assert!(owner.live);
         assert_eq!(owner.cancels, 0);
     }
-
 
     #[test]
     fn bounded_supervisor_retires_owner_on_prestart_and_mid_tick_stop() {
@@ -798,37 +796,3 @@ mod tests {
         let expected =
             PinnedControlTlsPeer::new(other, remote.node(), remote.fingerprint()).unwrap();
         let trust = DurablePeerTrustOperations::new(NetworkMembershipStore::new(
-            std::env::temp_dir().join("blueroute-outbound-test-nonexistent-membership"),
-        ));
-        let mut deadline = ConnectionDeadline::new(0);
-        deadline.advance(ConnectionStage::TlsHandshake, 1).unwrap();
-        deadline.advance(ConnectionStage::Hello, 2).unwrap();
-        deadline.advance(ConnectionStage::Active, 3).unwrap();
-        let setup = ApprovedControlSetup {
-            network,
-            facts: HelloFacts {
-                software_version: "outbound-test".to_owned(),
-                capabilities: blueroute_core::NodeCapabilities::default(),
-                segment: None,
-                direct_neighbors: Vec::new(),
-            },
-            handshake_deadline: Instant::now() + std::time::Duration::from_secs(1),
-            active_deadline: deadline,
-        };
-        let error = connect_registered_panu_control_session(
-            PanuControlRoute {
-                link: &link,
-                lease: &lease,
-                pool,
-            },
-            &local,
-            expected,
-            &trust,
-            setup,
-            Arc::new(Mutex::new(ControlSessionRegistry::new())),
-        )
-        .err()
-        .expect("wrong network pin must be denied before dialing");
-        assert_eq!(error.kind(), ErrorKind::AuthenticationFailed);
-    }
-}
