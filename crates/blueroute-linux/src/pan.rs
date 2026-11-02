@@ -143,6 +143,43 @@ impl PanBackend for BluezBackend {
     }
 }
 
+/// Disconnect a PANU link only when the freshly observed BlueZ attachment
+/// still matches the exact peer and interface returned to this runtime.
+///
+/// A disappeared link is already clean. A replacement attachment must not be
+/// disconnected using a stale join handle. This is a point-in-time guard:
+/// concurrent BlueZ changes and daemon-restart ownership still need P6-009
+/// reconciliation before production joining can be enabled.
+impl BluezBackend {
+    pub async fn disconnect_matching_panu(
+        &self,
+        expected: &PanAttachment,
+    ) -> Result<(), CoreError> {
+        validate_panu_attachment(expected)?;
+        let peer = expected.peer.as_ref().expect("validated PANU peer");
+        let observed = current_panu_attachment(&self.connection, peer).await?;
+        if should_disconnect_matching_panu(expected, observed.as_ref())? {
+            disconnect_panu(&self.connection, peer).await?;
+        }
+        Ok(())
+    }
+}
+
+fn should_disconnect_matching_panu(
+    expected: &PanAttachment,
+    observed: Option<&PanAttachment>,
+) -> Result<bool, CoreError> {
+    validate_panu_attachment(expected)?;
+    match observed {
+        None => Ok(false),
+        Some(current) if current == expected => Ok(true),
+        Some(_) => Err(CoreError::new(
+            ErrorKind::InvalidState,
+            "PANU attachment changed before cleanup; refusing to disconnect a replacement link",
+        )),
+    }
+}
+
 struct BluezPanuSubscription {
     connection: Connection,
     stream: MessageStream,
@@ -1409,6 +1446,45 @@ mod tests {
             validate_panu_attachment(&attachment).unwrap_err().kind(),
             ErrorKind::InvalidInput
         );
+    }
+
+    #[test]
+    fn matching_panu_cleanup_accepts_only_the_exact_observed_attachment() {
+        let expected = panu_attachment(&peer(), "bnep7".to_owned()).unwrap();
+        assert!(should_disconnect_matching_panu(&expected, Some(&expected)).unwrap());
+        assert!(!should_disconnect_matching_panu(&expected, None).unwrap());
+
+        let replacement = panu_attachment(&peer(), "bnep8".to_owned()).unwrap();
+        assert_eq!(
+            should_disconnect_matching_panu(&expected, Some(&replacement))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidState
+        );
+        let different_peer = PeerHandle::new("/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF").unwrap();
+        let foreign = panu_attachment(&different_peer, "bnep7".to_owned()).unwrap();
+        assert_eq!(
+            should_disconnect_matching_panu(&expected, Some(&foreign))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidState
+        );
+    }
+
+    #[test]
+    fn matching_panu_cleanup_rejects_non_panu_or_peerless_handles() {
+        let expected = panu_attachment(&peer(), "bnep7".to_owned()).unwrap();
+        for invalid in [
+            PanAttachment { role: PanRole::Nap, ..expected.clone() },
+            PanAttachment { peer: None, ..expected.clone() },
+        ] {
+            assert_eq!(
+                should_disconnect_matching_panu(&invalid, None)
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::InvalidInput
+            );
+        }
     }
 
     #[test]

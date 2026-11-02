@@ -9,7 +9,7 @@ use blueroute_core::{
 };
 use blueroute_linux::{
     InterfaceAddress, IpNetworkBackend, IpNetworkObservationBackend, NetworkInterfaceHandle,
-    NetworkManagerBackend, NetworkMembershipStore, NetworkStateBackend, PanAttachment, PanRole,
+    BluezBackend, NetworkManagerBackend, NetworkMembershipStore, NetworkStateBackend, PanAttachment, PanRole,
     PeerHandle,
 };
 
@@ -447,12 +447,10 @@ impl JoinRuntime for LinuxJoinRuntime {
         })
     }
 
-    fn disconnect_panu(&self, _link: JoinPanLink) -> JoinNetworkFuture<'_, ()> {
-        Box::pin(async {
-            Err(CoreError::new(
-                ErrorKind::CapabilityUnavailable,
-                "production PANU cleanup is not implemented for JoinNetwork yet",
-            ))
+    fn disconnect_panu(&self, link: JoinPanLink) -> JoinNetworkFuture<'_, ()> {
+        Box::pin(async move {
+            let bluez = BluezBackend::connect_system().await?;
+            bluez.disconnect_matching_panu(&link.attachment).await
         })
     }
 
