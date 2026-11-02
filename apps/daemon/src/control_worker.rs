@@ -1079,6 +1079,131 @@ mod tests {
     }
 
     #[test]
+    fn running_worker_rejects_authenticated_oversized_frame_and_recovers_same_peer() {
+        use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
+        use blueroute_core::NodeId;
+        use std::io::Write;
+
+        let root = std::env::temp_dir().join(format!(
+            "blueroute-worker-auth-hostile-frame-{}",
+            std::process::id()
+        ));
+        let host_path = root.join("host-membership");
+        let client_path = root.join("client-membership");
+        save_host_membership(&host_path);
+        save_host_membership(&client_path);
+        let network = NetworkId::from_bytes([7; 16]);
+        let host = LocalControlTlsIdentity::generate(NodeId::from_bytes([8; 16])).unwrap();
+        let client = LocalControlTlsIdentity::generate(NodeId::from_bytes([9; 16])).unwrap();
+        let host_pin = PinnedControlTlsPeer::new(network, host.node(), host.fingerprint()).unwrap();
+        let host_trust = Arc::new(DurablePeerTrustOperations::with_peer_pin_store(
+            NetworkMembershipStore::new(host_path.clone()),
+            PeerPinStore::new(root.join("host-pins")),
+        ));
+        let client_trust = DurablePeerTrustOperations::with_peer_pin_store(
+            NetworkMembershipStore::new(client_path),
+            PeerPinStore::new(root.join("client-pins")),
+        ));
+        // Synthetic fixture pins stand in for independently confirmed enrollment;
+        // the test still proves actual mutual TLS and exporter-bound Hello.
+        future::block_on(host_trust.trust_peer(client.node())).unwrap();
+        host_trust
+            .enroll_verified_key(
+                network,
+                client.node(),
+                client.fingerprint(),
+                client.fingerprint(),
+            )
+            .unwrap();
+        future::block_on(client_trust.trust_peer(host.node())).unwrap();
+        client_trust
+            .enroll_verified_key(network, host.node(), host.fingerprint(), host.fingerprint())
+            .unwrap();
+
+        let operations = Arc::new(HostedNapOperations::default());
+        let worker = spawn_daemon_control_worker(
+            NetworkMembershipStore::new(host_path.clone()),
+            operations.clone(),
+            Arc::clone(&host_trust),
+            host,
+            NodeCapabilities::default(),
+        )
+        .unwrap();
+        let ready_before = Instant::now() + Duration::from_secs(3);
+        let endpoint = loop {
+            if let Some(endpoint) = *operations.endpoint.lock().unwrap() {
+                break endpoint;
+            }
+            assert!(Instant::now() < ready_before, "guarded NAP did not bind");
+            thread::sleep(Duration::from_millis(5));
+        };
+
+        let socket = std::net::TcpStream::connect(endpoint).unwrap();
+        let (mut hostile, certificate) = crate::connect_pinned_control_tls(
+            socket,
+            &client,
+            network,
+            host_pin,
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+        hostile
+            .exchange_authenticated_hello(
+                network,
+                &client,
+                &certificate,
+                control_setup(network, NodeCapabilities::default()).facts,
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap();
+        // This is TLS plaintext *after* successful certificate/Hello proof,
+        // not an invalid pre-TLS record. Keep the hostile socket alive so a
+        // successful same-peer replacement proves the worker retired the
+        // malformed generation rather than merely noticing client EOF.
+        hostile.write_all(&[0xff, 0xff, 0xff, 0xff]).unwrap();
+        hostile.flush().unwrap();
+
+        let retry_until = Instant::now() + Duration::from_secs(4);
+        let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+        let mut recovered = loop {
+            let socket = std::net::TcpStream::connect(endpoint).unwrap();
+            match crate::connect_registered_control_session(
+                socket,
+                &client,
+                host_pin,
+                &client_trust,
+                control_setup(network, NodeCapabilities::default()),
+                Arc::clone(&registry),
+            ) {
+                Ok(session) => break session,
+                Err(error) => {
+                    assert!(
+                        Instant::now() < retry_until,
+                        "running worker did not retire hostile authenticated peer: {error:?}"
+                    );
+                    thread::sleep(Duration::from_millis(50));
+                }
+            }
+        };
+        assert_eq!(recovered.peer(), NodeId::from_bytes([8; 16]));
+        recovered
+            .send_heartbeat_until(Instant::now() + Duration::from_secs(2))
+            .unwrap();
+        assert!(std::net::TcpListener::bind(endpoint).is_err());
+        assert_eq!(host_trust.approved_control_pins(network).unwrap().len(), 1);
+        assert_eq!(
+            current_network(&NetworkMembershipStore::new(host_path).load().unwrap()).unwrap(),
+            Some(network)
+        );
+
+        worker.shutdown().unwrap();
+        drop(recovered);
+        drop(hostile);
+        assert!(std::net::TcpListener::bind(endpoint).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn shutdown_closes_authenticated_worker_session_without_mutating_membership() {
         use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
         use blueroute_core::NodeId;
