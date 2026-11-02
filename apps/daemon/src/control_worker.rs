@@ -957,6 +957,128 @@ mod tests {
     }
 
     #[test]
+    fn running_worker_closes_authenticated_session_on_durable_leave() {
+        use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
+        use blueroute_core::NodeId;
+
+        let root = std::env::temp_dir().join(format!(
+            "blueroute-control-worker-auth-leave-{}",
+            std::process::id()
+        ));
+        let host_path = root.join("host-membership");
+        let client_path = root.join("client-membership");
+        save_host_membership(&host_path);
+        save_host_membership(&client_path);
+        let host_store = NetworkMembershipStore::new(host_path.clone());
+        let client_store = NetworkMembershipStore::new(client_path);
+        let network = NetworkId::from_bytes([7; 16]);
+        let host = LocalControlTlsIdentity::generate(NodeId::from_bytes([8; 16])).unwrap();
+        let client = LocalControlTlsIdentity::generate(NodeId::from_bytes([9; 16])).unwrap();
+        let host_pin = PinnedControlTlsPeer::new(network, host.node(), host.fingerprint()).unwrap();
+        let host_trust = Arc::new(DurablePeerTrustOperations::with_peer_pin_store(
+            NetworkMembershipStore::new(host_path.clone()),
+            PeerPinStore::new(root.join("host-pins")),
+        ));
+        let client_trust = DurablePeerTrustOperations::with_peer_pin_store(
+            client_store,
+            PeerPinStore::new(root.join("client-pins")),
+        );
+
+        // These local fixtures emulate completed enrollment. Production can
+        // only persist a pin after independent confirmation and genuine TLS.
+        future::block_on(host_trust.trust_peer(client.node())).unwrap();
+        host_trust
+            .enroll_verified_key(
+                network,
+                client.node(),
+                client.fingerprint(),
+                client.fingerprint(),
+            )
+            .unwrap();
+        future::block_on(client_trust.trust_peer(host.node())).unwrap();
+        client_trust
+            .enroll_verified_key(network, host.node(), host.fingerprint(), host.fingerprint())
+            .unwrap();
+
+        let operations = Arc::new(HostedNapOperations::default());
+        let worker = spawn_daemon_control_worker(
+            host_store,
+            operations.clone(),
+            Arc::clone(&host_trust),
+            host,
+            NodeCapabilities::default(),
+        )
+        .unwrap();
+        let ready_before = Instant::now() + Duration::from_secs(3);
+        let endpoint = loop {
+            if let Some(endpoint) = *operations.endpoint.lock().unwrap() {
+                break endpoint;
+            }
+            assert!(
+                Instant::now() < ready_before,
+                "guarded test NAP did not bind"
+            );
+            thread::sleep(Duration::from_millis(5));
+        };
+        let socket = std::net::TcpStream::connect(endpoint).unwrap();
+        let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+        let mut session = crate::connect_registered_control_session(
+            socket,
+            &client,
+            host_pin,
+            &client_trust,
+            control_setup(network, NodeCapabilities::default()),
+            Arc::clone(&registry),
+        )
+        .expect("real TLS and exporter-bound Hello must authenticate the running worker");
+        assert_eq!(session.peer(), NodeId::from_bytes([8; 16]));
+        session
+            .send_heartbeat_until(Instant::now() + Duration::from_secs(2))
+            .unwrap();
+
+        // Remove durable host membership while the fake NAP backend still
+        // reports its stale endpoint. This must retire both the active TLS
+        // channel and the listening socket, without accepting stale ingress.
+        NetworkMembershipStore::new(host_path.clone())
+            .save(&blueroute_core::MembershipRegistry::default())
+            .unwrap();
+        let read_start = Instant::now();
+        let read_until = read_start + Duration::from_secs(4);
+        loop {
+            let now_ms = 3 + u64::try_from(read_start.elapsed().as_millis()).unwrap();
+            match session.receive_next_with_budget_at(now_ms, Duration::from_millis(80)) {
+                Ok(ControlSessionRead::Idle | ControlSessionRead::Frames(_)) => {
+                    assert!(
+                        Instant::now() < read_until,
+                        "durable leave kept an authenticated socket alive"
+                    );
+                }
+                Ok(ControlSessionRead::Closed) | Err(_) => break,
+            }
+        }
+        assert!(session.is_terminal());
+        assert!(host_trust.approved_control_pins(network).is_err());
+        assert_eq!(
+            current_network(&NetworkMembershipStore::new(host_path).load().unwrap()).unwrap(),
+            None
+        );
+        assert!(
+            std::net::TcpListener::bind(endpoint).is_ok(),
+            "durable leave must release the host listener"
+        );
+        let binds = operations.binds.load(Ordering::SeqCst);
+        thread::sleep(REBIND_INTERVAL + Duration::from_millis(300));
+        assert_eq!(
+            operations.binds.load(Ordering::SeqCst),
+            binds,
+            "stale backend NAP must not rebind without durable membership"
+        );
+        worker.shutdown().unwrap();
+        assert!(std::net::TcpListener::bind(endpoint).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn shutdown_closes_authenticated_worker_session_without_mutating_membership() {
         use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
         use blueroute_core::NodeId;
