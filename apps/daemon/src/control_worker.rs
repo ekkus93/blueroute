@@ -598,6 +598,7 @@ mod tests {
         let client_trust = DurablePeerTrustOperations::with_peer_pin_store(
             client_store,
             PeerPinStore::new(root.join("client-pins")),
+
         );
 
         // These local fixtures emulate completed enrollment. Production can
@@ -1198,6 +1199,7 @@ mod tests {
                 Err(error) => {
                     assert!(
                         Instant::now() < retry_until,
+
                         "running worker did not retire the Goodbye generation: {error:?}"
                     );
                     thread::sleep(Duration::from_millis(50));
@@ -1388,6 +1390,12 @@ mod tests {
             .enroll_verified_key(network, host.node(), host.fingerprint(), host.fingerprint())
             .unwrap();
 
+        fn write_raw_frame(stream: &mut impl std::io::Write, payload: &[u8]) {
+            assert!(payload.len() <= blueroute_protocol::control::MAX_CONTROL_FRAME_BYTES);
+            stream.write_all(&(payload.len() as u32).to_be_bytes()).unwrap();
+            stream.write_all(payload).unwrap();
+        }
+
         let operations = Arc::new(HostedNapOperations::default());
         let worker = spawn_daemon_control_worker(
             NetworkMembershipStore::new(host_path.clone()),
@@ -1406,7 +1414,7 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         };
 
-        for attack in 0..4 {
+        for attack in 0..9 {
             let socket = std::net::TcpStream::connect(endpoint).unwrap();
             let (mut hostile, certificate) = crate::connect_pinned_control_tls(
                 socket,
@@ -1460,6 +1468,41 @@ mod tests {
                     hostile
                         .write_all(&encode_control_frame(&envelope).unwrap())
                         .unwrap();
+                }
+                4 => {
+                    // An approved TLS key does not authorize a different NodeId.
+                    envelope.sender = NodeId::from_bytes([10; 16]);
+                    hostile
+                        .write_all(&encode_control_frame(&envelope).unwrap())
+                        .unwrap();
+                }
+                5 => {
+                    // The normal encoder refuses unsupported versions, so
+                    // mutate the wire JSON after creating a valid envelope.
+                    let mut value = serde_json::to_value(&envelope).unwrap();
+                    value["version"] = serde_json::json!(2);
+                    write_raw_frame(&mut hostile, &serde_json::to_vec(&value).unwrap());
+                }
+                6 => {
+                    // An authenticated channel cannot extend the message set.
+                    let mut value = serde_json::to_value(&envelope).unwrap();
+                    value["message"] = serde_json::json!({"type": "route_update"});
+                    write_raw_frame(&mut hostile, &serde_json::to_vec(&value).unwrap());
+                }
+                7 => {
+                    // Reject ambiguous duplicate JSON keys at the TLS ingress.
+                    let mut payload = serde_json::to_string(&envelope).unwrap();
+                    assert!(payload.ends_with('}'));
+                    payload.pop();
+                    payload.push_str(r#","sequence":4}"#);
+                    write_raw_frame(&mut hostile, payload.as_bytes());
+                }
+                8 => {
+                    // A valid frame followed by junk inside the same bounded
+                    // length prefix is not an accepted Heartbeat.
+                    let mut payload = serde_json::to_vec(&envelope).unwrap();
+                    payload.extend_from_slice(b"trailing-garbage");
+                    write_raw_frame(&mut hostile, &payload);
                 }
                 _ => unreachable!(),
             }
@@ -1798,6 +1841,7 @@ mod tests {
     }
 
     #[test]
+
     fn durable_leave_retires_stale_nap_listener() {
         use blueroute_core::NodeId;
         let path = std::env::temp_dir().join(format!(
