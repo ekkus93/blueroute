@@ -6,12 +6,13 @@
 //! registry admission all succeed. This seam does not enable JoinNetwork:
 //! production PANU discovery, pre-join enrollment and reconnect are still open.
 
-use std::net::{IpAddr, Shutdown, SocketAddr, SocketAddrV4, TcpStream};
+use std::net::{IpAddr, Shutdown, SocketAddrV4};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use blueroute_core::{CoreError, ErrorKind, Ipv4AddressPool, Ipv4StarAddressPlan, NetworkId};
 use blueroute_protocol::session::ControlSessionRegistry;
+use blueroute_linux::connect_tcp_from_ipv4;
 
 use crate::{
     ApprovedControlSetup, CONTROL_TCP_PORT, DurablePeerTrustOperations, JoinIpLease, JoinPanLink,
@@ -109,14 +110,23 @@ pub fn connect_registered_panu_control_session<'a>(
                 "outbound control handshake deadline expired before TCP dial",
             )
         })?;
-    let socket =
-        TcpStream::connect_timeout(&SocketAddr::V4(endpoint), budget).map_err(|error| {
+    let IpAddr::V4(source_ip) = route.lease.address().prefix.address else {
+        return Err(CoreError::new(
+            ErrorKind::InvalidState,
+            "outbound PANU control requires an owned IPv4 source",
+        ));
+    };
+    // Bind the source *before* connect. A post-connect source-address check
+    // alone could already have sent an untrusted SYN over another interface.
+    let socket = connect_tcp_from_ipv4(source_ip, endpoint, setup.handshake_deadline).map_err(
+        |error| {
             CoreError::with_diagnostic(
                 ErrorKind::PanFailure,
-                "unable to dial the planned NAP control endpoint",
+                "unable to dial the planned NAP control endpoint from the owned PANU address",
                 error.to_string(),
             )
-        })?;
+        },
+    )?;
     let source = socket.local_addr().map_err(|error| {
         CoreError::with_diagnostic(
             ErrorKind::PanFailure,
