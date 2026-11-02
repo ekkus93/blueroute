@@ -13,7 +13,7 @@ use rustix::event::{PollFd, PollFlags, poll};
 use rustix::io::Errno;
 use rustix::net::sockopt::socket_error;
 use rustix::net::{AddressFamily, SocketFlags, SocketType, bind, connect, socket_with};
-use rustix::timespec::Timespec;
+use rustix::time::Timespec;
 
 /// Open a TCP stream from the exact locally owned IPv4 address by a monotonic
 /// deadline. A missing source address fails before any outbound TCP connect.
