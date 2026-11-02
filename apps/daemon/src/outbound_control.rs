@@ -86,7 +86,8 @@ pub fn connect_registered_panu_control_session<'a>(
     setup: ApprovedControlSetup,
     registry: Arc<Mutex<ControlSessionRegistry>>,
 ) -> Result<RegisteredControlSession<'a>, CoreError> {
-    let endpoint = planned_panu_control_endpoint(setup.network, route.link, route.lease, route.pool)?;
+    let endpoint =
+        planned_panu_control_endpoint(setup.network, route.link, route.lease, route.pool)?;
     if expected.network() != setup.network || expected.node() == local.node() {
         return Err(CoreError::new(
             ErrorKind::AuthenticationFailed,
