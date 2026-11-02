@@ -998,7 +998,6 @@ mod tests {
         future::block_on(client_trust.trust_peer(host.node())).unwrap();
         client_trust
             .enroll_verified_key(network, host.node(), host.fingerprint(), host.fingerprint())
-
             .unwrap();
 
         let operations = Arc::new(HostedNapOperations::default());
@@ -1159,8 +1158,8 @@ mod tests {
         let read_start = Instant::now();
         let reply_until = read_start + Duration::from_secs(4);
         loop {
-            let now_ms = ACTIVE_CLOCK_BASE_MS
-                + u64::try_from(read_start.elapsed().as_millis()).unwrap();
+            let now_ms =
+                ACTIVE_CLOCK_BASE_MS + u64::try_from(read_start.elapsed().as_millis()).unwrap();
             match first.receive_next_with_budget_at(now_ms, Duration::from_millis(80)) {
                 Ok(ControlSessionRead::Frames(frames))
                     if frames
