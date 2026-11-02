@@ -1475,8 +1475,14 @@ mod tests {
     fn matching_panu_cleanup_rejects_non_panu_or_peerless_handles() {
         let expected = panu_attachment(&peer(), "bnep7".to_owned()).unwrap();
         for invalid in [
-            PanAttachment { role: PanRole::Nap, ..expected.clone() },
-            PanAttachment { peer: None, ..expected.clone() },
+            PanAttachment {
+                role: PanRole::Nap,
+                ..expected.clone()
+            },
+            PanAttachment {
+                peer: None,
+                ..expected.clone()
+            },
         ] {
             assert_eq!(
                 should_disconnect_matching_panu(&invalid, None)
