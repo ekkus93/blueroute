@@ -1347,6 +1347,165 @@ mod tests {
     }
 
     #[test]
+    fn running_worker_rejects_authenticated_replay_scope_and_handshake_frames() {
+        use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
+        use blueroute_core::NodeId;
+        use blueroute_protocol::control::encode_control_frame;
+        use std::io::Write;
+
+        let root = std::env::temp_dir().join(format!(
+            "blueroute-worker-auth-frame-scope-{}",
+            std::process::id()
+        ));
+        let host_path = root.join("host-membership");
+        let client_path = root.join("client-membership");
+        save_host_membership(&host_path);
+        save_host_membership(&client_path);
+        let network = NetworkId::from_bytes([7; 16]);
+        let host = LocalControlTlsIdentity::generate(NodeId::from_bytes([8; 16])).unwrap();
+        let client = LocalControlTlsIdentity::generate(NodeId::from_bytes([9; 16])).unwrap();
+        let host_pin = PinnedControlTlsPeer::new(network, host.node(), host.fingerprint()).unwrap();
+        let host_trust = Arc::new(DurablePeerTrustOperations::with_peer_pin_store(
+            NetworkMembershipStore::new(host_path.clone()),
+            PeerPinStore::new(root.join("host-pins")),
+        ));
+        let client_trust = DurablePeerTrustOperations::with_peer_pin_store(
+            NetworkMembershipStore::new(client_path),
+            PeerPinStore::new(root.join("client-pins")),
+        );
+        // Synthetic fixture pins; actual TLS 1.3 and exporter-bound Hello.
+        future::block_on(host_trust.trust_peer(client.node())).unwrap();
+        host_trust
+            .enroll_verified_key(
+                network,
+                client.node(),
+                client.fingerprint(),
+                client.fingerprint(),
+            )
+            .unwrap();
+        future::block_on(client_trust.trust_peer(host.node())).unwrap();
+        client_trust
+            .enroll_verified_key(network, host.node(), host.fingerprint(), host.fingerprint())
+            .unwrap();
+
+        let operations = Arc::new(HostedNapOperations::default());
+        let worker = spawn_daemon_control_worker(
+            NetworkMembershipStore::new(host_path.clone()),
+            operations.clone(),
+            Arc::clone(&host_trust),
+            host,
+            NodeCapabilities::default(),
+        )
+        .unwrap();
+        let ready_before = Instant::now() + Duration::from_secs(3);
+        let endpoint = loop {
+            if let Some(endpoint) = *operations.endpoint.lock().unwrap() {
+                break endpoint;
+            }
+            assert!(Instant::now() < ready_before, "guarded NAP did not bind");
+            thread::sleep(Duration::from_millis(5));
+        };
+
+        for attack in 0..4 {
+            let socket = std::net::TcpStream::connect(endpoint).unwrap();
+            let (mut hostile, certificate) = crate::connect_pinned_control_tls(
+                socket,
+                &client,
+                network,
+                host_pin,
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap();
+            let authenticated = hostile
+                .exchange_authenticated_hello(
+                    network,
+                    &client,
+                    &certificate,
+                    control_setup(network, NodeCapabilities::default()).facts,
+                    Instant::now() + Duration::from_secs(5),
+                )
+                .unwrap();
+            let mut envelope = blueroute_protocol::control::ControlEnvelope {
+                version: blueroute_protocol::control::CONTROL_VERSION,
+                network,
+                sender: client.node(),
+                session_id: *authenticated.session_id(),
+                sequence: 3,
+                message: ControlMessage::Heartbeat,
+            };
+            match attack {
+                0 => {
+                    // Replay a syntactically valid post-Hello Heartbeat.
+                    let frame = encode_control_frame(&envelope).unwrap();
+                    hostile.write_all(&frame).unwrap();
+                    hostile.write_all(&frame).unwrap();
+                }
+                1 => {
+                    envelope.network = NetworkId::from_bytes([6; 16]);
+                    hostile
+                        .write_all(&encode_control_frame(&envelope).unwrap())
+                        .unwrap();
+                }
+                2 => {
+                    envelope.session_id[0] ^= 1;
+                    hostile
+                        .write_all(&encode_control_frame(&envelope).unwrap())
+                        .unwrap();
+                }
+                3 => {
+                    envelope.message = ControlMessage::Hello {
+                        challenge: [1; 16],
+                        facts: control_setup(network, NodeCapabilities::default()).facts,
+                    };
+                    hostile
+                        .write_all(&encode_control_frame(&envelope).unwrap())
+                        .unwrap();
+                }
+                _ => unreachable!(),
+            }
+            hostile.flush().unwrap();
+
+            // Keep the hostile TLS socket open. Same-peer recovery requires
+            // the daemon to reject and retire the bad session generation.
+            let retry_until = Instant::now() + Duration::from_secs(6);
+            let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+            let mut recovered = loop {
+                let socket = std::net::TcpStream::connect(endpoint).unwrap();
+                match crate::connect_registered_control_session(
+                    socket,
+                    &client,
+                    host_pin,
+                    &client_trust,
+                    control_setup(network, NodeCapabilities::default()),
+                    Arc::clone(&registry),
+                ) {
+                    Ok(session) => break session,
+                    Err(error) => {
+                        assert!(
+                            Instant::now() < retry_until,
+                            "worker did not retire attack {attack} generation: {error:?}"
+                        );
+                        thread::sleep(Duration::from_millis(50));
+                    }
+                }
+            };
+            recovered
+                .send_heartbeat_until(Instant::now() + Duration::from_secs(2))
+                .unwrap();
+            drop(recovered);
+            drop(hostile);
+            assert_eq!(host_trust.approved_control_pins(network).unwrap().len(), 1);
+            let saved = NetworkMembershipStore::new(host_path.clone()).load().unwrap();
+            assert_eq!(current_network(&saved).unwrap(), Some(network));
+            assert!(std::net::TcpListener::bind(endpoint).is_err());
+        }
+
+        worker.shutdown().unwrap();
+        assert!(std::net::TcpListener::bind(endpoint).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn shutdown_closes_authenticated_worker_session_without_mutating_membership() {
         use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
         use blueroute_core::NodeId;
