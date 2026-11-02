@@ -226,14 +226,15 @@ pub fn connect_registered_panu_control_session<'a>(
     let peer = expected.node();
     let fingerprint = expected.fingerprint();
     let deadline = setup.handshake_deadline;
-    let session = connect_registered_control_session(socket, local, expected, trust, setup, registry)
-        .map_err(|error| {
-            CoreError::with_diagnostic(
-                ErrorKind::AuthenticationFailed,
-                "outbound PANU control TLS/Hello/registry admission failed",
-                error.to_string(),
-            )
-        })?;
+    let session =
+        connect_registered_control_session(socket, local, expected, trust, setup, registry)
+            .map_err(|error| {
+                CoreError::with_diagnostic(
+                    ErrorKind::AuthenticationFailed,
+                    "outbound PANU control TLS/Hello/registry admission failed",
+                    error.to_string(),
+                )
+            })?;
 
     // A PANU can disappear or be replaced during TLS/Hello. The pre-dial
     // snapshot cannot authorize retaining an authenticated session after that
@@ -300,7 +301,10 @@ mod tests {
         for kind in [ErrorKind::PanFailure, ErrorKind::AuthenticationFailed] {
             let dropped = Arc::new(AtomicUsize::new(0));
             let result = retain_after_post_auth_checks(Owner(Arc::clone(&dropped)), || {
-                Err(CoreError::new(kind, "injected post-handshake ownership failure"))
+                Err(CoreError::new(
+                    kind,
+                    "injected post-handshake ownership failure",
+                ))
             });
             assert!(result.is_err());
             assert_eq!(dropped.load(Ordering::SeqCst), 1);
