@@ -84,9 +84,10 @@ fn require_live_panu_lease(
     // may also be assigned to a foreign network or interface. Reject such
     // ambiguous snapshots rather than allowing a source-bound SYN to escape
     // through an unintended route.
-    if owned.iter().any(|address| {
-        address.prefix == lease.address().prefix && address != lease.address()
-    }) {
+    if owned
+        .iter()
+        .any(|address| address.prefix == lease.address().prefix && address != lease.address())
+    {
         return Err(CoreError::new(
             ErrorKind::InvalidState,
             "PANU control source address has conflicting NetworkManager ownership",
