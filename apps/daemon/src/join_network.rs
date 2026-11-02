@@ -42,6 +42,12 @@ impl JoinPanLink {
         &self.attachment.interface
     }
 
+    /// Preserve the original BlueZ attachment identity for live pre-dial
+    /// revalidation; a network interface name alone is not PANU ownership.
+    pub fn attachment(&self) -> &PanAttachment {
+        &self.attachment
+    }
+
     pub fn peer(&self) -> &PeerHandle {
         &self.peer
     }

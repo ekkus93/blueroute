@@ -12,8 +12,8 @@ use std::time::Instant;
 
 use blueroute_core::{CoreError, ErrorKind, Ipv4AddressPool, Ipv4StarAddressPlan, NetworkId};
 use blueroute_linux::{
-    ActiveIpv4Prefix, InterfaceAddress, IpNetworkBackend, IpNetworkObservationBackend,
-    NetworkManagerBackend, connect_tcp_from_ipv4_on_device,
+    ActiveIpv4Prefix, BluezBackend, InterfaceAddress, IpNetworkBackend,
+    IpNetworkObservationBackend, NetworkManagerBackend, connect_tcp_from_ipv4_on_device,
 };
 use blueroute_protocol::session::ControlSessionRegistry;
 use futures_lite::future;
@@ -172,7 +172,13 @@ pub fn connect_registered_panu_control_session<'a>(
     let owned = future::block_on(backend.addresses())?;
     let active = future::block_on(backend.active_ipv4_prefixes_with_interfaces())?;
     require_live_panu_lease(route.lease, &owned, &active)?;
-    // NetworkManager observations may block. Approval or the enrolled key
+    // A stale NetworkManager address does not establish a live Bluetooth PANU.
+    // Re-observe the exact BlueZ peer/interface before allowing any TCP SYN.
+    // Do this after potentially blocking NetworkManager observations so a
+    // detached or replaced PANU cannot be accepted from the old join handle.
+    let bluez = future::block_on(BluezBackend::connect_system())?;
+    future::block_on(bluez.require_matching_panu(route.link.attachment()))?;
+    // NetworkManager and BlueZ observations may block. Approval or the enrolled key
     // could have been revoked while those backend calls were pending. Recheck
     // durable authorization immediately before allowing any TCP SYN.
     trust.require_approved_pinned_tls_peer(

@@ -151,6 +151,20 @@ impl PanBackend for BluezBackend {
 /// concurrent BlueZ changes and daemon-restart ownership still need P6-009
 /// reconciliation before production joining can be enabled.
 impl BluezBackend {
+    /// Re-observe the exact BlueZ PANU peer and interface before opening an
+    /// outbound authenticated control socket. An absent link is not a usable
+    /// transport, even if its NetworkManager address still appears active.
+    /// This snapshot does not replace continuous PANU loss supervision.
+    pub async fn require_matching_panu(
+        &self,
+        expected: &PanAttachment,
+    ) -> Result<(), CoreError> {
+        validate_panu_attachment(expected)?;
+        let peer = expected.peer.as_ref().expect("validated PANU peer");
+        let observed = current_panu_attachment(&self.connection, peer).await?;
+        require_matching_panu_observation(expected, observed.as_ref())
+    }
+
     pub async fn disconnect_matching_panu(
         &self,
         expected: &PanAttachment,
@@ -162,6 +176,24 @@ impl BluezBackend {
             disconnect_panu(&self.connection, peer).await?;
         }
         Ok(())
+    }
+}
+
+fn require_matching_panu_observation(
+    expected: &PanAttachment,
+    observed: Option<&PanAttachment>,
+) -> Result<(), CoreError> {
+    validate_panu_attachment(expected)?;
+    match observed {
+        Some(current) if current == expected => Ok(()),
+        None => Err(CoreError::new(
+            ErrorKind::PanFailure,
+            "PANU link disappeared before outbound control connection",
+        )),
+        Some(_) => Err(CoreError::new(
+            ErrorKind::InvalidState,
+            "PANU attachment changed before outbound control connection",
+        )),
     }
 }
 
@@ -1469,6 +1501,52 @@ mod tests {
                 .kind(),
             ErrorKind::InvalidState
         );
+    }
+
+    #[test]
+    fn outbound_control_requires_fresh_matching_panu_attachment() {
+        let expected = panu_attachment(&peer(), "bnep7".to_owned()).unwrap();
+        assert!(require_matching_panu_observation(&expected, Some(&expected)).is_ok());
+        assert_eq!(
+            require_matching_panu_observation(&expected, None)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::PanFailure
+        );
+
+        let replacement = panu_attachment(&peer(), "bnep8".to_owned()).unwrap();
+        assert_eq!(
+            require_matching_panu_observation(&expected, Some(&replacement))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidState
+        );
+        let other = PeerHandle::new("/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF").unwrap();
+        let foreign = panu_attachment(&other, "bnep7".to_owned()).unwrap();
+        assert_eq!(
+            require_matching_panu_observation(&expected, Some(&foreign))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidState
+        );
+
+        for invalid in [
+            PanAttachment {
+                role: PanRole::Nap,
+                ..expected.clone()
+            },
+            PanAttachment {
+                peer: None,
+                ..expected.clone()
+            },
+        ] {
+            assert_eq!(
+                require_matching_panu_observation(&invalid, Some(&expected))
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::InvalidInput
+            );
+        }
     }
 
     #[test]
