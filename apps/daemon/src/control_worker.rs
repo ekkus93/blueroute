@@ -691,6 +691,148 @@ mod tests {
     }
 
     #[test]
+    fn running_worker_revokes_one_of_two_authenticated_peers_without_dropping_other() {
+        use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
+        use blueroute_core::NodeId;
+
+        let root = std::env::temp_dir().join(format!(
+            "blueroute-control-worker-two-peers-{}",
+            std::process::id()
+        ));
+        let host_path = root.join("host-membership");
+        let first_path = root.join("first-membership");
+        let second_path = root.join("second-membership");
+        for path in [&host_path, &first_path, &second_path] {
+            save_host_membership(path);
+        }
+        let network = NetworkId::from_bytes([7; 16]);
+        let host = LocalControlTlsIdentity::generate(NodeId::from_bytes([8; 16])).unwrap();
+        let first = LocalControlTlsIdentity::generate(NodeId::from_bytes([9; 16])).unwrap();
+        let second = LocalControlTlsIdentity::generate(NodeId::from_bytes([10; 16])).unwrap();
+        let host_node = host.node();
+        let host_fingerprint = host.fingerprint();
+        let host_trust = Arc::new(DurablePeerTrustOperations::with_peer_pin_store(
+            NetworkMembershipStore::new(host_path.clone()),
+            PeerPinStore::new(root.join("host-pins")),
+        ));
+        let first_trust = DurablePeerTrustOperations::with_peer_pin_store(
+            NetworkMembershipStore::new(first_path),
+            PeerPinStore::new(root.join("first-pins")),
+        );
+        let second_trust = DurablePeerTrustOperations::with_peer_pin_store(
+            NetworkMembershipStore::new(second_path),
+            PeerPinStore::new(root.join("second-pins")),
+        );
+        for peer in [&first, &second] {
+            future::block_on(host_trust.trust_peer(peer.node())).unwrap();
+            host_trust
+                .enroll_verified_key(network, peer.node(), peer.fingerprint(), peer.fingerprint())
+                .unwrap();
+        }
+        for trust in [&first_trust, &second_trust] {
+            future::block_on(trust.trust_peer(host_node)).unwrap();
+            trust
+                .enroll_verified_key(network, host_node, host_fingerprint, host_fingerprint)
+                .unwrap();
+        }
+
+        // Test pins emulate prior independent enrollment; only the TLS
+        // handshake and the running daemon worker are exercised here.
+        let operations = Arc::new(HostedNapOperations::default());
+        let worker = spawn_daemon_control_worker(
+            NetworkMembershipStore::new(host_path.clone()),
+            operations.clone(),
+            Arc::clone(&host_trust),
+            host,
+            NodeCapabilities::default(),
+        )
+        .unwrap();
+        let ready_before = Instant::now() + Duration::from_secs(3);
+        let endpoint = loop {
+            if let Some(endpoint) = *operations.endpoint.lock().unwrap() {
+                break endpoint;
+            }
+            assert!(Instant::now() < ready_before, "guarded test NAP did not bind");
+            thread::sleep(Duration::from_millis(5));
+        };
+        let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+        let mut first_session = crate::connect_registered_control_session(
+            std::net::TcpStream::connect(endpoint).unwrap(),
+            &first,
+            PinnedControlTlsPeer::new(network, host_node, host_fingerprint).unwrap(),
+            &first_trust,
+            control_setup(network, NodeCapabilities::default()),
+            Arc::clone(&registry),
+        )
+        .expect("first real mutual-TLS channel must authenticate");
+        let mut second_session = crate::connect_registered_control_session(
+            std::net::TcpStream::connect(endpoint).unwrap(),
+            &second,
+            PinnedControlTlsPeer::new(network, host_node, host_fingerprint).unwrap(),
+            &second_trust,
+            control_setup(network, NodeCapabilities::default()),
+            Arc::clone(&registry),
+        )
+        .expect("second real mutual-TLS channel must authenticate");
+        first_session
+            .send_heartbeat_until(Instant::now() + Duration::from_secs(2))
+            .unwrap();
+        second_session
+            .send_heartbeat_until(Instant::now() + Duration::from_secs(2))
+            .unwrap();
+
+        future::block_on(host_trust.forget_peer(first.node())).unwrap();
+        let started = Instant::now();
+        let deadline = started + Duration::from_secs(4);
+        loop {
+            let now_ms = ACTIVE_CLOCK_BASE_MS
+                + u64::try_from(started.elapsed().as_millis()).unwrap();
+            match first_session.receive_next_with_budget_at(now_ms, Duration::from_millis(80)) {
+                Ok(ControlSessionRead::Idle | ControlSessionRead::Frames(_)) => {
+                    assert!(Instant::now() < deadline, "revoked peer retained TLS socket");
+                }
+                Ok(ControlSessionRead::Closed) | Err(_) => break,
+            }
+        }
+        assert!(first_session.is_terminal());
+        assert_eq!(host_trust.approved_control_pins(network).unwrap().len(), 1);
+        assert_eq!(
+            current_network(&NetworkMembershipStore::new(host_path).load().unwrap()).unwrap(),
+            Some(network)
+        );
+        assert!(std::net::TcpListener::bind(endpoint).is_err());
+        // Revoking the first peer must not retire the unrelated registered
+        // generation or prevent it from exchanging another control frame.
+        assert!(!second_session.is_terminal());
+        second_session
+            .send_heartbeat_until(Instant::now() + Duration::from_secs(2))
+            .unwrap();
+        let now_ms = ACTIVE_CLOCK_BASE_MS
+            + u64::try_from(started.elapsed().as_millis()).unwrap();
+        assert!(matches!(
+            second_session.receive_next_with_budget_at(now_ms, Duration::from_millis(80)),
+            Ok(ControlSessionRead::Idle | ControlSessionRead::Frames(_))
+        ));
+
+        worker.shutdown().unwrap();
+        let started = Instant::now();
+        let deadline = started + Duration::from_secs(4);
+        loop {
+            let now_ms = ACTIVE_CLOCK_BASE_MS
+                + u64::try_from(started.elapsed().as_millis()).unwrap();
+            match second_session.receive_next_with_budget_at(now_ms, Duration::from_millis(80)) {
+                Ok(ControlSessionRead::Idle | ControlSessionRead::Frames(_)) => {
+                    assert!(Instant::now() < deadline, "shutdown retained second TLS socket");
+                }
+                Ok(ControlSessionRead::Closed) | Err(_) => break,
+            }
+        }
+        assert!(second_session.is_terminal());
+        assert!(std::net::TcpListener::bind(endpoint).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn running_worker_closes_authenticated_session_on_nap_ownership_loss() {
         use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
         use blueroute_core::NodeId;
