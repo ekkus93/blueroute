@@ -277,7 +277,6 @@ fn retain_after_post_auth_checks<T>(
     Ok(session)
 }
 
-
 /**
  * Revalidate an already registered outbound PANU TLS generation during active
  * supervision. The caller must invoke this on each bounded worker tick, not
@@ -303,12 +302,7 @@ pub fn supervise_registered_panu_control_session(
                     "outbound PANU supervisor expected a different authenticated peer",
                 ));
             }
-            planned_panu_control_endpoint(
-                session.network(),
-                route.link,
-                route.lease,
-                route.pool,
-            )?;
+            planned_panu_control_endpoint(session.network(), route.link, route.lease, route.pool)?;
             // A revoked peer should lose its transport without waiting for
             // a potentially blocking NetworkManager or BlueZ observation.
             session.revalidate_approval().map_err(|error| {
@@ -405,8 +399,15 @@ mod tests {
             live: bool,
             cancels: usize,
         }
-        for kind in [ErrorKind::InvalidState, ErrorKind::PanFailure, ErrorKind::AuthenticationFailed] {
-            let mut owner = Owner { live: true, cancels: 0 };
+        for kind in [
+            ErrorKind::InvalidState,
+            ErrorKind::PanFailure,
+            ErrorKind::AuthenticationFailed,
+        ] {
+            let mut owner = Owner {
+                live: true,
+                cancels: 0,
+            };
             let error = cancel_on_failed_supervision(
                 &mut owner,
                 |_| Err(CoreError::new(kind, "injected active PANU ownership loss")),
@@ -420,7 +421,10 @@ mod tests {
             assert!(!owner.live);
             assert_eq!(owner.cancels, 1);
         }
-        let mut owner = Owner { live: true, cancels: 0 };
+        let mut owner = Owner {
+            live: true,
+            cancels: 0,
+        };
         cancel_on_failed_supervision(
             &mut owner,
             |_| Ok(()),
