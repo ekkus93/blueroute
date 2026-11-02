@@ -843,13 +843,15 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    #[test]
-    fn running_worker_rejects_one_authenticated_malformed_peer_without_dropping_other() {
+    fn assert_authenticated_malformed_peer_isolation(
+        case: &str,
+        inject: impl FnOnce(&mut crate::control_tls::ControlTlsStream),
+    ) {
         use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
         use blueroute_core::NodeId;
 
         let root = std::env::temp_dir().join(format!(
-            "blueroute-control-worker-malformed-two-peers-{}",
+            "blueroute-control-worker-malformed-two-peers-{case}-{}",
             std::process::id()
         ));
         let host_path = root.join("host-membership");
@@ -918,7 +920,6 @@ mod tests {
         // The first client completes genuine mutual TLS and exporter-bound
         // Hello, but deliberately bypasses the post-Hello writer to inject
         // invalid encrypted control plaintext.
-        use std::io::Write;
         let (mut hostile, certificate) = crate::connect_pinned_control_tls(
             std::net::TcpStream::connect(endpoint).unwrap(),
             &first,
@@ -951,8 +952,7 @@ mod tests {
 
         // Keep the hostile TLS socket open: reconnect of the *same* NodeId
         // proves that the worker poisoned and retired only that generation.
-        hostile.write_all(&[0xff, 0xff, 0xff, 0xff]).unwrap();
-        hostile.flush().unwrap();
+        inject(&mut hostile);
         let retry_until = Instant::now() + Duration::from_secs(4);
         let mut recovered = loop {
             let socket = std::net::TcpStream::connect(endpoint).unwrap();
@@ -1017,6 +1017,32 @@ mod tests {
         drop(recovered);
         drop(hostile);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn running_worker_rejects_one_authenticated_malformed_peer_without_dropping_other() {
+        use std::io::Write;
+
+        assert_authenticated_malformed_peer_isolation("oversized", |hostile| {
+            hostile.write_all(&[0xff, 0xff, 0xff, 0xff]).unwrap();
+            hostile.flush().unwrap();
+        });
+    }
+
+    #[test]
+    fn running_worker_rejects_fragmented_malformed_peer_without_dropping_other() {
+        use std::io::Write;
+
+        assert_authenticated_malformed_peer_isolation("fragmented", |hostile| {
+            // Cross at least one worker poll with an incomplete length prefix.
+            // The worker may reject the partial frame immediately or wait
+            // for the remaining bytes; either path must retire this peer only.
+            hostile.write_all(&[0xff, 0xff]).unwrap();
+            hostile.flush().unwrap();
+            thread::sleep(Duration::from_millis(400));
+            let _ = hostile.write_all(&[0xff, 0xff]);
+            let _ = hostile.flush();
+        });
     }
 
     #[test]
