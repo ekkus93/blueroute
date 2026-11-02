@@ -80,10 +80,10 @@ impl PanBackend for BluezBackend {
             // Subscribe before taking the state snapshot so a loss cannot fall into a
             // check-then-subscribe race window.
             let stream = bluez_signal_stream(&self.connection).await?;
-            let connected =
+            let observed =
                 current_panu_attachment(&self.connection, attachment.peer.as_ref().unwrap())
-                    .await?
-                    .is_some();
+                    .await?;
+            let connected = observed_panu_is_same(&attachment, observed.as_ref());
             Ok(Box::new(BluezPanuSubscription {
                 connection: self.connection.clone(),
                 stream,
@@ -176,6 +176,10 @@ impl BluezBackend {
     }
 }
 
+fn observed_panu_is_same(expected: &PanAttachment, observed: Option<&PanAttachment>) -> bool {
+    observed == Some(expected)
+}
+
 fn require_matching_panu_observation(
     expected: &PanAttachment,
     observed: Option<&PanAttachment>,
@@ -249,10 +253,10 @@ impl PanuEventSubscription for BluezPanuSubscription {
                 if !panu_loss_trigger(&message, &peer)? {
                     continue;
                 }
-                if current_panu_attachment(&self.connection, &peer)
-                    .await?
-                    .is_none()
-                {
+                let observed = current_panu_attachment(&self.connection, &peer).await?;
+                if !observed_panu_is_same(&self.attachment, observed.as_ref()) {
+                    // A replacement attachment on the same peer is not the
+                    // original session's PANU link. Retire the old generation.
                     self.finished = true;
                     return Ok(Some(PanuEvent::Lost(self.attachment.clone())));
                 }
@@ -1498,6 +1502,19 @@ mod tests {
                 .kind(),
             ErrorKind::InvalidState
         );
+    }
+
+    #[test]
+    fn panu_loss_detection_rejects_replaced_attachment_on_same_peer() {
+        let expected = panu_attachment(&peer(), "bnep7".to_owned()).unwrap();
+        let replacement = panu_attachment(&peer(), "bnep8".to_owned()).unwrap();
+        let other = PeerHandle::new("/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF").unwrap();
+        let foreign = panu_attachment(&other, "bnep7".to_owned()).unwrap();
+
+        assert!(observed_panu_is_same(&expected, Some(&expected)));
+        assert!(!observed_panu_is_same(&expected, None));
+        assert!(!observed_panu_is_same(&expected, Some(&replacement)));
+        assert!(!observed_panu_is_same(&expected, Some(&foreign)));
     }
 
     #[test]
