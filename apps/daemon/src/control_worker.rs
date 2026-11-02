@@ -758,14 +758,17 @@ mod tests {
             );
             thread::sleep(Duration::from_millis(5));
         };
-        let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+        // Each client has its own registry: both see the same host NodeId,
+        // while the host worker owns the shared inbound peer registry.
+        let first_registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+        let second_registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
         let mut first_session = crate::connect_registered_control_session(
             std::net::TcpStream::connect(endpoint).unwrap(),
             &first,
             PinnedControlTlsPeer::new(network, host_node, host_fingerprint).unwrap(),
             &first_trust,
             control_setup(network, NodeCapabilities::default()),
-            Arc::clone(&registry),
+            Arc::clone(&first_registry),
         )
         .expect("first real mutual-TLS channel must authenticate");
         let mut second_session = crate::connect_registered_control_session(
@@ -774,7 +777,7 @@ mod tests {
             PinnedControlTlsPeer::new(network, host_node, host_fingerprint).unwrap(),
             &second_trust,
             control_setup(network, NodeCapabilities::default()),
-            Arc::clone(&registry),
+            Arc::clone(&second_registry),
         )
         .expect("second real mutual-TLS channel must authenticate");
         first_session
