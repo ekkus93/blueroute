@@ -998,6 +998,7 @@ mod tests {
         future::block_on(client_trust.trust_peer(host.node())).unwrap();
         client_trust
             .enroll_verified_key(network, host.node(), host.fingerprint(), host.fingerprint())
+
             .unwrap();
 
         let operations = Arc::new(HostedNapOperations::default());
@@ -1074,6 +1075,149 @@ mod tests {
             "stale backend NAP must not rebind without durable membership"
         );
         worker.shutdown().unwrap();
+        assert!(std::net::TcpListener::bind(endpoint).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn running_worker_goodbye_retires_generation_and_allows_reconnect() {
+        use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
+        use blueroute_core::NodeId;
+
+        let root = std::env::temp_dir().join(format!(
+            "blueroute-worker-auth-goodbye-reconnect-{}",
+            std::process::id()
+        ));
+        let host_path = root.join("host-membership");
+        let client_path = root.join("client-membership");
+        save_host_membership(&host_path);
+        save_host_membership(&client_path);
+        let network = NetworkId::from_bytes([7; 16]);
+        let host = LocalControlTlsIdentity::generate(NodeId::from_bytes([8; 16])).unwrap();
+        let client = LocalControlTlsIdentity::generate(NodeId::from_bytes([9; 16])).unwrap();
+        let host_pin = PinnedControlTlsPeer::new(network, host.node(), host.fingerprint()).unwrap();
+        let host_trust = Arc::new(DurablePeerTrustOperations::with_peer_pin_store(
+            NetworkMembershipStore::new(host_path.clone()),
+            PeerPinStore::new(root.join("host-pins")),
+        ));
+        let client_trust = DurablePeerTrustOperations::with_peer_pin_store(
+            NetworkMembershipStore::new(client_path),
+            PeerPinStore::new(root.join("client-pins")),
+        );
+        // Synthetic fixture pins stand in for independently confirmed enrollment;
+        // the test still proves actual mutual TLS and exporter-bound Hello.
+        future::block_on(host_trust.trust_peer(client.node())).unwrap();
+        host_trust
+            .enroll_verified_key(
+                network,
+                client.node(),
+                client.fingerprint(),
+                client.fingerprint(),
+            )
+            .unwrap();
+        future::block_on(client_trust.trust_peer(host.node())).unwrap();
+        client_trust
+            .enroll_verified_key(network, host.node(), host.fingerprint(), host.fingerprint())
+            .unwrap();
+
+        let operations = Arc::new(HostedNapOperations::default());
+        let worker = spawn_daemon_control_worker(
+            NetworkMembershipStore::new(host_path.clone()),
+            operations.clone(),
+            Arc::clone(&host_trust),
+            host,
+            NodeCapabilities::default(),
+        )
+        .unwrap();
+        let ready_before = Instant::now() + Duration::from_secs(3);
+        let endpoint = loop {
+            if let Some(endpoint) = *operations.endpoint.lock().unwrap() {
+                break endpoint;
+            }
+            assert!(Instant::now() < ready_before, "guarded NAP did not bind");
+            thread::sleep(Duration::from_millis(5));
+        };
+
+        // A genuinely authenticated peer ends its generation gracefully. The
+        // worker must consume Goodbye, respond, and release its registry slot
+        // without retiring the hosted NAP or modifying durable approval.
+        let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
+        let socket = std::net::TcpStream::connect(endpoint).unwrap();
+        let mut first = crate::connect_registered_control_session(
+            socket,
+            &client,
+            host_pin,
+            &client_trust,
+            control_setup(network, NodeCapabilities::default()),
+            Arc::clone(&registry),
+        )
+        .expect("first pinned TLS/Hello session");
+        first
+            .send_goodbye_until(Instant::now() + Duration::from_secs(2))
+            .unwrap();
+
+        let read_start = Instant::now();
+        let reply_until = read_start + Duration::from_secs(4);
+        loop {
+            let now_ms = ACTIVE_CLOCK_BASE_MS
+                + u64::try_from(read_start.elapsed().as_millis()).unwrap();
+            match first.receive_next_with_budget_at(now_ms, Duration::from_millis(80)) {
+                Ok(ControlSessionRead::Frames(frames))
+                    if frames
+                        .iter()
+                        .any(|frame| matches!(frame.message, ControlMessage::Goodbye)) =>
+                {
+                    break;
+                }
+                Ok(ControlSessionRead::Frames(_) | ControlSessionRead::Idle) => {
+                    assert!(
+                        Instant::now() < reply_until,
+                        "worker never acknowledged authenticated Goodbye"
+                    );
+                }
+                Ok(ControlSessionRead::Closed) | Err(_) => {
+                    panic!("worker closed before acknowledging authenticated Goodbye");
+                }
+            }
+        }
+        // Releasing the client-side owner alone cannot release the *server*
+        // registry slot. The replacement must be accepted by the live worker.
+        drop(first);
+
+        let retry_until = Instant::now() + Duration::from_secs(4);
+        let mut recovered = loop {
+            let socket = std::net::TcpStream::connect(endpoint).unwrap();
+            match crate::connect_registered_control_session(
+                socket,
+                &client,
+                host_pin,
+                &client_trust,
+                control_setup(network, NodeCapabilities::default()),
+                Arc::clone(&registry),
+            ) {
+                Ok(session) => break session,
+                Err(error) => {
+                    assert!(
+                        Instant::now() < retry_until,
+                        "running worker did not retire the Goodbye generation: {error:?}"
+                    );
+                    thread::sleep(Duration::from_millis(50));
+                }
+            }
+        };
+        assert_eq!(recovered.peer(), NodeId::from_bytes([8; 16]));
+        recovered
+            .send_heartbeat_until(Instant::now() + Duration::from_secs(2))
+            .unwrap();
+        assert!(std::net::TcpListener::bind(endpoint).is_err());
+        assert_eq!(host_trust.approved_control_pins(network).unwrap().len(), 1);
+        assert_eq!(
+            current_network(&NetworkMembershipStore::new(host_path).load().unwrap()).unwrap(),
+            Some(network)
+        );
+
+        worker.shutdown().unwrap();
+        drop(recovered);
         assert!(std::net::TcpListener::bind(endpoint).is_ok());
         std::fs::remove_dir_all(root).unwrap();
     }
