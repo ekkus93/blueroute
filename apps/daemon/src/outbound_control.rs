@@ -277,6 +277,87 @@ fn retain_after_post_auth_checks<T>(
     Ok(session)
 }
 
+
+/**
+ * Revalidate an already registered outbound PANU TLS generation during active
+ * supervision. The caller must invoke this on each bounded worker tick, not
+ * just once after Hello: neither the original source lease nor a successful
+ * TLS handshake is a permanent Bluetooth attachment ownership lease.
+ *
+ * Any failed check closes the owned TLS socket and retires its exact registry
+ * generation. This is a reusable supervision seam; the daemon's outbound
+ * PANU worker and reconnect orchestration are not yet wired to call it.
+ */
+pub fn supervise_registered_panu_control_session(
+    session: &mut RegisteredControlSession<'_>,
+    route: PanuControlRoute<'_>,
+    trust: &DurablePeerTrustOperations,
+    expected: &PinnedControlTlsPeer,
+) -> Result<(), CoreError> {
+    cancel_on_failed_supervision(
+        session,
+        |session| {
+            if session.network() != expected.network() || session.peer() != expected.node() {
+                return Err(CoreError::new(
+                    ErrorKind::AuthenticationFailed,
+                    "outbound PANU supervisor expected a different authenticated peer",
+                ));
+            }
+            planned_panu_control_endpoint(
+                session.network(),
+                route.link,
+                route.lease,
+                route.pool,
+            )?;
+            // A revoked peer should lose its transport without waiting for
+            // a potentially blocking NetworkManager or BlueZ observation.
+            session.revalidate_approval().map_err(|error| {
+                CoreError::with_diagnostic(
+                    ErrorKind::AuthenticationFailed,
+                    "outbound PANU TLS session no longer has durable approval",
+                    error.to_string(),
+                )
+            })?;
+            let backend = future::block_on(NetworkManagerBackend::connect_system())?;
+            let owned = future::block_on(backend.addresses())?;
+            let active = future::block_on(backend.active_ipv4_prefixes_with_interfaces())?;
+            require_live_panu_lease(route.lease, &owned, &active)?;
+            let bluez = future::block_on(BluezBackend::connect_system())?;
+            future::block_on(bluez.require_matching_panu(route.link.attachment()))?;
+            // Approval may change during backend observations. Check again
+            // before the caller is permitted to perform more session I/O.
+            trust.require_approved_pinned_tls_peer(
+                session.network(),
+                session.peer(),
+                expected.fingerprint(),
+            )?;
+            session.revalidate_approval().map_err(|error| {
+                CoreError::with_diagnostic(
+                    ErrorKind::AuthenticationFailed,
+                    "outbound PANU TLS approval changed during supervision",
+                    error.to_string(),
+                )
+            })
+        },
+        RegisteredControlSession::cancel,
+    )
+}
+
+/// A failed observation must retire its owned transport before the caller
+/// can schedule a replacement. Keep this contract independently testable
+/// without requiring a physical Bluetooth controller or system D-Bus.
+fn cancel_on_failed_supervision<T>(
+    owner: &mut T,
+    validate: impl FnOnce(&mut T) -> Result<(), CoreError>,
+    cancel: impl FnOnce(&mut T),
+) -> Result<(), CoreError> {
+    let result = validate(owner);
+    if result.is_err() {
+        cancel(owner);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,6 +397,41 @@ mod tests {
         assert_eq!(dropped.load(Ordering::SeqCst), 0);
         drop(owner);
         assert_eq!(dropped.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn active_supervision_cancels_owner_on_lease_loss_or_revocation() {
+        struct Owner {
+            live: bool,
+            cancels: usize,
+        }
+        for kind in [ErrorKind::InvalidState, ErrorKind::PanFailure, ErrorKind::AuthenticationFailed] {
+            let mut owner = Owner { live: true, cancels: 0 };
+            let error = cancel_on_failed_supervision(
+                &mut owner,
+                |_| Err(CoreError::new(kind, "injected active PANU ownership loss")),
+                |owner| {
+                    owner.live = false;
+                    owner.cancels += 1;
+                },
+            )
+            .unwrap_err();
+            assert_eq!(error.kind(), kind);
+            assert!(!owner.live);
+            assert_eq!(owner.cancels, 1);
+        }
+        let mut owner = Owner { live: true, cancels: 0 };
+        cancel_on_failed_supervision(
+            &mut owner,
+            |_| Ok(()),
+            |owner| {
+                owner.live = false;
+                owner.cancels += 1;
+            },
+        )
+        .unwrap();
+        assert!(owner.live);
+        assert_eq!(owner.cancels, 0);
     }
 
     fn fixtures(network: NetworkId) -> (JoinPanLink, JoinIpLease, Ipv4AddressPool) {
