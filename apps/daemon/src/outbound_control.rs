@@ -222,15 +222,58 @@ pub fn connect_registered_panu_control_session<'a>(
             "outbound control TCP source does not match the owned PANU address",
         ));
     }
-    connect_registered_control_session(socket, local, expected, trust, setup, registry).map_err(
-        |error| {
+    let network = setup.network;
+    let peer = expected.node();
+    let fingerprint = expected.fingerprint();
+    let deadline = setup.handshake_deadline;
+    let session = connect_registered_control_session(socket, local, expected, trust, setup, registry)
+        .map_err(|error| {
             CoreError::with_diagnostic(
                 ErrorKind::AuthenticationFailed,
                 "outbound PANU control TLS/Hello/registry admission failed",
                 error.to_string(),
             )
-        },
-    )
+        })?;
+
+    // A PANU can disappear or be replaced during TLS/Hello. The pre-dial
+    // snapshot cannot authorize retaining an authenticated session after that
+    // transition. Dropping the owner on any failure closes the TLS socket and
+    // retires its exact registry generation.
+    retain_after_post_auth_checks(session, || {
+        if Instant::now() >= deadline {
+            return Err(CoreError::new(
+                ErrorKind::AuthenticationFailed,
+                "outbound PANU control deadline expired before post-authentication validation",
+            ));
+        }
+        let backend = future::block_on(NetworkManagerBackend::connect_system())?;
+        let owned = future::block_on(backend.addresses())?;
+        let active = future::block_on(backend.active_ipv4_prefixes_with_interfaces())?;
+        require_live_panu_lease(route.lease, &owned, &active)?;
+        let bluez = future::block_on(BluezBackend::connect_system())?;
+        future::block_on(bluez.require_matching_panu(route.link.attachment()))?;
+        // The backend queries can block, and peer authorization can be
+        // revoked during them. Recheck the exact enrolled key last.
+        trust.require_approved_pinned_tls_peer(network, peer, fingerprint)?;
+        if Instant::now() >= deadline {
+            return Err(CoreError::new(
+                ErrorKind::AuthenticationFailed,
+                "outbound PANU control deadline expired during post-authentication validation",
+            ));
+        }
+        Ok(())
+    })
+}
+
+/// Keep a registered transport only after all post-handshake ownership and
+/// authorization checks succeed. Error unwinding drops the registered owner,
+/// which shuts down its socket before retiring the session generation.
+fn retain_after_post_auth_checks<T>(
+    session: T,
+    validate: impl FnOnce() -> Result<(), CoreError>,
+) -> Result<T, CoreError> {
+    validate()?;
+    Ok(session)
 }
 
 #[cfg(test)]
@@ -242,6 +285,34 @@ mod tests {
     };
     use blueroute_protocol::control::HelloFacts;
     use blueroute_protocol::session::{ConnectionDeadline, ConnectionStage};
+
+    #[test]
+    fn post_auth_validation_drops_registered_owner_on_loss_or_revocation() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Owner(Arc<AtomicUsize>);
+        impl Drop for Owner {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        for kind in [ErrorKind::PanFailure, ErrorKind::AuthenticationFailed] {
+            let dropped = Arc::new(AtomicUsize::new(0));
+            let result = retain_after_post_auth_checks(Owner(Arc::clone(&dropped)), || {
+                Err(CoreError::new(kind, "injected post-handshake ownership failure"))
+            });
+            assert!(result.is_err());
+            assert_eq!(dropped.load(Ordering::SeqCst), 1);
+        }
+
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let owner = retain_after_post_auth_checks(Owner(Arc::clone(&dropped)), || Ok(()))
+            .expect("valid post-authentication checks retain the owner");
+        assert_eq!(dropped.load(Ordering::SeqCst), 0);
+        drop(owner);
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+    }
 
     fn fixtures(network: NetworkId) -> (JoinPanLink, JoinIpLease, Ipv4AddressPool) {
         let pool = Ipv4AddressPool::default();
