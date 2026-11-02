@@ -11,7 +11,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use blueroute_core::{CoreError, ErrorKind, Ipv4AddressPool, Ipv4StarAddressPlan, NetworkId};
-use blueroute_linux::connect_tcp_from_ipv4;
+use blueroute_linux::{
+    ActiveIpv4Prefix, InterfaceAddress, IpNetworkBackend, IpNetworkObservationBackend,
+    NetworkManagerBackend, connect_tcp_from_ipv4,
+};
+use futures_lite::future;
 use blueroute_protocol::session::ControlSessionRegistry;
 
 use crate::{
@@ -57,6 +61,34 @@ pub fn planned_panu_control_endpoint(
         ));
     };
     Ok(SocketAddrV4::new(host, CONTROL_TCP_PORT))
+}
+
+/// Require a fresh NetworkManager ownership snapshot *and* a kernel-facing
+/// active-prefix observation for the exact PANU lease. A configured but inactive
+/// profile, an address on another interface, or unknown interface provenance
+/// must never authorize a TCP dial. This is a pre-dial guard, not a substitute
+/// for continuous link supervision or binding the socket to a device.
+fn require_live_panu_lease(
+    lease: &JoinIpLease,
+    owned: &[InterfaceAddress],
+    active: &[ActiveIpv4Prefix],
+) -> Result<(), CoreError> {
+    if !owned.iter().any(|address| address == lease.address()) {
+        return Err(CoreError::new(
+            ErrorKind::InvalidState,
+            "PANU control source address is not currently owned by BlueRoute",
+        ));
+    }
+    if !active.iter().any(|prefix| {
+        prefix.interface.as_ref() == Some(lease.interface())
+            && prefix.prefix == lease.address().prefix
+    }) {
+        return Err(CoreError::new(
+            ErrorKind::InvalidState,
+            "PANU control source address is not active on the owned interface",
+        ));
+    }
+    Ok(())
 }
 
 /// PANU route provenance supplied by the join runtime, not a remote peer.
@@ -106,6 +138,14 @@ pub fn connect_registered_panu_control_session<'a>(
             "outbound control handshake deadline expired before TCP dial",
         ));
     }
+    // A remembered JoinIpLease alone is not proof that the source address
+    // remains applied to the PANU interface. Fail closed before any SYN if
+    // NetworkManager no longer owns it or the active interface changed.
+    let backend = future::block_on(NetworkManagerBackend::connect_system())?;
+    let owned = future::block_on(backend.addresses())?;
+    let active = future::block_on(backend.active_ipv4_prefixes_with_interfaces())?;
+    require_live_panu_lease(route.lease, &owned, &active)?;
+
     let IpAddr::V4(source_ip) = route.lease.address().prefix.address else {
         return Err(CoreError::new(
             ErrorKind::InvalidState,
@@ -218,6 +258,48 @@ mod tests {
             ..lease.address().clone()
         });
         assert!(planned_panu_control_endpoint(network, &link, &wrong_ip, pool).is_err());
+    }
+
+    #[test]
+    fn outbound_lease_requires_live_address_on_the_exact_owned_interface() {
+        let network = NetworkId::from_bytes([0x51; 16]);
+        let (_link, lease, _pool) = fixtures(network);
+        let owned = vec![lease.address().clone()];
+        let active = vec![ActiveIpv4Prefix {
+            interface: Some(lease.interface().clone()),
+            prefix: lease.address().prefix,
+        }];
+        assert!(require_live_panu_lease(&lease, &owned, &active).is_ok());
+
+        assert!(require_live_panu_lease(&lease, &[], &active).is_err());
+        assert!(require_live_panu_lease(&lease, &owned, &[]).is_err());
+        assert!(require_live_panu_lease(
+            &lease,
+            &owned,
+            &[ActiveIpv4Prefix {
+                interface: None,
+                prefix: lease.address().prefix,
+            }],
+        )
+        .is_err());
+        assert!(require_live_panu_lease(
+            &lease,
+            &owned,
+            &[ActiveIpv4Prefix {
+                interface: Some(NetworkInterfaceHandle::new("bnep-foreign").unwrap()),
+                prefix: lease.address().prefix,
+            }],
+        )
+        .is_err());
+        assert!(require_live_panu_lease(
+            &lease,
+            &[InterfaceAddress {
+                owner: NetworkId::from_bytes([0x52; 16]),
+                ..lease.address().clone()
+            }],
+            &active,
+        )
+        .is_err());
     }
 
     #[test]
