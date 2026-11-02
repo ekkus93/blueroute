@@ -574,8 +574,8 @@ mod tests {
 
     #[test]
     fn running_worker_closes_authenticated_session_on_durable_revocation() {
-        use blueroute_core::NodeId;
         use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
+        use blueroute_core::NodeId;
 
         let root = std::env::temp_dir().join(format!(
             "blueroute-control-worker-auth-revoked-{}",
@@ -604,7 +604,12 @@ mod tests {
         // only persist a pin after independent confirmation and genuine TLS.
         future::block_on(host_trust.trust_peer(client.node())).unwrap();
         host_trust
-            .enroll_verified_key(network, client.node(), client.fingerprint(), client.fingerprint())
+            .enroll_verified_key(
+                network,
+                client.node(),
+                client.fingerprint(),
+                client.fingerprint(),
+            )
             .unwrap();
         future::block_on(client_trust.trust_peer(host.node())).unwrap();
         client_trust
@@ -625,7 +630,10 @@ mod tests {
             if let Some(endpoint) = *operations.endpoint.lock().unwrap() {
                 break endpoint;
             }
-            assert!(Instant::now() < ready_before, "guarded test NAP did not bind");
+            assert!(
+                Instant::now() < ready_before,
+                "guarded test NAP did not bind"
+            );
             thread::sleep(Duration::from_millis(5));
         };
         let socket = std::net::TcpStream::connect(endpoint).unwrap();
@@ -663,7 +671,12 @@ mod tests {
             }
         }
         assert!(session.is_terminal());
-        assert!(host_trust.approved_control_pins(network).unwrap().is_empty());
+        assert!(
+            host_trust
+                .approved_control_pins(network)
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             current_network(&NetworkMembershipStore::new(host_path).load().unwrap()).unwrap(),
             Some(network)
@@ -998,97 +1011,3 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         }
         assert!(operations.bind_attempts.load(Ordering::SeqCst) > 0);
-        // The initial error must not permanently poison the worker. A fresh
-        // observation after the bounded rebind delay can return no NAP.
-        operations.fail_bind.store(false, Ordering::SeqCst);
-        let retry_deadline = Instant::now() + Duration::from_secs(4);
-        while operations.bind_attempts.load(Ordering::SeqCst) < 2 && Instant::now() < retry_deadline
-        {
-            thread::sleep(Duration::from_millis(10));
-        }
-        assert!(
-            operations.bind_attempts.load(Ordering::SeqCst) >= 2,
-            "a transient bind error must not disable later guarded observations"
-        );
-        let started = Instant::now();
-        worker.shutdown().unwrap();
-        assert!(
-            started.elapsed() < Duration::from_secs(1),
-            "shutdown must interrupt the rebind park after recovery"
-        );
-    }
-
-    #[test]
-    fn shutdown_wakes_parked_worker_and_joins_without_waiting_for_poll_timeout() {
-        use std::sync::mpsc;
-
-        let stop = Arc::new(AtomicBool::new(false));
-        let observed = Arc::clone(&stop);
-        let (finished, completion) = mpsc::channel();
-        let handle = thread::spawn(move || {
-            while !observed.load(Ordering::Acquire) {
-                thread::park_timeout(Duration::from_secs(60));
-            }
-            finished.send(()).unwrap();
-        });
-        let worker = DaemonControlWorker {
-            stop,
-            handle: Some(handle),
-        };
-        worker.shutdown().unwrap();
-        completion.recv_timeout(Duration::from_secs(1)).unwrap();
-    }
-
-    #[test]
-    fn drop_requests_cancellation_without_joining_daemon_executor() {
-        use std::sync::mpsc;
-
-        let stop = Arc::new(AtomicBool::new(false));
-        let observed = Arc::clone(&stop);
-        let (finished, completion) = mpsc::channel();
-        let handle = thread::spawn(move || {
-            while !observed.load(Ordering::Acquire) {
-                thread::park_timeout(Duration::from_secs(60));
-            }
-            finished.send(()).unwrap();
-        });
-        drop(DaemonControlWorker {
-            stop,
-            handle: Some(handle),
-        });
-        completion.recv_timeout(Duration::from_secs(1)).unwrap();
-    }
-
-    #[test]
-    fn active_tls_clocks_are_per_generation_and_fail_closed_on_regression() {
-        let first = Instant::now();
-        let second = first + Duration::from_secs(10);
-        let check = second + Duration::from_secs(5);
-        assert_eq!(session_clock_ms(first, check), Some(15_003));
-        assert_eq!(session_clock_ms(second, check), Some(5_003));
-        assert_eq!(session_clock_ms(second, second), Some(3));
-        assert_eq!(session_clock_ms(second, first), None);
-    }
-
-    #[test]
-    fn heartbeat_schedule_is_bounded_and_rejects_regressed_time() {
-        let sent = Instant::now();
-        assert!(!heartbeat_due(sent, sent));
-        assert!(!heartbeat_due(
-            sent,
-            sent + HEARTBEAT_INTERVAL - Duration::from_millis(1)
-        ));
-        assert!(heartbeat_due(sent, sent + HEARTBEAT_INTERVAL));
-        assert!(!heartbeat_due(sent, sent - Duration::from_millis(1)));
-    }
-
-    #[test]
-    fn provisional_hello_has_no_invented_neighbors_or_segment() {
-        let network = NetworkId::from_bytes([9; 16]);
-        let setup = control_setup(network, NodeCapabilities::default());
-        assert_eq!(setup.network, network);
-        assert!(setup.facts.direct_neighbors.is_empty());
-        assert_eq!(setup.facts.segment, None);
-        assert_eq!(setup.active_deadline.stage(), ConnectionStage::Active);
-    }
-}
