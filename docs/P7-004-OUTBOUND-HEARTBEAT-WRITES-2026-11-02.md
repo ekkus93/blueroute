@@ -8,7 +8,7 @@ The helper `send_supervised_heartbeat_if_due` fails closed on regressed clocks a
 
 ## Verification
 
-Source: `apps/daemon/src/outbound_control.rs`. This change must pass exact-head CI before the TODO is reconciled. No physical Bluetooth evidence is claimed.
+Source: `apps/daemon/src/outbound_control.rs`. Implementation commit `c18f1b6b7d07cca95ba6cccb1c00c19e12c126bc`, formatting correction `f3af7f06c1d5cb1762dca8c9fb3d2e782317feff`; exact-head [CI 41555468820](https://github.com/ekkus93/blueroute/actions/runs/41555468820) **PASSED** formatting, locked build, Clippy, Rust tests and integrations. No physical Bluetooth evidence is claimed.
 
 ## Outstanding
 
