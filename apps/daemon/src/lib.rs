@@ -738,11 +738,7 @@ mod local_node_tests {
         use blueroute_core::{CapabilitySource, Sourced};
 
         let node = NodeId::from_bytes([7; 16]);
-        let service = DaemonService::new(
-            node,
-            HealthLevel::Healthy,
-            NodeCapabilities::default(),
-        );
+        let service = DaemonService::new(node, HealthLevel::Healthy, NodeCapabilities::default());
         let observed = |powered: bool| {
             let health = if powered {
                 HealthLevel::Healthy
@@ -785,10 +781,7 @@ mod local_node_tests {
             let snapshot = service.diagnostics_snapshot().unwrap();
             let system = snapshot.system.unwrap();
             let powered = system.adapters[0].powered;
-            assert_eq!(
-                snapshot.capabilities.adapter_usable.unwrap().value,
-                powered
-            );
+            assert_eq!(snapshot.capabilities.adapter_usable.unwrap().value, powered);
             assert_eq!(
                 snapshot.health,
                 if powered {
