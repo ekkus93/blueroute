@@ -1,5 +1,7 @@
 //! BlueRoute CLI commands through the shared version-checked daemon client.
 
+mod error_guidance;
+
 use blueroute_client::{BlueRouteClient, ClientError, ClientErrorKind};
 use blueroute_core::{DisplayName, NetworkId, NodeCapabilities, NodeId};
 use blueroute_protocol::peer_pin::SpkiSha256;
@@ -714,10 +716,12 @@ impl From<&'static str> for CliFailure {
 }
 
 fn run(args: &[String]) -> i32 {
+    // Keep the machine-readable stderr contract even for parse failures.
+    let json_mode = args.iter().any(|argument| argument == "--json");
     let operation = match parse(args) {
         Ok(operation) => operation,
         Err(message) => {
-            eprintln!("blueroute: {message}");
+            eprintln!("{}", error_guidance::format_failure(2, &message, json_mode));
             return 2;
         }
     };
@@ -737,8 +741,16 @@ fn run(args: &[String]) -> i32 {
     let client = match futures_lite::future::block_on(BlueRouteClient::connect()) {
         Ok(client) => client,
         Err(error) => {
-            eprintln!("blueroute: daemon unavailable/incompatible: {error}");
-            return 3;
+            let failure = CliFailure::from(error);
+            eprintln!(
+                "{}",
+                error_guidance::format_failure(
+                    failure.code,
+                    &format!("daemon unavailable/incompatible: {}", failure.message),
+                    json_mode,
+                )
+            );
+            return failure.code;
         }
     };
     let result = match operation {
@@ -899,7 +911,10 @@ fn run(args: &[String]) -> i32 {
             0
         }
         Err(error) => {
-            eprintln!("blueroute: {}", error.message);
+            eprintln!(
+                "{}",
+                error_guidance::format_failure(error.code, &error.message, json_mode)
+            );
             error.code
         }
     }
