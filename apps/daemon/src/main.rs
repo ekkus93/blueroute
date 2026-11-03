@@ -6,7 +6,7 @@ use blueroute_core::{DaemonConfig, HealthLevel};
 use blueroute_daemon::{
     ControlTlsIdentityStore, DaemonService, DurablePeerTrustOperations, NetworkOperations,
     PeerPinStore, SingleStarNetworkOperations, TransactionalJoinNetworkOperations, current_network,
-    spawn_daemon_control_worker,
+    spawn_daemon_capability_health_worker, spawn_daemon_control_worker,
 };
 use blueroute_linux::{
     NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
@@ -75,10 +75,10 @@ async fn run() -> Result<(), Box<dyn Error>> {
     )?);
     let network_operations = Arc::new(SingleStarNetworkOperations::new(
         NetworkMembershipStore::new(membership_path),
-        config,
+        config.clone(),
         capabilities.clone(),
     ));
-    if let Err(error) = network_operations.reconcile_on_startup().await {
+    let startup_reconciled = if let Err(error) = network_operations.reconcile_on_startup().await {
         if status.health == HealthLevel::Healthy {
             status.health = HealthLevel::Degraded;
         }
@@ -91,7 +91,10 @@ async fn run() -> Result<(), Box<dyn Error>> {
                 "failure_class": format!("{:?}", error.kind()),
             })
         );
-    }
+        false
+    } else {
+        true
+    };
     let system_diagnostics = SystemDiagnosticMetadata {
         daemon_version: env!("CARGO_PKG_VERSION").to_owned(),
         platform: "Linux".to_owned(),
@@ -116,6 +119,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
         .with_system_diagnostics(system_diagnostics)
         .with_local_control_tls_fingerprint(local_control_tls_identity.fingerprint());
 
+    let service_for_health = service.clone();
     let _connection = Builder::system()?
         .name(DBUS_SERVICE_NAME)?
         .serve_at(DBUS_OBJECT_PATH, service)?
@@ -130,6 +134,14 @@ async fn run() -> Result<(), Box<dyn Error>> {
         worker_peer_trust,
         local_control_tls_identity,
         capabilities,
+    )?;
+    // Probe live BlueZ/NetworkManager availability without blocking the
+    // D-Bus executor. A failed startup host restoration must not be disguised
+    // as Healthy merely because services later become reachable.
+    let _health_worker = spawn_daemon_capability_health_worker(
+        service_for_health,
+        SystemCapabilityProbe::new(config)?,
+        startup_reconciled,
     )?;
 
     future::pending::<()>().await;

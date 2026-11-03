@@ -16,6 +16,7 @@ mod peer_pin_store;
 mod peer_trust;
 mod pinned_ingress;
 mod registered_transport;
+mod runtime_health;
 mod single_star;
 
 use std::fmt;
@@ -73,6 +74,7 @@ pub use registered_transport::{
     AuthenticatedNapTicket, RegisteredControlSession, RegisteredNapControlOwner,
     SessionAdmissionError,
 };
+pub use runtime_health::{DaemonHealthWorker, spawn_daemon_capability_health_worker};
 pub use single_star::{
     LinuxStarHostRuntime, NetworkIdGenerator, NetworkOperationFuture, NetworkOperations,
     SingleStarNetworkOperations, StarHostRuntime, SystemNetworkIdGenerator, current_network,
@@ -185,6 +187,22 @@ impl DaemonService {
                     error.to_string(),
                 )
             })
+    }
+
+    /// Publish a fresh capability-health observation to all cloned daemon D-Bus
+    /// service handles. This does not change membership, authorize a peer, or
+    /// claim that an existing PAN attachment has been restored.
+    pub fn update_runtime_health(&self, observed: HealthLevel) -> Result<bool, CoreError> {
+        let mut status = self.status.lock().map_err(|error| {
+            CoreError::with_diagnostic(
+                ErrorKind::Internal,
+                "BlueRoute daemon health status lock was poisoned",
+                error.to_string(),
+            )
+        })?;
+        let changed = status.health != observed;
+        status.health = observed;
+        Ok(changed)
     }
 
     fn encode_response(response: &Response) -> fdo::Result<String> {
