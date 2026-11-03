@@ -2,6 +2,10 @@
 # Unprivileged Debian maintainer-script lifecycle contract checks.
 set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+script_dir="${BLUEROUTE_MAINTAINER_SCRIPT_DIR:-$root/packaging/debian}"
+for script in postinst prerm postrm; do
+    test -f "$script_dir/$script" || { printf "Missing maintainer script: %s\\n" "$script_dir/$script" >&2; exit 1; }
+done
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
@@ -20,7 +24,7 @@ check() {
     local script="$1" action="$2" expected="$3"
     shift 3
     : > "$BLUEROUTE_MAINTAINER_LOG"
-    sh "$root/packaging/debian/$script" "$action" "$@"
+    sh "$script_dir/$script" "$action" "$@"
     local actual
     actual="$(cat "$BLUEROUTE_MAINTAINER_LOG")"
     if [[ "$actual" != "$expected" ]]; then

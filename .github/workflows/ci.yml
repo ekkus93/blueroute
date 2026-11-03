@@ -116,6 +116,8 @@ jobs:
           "$tmp/root/usr/bin/blueroute" --version
           test -x "$tmp/root/usr/libexec/blueroute/blueroute-daemon"
           bash -n "$tmp/control/postinst" "$tmp/control/prerm" "$tmp/control/postrm"
+          # Exercise the scripts embedded in the actual .deb, not only source files.
+          BLUEROUTE_MAINTAINER_SCRIPT_DIR="$tmp/control" bash packaging/debian/test-maintainer-lifecycle.sh
           echo "Release Debian artifact built and inspected successfully."
 
       - name: Validate D-Bus and PolicyKit authorization packaging
