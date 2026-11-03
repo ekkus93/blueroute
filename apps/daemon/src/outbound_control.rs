@@ -198,6 +198,7 @@ pub fn connect_registered_panu_control_session<'a>(
     // Bind the source *before* connect. A post-connect source-address check
     // alone could already have sent an untrusted SYN over another interface.
     let socket =
+
         connect_tcp_from_ipv4_on_device(
             source_ip,
             endpoint,
@@ -370,6 +371,7 @@ pub fn run_registered_panu_supervision_until_stopped(
     expected: &PinnedControlTlsPeer,
     stop: &AtomicBool,
 ) -> Result<(), CoreError> {
+    let mut last_heartbeat = Instant::now();
     run_bounded_supervision_until_stopped(
         session,
         stop,
@@ -384,10 +386,63 @@ pub fn run_registered_panu_supervision_until_stopped(
                 },
                 trust,
                 expected,
+            )?;
+            // A stop requested during a blocking backend observation must
+            // never cause another outbound TLS write.
+            if stop.load(Ordering::Acquire) {
+                return Ok(());
+            }
+            send_supervised_heartbeat_if_due(
+                session,
+                &mut last_heartbeat,
+                Instant::now(),
+                Duration::from_secs(5),
+                Duration::from_millis(100),
+                |session, deadline| {
+                    session.send_heartbeat_until(deadline).map_err(|error| {
+                        CoreError::with_diagnostic(
+                            ErrorKind::PanFailure,
+                            "authenticated outbound PANU heartbeat failed",
+                            error.to_string(),
+                        )
+                    })
+                },
             )
         },
         RegisteredControlSession::cancel,
     )
+}
+
+/// Emit an authenticated Heartbeat only after a successful ownership check.
+/// The active TLS owner enforces the absolute write deadline and retires its
+/// exact registry generation on a failed write. Never advance the schedule
+/// after a failed send, and reject regressed clock observations.
+fn send_supervised_heartbeat_if_due<T>(
+    owner: &mut T,
+    last_sent: &mut Instant,
+    now: Instant,
+    interval: Duration,
+    budget: Duration,
+    send: impl FnOnce(&mut T, Instant) -> Result<(), CoreError>,
+) -> Result<(), CoreError> {
+    let elapsed = now.checked_duration_since(*last_sent).ok_or_else(|| {
+        CoreError::new(
+            ErrorKind::InvalidState,
+            "outbound PANU heartbeat clock regressed",
+        )
+    })?;
+    if elapsed < interval {
+        return Ok(());
+    }
+    let deadline = now.checked_add(budget).ok_or_else(|| {
+        CoreError::new(
+            ErrorKind::InvalidState,
+            "outbound PANU heartbeat deadline overflow",
+        )
+    })?;
+    send(owner, deadline)?;
+    *last_sent = Instant::now();
+    Ok(())
 }
 
 /// The scheduler and cancellation contract can be exercised without BlueZ,
@@ -398,6 +453,7 @@ fn run_bounded_supervision_until_stopped<T>(
     stop: &AtomicBool,
     interval: Duration,
     mut tick: impl FnMut(&mut T) -> Result<(), CoreError>,
+
     cancel: impl FnOnce(&mut T),
 ) -> Result<(), CoreError> {
     debug_assert!(!interval.is_zero());
@@ -575,6 +631,87 @@ mod tests {
         assert_eq!(owner.cancels, 1);
     }
 
+    #[test]
+    fn supervised_heartbeat_is_rate_limited_and_failure_does_not_renew_schedule() {
+        let mut writes = 0_usize;
+        let mut last_sent = Instant::now();
+        let interval = Duration::from_secs(5);
+        let budget = Duration::from_millis(100);
+        let not_due = last_sent + Duration::from_secs(4);
+        send_supervised_heartbeat_if_due(
+            &mut writes,
+            &mut last_sent,
+            not_due,
+            interval,
+            budget,
+            |writes, _| {
+                *writes += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(writes, 0);
+
+        let due = last_sent + interval;
+        let original_last_sent = last_sent;
+        let error = send_supervised_heartbeat_if_due(
+            &mut writes,
+            &mut last_sent,
+            due,
+            interval,
+            budget,
+            |writes, deadline| {
+                *writes += 1;
+                assert_eq!(deadline, due + budget);
+                Err(CoreError::new(ErrorKind::PanFailure, "injected TLS write failure"))
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::PanFailure);
+        assert_eq!(writes, 1);
+        assert_eq!(last_sent, original_last_sent);
+
+        // The next eligible tick may retry only after the caller has
+        // supervised the owner again. In production the failed send causes
+        // the outer supervisor to cancel the registered TLS generation.
+        send_supervised_heartbeat_if_due(
+            &mut writes,
+            &mut last_sent,
+            due,
+            interval,
+            budget,
+            |writes, deadline| {
+                *writes += 1;
+                assert_eq!(deadline, due + budget);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(writes, 2);
+        assert!(last_sent >= original_last_sent);
+    }
+
+    #[test]
+    fn supervised_heartbeat_rejects_regressed_clock_without_tls_write() {
+        let mut writes = 0_usize;
+        let mut last_sent = Instant::now();
+        let before = last_sent - Duration::from_millis(1);
+        let error = send_supervised_heartbeat_if_due(
+            &mut writes,
+            &mut last_sent,
+            before,
+            Duration::from_secs(5),
+            Duration::from_millis(100),
+            |writes, _| {
+                *writes += 1;
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidState);
+        assert_eq!(writes, 0);
+    }
+
     fn fixtures(network: NetworkId) -> (JoinPanLink, JoinIpLease, Ipv4AddressPool) {
         let pool = Ipv4AddressPool::default();
         let peer = PeerHandle::new("/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF").unwrap();
@@ -598,6 +735,7 @@ mod tests {
     }
 
     #[test]
+
     fn planned_target_is_exact_host_port_for_owned_panu_lease() {
         let network = NetworkId::from_bytes([0x4a; 16]);
 
@@ -798,6 +936,7 @@ mod tests {
         let trust = DurablePeerTrustOperations::new(NetworkMembershipStore::new(
             std::env::temp_dir().join("blueroute-outbound-test-nonexistent-membership"),
         ));
+
         let mut deadline = ConnectionDeadline::new(0);
         deadline.advance(ConnectionStage::TlsHandshake, 1).unwrap();
         deadline.advance(ConnectionStage::Hello, 2).unwrap();
