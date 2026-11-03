@@ -58,4 +58,25 @@ test "$(cat "$tmp/root/var/lib/blueroute/node-id")" = node-identity-fixture
 test "$(cat "$tmp/root/var/lib/blueroute/membership")" = network-membership-fixture
 test -x "$tmp/root/usr/bin/blueroute"
 test -x "$tmp/root/usr/libexec/blueroute/blueroute-daemon"
-echo "Isolated dpkg upgrade $arch 0.0.1 -> $version preserved state and restarted service."
+# Verify the actual dpkg removal transition, including the packaged prerm/postrm.
+# Do not run purge with --force-script-chrootless: the packaged postrm uses
+# an absolute /var/lib/blueroute path, which would target the CI host.
+: > "$tmp/service.log"
+dpkg --root="$tmp/root" --force-not-root --force-script-chrootless \
+    --force-depends --remove blueroute > "$tmp/dpkg.log" 2>&1 || {
+    cat "$tmp/dpkg.log" >&2
+    exit 1
+}
+grep -Fxq 'invoke stop blueroute.service' "$tmp/service.log"
+grep -Fxq 'helper disable blueroute.service' "$tmp/service.log"
+if test -e "$tmp/root/usr/bin/blueroute" ||
+   test -e "$tmp/root/usr/libexec/blueroute/blueroute-daemon" ||
+   test -e "$tmp/root/usr/lib/systemd/system/blueroute.service" ||
+   test -e "$tmp/root/usr/share/dbus-1/system.d/org.blueroute.Service1.conf" ||
+   test -e "$tmp/root/usr/share/polkit-1/actions/org.blueroute.policy"; then
+    echo "Package removal left package-owned files behind" >&2
+    exit 1
+fi
+test "$(cat "$tmp/root/var/lib/blueroute/node-id")" = node-identity-fixture
+test "$(cat "$tmp/root/var/lib/blueroute/membership")" = network-membership-fixture
+echo "Isolated dpkg upgrade $arch 0.0.1 -> $version preserved state and restarted service; removal retained state and removed package files."
