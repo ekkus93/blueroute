@@ -3,7 +3,14 @@ set -e
 
 if [ "$1" = configure ]; then
     deb-systemd-helper enable blueroute.service >/dev/null || true
-    deb-systemd-invoke start blueroute.service >/dev/null || true
+    # dpkg passes the previously configured version as $2 on upgrade.
+    # Restart so the active daemon runs the newly installed binary rather
+    # than continuing to serve requests from the old executable.
+    if [ -n "${2:-}" ]; then
+        deb-systemd-invoke restart blueroute.service >/dev/null || true
+    else
+        deb-systemd-invoke start blueroute.service >/dev/null || true
+    fi
 fi
 
 #DEBHELPER#

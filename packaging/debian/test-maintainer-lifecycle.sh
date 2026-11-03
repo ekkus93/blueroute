@@ -18,8 +18,9 @@ export PATH="$tmp/bin:$PATH"
 export BLUEROUTE_MAINTAINER_LOG="$tmp/commands"
 check() {
     local script="$1" action="$2" expected="$3"
+    shift 3
     : > "$BLUEROUTE_MAINTAINER_LOG"
-    sh "$root/packaging/debian/$script" "$action"
+    sh "$root/packaging/debian/$script" "$action" "$@"
     local actual
     actual="$(cat "$BLUEROUTE_MAINTAINER_LOG")"
     if [[ "$actual" != "$expected" ]]; then
@@ -30,9 +31,10 @@ check() {
 check postinst configure $'helper enable blueroute.service\ninvoke start blueroute.service'
 check prerm upgrade ''
 check postrm upgrade ''
+check postinst configure $'helper enable blueroute.service\ninvoke restart blueroute.service' '0.1.0'
 check postinst triggered ''
 check prerm remove 'invoke stop blueroute.service'
 check prerm deconfigure 'invoke stop blueroute.service'
 check postrm remove 'helper disable blueroute.service'
 check postrm disappear ''
-printf 'Maintainer lifecycle contract passed (configure/upgrade/remove).\n'
+printf 'Maintainer lifecycle contract passed (fresh install/upgrade/remove).\n'
