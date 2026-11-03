@@ -83,11 +83,7 @@ pub fn spawn_daemon_capability_health_worker(
                         report.runtime.node.clone(),
                         Some(system_diagnostics_from_report(&report)),
                     ),
-                    Err(_) => (
-                        HealthLevel::Degraded,
-                        NodeCapabilities::default(),
-                        None,
-                    ),
+                    Err(_) => (HealthLevel::Degraded, NodeCapabilities::default(), None),
                 };
                 match service.update_runtime_observation(health, capabilities, system) {
                     Ok(true) => eprintln!(
@@ -180,7 +176,6 @@ mod tests {
         );
     }
 
-
     fn observed_adapter(name: &str, powered: bool) -> SystemDiagnosticMetadata {
         SystemDiagnosticMetadata {
             daemon_version: "0.1.0".into(),
@@ -210,12 +205,20 @@ mod tests {
             adapter_usable: Some(Sourced::new(true, CapabilitySource::Discovered)),
             ..NodeCapabilities::default()
         };
-        assert!(service
-            .update_runtime_observation(HealthLevel::Healthy, ready.clone(), Some(initial.clone()))
-            .unwrap());
-        assert!(!service
-            .update_runtime_observation(HealthLevel::Healthy, ready, Some(initial))
-            .unwrap());
+        assert!(
+            service
+                .update_runtime_observation(
+                    HealthLevel::Healthy,
+                    ready.clone(),
+                    Some(initial.clone())
+                )
+                .unwrap()
+        );
+        assert!(
+            !service
+                .update_runtime_observation(HealthLevel::Healthy, ready, Some(initial))
+                .unwrap()
+        );
 
         // Simulate a lost BlueZ adapter and unavailable NetworkManager.
         let lost = NodeCapabilities {
@@ -224,9 +227,15 @@ mod tests {
         };
         let mut missing = observed_adapter("hci0", false);
         missing.network_backend_version = None;
-        assert!(service
-            .update_runtime_observation(HealthLevel::Degraded, lost.clone(), Some(missing.clone()))
-            .unwrap());
+        assert!(
+            service
+                .update_runtime_observation(
+                    HealthLevel::Degraded,
+                    lost.clone(),
+                    Some(missing.clone())
+                )
+                .unwrap()
+        );
         assert_eq!(cloned_api.status_snapshot().unwrap().capabilities, lost);
         let degraded = cloned_api.diagnostics_snapshot().unwrap();
         assert_eq!(degraded.health, HealthLevel::Degraded);
@@ -235,13 +244,15 @@ mod tests {
         assert!(degraded.topology.is_none());
 
         // An entirely failed probe must not preserve a stale available adapter.
-        assert!(service
-            .update_runtime_observation(
-                HealthLevel::Degraded,
-                NodeCapabilities::default(),
-                None,
-            )
-            .unwrap());
+        assert!(
+            service
+                .update_runtime_observation(
+                    HealthLevel::Degraded,
+                    NodeCapabilities::default(),
+                    None,
+                )
+                .unwrap()
+        );
         let unknown = cloned_api.diagnostics_snapshot().unwrap();
         assert_eq!(unknown.capabilities, NodeCapabilities::default());
         assert!(unknown.system.is_none());
@@ -252,17 +263,22 @@ mod tests {
             adapter_usable: Some(Sourced::new(true, CapabilitySource::Discovered)),
             ..NodeCapabilities::default()
         };
-        assert!(service
-            .update_runtime_observation(
-                HealthLevel::Healthy,
-                recovered.clone(),
-                Some(replacement.clone()),
-            )
-            .unwrap());
+        assert!(
+            service
+                .update_runtime_observation(
+                    HealthLevel::Healthy,
+                    recovered.clone(),
+                    Some(replacement.clone()),
+                )
+                .unwrap()
+        );
         let status = cloned_api.status_snapshot().unwrap();
         assert_eq!(status.health, HealthLevel::Healthy);
         assert_eq!(status.capabilities, recovered);
-        assert_eq!(cloned_api.diagnostics_snapshot().unwrap().system, Some(replacement));
+        assert_eq!(
+            cloned_api.diagnostics_snapshot().unwrap().system,
+            Some(replacement)
+        );
     }
 
     #[test]
