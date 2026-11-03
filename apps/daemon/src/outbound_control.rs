@@ -663,7 +663,10 @@ mod tests {
             |writes, deadline| {
                 *writes += 1;
                 assert_eq!(deadline, due + budget);
-                Err(CoreError::new(ErrorKind::PanFailure, "injected TLS write failure"))
+                Err(CoreError::new(
+                    ErrorKind::PanFailure,
+                    "injected TLS write failure",
+                ))
             },
         )
         .unwrap_err();
