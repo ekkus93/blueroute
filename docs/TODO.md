@@ -2592,6 +2592,8 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 **Software partial (2026-10-15):** P6-009 adds an ownership-aware startup reconciliation pass with deterministic re-observation and fail-closed collision handling. This is not yet the central continuous loop; service-owner change events, route reconciliation and live adapter reset handling remain open.
 
+**Software partial (2026-11-03):** The production daemon now owns a 15-second read-only `SystemCapabilityProbe` monitor on a separate thread (`apps/daemon/src/runtime_health.rs`) and publishes live BlueZ, NetworkManager and adapter availability changes to the shared D-Bus status/diagnostics health. Unknown probe results degrade health; a failed startup host restoration cannot be masked as healthy merely when services return. The monitor is shutdown-aware, emits transition-only structured logs, and has deterministic loss/recovery, shared-status and unchanged-state tests. Source `a81dd131`, formatting correction `ec6c5029`; [exact-head CI #41706036131](https://github.com/ekkus93/blueroute/actions/runs/41706036131) passed. **This is observation/health reporting only**: no live service-owner subscription, controlled PAN/route restoration, continuous owner-scoped reconciliation or physical reset/restart acceptance. Keep P13-001/002/003 open.
+
 **Acceptance**
 
 - Recovery does not depend on remembered success of prior calls.
