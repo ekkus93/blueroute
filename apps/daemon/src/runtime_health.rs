@@ -54,7 +54,8 @@ pub fn spawn_daemon_capability_health_worker(
                 if worker_stop.load(Ordering::Acquire) {
                     break;
                 }
-                let health = health_for_support(reported.ok().map(|r| r.support), startup_reconciled);
+                let health =
+                    health_for_support(reported.ok().map(|r| r.support), startup_reconciled);
                 match service.update_runtime_health(health) {
                     Ok(true) => eprintln!(
                         "{}",
@@ -112,13 +113,19 @@ mod tests {
             (None, HealthLevel::Degraded),
             (Some(SystemSupportLevel::Unsupported), HealthLevel::Error),
             (Some(SystemSupportLevel::Degraded), HealthLevel::Degraded),
-            (Some(SystemSupportLevel::FullySupported), HealthLevel::Healthy),
+            (
+                Some(SystemSupportLevel::FullySupported),
+                HealthLevel::Healthy,
+            ),
             (Some(SystemSupportLevel::ClientOnly), HealthLevel::Healthy),
         ] {
             assert_eq!(health_for_support(support, true), expected);
             assert!(service.update_runtime_health(expected).is_ok());
             assert_eq!(client_handle.status_snapshot().unwrap().health, expected);
-            assert_eq!(client_handle.diagnostics_snapshot().unwrap().health, expected);
+            assert_eq!(
+                client_handle.diagnostics_snapshot().unwrap().health,
+                expected
+            );
         }
     }
 
@@ -128,7 +135,10 @@ mod tests {
             SystemSupportLevel::FullySupported,
             SystemSupportLevel::ClientOnly,
         ] {
-            assert_eq!(health_for_support(Some(support), false), HealthLevel::Degraded);
+            assert_eq!(
+                health_for_support(Some(support), false),
+                HealthLevel::Degraded
+            );
         }
         assert_eq!(
             health_for_support(Some(SystemSupportLevel::Unsupported), false),
@@ -144,7 +154,15 @@ mod tests {
             NodeCapabilities::default(),
         );
         assert!(!service.update_runtime_health(HealthLevel::Healthy).unwrap());
-        assert!(service.update_runtime_health(HealthLevel::Degraded).unwrap());
-        assert!(!service.update_runtime_health(HealthLevel::Degraded).unwrap());
+        assert!(
+            service
+                .update_runtime_health(HealthLevel::Degraded)
+                .unwrap()
+        );
+        assert!(
+            !service
+                .update_runtime_health(HealthLevel::Degraded)
+                .unwrap()
+        );
     }
 }
