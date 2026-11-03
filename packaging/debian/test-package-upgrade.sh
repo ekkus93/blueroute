@@ -29,8 +29,24 @@ cat > "$tmp/bin/deb-systemd-invoke" <<'MOCK'
 #!/bin/sh
 printf 'invoke %s\n' "$*" >> "$BLUEROUTE_MAINTAINER_LOG"
 MOCK
+# The packaged postrm uses an absolute purge path. Intercept only that exact
+# operation so a chrootless dpkg purge cannot touch the runner's host data.
+cat > "$tmp/bin/rm" <<'MOCK'
+#!/bin/sh
+if [ "$#" -ne 2 ] || [ "$1" != -rf ] || [ "$2" != /var/lib/blueroute ]; then
+    echo "Unexpected package purge deletion: $*" >&2
+    exit 1
+fi
+if [ -z "${BLUEROUTE_TEST_ROOT:-}" ] || [ ! -d "$BLUEROUTE_TEST_ROOT/var/lib/dpkg" ]; then
+    echo "Missing isolated dpkg root for purge" >&2
+    exit 1
+fi
+/bin/rm -rf -- "$BLUEROUTE_TEST_ROOT/var/lib/blueroute"
+printf 'purge state\n' >> "$BLUEROUTE_MAINTAINER_LOG"
+MOCK
 chmod +x "$tmp/bin/"*
 export BLUEROUTE_MAINTAINER_LOG="$tmp/service.log"
+export BLUEROUTE_TEST_ROOT="$tmp/root"
 export PATH="$tmp/bin:$PATH"
 # The --root and --script-chrootless flags keep package writes inside tmp,
 # while maintainer scripts use the mocked systemd helpers above.
@@ -79,4 +95,19 @@ if test -e "$tmp/root/usr/bin/blueroute" ||
 fi
 test "$(cat "$tmp/root/var/lib/blueroute/node-id")" = node-identity-fixture
 test "$(cat "$tmp/root/var/lib/blueroute/membership")" = network-membership-fixture
-echo "Isolated dpkg upgrade $arch 0.0.1 -> $version preserved state and restarted service; removal retained state and removed package files."
+# Purge is a separate explicit action: unlike remove, it must delete the
+# persisted identity and membership. The guarded rm wrapper redirects the
+# packaged absolute deletion into the isolated dpkg root.
+: > "$tmp/service.log"
+dpkg --root="$tmp/root" --force-not-root --force-script-chrootless \\
+    --force-depends --purge blueroute > "$tmp/dpkg.log" 2>&1 || {
+    cat "$tmp/dpkg.log" >&2
+    exit 1
+}
+grep -Fxq 'purge state' "$tmp/service.log"
+test ! -e "$tmp/root/var/lib/blueroute"
+if dpkg-query --admindir="$tmp/root/var/lib/dpkg" -W -f='${Status}' blueroute 2>/dev/null | grep -Fq 'installed'; then
+    echo "Purged package still marked installed" >&2
+    exit 1
+fi
+echo "Isolated dpkg upgrade $arch 0.0.1 -> $version preserved state and restarted service; removal retained state; purge deleted state."
