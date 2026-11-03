@@ -746,6 +746,47 @@ mod tests {
         assert_eq!(writes, 0);
     }
 
+    #[test]
+    fn failed_supervised_heartbeat_retires_owner_without_another_tick() {
+        struct Owner {
+            ticks: usize,
+            writes: usize,
+            cancels: usize,
+        }
+        let stop = AtomicBool::new(false);
+        let mut owner = Owner {
+            ticks: 0,
+            writes: 0,
+            cancels: 0,
+        };
+        let mut last_sent = Instant::now() - Duration::from_secs(6);
+        let error = run_bounded_supervision_until_stopped(
+            &mut owner,
+            &stop,
+            Duration::from_millis(1),
+            |owner| {
+                owner.ticks += 1;
+                send_supervised_heartbeat_if_due(
+                    owner,
+                    &mut last_sent,
+                    Instant::now(),
+                    Duration::from_secs(5),
+                    Duration::from_millis(100),
+                    |owner, _| {
+                        owner.writes += 1;
+                        Err(CoreError::new(ErrorKind::PanFailure, "injected TLS failure"))
+                    },
+                )
+            },
+            |owner| owner.cancels += 1,
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::PanFailure);
+        assert_eq!(owner.ticks, 1);
+        assert_eq!(owner.writes, 1);
+        assert_eq!(owner.cancels, 1);
+    }
+
     fn fixtures(network: NetworkId) -> (JoinPanLink, JoinIpLease, Ipv4AddressPool) {
         let pool = Ipv4AddressPool::default();
         let peer = PeerHandle::new("/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF").unwrap();
@@ -998,6 +1039,7 @@ mod tests {
             setup,
             Arc::new(Mutex::new(ControlSessionRegistry::new())),
         )
+
         .err()
         .expect("wrong network pin must be denied before dialing");
         assert_eq!(error.kind(), ErrorKind::AuthenticationFailed);
