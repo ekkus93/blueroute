@@ -75,8 +75,7 @@ test "$(cat "$tmp/root/var/lib/blueroute/membership")" = network-membership-fixt
 test -x "$tmp/root/usr/bin/blueroute"
 test -x "$tmp/root/usr/libexec/blueroute/blueroute-daemon"
 # Verify the actual dpkg removal transition, including the packaged prerm/postrm.
-# Do not run purge with --force-script-chrootless: the packaged postrm uses
-# an absolute /var/lib/blueroute path, which would target the CI host.
+# Purge is tested below with a guarded rm wrapper to prevent host deletion.
 : > "$tmp/service.log"
 dpkg --root="$tmp/root" --force-not-root --force-script-chrootless \
     --force-depends --remove blueroute > "$tmp/dpkg.log" 2>&1 || {
@@ -99,7 +98,7 @@ test "$(cat "$tmp/root/var/lib/blueroute/membership")" = network-membership-fixt
 # persisted identity and membership. The guarded rm wrapper redirects the
 # packaged absolute deletion into the isolated dpkg root.
 : > "$tmp/service.log"
-dpkg --root="$tmp/root" --force-not-root --force-script-chrootless \\
+dpkg --root="$tmp/root" --force-not-root --force-script-chrootless \
     --force-depends --purge blueroute > "$tmp/dpkg.log" 2>&1 || {
     cat "$tmp/dpkg.log" >&2
     exit 1
