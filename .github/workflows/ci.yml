@@ -99,6 +99,25 @@ jobs:
       - name: Validate Debian maintainer upgrade and removal lifecycle
         run: bash packaging/debian/test-maintainer-lifecycle.sh
 
+      - name: Build and inspect Debian package artifact
+        run: |
+          bash packaging/debian/build-package.sh
+          version="$(cargo pkgid -p blueroute-daemon | sed 's/.*@//')"
+          arch="$(dpkg --print-architecture)"
+          package="target/debian/blueroute_${version}_${arch}.deb"
+          test -s "$package"
+          test "$(dpkg-deb --field "$package" Package)" = blueroute
+          test "$(dpkg-deb --field "$package" Version)" = "$version"
+          test "$(dpkg-deb --field "$package" Architecture)" = "$arch"
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          dpkg-deb --extract "$package" "$tmp/root"
+          dpkg-deb --control "$package" "$tmp/control"
+          "$tmp/root/usr/bin/blueroute" --version
+          test -x "$tmp/root/usr/libexec/blueroute/blueroute-daemon"
+          bash -n "$tmp/control/postinst" "$tmp/control/prerm" "$tmp/control/postrm"
+          echo "Release Debian artifact built and inspected successfully."
+
       - name: Validate D-Bus and PolicyKit authorization packaging
         run: |
           python - <<'PY'
