@@ -96,6 +96,9 @@ jobs:
           grep -Fxq 'StandardError=journal' packaging/systemd/blueroute.service
           grep -Fxq 'WantedBy=multi-user.target' packaging/systemd/blueroute.service
 
+      - name: Validate Debian maintainer upgrade and removal lifecycle
+        run: bash packaging/debian/test-maintainer-lifecycle.sh
+
       - name: Validate D-Bus and PolicyKit authorization packaging
         run: |
           python - <<'PY'
