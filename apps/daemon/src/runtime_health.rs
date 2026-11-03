@@ -7,13 +7,36 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use blueroute_core::HealthLevel;
-use blueroute_linux::{SystemCapabilityProbe, SystemSupportLevel};
+use blueroute_core::{HealthLevel, NodeCapabilities};
+use blueroute_linux::{SystemCapabilityProbe, SystemCapabilityReport, SystemSupportLevel};
+use blueroute_protocol::{DiagnosticAdapter, SystemDiagnosticMetadata};
 use futures_lite::future;
 
 use crate::DaemonService;
 
 const HEALTH_RECHECK_INTERVAL: Duration = Duration::from_secs(15);
+
+/// Convert only locally probed Linux metadata into the shared diagnostic
+/// representation. No remote peer claim or previously cached adapter is used.
+pub fn system_diagnostics_from_report(report: &SystemCapabilityReport) -> SystemDiagnosticMetadata {
+    SystemDiagnosticMetadata {
+        daemon_version: env!("CARGO_PKG_VERSION").to_owned(),
+        platform: "Linux".to_owned(),
+        kernel_release: report.kernel_release.clone(),
+        bluez_version: report.bluez_version.clone(),
+        network_backend_version: report.network_backend_version.clone(),
+        adapters: report
+            .controllers
+            .iter()
+            .map(|adapter| DiagnosticAdapter {
+                id: adapter.handle.clone(),
+                powered: adapter.powered,
+                address: adapter.address.clone(),
+                driver: adapter.driver.clone(),
+            })
+            .collect(),
+    }
+}
 
 /// Owns the background capability monitor for the lifetime of the daemon.
 /// Drop requests shutdown and wakes any parked monitor thread.
@@ -54,14 +77,24 @@ pub fn spawn_daemon_capability_health_worker(
                 if worker_stop.load(Ordering::Acquire) {
                     break;
                 }
-                let health =
-                    health_for_support(reported.ok().map(|r| r.support), startup_reconciled);
-                match service.update_runtime_health(health) {
+                let (health, capabilities, system) = match reported {
+                    Ok(report) => (
+                        health_for_support(Some(report.support), startup_reconciled),
+                        report.runtime.node.clone(),
+                        Some(system_diagnostics_from_report(&report)),
+                    ),
+                    Err(_) => (
+                        HealthLevel::Degraded,
+                        NodeCapabilities::default(),
+                        None,
+                    ),
+                };
+                match service.update_runtime_observation(health, capabilities, system) {
                     Ok(true) => eprintln!(
                         "{}",
                         serde_json::json!({
                             "component": "daemon_runtime",
-                            "event": "capability_health_transition",
+                            "event": "runtime_observation_updated",
                             "health": format!("{health:?}"),
                         })
                     ),
@@ -99,7 +132,8 @@ fn health_for_support(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blueroute_core::{NodeCapabilities, NodeId};
+    use blueroute_core::{CapabilitySource, NodeId, Sourced};
+    use blueroute_protocol::DiagnosticAdapter;
 
     #[test]
     fn live_service_loss_and_return_update_shared_status_and_diagnostics() {
@@ -144,6 +178,91 @@ mod tests {
             health_for_support(Some(SystemSupportLevel::Unsupported), false),
             HealthLevel::Error
         );
+    }
+
+
+    fn observed_adapter(name: &str, powered: bool) -> SystemDiagnosticMetadata {
+        SystemDiagnosticMetadata {
+            daemon_version: "0.1.0".into(),
+            platform: "Linux".into(),
+            kernel_release: Some("test-kernel".into()),
+            bluez_version: Some("test-bluez".into()),
+            network_backend_version: Some("test-networkmanager".into()),
+            adapters: vec![DiagnosticAdapter {
+                id: name.into(),
+                powered,
+                address: None,
+                driver: None,
+            }],
+        }
+    }
+
+    #[test]
+    fn live_adapter_inventory_and_capabilities_replace_stale_startup_data() {
+        let service = DaemonService::new(
+            NodeId::from_bytes([7; 16]),
+            HealthLevel::Healthy,
+            NodeCapabilities::default(),
+        );
+        let cloned_api = service.clone();
+        let initial = observed_adapter("hci0", true);
+        let ready = NodeCapabilities {
+            adapter_usable: Some(Sourced::new(true, CapabilitySource::Discovered)),
+            ..NodeCapabilities::default()
+        };
+        assert!(service
+            .update_runtime_observation(HealthLevel::Healthy, ready.clone(), Some(initial.clone()))
+            .unwrap());
+        assert!(!service
+            .update_runtime_observation(HealthLevel::Healthy, ready, Some(initial))
+            .unwrap());
+
+        // Simulate a lost BlueZ adapter and unavailable NetworkManager.
+        let lost = NodeCapabilities {
+            adapter_usable: Some(Sourced::new(false, CapabilitySource::Discovered)),
+            ..NodeCapabilities::default()
+        };
+        let mut missing = observed_adapter("hci0", false);
+        missing.network_backend_version = None;
+        assert!(service
+            .update_runtime_observation(HealthLevel::Degraded, lost.clone(), Some(missing.clone()))
+            .unwrap());
+        assert_eq!(cloned_api.status_snapshot().unwrap().capabilities, lost);
+        let degraded = cloned_api.diagnostics_snapshot().unwrap();
+        assert_eq!(degraded.health, HealthLevel::Degraded);
+        assert_eq!(degraded.system, Some(missing));
+        assert!(degraded.observed_peers.is_none());
+        assert!(degraded.topology.is_none());
+
+        // An entirely failed probe must not preserve a stale available adapter.
+        assert!(service
+            .update_runtime_observation(
+                HealthLevel::Degraded,
+                NodeCapabilities::default(),
+                None,
+            )
+            .unwrap());
+        let unknown = cloned_api.diagnostics_snapshot().unwrap();
+        assert_eq!(unknown.capabilities, NodeCapabilities::default());
+        assert!(unknown.system.is_none());
+
+        // A fresh controller observation replaces the old metadata on return.
+        let replacement = observed_adapter("hci1", true);
+        let recovered = NodeCapabilities {
+            adapter_usable: Some(Sourced::new(true, CapabilitySource::Discovered)),
+            ..NodeCapabilities::default()
+        };
+        assert!(service
+            .update_runtime_observation(
+                HealthLevel::Healthy,
+                recovered.clone(),
+                Some(replacement.clone()),
+            )
+            .unwrap());
+        let status = cloned_api.status_snapshot().unwrap();
+        assert_eq!(status.health, HealthLevel::Healthy);
+        assert_eq!(status.capabilities, recovered);
+        assert_eq!(cloned_api.diagnostics_snapshot().unwrap().system, Some(replacement));
     }
 
     #[test]

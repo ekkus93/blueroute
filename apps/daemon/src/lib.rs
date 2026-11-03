@@ -74,7 +74,9 @@ pub use registered_transport::{
     AuthenticatedNapTicket, RegisteredControlSession, RegisteredNapControlOwner,
     SessionAdmissionError,
 };
-pub use runtime_health::{DaemonHealthWorker, spawn_daemon_capability_health_worker};
+pub use runtime_health::{
+    DaemonHealthWorker, spawn_daemon_capability_health_worker, system_diagnostics_from_report,
+};
 pub use single_star::{
     LinuxStarHostRuntime, NetworkIdGenerator, NetworkOperationFuture, NetworkOperations,
     SingleStarNetworkOperations, StarHostRuntime, SystemNetworkIdGenerator, current_network,
@@ -187,6 +189,43 @@ impl DaemonService {
                     error.to_string(),
                 )
             })
+    }
+
+    /// Refresh the public runtime capability and system observation consumed
+    /// by status, capability, and diagnostic D-Bus queries. Do not mutate
+    /// membership, enrolled keys, existing PAN ownership, or routing.
+    ///
+    /// Update both locks in the same order used by diagnostics_snapshot to
+    /// keep each published snapshot coherent even across service restarts.
+    /// If the probe fails entirely, None means diagnostics are unavailable,
+    /// not that an empty adapter inventory was independently observed.
+    pub fn update_runtime_observation(
+        &self,
+        observed_health: HealthLevel,
+        observed_capabilities: NodeCapabilities,
+        observed_system: Option<SystemDiagnosticMetadata>,
+    ) -> Result<bool, CoreError> {
+        let mut status = self.status.lock().map_err(|error| {
+            CoreError::with_diagnostic(
+                ErrorKind::Internal,
+                "BlueRoute daemon status lock was poisoned",
+                error.to_string(),
+            )
+        })?;
+        let mut system = self.system_diagnostics.lock().map_err(|error| {
+            CoreError::with_diagnostic(
+                ErrorKind::Internal,
+                "BlueRoute system diagnostics lock was poisoned",
+                error.to_string(),
+            )
+        })?;
+        let changed = status.health != observed_health
+            || status.capabilities != observed_capabilities
+            || *system != observed_system;
+        status.health = observed_health;
+        status.capabilities = observed_capabilities;
+        *system = observed_system;
+        Ok(changed)
     }
 
     /// Publish a fresh capability-health observation to all cloned daemon D-Bus

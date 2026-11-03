@@ -7,12 +7,12 @@ use blueroute_daemon::{
     ControlTlsIdentityStore, DaemonService, DurablePeerTrustOperations, NetworkOperations,
     PeerPinStore, SingleStarNetworkOperations, TransactionalJoinNetworkOperations, current_network,
     spawn_daemon_capability_health_worker, spawn_daemon_control_worker,
+    system_diagnostics_from_report,
 };
 use blueroute_linux::{
     NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
 };
 use blueroute_protocol::{ApiVersion, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, DaemonStatus};
-use blueroute_protocol::{DiagnosticAdapter, SystemDiagnosticMetadata};
 use futures_lite::future;
 use zbus::connection::Builder;
 
@@ -95,23 +95,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
     } else {
         true
     };
-    let system_diagnostics = SystemDiagnosticMetadata {
-        daemon_version: env!("CARGO_PKG_VERSION").to_owned(),
-        platform: "Linux".to_owned(),
-        kernel_release: capability_report.kernel_release.clone(),
-        bluez_version: capability_report.bluez_version.clone(),
-        network_backend_version: capability_report.network_backend_version.clone(),
-        adapters: capability_report
-            .controllers
-            .iter()
-            .map(|adapter| DiagnosticAdapter {
-                id: adapter.handle.clone(),
-                powered: adapter.powered,
-                address: adapter.address.clone(),
-                driver: adapter.driver.clone(),
-            })
-            .collect(),
-    };
+    let system_diagnostics = system_diagnostics_from_report(&capability_report);
     let worker_network_operations: Arc<dyn NetworkOperations> = network_operations.clone();
     let worker_peer_trust = peer_trust_operations.clone();
     let service = DaemonService::with_operations(status, network_operations, peer_trust_operations)
