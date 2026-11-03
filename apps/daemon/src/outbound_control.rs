@@ -774,7 +774,10 @@ mod tests {
                     Duration::from_millis(100),
                     |owner, _| {
                         owner.writes += 1;
-                        Err(CoreError::new(ErrorKind::PanFailure, "injected TLS failure"))
+                        Err(CoreError::new(
+                            ErrorKind::PanFailure,
+                            "injected TLS failure",
+                        ))
                     },
                 )
             },
@@ -998,6 +1001,7 @@ mod tests {
     }
 
     #[test]
+
     fn wrong_network_pin_is_rejected_before_any_tcp_dial() {
         let network = NetworkId::from_bytes([0x4d; 16]);
         let other = NetworkId::from_bytes([0x4e; 16]);
@@ -1039,7 +1043,6 @@ mod tests {
             setup,
             Arc::new(Mutex::new(ControlSessionRegistry::new())),
         )
-
         .err()
         .expect("wrong network pin must be denied before dialing");
         assert_eq!(error.kind(), ErrorKind::AuthenticationFailed);
