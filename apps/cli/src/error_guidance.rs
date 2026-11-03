@@ -1,9 +1,7 @@
 //! Typed troubleshooting guidance for CLI users and JSON automation.
 //! Advice is chosen from the exit category, not untrusted daemon error text.
-const GUIDE: &str =
-    "https://github.com/ekkus93/blueroute/blob/master/docs/TROUBLESHOOTING.md";
-const ADMIN_GUIDE: &str =
-    "https://github.com/ekkus93/blueroute/blob/master/docs/ADMINISTRATOR.md";
+const GUIDE: &str = "https://github.com/ekkus93/blueroute/blob/master/docs/TROUBLESHOOTING.md";
+const ADMIN_GUIDE: &str = "https://github.com/ekkus93/blueroute/blob/master/docs/ADMINISTRATOR.md";
 
 pub(crate) fn format_failure(code: i32, message: &str, json: bool) -> String {
     let (kind, next_step, help) = match code {
