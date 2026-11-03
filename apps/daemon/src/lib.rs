@@ -312,18 +312,26 @@ impl DaemonService {
     /// Read-only diagnostics never invent members from approvals, Bluetooth
     /// discovery or unverified peer-controlled Hello fields.
     pub fn diagnostics_snapshot(&self) -> Result<DiagnosticSnapshot, CoreError> {
-        let status = self.status_snapshot()?;
-        let system = self
-            .system_diagnostics
-            .lock()
-            .map_err(|error| {
+        // Hold both observation locks while cloning so a concurrent 15-second
+        // capability refresh cannot mix the new health with an old adapter
+        // inventory (or vice versa). The writer takes the same lock order.
+        let (status, system) = {
+            let status = self.status.lock().map_err(|error| {
+                CoreError::with_diagnostic(
+                    ErrorKind::Internal,
+                    "BlueRoute daemon status lock was poisoned",
+                    error.to_string(),
+                )
+            })?;
+            let system = self.system_diagnostics.lock().map_err(|error| {
                 CoreError::with_diagnostic(
                     ErrorKind::Internal,
                     "BlueRoute system diagnostics are unavailable",
                     error.to_string(),
                 )
-            })?
-            .clone();
+            })?;
+            (status.clone(), system.clone())
+        };
         let recent_errors = self
             .recent_errors
             .lock()
@@ -723,6 +731,75 @@ mod local_node_tests {
         let encoded = serde_json::to_string(&snapshot).unwrap();
         assert!(!encoded.contains("PRIVATE KEY"));
         assert!(!encoded.contains("private_key"));
+    }
+
+    #[test]
+    fn concurrent_runtime_refresh_cannot_mix_health_and_adapter_generations() {
+        use blueroute_core::{CapabilitySource, Sourced};
+
+        let node = NodeId::from_bytes([7; 16]);
+        let service = DaemonService::new(
+            node,
+            HealthLevel::Healthy,
+            NodeCapabilities::default(),
+        );
+        let observed = |powered: bool| {
+            let health = if powered {
+                HealthLevel::Healthy
+            } else {
+                HealthLevel::Degraded
+            };
+            let capabilities = NodeCapabilities {
+                adapter_usable: Some(Sourced::new(powered, CapabilitySource::Discovered)),
+                ..NodeCapabilities::default()
+            };
+            let system = SystemDiagnosticMetadata {
+                daemon_version: "test".into(),
+                platform: "Linux".into(),
+                kernel_release: None,
+                bluez_version: Some("test".into()),
+                network_backend_version: None,
+                adapters: vec![blueroute_protocol::DiagnosticAdapter {
+                    id: "hci0".into(),
+                    powered,
+                    address: None,
+                    driver: None,
+                }],
+            };
+            (health, capabilities, system)
+        };
+        let (health, capabilities, system) = observed(true);
+        service
+            .update_runtime_observation(health, capabilities, Some(system))
+            .unwrap();
+        let writer = service.clone();
+        let updater = std::thread::spawn(move || {
+            for index in 0..1000 {
+                let (health, capabilities, system) = observed(index % 2 == 0);
+                writer
+                    .update_runtime_observation(health, capabilities, Some(system))
+                    .unwrap();
+            }
+        });
+        for _ in 0..1000 {
+            let snapshot = service.diagnostics_snapshot().unwrap();
+            let system = snapshot.system.unwrap();
+            let powered = system.adapters[0].powered;
+            assert_eq!(
+                snapshot.capabilities.adapter_usable.unwrap().value,
+                powered
+            );
+            assert_eq!(
+                snapshot.health,
+                if powered {
+                    HealthLevel::Healthy
+                } else {
+                    HealthLevel::Degraded
+                }
+            );
+        }
+        updater.join().unwrap();
+        assert_eq!(service.status_snapshot().unwrap().local_node, Some(node));
     }
 
     #[test]
