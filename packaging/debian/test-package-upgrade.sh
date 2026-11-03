@@ -8,7 +8,7 @@ if [[ $# -ne 1 || ! -f $1 ]]; then
 fi
 package="$(realpath -- "$1")"
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+trap '/bin/rm -rf -- "$tmp"' EXIT
 mkdir -p "$tmp/old-root" "$tmp/old-control" "$tmp/root/var/lib/dpkg/updates" "$tmp/bin"
 touch "$tmp/root/var/lib/dpkg/status"
 dpkg-deb --extract "$package" "$tmp/old-root"
