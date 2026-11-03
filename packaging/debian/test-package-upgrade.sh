@@ -9,7 +9,7 @@ fi
 package="$(realpath -- "$1")"
 tmp="$(mktemp -d)"
 trap '/bin/rm -rf -- "$tmp"' EXIT
-mkdir -p "$tmp/old-root" "$tmp/old-control" "$tmp/root/var/lib/dpkg/updates" "$tmp/bin"
+mkdir -p "$tmp/old-root" "$tmp/old-control" "$tmp/root/var/lib/dpkg/updates" "$tmp/bin" "$tmp/guard-bin"
 touch "$tmp/root/var/lib/dpkg/status"
 dpkg-deb --extract "$package" "$tmp/old-root"
 dpkg-deb --control "$package" "$tmp/old-control"
@@ -31,23 +31,37 @@ printf 'invoke %s\n' "$*" >> "$BLUEROUTE_MAINTAINER_LOG"
 MOCK
 # The packaged postrm uses an absolute purge path. Intercept only that exact
 # operation so a chrootless dpkg purge cannot touch the runner's host data.
-cat > "$tmp/bin/rm" <<'MOCK'
+cat > "$tmp/guard-bin/rm" <<'MOCK'
 #!/bin/sh
-if [ "$#" -ne 2 ] || [ "$1" != -rf ] || [ "$2" != /var/lib/blueroute ]; then
-    echo "Unexpected package purge deletion: $*" >&2
-    exit 1
-fi
 if [ -z "${BLUEROUTE_TEST_ROOT:-}" ] || [ ! -d "$BLUEROUTE_TEST_ROOT/var/lib/dpkg" ]; then
     echo "Missing isolated dpkg root for purge" >&2
     exit 1
 fi
-/bin/rm -rf -- "$BLUEROUTE_TEST_ROOT/var/lib/blueroute"
-printf 'purge state\n' >> "$BLUEROUTE_MAINTAINER_LOG"
+if [ "$#" -eq 2 ] && [ "$1" = -rf ] && [ "$2" = /var/lib/blueroute ]; then
+    /bin/rm -rf -- "$BLUEROUTE_TEST_ROOT/var/lib/blueroute"
+    printf 'purge state\n' >> "$BLUEROUTE_MAINTAINER_LOG"
+    exit 0
+fi
+# dpkg removes its own scratch files during purge. Allow only the isolated
+# root, and reject unexpected host paths without invoking the real rm.
+if [ "$#" -eq 0 ]; then
+    echo "Unexpected empty rm invocation during purge" >&2
+    exit 1
+fi
+for arg in "$@"; do
+    case "$arg" in
+        -*) ;;
+        "$BLUEROUTE_TEST_ROOT"/*) ;;
+        *) echo "Unexpected purge cleanup outside isolated root: $arg" >&2; exit 1 ;;
+    esac
+done
+exec /bin/rm "$@"
 MOCK
-chmod +x "$tmp/bin/"*
+chmod +x "$tmp/bin/"* "$tmp/guard-bin/rm"
 export BLUEROUTE_MAINTAINER_LOG="$tmp/service.log"
 export BLUEROUTE_TEST_ROOT="$tmp/root"
 export PATH="$tmp/bin:$PATH"
+# The deletion guard is NOT enabled during installation and upgrade.
 # The --root and --script-chrootless flags keep package writes inside tmp,
 # while maintainer scripts use the mocked systemd helpers above.
 install_pkg() {
@@ -98,7 +112,7 @@ test "$(cat "$tmp/root/var/lib/blueroute/membership")" = network-membership-fixt
 # persisted identity and membership. The guarded rm wrapper redirects the
 # packaged absolute deletion into the isolated dpkg root.
 : > "$tmp/service.log"
-dpkg --root="$tmp/root" --force-not-root --force-script-chrootless \
+PATH="$tmp/guard-bin:$PATH" dpkg --root="$tmp/root" --force-not-root --force-script-chrootless \
     --force-depends --purge blueroute > "$tmp/dpkg.log" 2>&1 || {
     cat "$tmp/dpkg.log" >&2
     exit 1
