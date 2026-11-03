@@ -49,7 +49,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
         SystemSupportLevel::Degraded => HealthLevel::Degraded,
         SystemSupportLevel::Unsupported => HealthLevel::Error,
     };
-    let capabilities = capability_report.runtime.node;
+    let capabilities = capability_report.runtime.node.clone();
     let mut status = DaemonStatus {
         api_version: ApiVersion::CURRENT,
         local_node: Some(local_node),
