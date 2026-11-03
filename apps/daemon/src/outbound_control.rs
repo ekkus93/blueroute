@@ -702,6 +702,30 @@ mod tests {
     }
 
     #[test]
+    fn supervised_heartbeat_rejects_success_reported_after_deadline() {
+        let mut writes = 0_usize;
+        let mut last_sent = Instant::now() - Duration::from_secs(6);
+        let original_last_sent = last_sent;
+        let result = send_supervised_heartbeat_if_due(
+            &mut writes,
+            &mut last_sent,
+            Instant::now(),
+            Duration::from_secs(5),
+            Duration::from_millis(1),
+            |writes, deadline| {
+                *writes += 1;
+                while Instant::now() <= deadline {
+                    std::thread::yield_now();
+                }
+                Ok(())
+            },
+        );
+        assert_eq!(result.unwrap_err().kind(), ErrorKind::PanFailure);
+        assert_eq!(writes, 1);
+        assert_eq!(last_sent, original_last_sent);
+    }
+
+    #[test]
     fn supervised_heartbeat_rejects_regressed_clock_without_tls_write() {
         let mut writes = 0_usize;
         let mut last_sent = Instant::now();
