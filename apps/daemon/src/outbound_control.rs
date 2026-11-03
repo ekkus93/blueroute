@@ -441,7 +441,14 @@ fn send_supervised_heartbeat_if_due<T>(
         )
     })?;
     send(owner, deadline)?;
-    *last_sent = Instant::now();
+    let completed_at = Instant::now();
+    if completed_at > deadline {
+        return Err(CoreError::new(
+            ErrorKind::PanFailure,
+            "authenticated outbound PANU heartbeat completed after its deadline",
+        ));
+    }
+    *last_sent = completed_at;
     Ok(())
 }
 
