@@ -100,13 +100,9 @@ impl PlatformCheck {
         let network = backend(&status.capabilities, &mut issues);
         let health = match status.health {
             HealthLevel::Healthy => ActionAvailability::PrerequisitesObserved,
-            HealthLevel::Degraded | HealthLevel::Unhealthy => {
+            HealthLevel::Degraded | HealthLevel::Reconnecting | HealthLevel::Error => {
                 issues.push(PlatformIssue::DaemonDegraded);
                 ActionAvailability::Blocked
-            }
-            HealthLevel::Unknown => {
-                issues.push(PlatformIssue::DaemonHealthUnknown);
-                ActionAvailability::Unknown
             }
         };
         // Host/create and outbound join require different PAN roles.
