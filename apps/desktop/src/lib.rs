@@ -2,6 +2,10 @@
 //!
 //! A future Tauri 2 command layer can expose these narrow snapshots without
 //! granting web content raw D-Bus access or arbitrary daemon command dispatch.
+mod platform_check;
+
+pub use platform_check::{ActionAvailability, PlatformCheck, PlatformIssue};
+
 use blueroute_client::{BlueRouteClient, ClientErrorKind};
 use blueroute_core::{HealthLevel, NetworkId, NodeId};
 use blueroute_protocol::{Command, DaemonStatus, NetworkSummary, NodeSummary, Response};
@@ -67,6 +71,16 @@ impl DesktopBridge {
             .await
             .map_err(|error| DesktopError::from(error.kind()))?;
         Ok(Self { client })
+    }
+
+    /// First-run readiness uses only local, version-gated daemon observations.
+    /// This never authorizes a network mutation or trusts a discovered peer.
+    pub async fn platform_check(&self) -> Result<PlatformCheck, DesktopError> {
+        self.client
+            .status()
+            .await
+            .map(|status| PlatformCheck::from_status(&status))
+            .map_err(|error| DesktopError::from(error.kind()))
     }
 
     pub async fn overview(&self) -> Result<DesktopOverview, DesktopError> {
