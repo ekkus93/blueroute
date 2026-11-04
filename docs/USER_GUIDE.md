@@ -1,6 +1,6 @@
 # BlueRoute user guide (development build)
 
-**Status: not a finished consumer release.** BlueRoute currently has a Linux background service and command-line client. The terminal and graphical apps are placeholders. Hosting and inspecting a local network are implemented; **joining through the production daemon is intentionally disabled** until independent key enrollment and authenticated peer sessions are integrated. This is not yet a complete two-computer networking solution.
+**Status: not a finished consumer release.** BlueRoute currently has a Linux background service and command-line client. The terminal app has preliminary read-only daemon-backed views but is not yet a full Ratatui UI or included in the Debian package; the graphical app remains a placeholder. Hosting and inspecting a local network are implemented; **joining through the production daemon is intentionally disabled** until independent key enrollment and authenticated peer sessions are integrated. This is not yet a complete two-computer networking solution.
 
 ## What BlueRoute does
 
@@ -46,6 +46,12 @@ blueroute diagnostics show --summary
 `status` shows the local node, current network and health. `capability show` reports whether the local computer can host a network (NAP) or connect as a client (PANU), with evidence sources. **Unknown does not mean supported.** The reported connection-policy ceiling is not a measured Bluetooth client limit.
 
 `diagnostics show --summary` is a short overview; `blueroute diagnostics show` gives more detail. Some fields say **unavailable** because live authenticated remote-peer inventory, topology and route observations are incomplete. A healthy local daemon does not prove a peer connection or working traffic. Current `blueroute node list` reports the local node only.
+
+### Terminal status views (source-build only)
+
+On a text-terminal Linux development system, run `cargo run -p blueroute-tui --locked` from the source checkout. The initial keyboard-driven shell reads **only** the version-checked local daemon API: `1` Overview, `2` Networks, `3` Devices, `4` Diagnostics, `r` Refresh/reconnect, `h` Help and `q` Quit. It is not packaged yet, uses line-oriented input rather than Ratatui's full-screen event loop, and must be refreshed manually after changes. The daemon remains in charge when the view exits.
+
+A missing/incompatible daemon is reported as unavailable rather than a blank or fabricated healthy state. The screen's reported nodes are not a verified remote-member inventory; a locally healthy status is not proof of Bluetooth connectivity. Interactive create, trust, join and leave remain CLI-only; production authenticated joining remains deliberately disabled.
 
 ## Create a local network (host-only development flow)
 
@@ -110,4 +116,4 @@ See [troubleshooting](TROUBLESHOOTING.md) for driver/firmware problems, addition
 
 ## What remains before the intended user experience
 
-BlueRoute still needs independently verified key enrollment, production authenticated joining, joined-client leave/recovery, functional TUI/desktop workflows and real multi-device Bluetooth acceptance. Physical tests must establish that traffic actually uses Bluetooth rather than Wi-Fi and document the exact tested Linux/controller combinations. This guide describes **currently available development behavior**, not a plug-and-play release.
+BlueRoute still needs independently verified key enrollment, production authenticated joining, joined-client leave/recovery, the full Ratatui TUI and desktop workflows and real multi-device Bluetooth acceptance. Physical tests must establish that traffic actually uses Bluetooth rather than Wi-Fi and document the exact tested Linux/controller combinations. This guide describes **currently available development behavior**, not a plug-and-play release.

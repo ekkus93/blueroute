@@ -2384,12 +2384,14 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 - TUI starts in text-only supported Linux session and renders status.
 
+**Software partial (2026-11-03, P11):** The existing line-oriented terminal shell now queries the real version-checked `blueroute-client` over system D-Bus for read-only status, known networks, reported nodes and diagnostics. Numbered view navigation and explicit `r` refresh re-establish a fresh checked client after daemon loss/return without replaying privileged mutations; an unavailable daemon stays visible as a recoverable error, never a fabricated healthy snapshot. Deterministic renderer/navigation tests and the complete locked workspace/real-broker CI passed at `575ef47731ea6b30a72d7cfc2cd563d30f6f5df0`, [exact-head CI #41760734245](https://github.com/ekkus93/blueroute/actions/runs/41760734245). This is **not yet Ratatui**, does not subscribe to live events, handle terminal resize, automatically recover/repaint after changes, or enable interactive create/join/leave. P11-001 remains OPEN; no physical Bluetooth acceptance is implied.
+
 ## P11-002 — Implement overview/status screen
 
-- [ ] node/network.
-- [ ] overall health.
-- [ ] device count.
-- [ ] concise capability warnings.
+- [x] node/network (version-gated local daemon status).
+- [x] overall health (explicitly labeled local-only).
+- [ ] device count (authenticated/live remote count not yet available).
+- [x] concise capability warnings (local adapter/host/client reported/unknown).
 - [ ] Internet placeholder hidden until implemented.
 
 **Acceptance**
@@ -2428,9 +2430,9 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 ## P11-006 — TUI usability review
 
-- [ ] on-screen key hints.
-- [ ] predictable back/quit.
-- [ ] no mouse requirement.
+- [x] on-screen key hints (1–4, r, h, q in current line-oriented shell).
+- [ ] predictable back/quit (full-screen navigation still needed).
+- [x] no mouse requirement (line-oriented keyboard navigation).
 
 **Acceptance**
 
