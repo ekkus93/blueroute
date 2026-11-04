@@ -40,7 +40,12 @@ pub struct PlatformCheck {
     pub internet_sharing_enabled: bool,
 }
 
-fn observed_capability(value: Option<bool>, unsupported: PlatformIssue, unknown: PlatformIssue, issues: &mut Vec<PlatformIssue>) -> ActionAvailability {
+fn observed_capability(
+    value: Option<bool>,
+    unsupported: PlatformIssue,
+    unknown: PlatformIssue,
+    issues: &mut Vec<PlatformIssue>,
+) -> ActionAvailability {
     match value {
         Some(true) => ActionAvailability::PrerequisitesObserved,
         Some(false) => {
@@ -56,8 +61,12 @@ fn observed_capability(value: Option<bool>, unsupported: PlatformIssue, unknown:
 
 fn combine(a: ActionAvailability, b: ActionAvailability) -> ActionAvailability {
     match (a, b) {
-        (ActionAvailability::Blocked, _) | (_, ActionAvailability::Blocked) => ActionAvailability::Blocked,
-        (ActionAvailability::Unknown, _) | (_, ActionAvailability::Unknown) => ActionAvailability::Unknown,
+        (ActionAvailability::Blocked, _) | (_, ActionAvailability::Blocked) => {
+            ActionAvailability::Blocked
+        }
+        (ActionAvailability::Unknown, _) | (_, ActionAvailability::Unknown) => {
+            ActionAvailability::Unknown
+        }
         _ => ActionAvailability::PrerequisitesObserved,
     }
 }
@@ -151,7 +160,11 @@ mod tests {
         assert_eq!(check.create, ActionAvailability::Unknown);
         assert_eq!(check.join, ActionAvailability::Unknown);
         assert!(check.issues.contains(&PlatformIssue::AdapterUnverified));
-        assert!(check.issues.contains(&PlatformIssue::NetworkBackendUnverified));
+        assert!(
+            check
+                .issues
+                .contains(&PlatformIssue::NetworkBackendUnverified)
+        );
         assert!(!check.join_enabled);
         assert!(!check.internet_sharing_enabled);
     }
@@ -167,7 +180,11 @@ mod tests {
         assert_eq!(check.create, ActionAvailability::PrerequisitesObserved);
         assert_eq!(check.join, ActionAvailability::PrerequisitesObserved);
         assert!(!check.join_enabled);
-        assert!(check.issues.contains(&PlatformIssue::ProductionJoinUnavailable));
+        assert!(
+            check
+                .issues
+                .contains(&PlatformIssue::ProductionJoinUnavailable)
+        );
         assert!(check.summary.contains("policy authorization"));
     }
 
@@ -181,8 +198,16 @@ mod tests {
         let check = PlatformCheck::from_status(&daemon);
         assert_eq!(check.create, ActionAvailability::Blocked);
         assert_eq!(check.join, ActionAvailability::Blocked);
-        assert!(check.issues.contains(&PlatformIssue::AdapterMissingOrDisabled));
-        assert!(check.issues.contains(&PlatformIssue::NetworkBackendUnsupported));
+        assert!(
+            check
+                .issues
+                .contains(&PlatformIssue::AdapterMissingOrDisabled)
+        );
+        assert!(
+            check
+                .issues
+                .contains(&PlatformIssue::NetworkBackendUnsupported)
+        );
     }
 
     #[test]
