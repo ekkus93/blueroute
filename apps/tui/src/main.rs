@@ -240,6 +240,7 @@ fn run_with_source<R: BufRead, W: Write>(
     loop {
 
 
+
         write!(output, "> ")?;
         output.flush()?;
         let mut line = String::new();
@@ -288,7 +289,7 @@ fn run_live<W: Write>(
                     body = load(screen);
                     writeln!(output, "{}", render(screen, &body))?;
                 }
-                Action::Help => writeln!(output, "Select 1-4 for a view, r to refresh, q to quit.")?,
+                Action::Help => {\n                    writeln!(output, "Select 1-4 for a view, r to refresh, q to quit.")?\n                }
                 Action::Invalid => writeln!(output, "Unknown command. Press h for help.")?,
             },
             Err(RecvTimeoutError::Timeout) => {
