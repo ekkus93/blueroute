@@ -2419,14 +2419,16 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 ## P11-005 — Implement diagnostics screen
 
-- [ ] topology.
-- [ ] capabilities.
-- [ ] interfaces/routes.
-- [ ] errors/transitions.
+- [ ] topology (typed observations rendered when supplied; daemon does not yet expose live topology).
+- [x] capabilities (local values, unknowns, and provenance displayed via shared snapshot).
+- [ ] interfaces/routes (typed details rendered if supplied; live observation provider still pending).
+- [ ] errors/transitions (bounded API failures displayed; link transitions still unavailable).
 
 **Acceptance**
 
 - Advanced detail is available without cluttering primary UI.
+
+**Software partial (2026-11-04, P11-005):** The terminal diagnostics view now renders the actual version-checked `DiagnosticSnapshot`: sourced local capabilities, safely displayed adapter/system metadata, observed peer inventory with an explicit *not authenticated* warning, interface/address rows, owned route intents, topology nodes/links, and recent typed API failures. Collections show **unavailable (not observed)** for `None`, not fabricated zeros; present collections are capped to eight displayed records and untrusted diagnostic strings escape terminal/bidirectional controls with bounded length. The future Internet feature stays hidden and link transitions remain explicitly unavailable. Deterministic rich/unknown/hostile-field tests and full workspace CI passed at `0f9eb3b91924d31d30577efcd991155927a02fdb`, [exact-head CI #41805165769](https://github.com/ekkus93/blueroute/actions/runs/41805165769). **P11-005 stays OPEN** pending live authenticated topology/interface/route providers and transitions, plus full Ratatui integration; this does not validate Bluetooth or remote membership.
 
 ## P11-006 — TUI usability review
 
