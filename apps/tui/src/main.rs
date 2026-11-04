@@ -1,6 +1,8 @@
 //! Read-only terminal views backed by the version-checked daemon client.
 //! A full Ratatui event loop and event subscription remain separate P11 work.
 use std::io::{self, BufRead, IsTerminal, Write};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::time::Duration;
 
 use blueroute_client::{BlueRouteClient, ClientErrorKind};
 use blueroute_core::HealthLevel;
@@ -253,14 +255,68 @@ fn run_with_source<R: BufRead, W: Write>(
     Ok(())
 }
 
+
+// A background reader keeps the terminal responsive to periodic daemon checks
+// even when the operator has not entered a command. No privileged operation is
+// ever issued by this loop.
+fn run_live<W: Write>(
+    output: &mut W,
+    input: &Receiver<String>,
+    interval: Duration,
+    mut load: impl FnMut(Screen) -> String,
+) -> io::Result<()> {
+    let mut screen = Screen::Overview;
+    let mut body = load(screen);
+    writeln!(output, "{}", render(screen, &body))?;
+    output.flush()?;
+    loop {
+        match input.recv_timeout(interval) {
+            Ok(line) => match parse_action(&line) {
+                Action::Quit => return Ok(()),
+                Action::Show(next) => {
+                    screen = next;
+                    body = load(screen);
+                    writeln!(output, "{}", render(screen, &body))?;
+                }
+                Action::Refresh => {
+                    body = load(screen);
+                    writeln!(output, "{}", render(screen, &body))?;
+                }
+                Action::Help => writeln!(output, "Select 1-4 for a view, r to refresh, q to quit.")?,
+                Action::Invalid => writeln!(output, "Unknown command. Press h for help.")?,
+            },
+            Err(RecvTimeoutError::Timeout) => {
+                let refreshed = load(screen);
+                if refreshed != body {
+                    body = refreshed;
+                    writeln!(output, "{}", render(screen, &body))?;
+                }
+            }
+            Err(RecvTimeoutError::Disconnected) => return Ok(()),
+        }
+        output.flush()?;
+    }
+}
+
 fn main() -> io::Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         eprintln!("BlueRoute TUI requires an interactive text terminal.");
         std::process::exit(2);
     }
-    run_with_source(
-        &mut io::stdin().lock(),
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let stdin = io::stdin();
+        for line in stdin.lock().lines() {
+            match line {
+                Ok(line) if sender.send(line).is_ok() => {}
+                _ => break,
+            }
+        }
+    });
+    run_live(
         &mut io::stdout().lock(),
+        &receiver,
+        Duration::from_secs(5),
         |screen| future::block_on(fetch_view(screen)),
     )
 }
@@ -311,6 +367,45 @@ mod tests {
         assert!(text.contains("Daemon restored"));
         assert!(text.contains("r to refresh"));
         assert!(!text.contains("BlueRoute | Diagnostics"));
+    }
+
+    #[test]
+    fn live_shell_reloads_after_timeout_and_reconnects_without_mutations() {
+        let (tx, rx) = mpsc::channel();
+        let mut output = Vec::new();
+        let mut calls = 0;
+        run_live(&mut output, &rx, Duration::from_millis(1), |_| {
+            calls += 1;
+            if calls == 1 {
+                "Daemon unavailable".to_owned()
+            } else {
+                tx.send("q".to_owned()).unwrap();
+                "Daemon restored".to_owned()
+            }
+        })
+        .unwrap();
+        let text = String::from_utf8(output).unwrap();
+        assert_eq!(calls, 2);
+        assert!(text.contains("Daemon unavailable"));
+        assert!(text.contains("Daemon restored"));
+    }
+
+    #[test]
+    fn live_shell_navigation_and_eof_are_bounded() {
+        let (tx, rx) = mpsc::channel();
+        tx.send("2".to_owned()).unwrap();
+        tx.send("q".to_owned()).unwrap();
+        let mut output = Vec::new();
+        run_live(&mut output, &rx, Duration::from_secs(1), |screen| {
+            screen.title().to_owned()
+        })
+        .unwrap();
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.contains("BlueRoute | Networks"));
+        assert!(!text.contains("BlueRoute | Devices"));
+        drop(tx);
+        let mut eof_output = Vec::new();
+        run_live(&mut eof_output, &rx, Duration::from_secs(1), |_| "offline".into()).unwrap();
     }
 
     #[test]
