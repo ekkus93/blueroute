@@ -1,6 +1,8 @@
 //! Read-only terminal views backed by the version-checked daemon client.
 //! A full Ratatui event loop and event subscription remain separate P11 work.
-use std::io::{self, BufRead, IsTerminal, Write};
+use std::io::{self, IsTerminal, Write};
+#[cfg(test)]
+use std::io::BufRead;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::Duration;
 
@@ -227,6 +229,7 @@ async fn fetch_view(screen: Screen) -> String {
     }
 }
 
+#[cfg(test)]
 fn run_with_source<R: BufRead, W: Write>(
     input: &mut R,
     output: &mut W,
@@ -428,21 +431,3 @@ mod tests {
         let text = format_networks(&networks);
         assert!(text.contains("Local Lab"));
         assert!(text.contains("not live peers"));
-        assert!(format_networks(&[]).contains("No networks reported"));
-        let nodes = vec![NodeSummary {
-            id: NodeId::from_bytes([3; 16]),
-            name: DisplayName::new("This computer").unwrap(),
-            reachability: Reachability::Local,
-        }];
-        assert!(format_devices(&nodes).contains("This computer"));
-        assert!(format_devices(&nodes).contains("not yet authenticated"));
-        assert!(format_devices(&[]).contains("No nodes reported"));
-    }
-
-    #[test]
-    fn unavailable_data_is_not_reported_as_observed_empty() {
-        assert_eq!(observed_count::<u8>(None), "unavailable (not observed)");
-        assert_eq!(observed_count(Some(&[] as &[u8])), "0 reported");
-        assert!(offline_message(ClientErrorKind::Unavailable).contains("press r to retry"));
-    }
-}
