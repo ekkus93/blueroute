@@ -101,10 +101,9 @@ pub(super) fn format_diagnostics(snapshot: &DiagnosticSnapshot) -> String {
         format!("Local daemon health: {:?}", snapshot.health),
         format!(
             "Network: {}",
-            snapshot.current_network.map_or_else(
-                || "none reported".to_owned(),
-                |network| network.to_string()
-            )
+            snapshot
+                .current_network
+                .map_or_else(|| "none reported".to_owned(), |network| network.to_string())
         ),
         format!(
             "Visible nodes: {} (local-only until authenticated peer observation)",
@@ -123,15 +122,20 @@ pub(super) fn format_diagnostics(snapshot: &DiagnosticSnapshot) -> String {
                 optional_field(system.bluez_version.as_deref()),
                 optional_field(system.network_backend_version.as_deref()),
             ));
-            rows(&mut lines, "Adapters", Some(system.adapters.as_slice()), |adapter| {
-                format!(
-                    "id={} powered={} address={} driver={}",
-                    safe_field(&adapter.id),
-                    adapter.powered,
-                    optional_field(adapter.address.as_deref()),
-                    optional_field(adapter.driver.as_deref()),
-                )
-            });
+            rows(
+                &mut lines,
+                "Adapters",
+                Some(system.adapters.as_slice()),
+                |adapter| {
+                    format!(
+                        "id={} powered={} address={} driver={}",
+                        safe_field(&adapter.id),
+                        adapter.powered,
+                        optional_field(adapter.address.as_deref()),
+                        optional_field(adapter.driver.as_deref()),
+                    )
+                },
+            );
         }
     }
     rows(
@@ -172,29 +176,42 @@ pub(super) fn format_diagnostics(snapshot: &DiagnosticSnapshot) -> String {
     match &snapshot.topology {
         None => lines.push("Topology: unavailable (not observed)".to_owned()),
         Some(topology) => {
-            rows(&mut lines, "Topology nodes", Some(&topology.nodes), |node| {
-                format!("{} {} ({:?})", node.id, node.name, node.reachability)
-            });
-            rows(&mut lines, "Topology links", Some(&topology.links), |link| {
-                format!(
-                    "id={} {} -> {} state={:?} health={:?}",
-                    safe_field(&link.id),
-                    link.left,
-                    link.right,
-                    link.state,
-                    link.health
-                )
-            });
+            rows(
+                &mut lines,
+                "Topology nodes",
+                Some(&topology.nodes),
+                |node| format!("{} {} ({:?})", node.id, node.name, node.reachability),
+            );
+            rows(
+                &mut lines,
+                "Topology links",
+                Some(&topology.links),
+                |link| {
+                    format!(
+                        "id={} {} -> {} state={:?} health={:?}",
+                        safe_field(&link.id),
+                        link.left,
+                        link.right,
+                        link.state,
+                        link.health
+                    )
+                },
+            );
         }
     }
-    rows(&mut lines, "Recent API failures", Some(&snapshot.recent_errors), |failure| {
-        format!(
-            "unix_ms={} operation={} class={}",
-            failure.timestamp_unix_ms,
-            safe_field(&failure.operation),
-            safe_field(&failure.failure_class),
-        )
-    });
+    rows(
+        &mut lines,
+        "Recent API failures",
+        Some(&snapshot.recent_errors),
+        |failure| {
+            format!(
+                "unix_ms={} operation={} class={}",
+                failure.timestamp_unix_ms,
+                safe_field(&failure.operation),
+                safe_field(&failure.failure_class),
+            )
+        },
+    );
     lines.push("Link transitions: unavailable (not exposed by daemon)".to_owned());
     lines.push(
         "Daemon observations only; not proof of authenticated peers or Bluetooth traffic."

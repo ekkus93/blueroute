@@ -8,9 +8,7 @@ mod diagnostics;
 
 use blueroute_client::{BlueRouteClient, ClientErrorKind};
 use blueroute_core::HealthLevel;
-use blueroute_protocol::{
-    Command, DaemonStatus, NetworkSummary, NodeSummary, Response,
-};
+use blueroute_protocol::{Command, DaemonStatus, NetworkSummary, NodeSummary, Response};
 use futures_lite::future;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -413,8 +411,14 @@ mod tests {
 
     #[test]
     fn unavailable_data_is_not_reported_as_observed_empty() {
-        assert_eq!(diagnostics::observed_count::<u8>(None), "unavailable (not observed)");
-        assert_eq!(diagnostics::observed_count(Some(&[] as &[u8])), "0 reported");
+        assert_eq!(
+            diagnostics::observed_count::<u8>(None),
+            "unavailable (not observed)"
+        );
+        assert_eq!(
+            diagnostics::observed_count(Some(&[] as &[u8])),
+            "0 reported"
+        );
         assert!(offline_message(ClientErrorKind::Unavailable).contains("press r to retry"));
     }
 }
