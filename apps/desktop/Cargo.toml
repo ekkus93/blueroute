@@ -7,5 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[dependencies]
+blueroute-client = { path = "../../crates/blueroute-client" }
+blueroute-core = { path = "../../crates/blueroute-core" }
+blueroute-protocol = { path = "../../crates/blueroute-protocol" }
+
 [lints]
 workspace = true
