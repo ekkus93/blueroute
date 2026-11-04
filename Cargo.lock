@@ -350,6 +350,12 @@ dependencies = [
 [[package]]
 name = "blueroute-tui"
 version = "0.1.0"
+dependencies = [
+ "blueroute-client",
+ "blueroute-core",
+ "blueroute-protocol",
+ "futures-lite",
+]
 
 [[package]]
 name = "bumpalo"
