@@ -102,7 +102,12 @@ mod tests {
     }
     #[test]
     fn view_discloses_unavailable_daemon_data() {
-        for screen in [Screen::Overview, Screen::Networks, Screen::Devices, Screen::Diagnostics] {
+        for screen in [
+            Screen::Overview,
+            Screen::Networks,
+            Screen::Devices,
+            Screen::Diagnostics,
+        ] {
             assert!(render(screen).contains("Daemon data not yet connected"));
         }
     }
