@@ -238,6 +238,7 @@ fn run_with_source<R: BufRead, W: Write>(
     let mut screen = Screen::Overview;
     writeln!(output, "{}", render(screen, &load(screen)))?;
     loop {
+
         write!(output, "> ")?;
         output.flush()?;
         let mut line = String::new();
@@ -431,3 +432,21 @@ mod tests {
         let text = format_networks(&networks);
         assert!(text.contains("Local Lab"));
         assert!(text.contains("not live peers"));
+        assert!(format_networks(&[]).contains("No networks reported"));
+        let nodes = vec![NodeSummary {
+            id: NodeId::from_bytes([3; 16]),
+            name: DisplayName::new("This computer").unwrap(),
+            reachability: Reachability::Local,
+        }];
+        assert!(format_devices(&nodes).contains("This computer"));
+        assert!(format_devices(&nodes).contains("not yet authenticated"));
+        assert!(format_devices(&[]).contains("No nodes reported"));
+    }
+
+    #[test]
+    fn unavailable_data_is_not_reported_as_observed_empty() {
+        assert_eq!(observed_count::<u8>(None), "unavailable (not observed)");
+        assert_eq!(observed_count(Some(&[] as &[u8])), "0 reported");
+        assert!(offline_message(ClientErrorKind::Unavailable).contains("press r to retry"));
+    }
+}
