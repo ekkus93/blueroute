@@ -2363,6 +2363,8 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 **Software partial (2026-10-14):** Executable CLI subprocess tests now verify `--help`/`--version` exit `0`, malformed and duplicate options exit `2`, and an intentionally unusable `DBUS_SYSTEM_BUS_ADDRESS` exits `3` without a daemon or hardware. [Exact-head CI 38693385185](https://github.com/ekkus93/blueroute/actions/runs/38693385185) passed at `45744890455cfc0eedecc92cc07535f59c3620ba`. `blueroute-client` now maps only **exact typed D-Bus error names** to distinct categories, and the CLI preserves these instead of flattening transport errors to strings. Authorization failures exit `4`, unsupported capabilities `5`, unavailable daemons `3`, and unknown operational failures `1`. Anti-spoofing error-name tests and typed-error unit tests passed [exact-head CI 38694742077](https://github.com/ekkus93/blueroute/actions/runs/38694742077) at `073031ee5ca0e089e03336a717356c51fd08a067`. Isolated real-broker subprocess tests now exercise exact typed D-Bus `AccessDenied` / `NotSupported` responses and a generic failure whose human text includes “AccessDenied”, asserting exit `4`, `5`, and `1`, respectively. [Exact-head CI 38695337220](https://github.com/ekkus93/blueroute/actions/runs/38695337220) passed at `d097fcf0f733844182ba24b55fe07eb546e6a9f9`. Clap parsing and final cross-command integration remain open. This is **not** authenticated joining or radio acceptance.
 
+**CLI typed failure guidance (2026-11-03, software only):** The CLI now maps typed exit categories to actionable troubleshooting/help links; `--json` errors return a stable JSON failure envelope on stderr while preserving exact exit codes (2 usage, 3 unavailable, 4 authorization, 5 unsupported, 1 operational). Executable subprocess tests cover unavailable daemon and malformed usage, and unit tests enforce typed-category links and JSON escaping; existing isolated real-broker error tests continue to pass. Source `bc609319`, follow-up fixes `f1a0a704`, `02b8a59c`, and `17484d423c`; [verified exact-head CI #41743681295](https://github.com/ekkus93/blueroute/actions/runs/41743681295) passed (format, build, Clippy, Rust tests, broker tests and packaging). This improves the CLI contract but does not establish production authenticated joining or complete GUI/TUI integration.
+
 **Acceptance**
 
 - Script tests verify representative exits.
@@ -3003,7 +3005,9 @@ Cover:
 
 - driver/firmware quirks.
 
-**Software partial (2026-10-15):** `docs/TROUBLESHOOTING.md` covers each listed failure class with current diagnostics and recovery boundaries. Acceptance remains open because the CLI/TUI/desktop do not yet link their runtime errors to this guidance and authenticated routed-peer states are not implemented.
+**Software partial (2026-10-15):** `docs/TROUBLESHOOTING.md` covers each listed failure class with current diagnostics and recovery boundaries. The CLI now links typed runtime error categories to this guidance, but TUI/desktop integration and authenticated routed-peer states remain unimplemented.
+
+**CLI guidance acceptance slice (2026-11-03):** Human-readable CLI failures now provide category-appropriate next steps and links to troubleshooting or administrator guidance; JSON errors include a help URL and preserve typed exit status on stderr. Direct process tests confirm the no-daemon and invalid-usage JSON contract; typed category mapping and hostile quoted error messages have deterministic unit tests. Source `17484d423c98a56bc1b39c690b2ccd913c4f3e01`; [exact-head CI #41743681295](https://github.com/ekkus93/blueroute/actions/runs/41743681295) **passed**. **P17-004 remains OPEN** until TUI/desktop error navigation and end-to-end authenticated link diagnostics are implemented.
 
 **Acceptance**
 
