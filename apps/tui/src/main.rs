@@ -238,10 +238,6 @@ fn run_with_source<R: BufRead, W: Write>(
     let mut screen = Screen::Overview;
     writeln!(output, "{}", render(screen, &load(screen)))?;
     loop {
-
-
-
-
         write!(output, "> ")?;
         output.flush()?;
         let mut line = String::new();
