@@ -1,8 +1,6 @@
 //! Read-only terminal views backed by the version-checked daemon client.
 //! A full Ratatui event loop and event subscription remain separate P11 work.
-#[cfg(test)]
-use std::io::BufRead;
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, BufRead, IsTerminal, Write};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::Duration;
 
@@ -238,6 +236,7 @@ fn run_with_source<R: BufRead, W: Write>(
     let mut screen = Screen::Overview;
     writeln!(output, "{}", render(screen, &load(screen)))?;
     loop {
+
         write!(output, "> ")?;
         output.flush()?;
         let mut line = String::new();
