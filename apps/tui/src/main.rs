@@ -4,10 +4,12 @@ use std::io::{self, BufRead, IsTerminal, Write};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::Duration;
 
+mod diagnostics;
+
 use blueroute_client::{BlueRouteClient, ClientErrorKind};
 use blueroute_core::HealthLevel;
 use blueroute_protocol::{
-    Command, DaemonStatus, DiagnosticSnapshot, NetworkSummary, NodeSummary, Response,
+    Command, DaemonStatus, NetworkSummary, NodeSummary, Response,
 };
 use futures_lite::future;
 
@@ -143,45 +145,6 @@ fn format_devices(nodes: &[NodeSummary]) -> String {
     lines.join("\n")
 }
 
-fn observed_count<T>(values: Option<&[T]>) -> String {
-    match values {
-        Some(values) => format!("{} reported", values.len()),
-        None => "unavailable (not observed)".to_owned(),
-    }
-}
-
-fn format_diagnostics(snapshot: &DiagnosticSnapshot) -> String {
-    let (adapters, bluez, backend) = match snapshot.system.as_ref() {
-        Some(system) => (
-            format!("{} observed", system.adapters.len()),
-            if system.bluez_version.is_some() {
-                "reported"
-            } else {
-                "unavailable"
-            },
-            if system.network_backend_version.is_some() {
-                "reported"
-            } else {
-                "unavailable"
-            },
-        ),
-        None => ("unavailable".to_owned(), "unavailable", "unavailable"),
-    };
-    format!(
-        "Local daemon health: {}\nAdapters: {adapters}\nBlueZ version: {bluez}\nNetwork backend version: {backend}\nObserved peers: {}\nInterfaces: {}\nRoutes: {}\nTopology: {}\nRecent API failures: {}\n\nThese are daemon observations, not Bluetooth data-plane acceptance.",
-        health_label(snapshot.health),
-        observed_count(snapshot.observed_peers.as_deref()),
-        observed_count(snapshot.interfaces.as_deref()),
-        observed_count(snapshot.routes.as_deref()),
-        if snapshot.topology.is_some() {
-            "reported"
-        } else {
-            "unavailable (not observed)"
-        },
-        snapshot.recent_errors.len(),
-    )
-}
-
 fn offline_message(kind: ClientErrorKind) -> &'static str {
     match kind {
         ClientErrorKind::Unavailable => {
@@ -220,7 +183,7 @@ async fn fetch_view(screen: Screen) -> String {
             Err(error) => offline_message(error.kind()).to_owned(),
         },
         Screen::Diagnostics => match client.request(&Command::GetDiagnostics).await {
-            Ok(Response::Diagnostics(snapshot)) => format_diagnostics(&snapshot),
+            Ok(Response::Diagnostics(snapshot)) => diagnostics::format_diagnostics(&snapshot),
             Ok(_) => "Daemon returned an unexpected diagnostic response.".to_owned(),
             Err(error) => offline_message(error.kind()).to_owned(),
         },
@@ -450,8 +413,8 @@ mod tests {
 
     #[test]
     fn unavailable_data_is_not_reported_as_observed_empty() {
-        assert_eq!(observed_count::<u8>(None), "unavailable (not observed)");
-        assert_eq!(observed_count(Some(&[] as &[u8])), "0 reported");
+        assert_eq!(diagnostics::observed_count::<u8>(None), "unavailable (not observed)");
+        assert_eq!(diagnostics::observed_count(Some(&[] as &[u8])), "0 reported");
         assert!(offline_message(ClientErrorKind::Unavailable).contains("press r to retry"));
     }
 }
