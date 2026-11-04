@@ -310,8 +310,12 @@ fn main() -> io::Result<()> {
         let stdin = io::stdin();
         for line in stdin.lock().lines() {
             match line {
-                Ok(line) if sender.send(line).is_ok() => {}
-                _ => break,
+                Ok(line) => {
+                    if sender.send(line).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
             }
         }
     });
