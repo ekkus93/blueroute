@@ -4,7 +4,9 @@ use std::io::{self, BufRead, IsTerminal, Write};
 
 use blueroute_client::{BlueRouteClient, ClientErrorKind};
 use blueroute_core::{HealthLevel, NodeCapabilities};
-use blueroute_protocol::{Command, DaemonStatus, DiagnosticSnapshot, NetworkSummary, NodeSummary, Response};
+use blueroute_protocol::{
+    Command, DaemonStatus, DiagnosticSnapshot, NetworkSummary, NodeSummary, Response,
+};
 use futures_lite::future;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,8 +84,12 @@ fn format_overview(status: &DaemonStatus) -> String {
     format!(
         "Status: {}\nLocal node: {}\nCurrent network: {}\n{}\nCan host: {}\nCan join: {}\nRemote peer count: unavailable (not authenticated yet)\n\nNo Internet sharing or authenticated joining is enabled.",
         health_label(status.health),
-        status.local_node.map_or_else(|| "unavailable".to_owned(), |id| id.to_string()),
-        status.current_network.map_or_else(|| "none reported".to_owned(), |id| id.to_string()),
+        status
+            .local_node
+            .map_or_else(|| "unavailable".to_owned(), |id| id.to_string()),
+        status
+            .current_network
+            .map_or_else(|| "none reported".to_owned(), |id| id.to_string()),
         warning,
         support_label(status.capabilities.can_host_pan()),
         support_label(status.capabilities.can_join_pan()),
@@ -91,9 +97,7 @@ fn format_overview(status: &DaemonStatus) -> String {
 }
 
 fn format_networks(networks: &[NetworkSummary]) -> String {
-    let mut lines = vec![
-        "Daemon-reported networks (discovery is not authentication):".to_owned(),
-    ];
+    let mut lines = vec!["Daemon-reported networks (discovery is not authentication):".to_owned()];
     if networks.is_empty() {
         lines.push("No networks reported.".to_owned());
     } else {
@@ -104,7 +108,10 @@ fn format_networks(networks: &[NetworkSummary]) -> String {
             ));
         }
         if networks.len() > 32 {
-            lines.push(format!("  ... {} additional entries omitted", networks.len() - 32));
+            lines.push(format!(
+                "  ... {} additional entries omitted",
+                networks.len() - 32
+            ));
         }
     }
     lines.push("Creating, joining and leaving networks is not available in this view.".to_owned());
@@ -112,17 +119,22 @@ fn format_networks(networks: &[NetworkSummary]) -> String {
 }
 
 fn format_devices(nodes: &[NodeSummary]) -> String {
-    let mut lines = vec![
-        "Daemon-reported nodes (remote reachability is not yet authenticated):".to_owned(),
-    ];
+    let mut lines =
+        vec!["Daemon-reported nodes (remote reachability is not yet authenticated):".to_owned()];
     if nodes.is_empty() {
         lines.push("No nodes reported.".to_owned());
     } else {
         for node in nodes.iter().take(32) {
-            lines.push(format!("  {} — {} ({:?})", node.name, node.id, node.reachability));
+            lines.push(format!(
+                "  {} — {} ({:?})",
+                node.name, node.id, node.reachability
+            ));
         }
         if nodes.len() > 32 {
-            lines.push(format!("  ... {} additional entries omitted", nodes.len() - 32));
+            lines.push(format!(
+                "  ... {} additional entries omitted",
+                nodes.len() - 32
+            ));
         }
     }
     lines.push("Peer trust is not TLS key enrollment or membership.".to_owned());
@@ -140,8 +152,16 @@ fn format_diagnostics(snapshot: &DiagnosticSnapshot) -> String {
     let (adapters, bluez, backend) = match snapshot.system.as_ref() {
         Some(system) => (
             format!("{} observed", system.adapters.len()),
-            if system.bluez_version.is_some() { "reported" } else { "unavailable" },
-            if system.network_backend_version.is_some() { "reported" } else { "unavailable" },
+            if system.bluez_version.is_some() {
+                "reported"
+            } else {
+                "unavailable"
+            },
+            if system.network_backend_version.is_some() {
+                "reported"
+            } else {
+                "unavailable"
+            },
         ),
         None => ("unavailable".to_owned(), "unavailable", "unavailable"),
     };
@@ -151,17 +171,27 @@ fn format_diagnostics(snapshot: &DiagnosticSnapshot) -> String {
         observed_count(snapshot.observed_peers.as_deref()),
         observed_count(snapshot.interfaces.as_deref()),
         observed_count(snapshot.routes.as_deref()),
-        if snapshot.topology.is_some() { "reported" } else { "unavailable (not observed)" },
+        if snapshot.topology.is_some() {
+            "reported"
+        } else {
+            "unavailable (not observed)"
+        },
         snapshot.recent_errors.len(),
     )
 }
 
 fn offline_message(kind: ClientErrorKind) -> &'static str {
     match kind {
-        ClientErrorKind::Unavailable => "Daemon unavailable or incompatible. Check blueroute.service and press r to retry.",
-        ClientErrorKind::Authorization => "Read-only access denied by system policy. Check D-Bus permissions.",
+        ClientErrorKind::Unavailable => {
+            "Daemon unavailable or incompatible. Check blueroute.service and press r to retry."
+        }
+        ClientErrorKind::Authorization => {
+            "Read-only access denied by system policy. Check D-Bus permissions."
+        }
         ClientErrorKind::Unsupported => "Daemon does not support this query.",
-        ClientErrorKind::Operational => "Daemon query failed. Use blueroute diagnostics show for details.",
+        ClientErrorKind::Operational => {
+            "Daemon query failed. Use blueroute diagnostics show for details."
+        }
     }
 }
 
@@ -228,15 +258,17 @@ fn main() -> io::Result<()> {
         eprintln!("BlueRoute TUI requires an interactive text terminal.");
         std::process::exit(2);
     }
-    run_with_source(&mut io::stdin().lock(), &mut io::stdout().lock(), |screen| {
-        future::block_on(fetch_view(screen))
-    })
+    run_with_source(
+        &mut io::stdin().lock(),
+        &mut io::stdout().lock(),
+        |screen| future::block_on(fetch_view(screen)),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blueroute_core::{DisplayName, NodeId, NetworkId, Reachability};
+    use blueroute_core::{DisplayName, NetworkId, NodeId, Reachability};
     use blueroute_protocol::ApiVersion;
 
     fn local_status() -> DaemonStatus {
@@ -264,8 +296,13 @@ mod tests {
         let mut attempts = 0;
         run_with_source(&mut &b"r\n2\n3\nh\nq\n"[..], &mut output, |_| {
             attempts += 1;
-            if attempts == 1 { "Daemon unavailable".into() } else { "Daemon restored".into() }
-        }).unwrap();
+            if attempts == 1 {
+                "Daemon unavailable".into()
+            } else {
+                "Daemon restored".into()
+            }
+        })
+        .unwrap();
         let text = String::from_utf8(output).unwrap();
         assert_eq!(attempts, 4);
         assert!(text.contains("Daemon unavailable"));
@@ -289,7 +326,9 @@ mod tests {
     fn network_and_node_views_use_only_explicit_daemon_records() {
         let id = NetworkId::from_bytes([9; 16]);
         let networks = vec![NetworkSummary {
-            id, name: DisplayName::new("Local Lab").unwrap(), member_count: 2,
+            id,
+            name: DisplayName::new("Local Lab").unwrap(),
+            member_count: 2,
         }];
         let text = format_networks(&networks);
         assert!(text.contains("Local Lab"));
