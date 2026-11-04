@@ -3,7 +3,7 @@
 use std::io::{self, BufRead, IsTerminal, Write};
 
 use blueroute_client::{BlueRouteClient, ClientErrorKind};
-use blueroute_core::{HealthLevel, NodeCapabilities};
+use blueroute_core::HealthLevel;
 use blueroute_protocol::{
     Command, DaemonStatus, DiagnosticSnapshot, NetworkSummary, NodeSummary, Response,
 };
@@ -268,7 +268,7 @@ fn main() -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blueroute_core::{DisplayName, NetworkId, NodeId, Reachability};
+    use blueroute_core::{DisplayName, NetworkId, NodeCapabilities, NodeId, Reachability};
     use blueroute_protocol::ApiVersion;
 
     fn local_status() -> DaemonStatus {
