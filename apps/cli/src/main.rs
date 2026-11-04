@@ -741,16 +741,18 @@ fn run(args: &[String]) -> i32 {
     let client = match futures_lite::future::block_on(BlueRouteClient::connect()) {
         Ok(client) => client,
         Err(error) => {
-            let failure = CliFailure::from(error);
+            // An initial bus/version connection failure is always unavailable.
+            // Preserve exit 3 even if zbus internally classifies the transport error
+            // as a generic operational failure.
             eprintln!(
                 "{}",
                 error_guidance::format_failure(
-                    failure.code,
-                    &format!("daemon unavailable/incompatible: {}", failure.message),
+                    3,
+                    &format!("daemon unavailable/incompatible: {error}"),
                     json_mode,
                 )
             );
-            return failure.code;
+            return 3;
         }
     };
     let result = match operation {

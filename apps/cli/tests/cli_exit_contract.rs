@@ -55,6 +55,23 @@ fn daemon_unavailable_exits_three_without_falling_back_to_privileged_tools() {
         error.contains("daemon unavailable/incompatible"),
         "unexpected connection diagnostic: {error}"
     );
+    let json: serde_json::Value = serde_json::from_slice(&result.stderr)
+        .expect("--json failure must be valid JSON on stderr");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], 3);
+    assert_eq!(json["error"]["kind"], "daemon_unavailable");
+    assert!(json["error"]["help"].as_str().unwrap().contains("TROUBLESHOOTING.md"));
+}
+
+#[test]
+fn usage_error_is_valid_json_with_exit_two() {
+    let result = invoke(&["--json", "--unrecognized"]);
+    assert_eq!(result.status.code(), Some(2));
+    assert!(result.stdout.is_empty());
+    let json: serde_json::Value = serde_json::from_slice(&result.stderr).unwrap();
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], 2);
+    assert_eq!(json["error"]["kind"], "usage");
 }
 
 #[test]
