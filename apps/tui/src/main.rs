@@ -1,8 +1,8 @@
 //! Read-only terminal views backed by the version-checked daemon client.
 //! A full Ratatui event loop and event subscription remain separate P11 work.
-use std::io::{self, IsTerminal, Write};
 #[cfg(test)]
 use std::io::BufRead;
+use std::io::{self, IsTerminal, Write};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::Duration;
 
@@ -239,6 +239,7 @@ fn run_with_source<R: BufRead, W: Write>(
     writeln!(output, "{}", render(screen, &load(screen)))?;
     loop {
 
+
         write!(output, "> ")?;
         output.flush()?;
         let mut line = String::new();
@@ -252,13 +253,14 @@ fn run_with_source<R: BufRead, W: Write>(
                 writeln!(output, "{}", render(screen, &load(screen)))?;
             }
             Action::Refresh => writeln!(output, "{}", render(screen, &load(screen)))?,
-            Action::Help => writeln!(output, "Select 1-4 for a view, r to refresh, q to quit.")?,
+            Action::Help => {
+                    writeln!(output, "Select 1-4 for a view, r to refresh, q to quit.")?
+                }
             Action::Invalid => writeln!(output, "Unknown command. Press h for help.")?,
         }
     }
     Ok(())
 }
-
 
 // A background reader keeps the terminal responsive to periodic daemon checks
 // even when the operator has not entered a command. No privileged operation is
@@ -409,7 +411,10 @@ mod tests {
         assert!(!text.contains("BlueRoute | Devices"));
         drop(tx);
         let mut eof_output = Vec::new();
-        run_live(&mut eof_output, &rx, Duration::from_secs(1), |_| "offline".into()).unwrap();
+        run_live(&mut eof_output, &rx, Duration::from_secs(1), |_| {
+            "offline".into()
+        })
+        .unwrap();
     }
 
     #[test]
