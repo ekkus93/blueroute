@@ -49,7 +49,7 @@ blueroute diagnostics show --summary
 
 ### Terminal status views (source-build only)
 
-On a text-terminal Linux development system, run `cargo run -p blueroute-tui --locked` from the source checkout. The initial keyboard-driven shell reads **only** the version-checked local daemon API: `1` Overview, `2` Networks, `3` Devices, `4` Diagnostics, `r` Refresh/reconnect, `h` Help and `q` Quit. It is not packaged yet, uses line-oriented input rather than Ratatui's full-screen event loop, and must be refreshed manually after changes. The daemon remains in charge when the view exits.
+On a text-terminal Linux development system, run `cargo run -p blueroute-tui --locked` from the source checkout. The initial keyboard-driven shell reads **only** the version-checked local daemon API: `1` Overview, `2` Networks, `3` Devices, `4` Diagnostics, `r` Refresh/reconnect, `h` Help and `q` Quit. It is not packaged yet, uses line-oriented input rather than Ratatui's full-screen event loop, and automatically rechecks the selected read-only daemon view every five seconds, repainting only when its contents change. You can still press `r` for an immediate refresh. It does not yet subscribe to daemon events. The daemon remains in charge when the view exits.
 
 A missing/incompatible daemon is reported as unavailable rather than a blank or fabricated healthy state. The screen's reported nodes are not a verified remote-member inventory; a locally healthy status is not proof of Bluetooth connectivity. Interactive create, trust, join and leave remain CLI-only; production authenticated joining remains deliberately disabled.
 
