@@ -325,6 +325,11 @@ dependencies = [
 [[package]]
 name = "blueroute-desktop"
 version = "0.1.0"
+dependencies = [
+ "blueroute-client",
+ "blueroute-core",
+ "blueroute-protocol",
+]
 
 [[package]]
 name = "blueroute-linux"
