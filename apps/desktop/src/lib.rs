@@ -78,7 +78,10 @@ impl DesktopBridge {
     }
 
     pub async fn networks(&self) -> Result<Vec<NetworkSummary>, DesktopError> {
-        let result = self.client.request(&Command::ListNetworks).await
+        let result = self
+            .client
+            .request(&Command::ListNetworks)
+            .await
             .map_err(|error| DesktopError::from(error.kind()))?;
         match result {
             Response::Networks(networks) => Ok(networks),
@@ -87,7 +90,10 @@ impl DesktopBridge {
     }
 
     pub async fn devices(&self) -> Result<Vec<NodeSummary>, DesktopError> {
-        let result = self.client.request(&Command::ListNodes).await
+        let result = self
+            .client
+            .request(&Command::ListNodes)
+            .await
             .map_err(|error| DesktopError::from(error.kind()))?;
         match result {
             Response::Nodes(nodes) => Ok(nodes),
