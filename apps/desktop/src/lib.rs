@@ -110,8 +110,10 @@ mod tests {
 
     #[test]
     fn overview_never_promotes_local_health_to_authenticated_membership() {
-        let mut capabilities = NodeCapabilities::default();
-        capabilities.adapter_usable = Some(Sourced::new(true, CapabilitySource::Measured));
+        let capabilities = NodeCapabilities {
+            adapter_usable: Some(Sourced::new(true, CapabilitySource::Measured)),
+            ..Default::default()
+        };
         let status = DaemonStatus {
             api_version: ApiVersion::CURRENT,
             local_node: Some(NodeId::from_bytes([1; 16])),
