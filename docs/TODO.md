@@ -2494,6 +2494,8 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 - User sees actionable capability explanation, never “unsupported Chromebook” logic.
 
+**Software partial (2026-11-04):** The typed desktop daemon bridge now exposes `platform_check()` backed by the version-checked local `DaemonStatus`. Its pure `PlatformCheck` model distinguishes missing/disabled versus unknown adapters, PANU versus NAP roles, the supported NetworkManager backend, and degraded/reconnecting/error daemon health; it computes separate create/join prerequisite states without treating unknown as supported. Production Join remains **disabled even when prerequisites are observed**, and Internet sharing remains hidden. Deterministic tests cover unknown, fully observed, unsupported and asymmetric PAN role cases. CI passed at `2b5d607fc41f043416ba040f2dbc63dc21810b0f`, [run #41815978661](https://github.com/ekkus93/blueroute/actions/runs/41815978661). **P12-004 remains OPEN**: Tauri/React first-run screen, UI integration, live platform acceptance and final action availability require implementation; this is a read-only model, not hardware evidence or permission to join.
+
 ## P12-005 — Implement create-network workflow
 
 - [ ] name/create/progress/success/error.
