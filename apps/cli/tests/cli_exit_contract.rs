@@ -60,7 +60,12 @@ fn daemon_unavailable_exits_three_without_falling_back_to_privileged_tools() {
     assert_eq!(json["ok"], false);
     assert_eq!(json["error"]["code"], 3);
     assert_eq!(json["error"]["kind"], "daemon_unavailable");
-    assert!(json["error"]["help"].as_str().unwrap().contains("TROUBLESHOOTING.md"));
+    assert!(
+        json["error"]["help"]
+            .as_str()
+            .unwrap()
+            .contains("TROUBLESHOOTING.md")
+    );
 }
 
 #[test]
