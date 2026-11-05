@@ -67,6 +67,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P7-001 | `[x]` | ADR 0001 selects TCP over the PAN, per-node Ed25519 identity, a Noise_XX handshake bound to the identity, and authority-signed membership credentials. |
 | P7-002 | `[x]` | Bounded length-prefixed control envelope with typed rejection of malformed/oversized/unknown-critical/replayed data and an identity- and network-bound inbound validator. |
 | P7-003 | `[x]` | `Hello` payload with bounded fields, identity check against the authenticated sender, and capability/feature/version negotiation independent of computer model. |
+| P7-004 | `[x]` | Clock-injected session lifecycle: starts after data-plane availability, keepalive/loss detection, exponential backoff reconnect, one session per logical peer with deterministic duplicate tie-break, no leak across 200 reconnects. Transport execution of the actions is pending the handshake task. |
 | P6-008 | `[-]` | `LeaveNetwork` stops the hosted runtime, then commits `NotMember` idempotently with a documented trust-retention policy; deterministic and real-broker tests are green. Physical no-stale-state acceptance, client-side runtime teardown (after P6-004), and post-restart cleanup (P6-009) are outstanding; see `docs/P6-008-LEAVE-NETWORK.md`. |
 | All other tasks | `[ ]` | Not started. |
 
@@ -835,14 +836,15 @@ This is the first complete product slice.
 
 ## P7-004 — Implement control-session lifecycle
 
-- [ ] establish after data-plane availability.
-- [ ] detect loss.
-- [ ] reconnect.
-- [ ] avoid duplicate logical-peer sessions.
+- [x] establish after data-plane availability.
+- [x] detect loss.
+- [x] reconnect.
+- [x] avoid duplicate logical-peer sessions.
 
 **Acceptance**
 
 - Repeated PAN reconnects do not leak sessions/tasks.
+- Met by `crates/blueroute-protocol/src/session.rs` (pure, clock-injected state machine with deterministic tests); see `docs/P7-004-SESSION-LIFECYCLE.md`. The daemon task that executes the actions needs the P7 transport/handshake and a real PAN link, so end-to-end behavior is unproven.
 
 ## P7-005 — Fuzz/property-test parser
 

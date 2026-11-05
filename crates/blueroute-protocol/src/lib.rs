@@ -2,6 +2,7 @@
 
 pub mod control;
 pub mod hello;
+pub mod session;
 
 use std::fmt;
 
