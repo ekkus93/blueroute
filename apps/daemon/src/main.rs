@@ -8,7 +8,7 @@ use blueroute_daemon::{
     TransactionalJoinNetworkOperations, current_network,
 };
 use blueroute_linux::{
-    NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
+    NetworkMembershipStore, NodeKeyStore, SystemCapabilityProbe, SystemSupportLevel,
 };
 use blueroute_protocol::{ApiVersion, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, DaemonStatus};
 use futures_lite::future;
@@ -28,8 +28,10 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let state_directory = std::env::var_os(STATE_DIRECTORY_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_STATE_DIRECTORY));
-    let identity_store = NodeIdentityStore::new(node_identity_path(&state_directory));
-    let local_node = identity_store.load_or_create()?;
+    // ADR 0001: the NodeId is derived from a persisted Ed25519 key. The legacy random
+    // `node-id` file is left untouched and is not reused as an authenticated identity.
+    let node_identity = NodeKeyStore::new(node_key_path(&state_directory)).load_or_create()?;
+    let local_node = node_identity.node_id();
 
     let membership_path = network_membership_path(&state_directory);
     let membership_store = NetworkMembershipStore::new(membership_path.clone());
@@ -77,8 +79,8 @@ async fn run() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn node_identity_path(state_directory: &Path) -> PathBuf {
-    state_directory.join("node-id")
+fn node_key_path(state_directory: &Path) -> PathBuf {
+    state_directory.join("node-key")
 }
 
 fn network_membership_path(state_directory: &Path) -> PathBuf {
@@ -93,8 +95,8 @@ mod tests {
     fn durable_state_paths_are_stable_inside_state_directory() {
         let state_directory = Path::new("/tmp/blueroute-state");
         assert_eq!(
-            node_identity_path(state_directory),
-            PathBuf::from("/tmp/blueroute-state/node-id")
+            node_key_path(state_directory),
+            PathBuf::from("/tmp/blueroute-state/node-key")
         );
         assert_eq!(
             network_membership_path(state_directory),

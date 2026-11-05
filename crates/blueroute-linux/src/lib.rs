@@ -6,6 +6,7 @@ mod forwarding;
 mod identity;
 mod ipv4_observation;
 mod kernel_address;
+mod key_identity;
 mod membership_store;
 mod network_discovery;
 mod networkmanager;
@@ -19,6 +20,7 @@ pub use capability_report::{
 };
 pub use identity::{NodeIdentityGenerator, NodeIdentityStore, SystemNodeIdentityGenerator};
 pub use kernel_address::{KernelAddressBackend, KernelAddressLease};
+pub use key_identity::{NodeKeyStore, SeedSource, SystemSeedSource};
 pub use membership_store::NetworkMembershipStore;
 pub use network_discovery::NetworkAdvertisement;
 pub use networkmanager::NetworkManagerBackend;

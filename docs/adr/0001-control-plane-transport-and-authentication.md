@@ -74,3 +74,8 @@ The decision needs to bind a control session to a stable BlueRoute identity and 
 | P7-004 | Session lifecycle and duplicate-session suppression. |
 | P7-005 | Property/fuzz tests of the codec. |
 | P14-003 | Membership verification on every topology/route message. |
+
+## Implementation status
+
+- Done (follow-up to P7-001): `blueroute-protocol::crypto` (Ed25519 identity, key-derived `NodeId`, Noise static-key binding signature, authority-signed time-bounded membership credentials with bounded clock skew) and `blueroute-linux::NodeKeyStore` (versioned `node-key` file, mode 0600, corrupt files rejected, legacy `node-id` never read). The daemon's `local_node` is now key-derived; an existing legacy `node-id` file is left in place and ignored, so dev fixtures must re-approve peers.
+- Remaining: the Noise XX handshake over TCP, authority pinning and credential issuance on join (P6-004 production wiring), and a deny list.
