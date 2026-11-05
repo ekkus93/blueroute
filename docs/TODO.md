@@ -65,6 +65,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P6-005 | `[x]` | Deterministic `NetworkId`-derived one-star IPv4 allocation, conflict detection, and NetworkManager apply/remove are merged with green CI; live Debian repeated-cycle acceptance is recorded in `docs/P6-005-HARDWARE-EVIDENCE-2026-09-02.md`. |
 | P6-006 | `[-]` | Host/client traffic probes, socket helper, and runbook are implemented (`docs/P6-006-APPLICATION-TRAFFIC.md`); the physical two-node ping/SSH/TCP/UDP acceptance run and evidence record are still pending. |
 | P7-001 | `[x]` | ADR 0001 selects TCP over the PAN, per-node Ed25519 identity, a Noise_XX handshake bound to the identity, and authority-signed membership credentials. |
+| P7-002 | `[x]` | Bounded length-prefixed control envelope with typed rejection of malformed/oversized/unknown-critical/replayed data and an identity- and network-bound inbound validator. |
 | P6-008 | `[-]` | `LeaveNetwork` stops the hosted runtime, then commits `NotMember` idempotently with a documented trust-retention policy; deterministic and real-broker tests are green. Physical no-stale-state acceptance, client-side runtime teardown (after P6-004), and post-restart cleanup (P6-009) are outstanding; see `docs/P6-008-LEAVE-NETWORK.md`. |
 | All other tasks | `[ ]` | Not started. |
 
@@ -807,15 +808,16 @@ This is the first complete product slice.
 
 ## P7-002 — Define control protocol envelope
 
-- [ ] version.
-- [ ] sender/network identity.
-- [ ] message type.
-- [ ] bounded payload.
-- [ ] freshness/replay approach.
+- [x] version.
+- [x] sender/network identity.
+- [x] message type.
+- [x] bounded payload.
+- [x] freshness/replay approach.
 
 **Acceptance**
 
 - Malformed/oversized/unknown-critical data is safely rejected.
+- Met by `crates/blueroute-protocol/src/control.rs` with deterministic tests; see `docs/P7-002-CONTROL-ENVELOPE.md`.
 
 ## P7-003 — Implement peer hello/capability exchange
 
