@@ -75,6 +75,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P8-005 | `[-]` | Software complete and tested against a fake backend: authority-only assignment message, fail-closed validation, minimal route diff with stale removal, foreign routes untouched. Real route-table acceptance and per-member next-hop addressing are outstanding. |
 | P9-001 | `[x]` | Explicit, model-free `TopologyInputs` (capacity, neighbor availability, link quality/stability, cost, power and gateway placeholders). |
 | P9-002 | `[x]` | `select_roles`: deterministic capacity-aware NAP role selection across heterogeneous capabilities; no unnecessary hubs; client-only nodes supported. |
+| P9-003 | `[x]` | `diff_topology`: minimal capacity-aware ordered link changes; small metric changes produce no rebuild. |
 | P6-008 | `[-]` | `LeaveNetwork` stops the hosted runtime, then commits `NotMember` idempotently with a documented trust-retention policy; deterministic and real-broker tests are green. Physical no-stale-state acceptance, client-side runtime teardown (after P6-004), and post-restart cleanup (P6-009) are outstanding; see `docs/P6-008-LEAVE-NETWORK.md`. |
 | All other tasks | `[ ]` | Not started. |
 
@@ -1009,13 +1010,14 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P9-003 — Implement topology plan diff
 
-- [ ] desired vs active topology.
-- [ ] minimal ordered changes.
-- [ ] keep working path until replacement exists where possible.
+- [x] desired vs active topology.
+- [x] minimal ordered changes.
+- [x] keep working path until replacement exists where possible.
 
 **Acceptance**
 
 - Small metric changes do not rebuild whole network.
+- Met by `crates/blueroute-core/src/plan_diff.rs` (`diff_topology`): minimal ordered Add/Remove list; make-before-break unless node capacity forces a targeted removal first; role flips remove-then-add; infeasible additions reported as `blocked`. A test shows a uniform link-quality change leaves the diff empty.
 
 ## P9-004 — Implement topology executor
 

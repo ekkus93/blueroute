@@ -8,6 +8,7 @@ mod health;
 mod id;
 mod membership;
 mod neighbor;
+mod plan_diff;
 mod role_selection;
 mod route;
 mod routing;
@@ -28,6 +29,7 @@ pub use health::{HealthComponent, HealthLevel, NodeHealth};
 pub use id::{DisplayName, LinkId, NetworkId, NodeId, SegmentId};
 pub use membership::{MembershipRegistry, MembershipState, NetworkMembership, PeerMembership};
 pub use neighbor::{Neighbor, NeighborLink, NeighborTable};
+pub use plan_diff::{LinkChange, PlanDiff, diff_topology};
 pub use role_selection::{PlannedLink, TopologyPlan, select_roles};
 pub use route::{IpPrefix, Route, RouteDestination, RouteOwner};
 pub use routing::{
