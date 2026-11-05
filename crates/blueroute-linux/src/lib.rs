@@ -2,6 +2,7 @@
 
 mod bluez;
 mod capability_report;
+mod control_transport;
 mod forwarding;
 mod identity;
 mod ipv4_observation;
@@ -18,6 +19,7 @@ pub use capability_report::{
     BluetoothControllerReport, CapabilityDiagnostic, CapabilityDiagnosticLevel,
     RuntimePrerequisite, SystemCapabilityProbe, SystemCapabilityReport, SystemSupportLevel,
 };
+pub use control_transport::{ControlChannel, HANDSHAKE_TIMEOUT, TransportError};
 pub use identity::{NodeIdentityGenerator, NodeIdentityStore, SystemNodeIdentityGenerator};
 pub use kernel_address::{KernelAddressBackend, KernelAddressLease};
 pub use key_identity::{NodeKeyStore, SeedSource, SystemSeedSource};

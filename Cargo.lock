@@ -274,6 +274,7 @@ dependencies = [
  "blueroute-protocol",
  "futures-lite",
  "rustix",
+ "serde_json",
  "zbus",
 ]
 

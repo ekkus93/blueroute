@@ -170,6 +170,9 @@ impl Handshake {
         self.step += 1;
         if self.step >= 2 {
             self.verify_peer(&payload)?;
+        } else if !payload.is_empty() {
+            // Message 1 is unauthenticated; it must carry no payload.
+            return Err(HandshakeError::MalformedIdentityPayload);
         }
         Ok(())
     }
@@ -365,6 +368,15 @@ mod tests {
             Err(HandshakeError::OutOfOrder)
         ));
         assert!(matches!(init.finish(), Err(HandshakeError::OutOfOrder)));
+    }
+
+    #[test]
+    fn first_message_with_a_payload_is_rejected() {
+        let mut resp = Handshake::new(Role::Responder, &identity(1), None).unwrap();
+        assert!(matches!(
+            resp.read_message(&[0x11; 48]),
+            Err(HandshakeError::MalformedIdentityPayload)
+        ));
     }
 
     #[test]
