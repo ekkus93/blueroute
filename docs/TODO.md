@@ -79,6 +79,10 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P9-004 | `[x]` | `execute_diff` with injected-failure recovery tests. No production `TopologyBackend` yet. |
 | P9-006 | `[x]` | `AntiFlap`: hysteresis, failure backoff and known-good preference; noisy metrics do not trigger rebuilds. |
 | P10-001 | `[x]` | clap skeleton with `--json`, version, daemon-only access and consistent errors. |
+| P10-002 | `[x]` | Status, capability, node and network list/show with friendly text and exactly-tested JSON. |
+| P10-003 | `[-]` | CLI create/join/leave/discover implemented and tested against a fake daemon; end-to-end single-star acceptance outstanding. |
+| P10-004 | `[-]` | `trust approve|forget` implemented; pending-request listing needs a daemon API. |
+| P10-005 | `[-]` | Concise/detailed/JSON diagnostics from the current snapshot; PAN/route state needs a daemon API extension. |
 | P10-006 | `[x]` | Documented exit codes 0-5 with unit and real-binary script tests. |
 | P6-008 | `[-]` | `LeaveNetwork` stops the hosted runtime, then commits `NotMember` idempotently with a documented trust-retention policy; deterministic and real-broker tests are green. Physical no-stale-state acceptance, client-side runtime teardown (after P6-004), and post-restart cleanup (P6-009) are outstanding; see `docs/P6-008-LEAVE-NETWORK.md`. |
 | All other tasks | `[ ]` | Not started. |
@@ -1075,46 +1079,50 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P10-002 — Implement status commands
 
-- [ ] `blueroute status`.
-- [ ] `blueroute capability show`.
-- [ ] `blueroute node list/show`.
-- [ ] `blueroute network list`.
+- [x] `blueroute status`.
+- [x] `blueroute capability show`.
+- [x] `blueroute node list/show`.
+- [x] `blueroute network list`.
 
 **Acceptance**
 
 - Human output is useful and JSON is stable/tested.
+- Met by `apps/cli/src/{app,render}.rs`: `status`, `capability show`, `node list|show`, `network list` with plain-language text (no PAN jargon, unknown kept distinct from no) and JSON that mirrors the daemon response; JSON shape is asserted exactly in tests.
 
 ## P10-003 — Implement network lifecycle commands
 
-- [ ] create.
-- [ ] join.
-- [ ] leave.
-- [ ] discover.
+- [x] create.
+- [x] join.
+- [x] leave.
+- [x] discover.
 
 **Acceptance**
 
 - Single-star network can be managed end-to-end through daemon.
+- CLI side done: `network create|join|leave|discover [--stop]` each map to exactly one daemon command with validation before any daemon call. The end-to-end single-star run through a real daemon and adapters is not demonstrated (join is still blocked, see P6-004).
 
 ## P10-004 — Implement trust commands
 
 - [ ] pending requests where applicable.
-- [ ] approve/trust.
-- [ ] forget/revoke.
+- [x] approve/trust.
+- [x] forget/revoke.
 
 **Acceptance**
 
 - Unauthorized join is never silently approved by defaults.
+- Done: `trust approve <id>` and `trust forget <id>` require an explicit node id and are never implied. "Pending requests" is not implemented: the daemon API has no pending-request listing, so that subtask stays open.
 
 ## P10-005 — Implement diagnostics command
 
-- [ ] concise and detailed output.
-- [ ] JSON.
-- [ ] redact secrets.
-- [ ] show platform/capabilities/backend.
+- [x] concise and detailed output.
+- [x] JSON.
+- [x] redact secrets.
+- [x] show platform/capabilities/backend.
 
 **Acceptance**
 
 - Diagnostics expose enough system/PAN/route/capability state to troubleshoot heterogeneous hardware.
+- CLI side done: `diagnostics` (concise), `--detailed`, `--json`, capability and backend shown, nothing secret in the snapshot. The daemon snapshot only carries health, network, visible-node count and capabilities, so PAN/interface/route state is not yet exposed; the acceptance needs that daemon-side extension.
 
 ## P10-006 — Define exit-code contract
 

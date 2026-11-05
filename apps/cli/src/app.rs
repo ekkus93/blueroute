@@ -6,9 +6,10 @@ use std::io::Write;
 use std::pin::Pin;
 
 use blueroute_client::{BlueRouteClient, ClientError};
+use blueroute_core::{DisplayName, NetworkId, NodeId};
 use blueroute_protocol::{Command as ApiCommand, Response};
 
-use crate::args::{Cli, Command};
+use crate::args::{CapabilityAction, Cli, Command, NetworkAction, NodeAction, TrustAction};
 use crate::exit::{Exit, classify};
 
 pub type DaemonFuture<'a> = Pin<Box<dyn Future<Output = Result<Response, ClientError>> + 'a>>;
@@ -31,14 +32,14 @@ pub struct Io<'a> {
 
 /// Run one parsed command and return the process exit status.
 pub async fn run(cli: &Cli, daemon: &dyn Daemon, io: &mut Io<'_>) -> Exit {
-    let result = match &cli.command {
-        Command::Status => daemon.request(ApiCommand::GetStatus).await,
-        _ => {
-            let _ = writeln!(io.err, "blueroute: this command is not available yet");
-            return Exit::Unsupported;
+    let request = match build_request(&cli.command) {
+        Ok(request) => request,
+        Err(message) => {
+            let _ = writeln!(io.err, "blueroute: {message}");
+            return Exit::Usage;
         }
     };
-    match result {
+    match daemon.request(request).await {
         Ok(response) => {
             crate::render::render(&cli.command, cli.json, &response, io.out);
             Exit::Success
@@ -48,6 +49,53 @@ pub async fn run(cli: &Cli, daemon: &dyn Daemon, io: &mut Io<'_>) -> Exit {
             classify(&error)
         }
     }
+}
+
+/// Translate a parsed command into exactly one daemon request. Argument values are validated
+/// here so a typo never reaches the daemon.
+pub fn build_request(command: &Command) -> Result<ApiCommand, String> {
+    Ok(match command {
+        Command::Status => ApiCommand::GetStatus,
+        Command::Capability {
+            action: CapabilityAction::Show,
+        } => ApiCommand::GetCapabilities,
+        Command::Node {
+            action: NodeAction::List,
+        } => ApiCommand::ListNodes,
+        Command::Node {
+            action: NodeAction::Show { id },
+        } => ApiCommand::GetNode {
+            node: parse_id::<NodeId>("node", id)?,
+        },
+        Command::Network { action } => match action {
+            NetworkAction::List => ApiCommand::ListNetworks,
+            NetworkAction::Create { name } => ApiCommand::CreateNetwork {
+                name: DisplayName::new(name.as_str())
+                    .map_err(|e| format!("invalid network name: {}", e.message()))?,
+            },
+            NetworkAction::Join { id } => ApiCommand::JoinNetwork {
+                network: parse_id::<NetworkId>("network", id)?,
+            },
+            NetworkAction::Leave => ApiCommand::LeaveNetwork,
+            NetworkAction::Discover { stop: false } => ApiCommand::StartDiscovery,
+            NetworkAction::Discover { stop: true } => ApiCommand::StopDiscovery,
+        },
+        Command::Trust { action } => match action {
+            TrustAction::Approve { id } => ApiCommand::TrustPeer {
+                node: parse_id("node", id)?,
+            },
+            TrustAction::Forget { id } => ApiCommand::ForgetPeer {
+                node: parse_id("node", id)?,
+            },
+        },
+        Command::Diagnostics(_) => ApiCommand::GetDiagnostics,
+    })
+}
+
+fn parse_id<T: std::str::FromStr>(what: &str, value: &str) -> Result<T, String> {
+    value
+        .parse()
+        .map_err(|_| format!("`{value}` is not a valid {what} id (expected 32 hex characters)"))
 }
 
 pub fn report_error(error: &ClientError, err: &mut dyn Write) {
@@ -171,6 +219,237 @@ mod tests {
             assert_eq!(exit, expected);
             assert!(out.is_empty());
             assert!(err.starts_with("blueroute: "), "{err}");
+        }
+    }
+
+    fn node_id(b: u8) -> NodeId {
+        NodeId::from_bytes([b; 16])
+    }
+
+    fn net_id(b: u8) -> NetworkId {
+        NetworkId::from_bytes([b; 16])
+    }
+
+    fn parse(args: &[&str]) -> Cli {
+        use clap::Parser;
+        Cli::try_parse_from(args).unwrap()
+    }
+
+    #[test]
+    fn every_command_maps_to_exactly_one_daemon_request() {
+        let node = node_id(1).to_string();
+        let net = net_id(2).to_string();
+        let cases: Vec<(Vec<&str>, ApiCommand)> = vec![
+            (vec!["blueroute", "status"], ApiCommand::GetStatus),
+            (
+                vec!["blueroute", "capability", "show"],
+                ApiCommand::GetCapabilities,
+            ),
+            (vec!["blueroute", "node", "list"], ApiCommand::ListNodes),
+            (
+                vec!["blueroute", "node", "show", &node],
+                ApiCommand::GetNode { node: node_id(1) },
+            ),
+            (
+                vec!["blueroute", "network", "list"],
+                ApiCommand::ListNetworks,
+            ),
+            (
+                vec!["blueroute", "network", "create", "Home"],
+                ApiCommand::CreateNetwork {
+                    name: DisplayName::new("Home").unwrap(),
+                },
+            ),
+            (
+                vec!["blueroute", "network", "join", &net],
+                ApiCommand::JoinNetwork { network: net_id(2) },
+            ),
+            (
+                vec!["blueroute", "network", "leave"],
+                ApiCommand::LeaveNetwork,
+            ),
+            (
+                vec!["blueroute", "network", "discover"],
+                ApiCommand::StartDiscovery,
+            ),
+            (
+                vec!["blueroute", "network", "discover", "--stop"],
+                ApiCommand::StopDiscovery,
+            ),
+            (
+                vec!["blueroute", "trust", "approve", &node],
+                ApiCommand::TrustPeer { node: node_id(1) },
+            ),
+            (
+                vec!["blueroute", "trust", "forget", &node],
+                ApiCommand::ForgetPeer { node: node_id(1) },
+            ),
+            (vec!["blueroute", "diagnostics"], ApiCommand::GetDiagnostics),
+        ];
+        for (argv, expected) in cases {
+            assert_eq!(
+                build_request(&parse(&argv).command),
+                Ok(expected),
+                "{argv:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_ids_and_names_fail_before_any_daemon_call() {
+        for argv in [
+            vec!["blueroute", "node", "show", "nope"],
+            vec!["blueroute", "network", "join", "1234"],
+            vec!["blueroute", "trust", "approve", "zz"],
+            vec!["blueroute", "network", "create", ""],
+        ] {
+            let daemon = FakeDaemon::replying(vec![]);
+            let (exit, out, err) = run_args(&argv, &daemon);
+            assert_eq!(exit, Exit::Usage, "{argv:?}");
+            assert!(out.is_empty() && err.starts_with("blueroute: "));
+            assert!(
+                daemon.seen.borrow().is_empty(),
+                "{argv:?} reached the daemon"
+            );
+        }
+    }
+
+    #[test]
+    fn nothing_is_approved_unless_the_user_names_a_computer() {
+        // `trust` with no subcommand or id is a usage error at parse time.
+        use clap::Parser;
+        assert!(Cli::try_parse_from(["blueroute", "trust"]).is_err());
+        assert!(Cli::try_parse_from(["blueroute", "trust", "approve"]).is_err());
+        // A denied approval surfaces as an authorization failure, not silent success.
+        let daemon = FakeDaemon::replying(vec![Err(ClientError::Bus(zbus::Error::FDO(Box::new(
+            fdo::Error::AccessDenied("not allowed".into()),
+        ))))]);
+        let (exit, out, _) = run_args(
+            &["blueroute", "trust", "approve", &node_id(1).to_string()],
+            &daemon,
+        );
+        assert_eq!((exit, out.is_empty()), (Exit::Unauthorized, true));
+    }
+
+    #[test]
+    fn lifecycle_commands_report_done_and_stay_quiet_in_json_ack() {
+        let daemon = FakeDaemon::replying(vec![Ok(Response::Ack), Ok(Response::Ack)]);
+        let (exit, out, _) = run_args(&["blueroute", "network", "leave"], &daemon);
+        assert_eq!((exit, out.as_str()), (Exit::Success, "Done.\n"));
+        let (_, json, _) = run_args(&["blueroute", "--json", "network", "leave"], &daemon);
+        assert_eq!(json.trim(), r#"{"type":"ack"}"#);
+    }
+
+    #[test]
+    fn node_and_network_lists_are_friendly_and_json_is_stable() {
+        use blueroute_core::Reachability;
+        use blueroute_protocol::{NetworkSummary, NodeSummary};
+        let nodes = vec![NodeSummary {
+            id: node_id(7),
+            name: DisplayName::new("Kitchen laptop").unwrap(),
+            reachability: Reachability::Routed,
+        }];
+        let networks = vec![NetworkSummary {
+            id: net_id(9),
+            name: DisplayName::new("Home").unwrap(),
+            member_count: 1,
+        }];
+        let daemon = FakeDaemon::replying(vec![
+            Ok(Response::Nodes(nodes.clone())),
+            Ok(Response::Nodes(nodes)),
+            Ok(Response::Networks(networks.clone())),
+            Ok(Response::Networks(networks)),
+            Ok(Response::Networks(vec![])),
+            Ok(Response::Node(None)),
+        ]);
+        let (_, text, _) = run_args(&["blueroute", "node", "list"], &daemon);
+        assert!(text.contains("Kitchen laptop") && text.contains("through another computer"));
+        assert!(!text.contains("Routed") && !text.contains("PANU"));
+        let (_, json, _) = run_args(&["blueroute", "--json", "node", "list"], &daemon);
+        assert_eq!(
+            json.trim(),
+            format!(
+                r#"{{"type":"nodes","data":[{{"id":"{}","name":"Kitchen laptop","reachability":"routed"}}]}}"#,
+                node_id(7)
+            )
+        );
+        let (_, text, _) = run_args(&["blueroute", "network", "list"], &daemon);
+        assert!(text.contains("Home") && text.contains("1 member\n"));
+        let (_, json, _) = run_args(&["blueroute", "--json", "network", "list"], &daemon);
+        assert_eq!(
+            json.trim(),
+            format!(
+                r#"{{"type":"networks","data":[{{"id":"{}","name":"Home","member_count":1}}]}}"#,
+                net_id(9)
+            )
+        );
+        let (_, text, _) = run_args(&["blueroute", "network", "list"], &daemon);
+        assert!(text.contains("discover"));
+        let (_, text, _) = run_args(
+            &["blueroute", "node", "show", &node_id(1).to_string()],
+            &daemon,
+        );
+        assert!(text.contains("No such computer"));
+    }
+
+    #[test]
+    fn capability_output_keeps_unknown_distinct_from_no() {
+        use blueroute_core::{CapabilitySource, Sourced};
+        let caps = NodeCapabilities {
+            panu: Some(Sourced::new(true, CapabilitySource::Measured)),
+            nap: Some(Sourced::new(false, CapabilitySource::Discovered)),
+            ..NodeCapabilities::default()
+        };
+        let daemon = FakeDaemon::replying(vec![
+            Ok(Response::Capabilities(caps.clone())),
+            Ok(Response::Capabilities(caps)),
+        ]);
+        let (_, text, _) = run_args(&["blueroute", "capability", "show"], &daemon);
+        assert!(text.contains("Can join a network: yes (Measured)"));
+        assert!(text.contains("Can host a network: no (Discovered)"));
+        assert!(text.contains("Can pass traffic between networks: unknown"));
+        let (_, json, _) = run_args(&["blueroute", "--json", "capability", "show"], &daemon);
+        let value: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
+        assert_eq!(value["data"]["panu"]["value"], true);
+        assert!(value["data"]["routing"].is_null());
+    }
+
+    #[test]
+    fn diagnostics_is_concise_by_default_detailed_on_request_and_json_capable() {
+        use blueroute_core::{CapabilitySource, NetworkBackend, Sourced};
+        let snapshot = blueroute_protocol::DiagnosticSnapshot {
+            api_version: ApiVersion::CURRENT,
+            health: HealthLevel::Degraded,
+            current_network: Some(net_id(3)),
+            visible_nodes: 2,
+            capabilities: NodeCapabilities {
+                nap: Some(Sourced::new(false, CapabilitySource::Discovered)),
+                network_backend: Some(Sourced::new(
+                    NetworkBackend::NetworkManager,
+                    CapabilitySource::Discovered,
+                )),
+                ..NodeCapabilities::default()
+            },
+        };
+        let daemon = FakeDaemon::replying(vec![
+            Ok(Response::Diagnostics(snapshot.clone())),
+            Ok(Response::Diagnostics(snapshot.clone())),
+            Ok(Response::Diagnostics(snapshot)),
+        ]);
+        let (_, concise, _) = run_args(&["blueroute", "diagnostics"], &daemon);
+        assert!(
+            concise.contains("working, with limits") && concise.contains("Computers in view: 2")
+        );
+        assert!(concise.contains("Not available here: Can host a network"));
+        assert!(!concise.contains("Daemon API version"));
+        let (_, detailed, _) = run_args(&["blueroute", "diagnostics", "--detailed"], &daemon);
+        assert!(detailed.contains("Daemon API version: 1.0"));
+        assert!(detailed.contains("Network manager: NetworkManager (Discovered)"));
+        let (_, json, _) = run_args(&["blueroute", "--json", "diagnostics"], &daemon);
+        let value: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
+        assert_eq!(value["data"]["visible_nodes"], 2);
+        for text in [&concise, &detailed, &json] {
+            assert!(!text.to_lowercase().contains("secret") && !text.contains("key"));
         }
     }
 
