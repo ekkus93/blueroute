@@ -13,6 +13,7 @@ mod routing;
 mod secret;
 mod subnet;
 mod topology;
+mod topology_policy;
 
 pub use addressing::{Ipv4StarAddressPlan, ensure_ipv4_segment_available, normalized_ipv4_prefix};
 pub use capability::{
@@ -33,6 +34,9 @@ pub use routing::{
 pub use secret::Secret;
 pub use subnet::SegmentSubnets;
 pub use topology::{LinkHealth, LinkState, PanLink, PanSegment, Reachability, TopologyGraph};
+pub use topology_policy::{
+    CandidateLink, DEFAULT_LINK_COST, DEFAULT_UNKNOWN_CAPACITY, LinkStability, TopologyInputs,
+};
 
 /// The human-readable project name.
 pub const PROJECT_NAME: &str = "BlueRoute";

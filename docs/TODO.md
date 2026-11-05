@@ -73,6 +73,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P8-002 | `[x]` | `SegmentSubnets`: distinct per-segment prefixes, foreign-prefix avoidance, conflict detection, and safe reclamation. |
 | P8-004 | `[x]` | `compute_routes`: deterministic, stability-preferring segment routes through capability-qualified routers, with unreachable detection. |
 | P8-005 | `[-]` | Software complete and tested against a fake backend: authority-only assignment message, fail-closed validation, minimal route diff with stale removal, foreign routes untouched. Real route-table acceptance and per-member next-hop addressing are outstanding. |
+| P9-001 | `[x]` | Explicit, model-free `TopologyInputs` (capacity, neighbor availability, link quality/stability, cost, power and gateway placeholders). |
 | P6-008 | `[-]` | `LeaveNetwork` stops the hosted runtime, then commits `NotMember` idempotently with a documented trust-retention policy; deterministic and real-broker tests are green. Physical no-stale-state acceptance, client-side runtime teardown (after P6-004), and post-restart cleanup (P6-009) are outstanding; see `docs/P6-008-LEAVE-NETWORK.md`. |
 | All other tasks | `[ ]` | Not started. |
 
@@ -980,17 +981,18 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P9-001 — Define topology policy inputs
 
-- [ ] connection capacity/capabilities.
-- [ ] direct-neighbor availability.
-- [ ] link quality/stability where portable.
-- [ ] hop/path cost.
-- [ ] topology stability.
-- [ ] battery/power placeholder.
-- [ ] future gateway preference.
+- [x] connection capacity/capabilities.
+- [x] direct-neighbor availability.
+- [x] link quality/stability where portable.
+- [x] hop/path cost.
+- [x] topology stability.
+- [x] battery/power placeholder.
+- [x] future gateway preference.
 
 **Acceptance**
 
 - Inputs are explicit/testable and do not include hard-coded product models.
+- Met by `crates/blueroute-core/src/topology_policy.rs` (`TopologyInputs`, `CandidateLink`, `LinkStability`): plain-data inputs with no model/vendor field; unknown capabilities are never treated as true; unreported capacity defaults to 1 (`DEFAULT_UNKNOWN_CAPACITY`, conservative, not a measured claim). Battery/power and gateway preference are placeholders that only adjust hub score.
 
 ## P9-002 — Implement NAP role selection v1
 
