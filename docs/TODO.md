@@ -61,6 +61,9 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P6-001 | `[x]` | CreateNetwork establishes durable member state, a deterministic BlueRoute-owned NetworkManager bridge/address, a live BlueZ NAP, and real PANU attachment on physical hardware. |
 | P6-002 | `[x]` | Hosted networks advertise the full logical `NetworkId` through BlueZ LE manufacturer data; `arisu` discovered the exact `debiancb1` network without manual MAC entry, with discovery metadata explicitly non-authoritative for security. |
 | P6-003 | `[x]` | Explicit BlueRoute peer approval/revocation is PolicyKit-gated and durable; live acceptance persisted `arisu` as trusted but non-member, proved idempotent reapproval, and removed the approval without disturbing network state. |
+| P6-004 | `[!]` | Fail-closed join orchestration, rollback, and deterministic tests are merged; production `JoinNetwork` is blocked on authenticated P7 control bootstrap (see `docs/P6-004-JOIN-ORCHESTRATION.md`). |
+| P6-005 | `[x]` | Deterministic `NetworkId`-derived one-star IPv4 allocation, conflict detection, and NetworkManager apply/remove are merged with green CI; live Debian repeated-cycle acceptance is recorded in `docs/P6-005-HARDWARE-EVIDENCE-2026-09-02.md`. |
+| P6-006 | `[-]` | Host/client traffic probes, socket helper, and runbook are implemented (`docs/P6-006-APPLICATION-TRAFFIC.md`); the physical two-node ping/SSH/TCP/UDP acceptance run and evidence record are still pending. |
 | All other tasks | `[ ]` | Not started. |
 
 ## Platform rule
@@ -714,17 +717,19 @@ This is the first complete product slice.
 **Acceptance**
 
 - Compatible node joins without manual Bluetooth/network shell commands.
+- Blocked: the orchestration boundary is implemented, but production activation requires authenticated P7 control bootstrap. Details are in `docs/P6-004-JOIN-ORCHESTRATION.md`.
 
 ## P6-005 — Implement IPv4 allocation for one star
 
-- [ ] select private subnet policy.
-- [ ] detect route conflicts.
-- [ ] assign addresses.
-- [ ] avoid unnecessary durable transient state.
+- [x] select private subnet policy.
+- [x] detect route conflicts.
+- [x] assign addresses.
+- [x] avoid unnecessary durable transient state.
 
 **Acceptance**
 
 - Repeated create/join cycles do not accumulate conflicts.
+- Hardware acceptance is recorded in `docs/P6-005-HARDWARE-EVIDENCE-2026-09-02.md`; repeated apply/remove cycles on the production NetworkManager backend left no stale address/profile on the tested Debian host. Join-driven cycles remain covered by P6-004 once unblocked.
 
 ## P6-006 — Prove ordinary application traffic
 
@@ -737,6 +742,7 @@ This is the first complete product slice.
 **Acceptance**
 
 - Applications require no BlueRoute-specific library.
+- In progress: the acceptance probes, socket helper, and runbook are implemented. The physical two-node run and its evidence record are still outstanding; CI cannot satisfy this criterion.
 
 ## P6-007 — Add third and subsequent clients
 
