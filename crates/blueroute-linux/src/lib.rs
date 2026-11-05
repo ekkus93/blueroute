@@ -2,6 +2,7 @@
 
 mod bluez;
 mod capability_report;
+mod control_join;
 mod control_transport;
 mod forwarding;
 mod identity;
@@ -18,6 +19,10 @@ pub use bluez::BluezBackend;
 pub use capability_report::{
     BluetoothControllerReport, CapabilityDiagnostic, CapabilityDiagnosticLevel,
     RuntimePrerequisite, SystemCapabilityProbe, SystemCapabilityReport, SystemSupportLevel,
+};
+pub use control_join::{
+    CLOCK_SKEW_SECS, CREDENTIAL_TTL_SECS, HostJoinOutcome, HostJoinPolicy, JoinError,
+    JoinerOutcome, request_join, serve_join,
 };
 pub use control_transport::{ControlChannel, HANDSHAKE_TIMEOUT, TransportError};
 pub use identity::{NodeIdentityGenerator, NodeIdentityStore, SystemNodeIdentityGenerator};

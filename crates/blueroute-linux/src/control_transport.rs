@@ -166,6 +166,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ControlChannel<S> {
         self.session.peer()
     }
 
+    /// Ed25519 identity key proven by the handshake (the pinned authority key for a joiner).
+    pub fn peer_public_key(&self) -> [u8; 32] {
+        self.session.peer_public_key()
+    }
+
     pub async fn send(&mut self, envelope: &ControlEnvelope) -> Result<(), TransportError> {
         let frame = encode_frame(envelope)?;
         let ciphertext = self.session.encrypt(&frame)?;

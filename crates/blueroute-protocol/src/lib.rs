@@ -4,6 +4,7 @@ pub mod control;
 pub mod crypto;
 pub mod handshake;
 pub mod hello;
+pub mod join;
 pub mod session;
 
 use std::fmt;

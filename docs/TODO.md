@@ -723,7 +723,7 @@ This is the first complete product slice.
 **Acceptance**
 
 - Compatible node joins without manual Bluetooth/network shell commands.
-- Blocked: the orchestration boundary is implemented, but production activation requires authenticated P7 control bootstrap. Details are in `docs/P6-004-JOIN-ORCHESTRATION.md`.
+- Blocked: the orchestration boundary is implemented and the authenticated control exchange (handshake, hello, credential issue/verify) now exists and is tested over loopback TCP (ADR 0001). Production activation still needs: PANU establish/disconnect in `LinuxJoinRuntime` (hardware-verified), durable authority pinning from user confirmation (P12-006), the host-side daemon listener, and wiring `start_control_session` to `request_join`. Details are in `docs/P6-004-JOIN-ORCHESTRATION.md`.
 
 ## P6-005 — Implement IPv4 allocation for one star
 

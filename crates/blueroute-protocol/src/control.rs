@@ -56,7 +56,10 @@ impl MessageType {
 
     /// Whether this daemon version understands the message type.
     pub fn is_known(&self) -> bool {
-        matches!(self.0.as_str(), Self::HELLO)
+        matches!(
+            self.0.as_str(),
+            Self::HELLO | "join.request" | "join.credential" | "join.denied"
+        )
     }
 }
 
