@@ -821,14 +821,16 @@ This is the first complete product slice.
 
 ## P7-003 — Implement peer hello/capability exchange
 
-- [ ] software/protocol version.
-- [ ] stable identity.
-- [ ] node capabilities.
-- [ ] current segment/topology facts.
+- [x] software/protocol version.
+- [x] stable identity.
+- [x] node capabilities.
+- [x] current segment/topology facts.
 
 **Acceptance**
 
 - Peers negotiate capability without knowing each other's computer model.
+
+- Met by `crates/blueroute-protocol/src/hello.rs` with deterministic tests; see `docs/P7-003-HELLO-CAPABILITIES.md`.
 
 ## P7-004 — Implement control-session lifecycle
 
