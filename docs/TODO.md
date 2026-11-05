@@ -78,6 +78,8 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P9-003 | `[x]` | `diff_topology`: minimal capacity-aware ordered link changes; small metric changes produce no rebuild. |
 | P9-004 | `[x]` | `execute_diff` with injected-failure recovery tests. No production `TopologyBackend` yet. |
 | P9-006 | `[x]` | `AntiFlap`: hysteresis, failure backoff and known-good preference; noisy metrics do not trigger rebuilds. |
+| P10-001 | `[x]` | clap skeleton with `--json`, version, daemon-only access and consistent errors. |
+| P10-006 | `[x]` | Documented exit codes 0-5 with unit and real-binary script tests. |
 | P6-008 | `[-]` | `LeaveNetwork` stops the hosted runtime, then commits `NotMember` idempotently with a documented trust-retention policy; deterministic and real-broker tests are green. Physical no-stale-state acceptance, client-side runtime teardown (after P6-004), and post-restart cleanup (P6-009) are outstanding; see `docs/P6-008-LEAVE-NETWORK.md`. |
 | All other tasks | `[ ]` | Not started. |
 
@@ -1061,14 +1063,15 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P10-001 — Create CLI skeleton with clap
 
-- [ ] global options.
-- [ ] daemon handling.
-- [ ] version.
-- [ ] consistent errors/exits.
+- [x] global options.
+- [x] daemon handling.
+- [x] version.
+- [x] consistent errors/exits.
 
 **Acceptance**
 
 - CLI contains no direct BlueZ/NetworkManager networking code.
+- Met by `apps/cli` (`args.rs`, `app.rs`): clap definition with global `--json`, `--version`, daemon access only through the typed `Daemon` trait over `blueroute-client`; the crate has no BlueZ/NetworkManager code. Remaining subcommands report "not available yet" (exit 4) until P10-002..005.
 
 ## P10-002 — Implement status commands
 
@@ -1115,16 +1118,17 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P10-006 — Define exit-code contract
 
-- [ ] success.
-- [ ] usage/config.
-- [ ] daemon unavailable.
-- [ ] unsupported capability.
-- [ ] authorization.
-- [ ] operational failure.
+- [x] success.
+- [x] usage/config.
+- [x] daemon unavailable.
+- [x] unsupported capability.
+- [x] authorization.
+- [x] operational failure.
 
 **Acceptance**
 
 - Script tests verify representative exits.
+- Met by `apps/cli/src/exit.rs` and `apps/cli/tests/exit_codes.rs`: 0 ok, 1 operation failed, 2 usage, 3 daemon unavailable, 4 unsupported, 5 unauthorized; classification unit tests plus script tests against the real binary for 0, 2, and 3.
 
 ---
 
