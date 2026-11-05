@@ -74,6 +74,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P8-004 | `[x]` | `compute_routes`: deterministic, stability-preferring segment routes through capability-qualified routers, with unreachable detection. |
 | P8-005 | `[-]` | Software complete and tested against a fake backend: authority-only assignment message, fail-closed validation, minimal route diff with stale removal, foreign routes untouched. Real route-table acceptance and per-member next-hop addressing are outstanding. |
 | P9-001 | `[x]` | Explicit, model-free `TopologyInputs` (capacity, neighbor availability, link quality/stability, cost, power and gateway placeholders). |
+| P9-002 | `[x]` | `select_roles`: deterministic capacity-aware NAP role selection across heterogeneous capabilities; no unnecessary hubs; client-only nodes supported. |
 | P6-008 | `[-]` | `LeaveNetwork` stops the hosted runtime, then commits `NotMember` idempotently with a documented trust-retention policy; deterministic and real-broker tests are green. Physical no-stale-state acceptance, client-side runtime teardown (after P6-004), and post-restart cleanup (P6-009) are outstanding; see `docs/P6-008-LEAVE-NETWORK.md`. |
 | All other tasks | `[ ]` | Not started. |
 
@@ -996,14 +997,15 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P9-002 — Implement NAP role selection v1
 
-- [ ] choose capable hub nodes automatically.
-- [ ] respect per-node capacity.
-- [ ] avoid unnecessary hubs.
-- [ ] permit client-only nodes.
+- [x] choose capable hub nodes automatically.
+- [x] respect per-node capacity.
+- [x] avoid unnecessary hubs.
+- [x] permit client-only nodes.
 
 **Acceptance**
 
 - Deterministic tests produce expected assignments across heterogeneous capabilities.
+- Met by `crates/blueroute-core/src/role_selection.rs` (`select_roles`): deterministic greedy hub selection that respects per-node capacity, creates a hub only when it links a new node, lets a client become a second hub to reach further nodes, joins separate groups, and never hosts on client-only nodes. Order-independence is tested. Only capability inputs are used; real-radio feasibility is P9-005/P16.
 
 ## P9-003 — Implement topology plan diff
 
