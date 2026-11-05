@@ -64,6 +64,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P6-004 | `[!]` | Fail-closed join orchestration, rollback, and deterministic tests are merged; production `JoinNetwork` is blocked on authenticated P7 control bootstrap (see `docs/P6-004-JOIN-ORCHESTRATION.md`). |
 | P6-005 | `[x]` | Deterministic `NetworkId`-derived one-star IPv4 allocation, conflict detection, and NetworkManager apply/remove are merged with green CI; live Debian repeated-cycle acceptance is recorded in `docs/P6-005-HARDWARE-EVIDENCE-2026-09-02.md`. |
 | P6-006 | `[-]` | Host/client traffic probes, socket helper, and runbook are implemented (`docs/P6-006-APPLICATION-TRAFFIC.md`); the physical two-node ping/SSH/TCP/UDP acceptance run and evidence record are still pending. |
+| P7-001 | `[x]` | ADR 0001 selects TCP over the PAN, per-node Ed25519 identity, a Noise_XX handshake bound to the identity, and authority-signed membership credentials. |
 | P6-008 | `[-]` | `LeaveNetwork` stops the hosted runtime, then commits `NotMember` idempotently with a documented trust-retention policy; deterministic and real-broker tests are green. Physical no-stale-state acceptance, client-side runtime teardown (after P6-004), and post-restart cleanup (P6-009) are outstanding; see `docs/P6-008-LEAVE-NETWORK.md`. |
 | All other tasks | `[ ]` | Not started. |
 
@@ -794,14 +795,15 @@ This is the first complete product slice.
 
 ## P7-001 — Choose control-plane transport
 
-- [ ] evaluate transport over established IP PAN.
-- [ ] port/address discovery.
-- [ ] authentication binding to BlueRoute identity.
-- [ ] ADR.
+- [x] evaluate transport over established IP PAN.
+- [x] port/address discovery.
+- [x] authentication binding to BlueRoute identity.
+- [x] ADR. *(`docs/adr/0001-control-plane-transport-and-authentication.md`)*
 
 **Acceptance**
 
 - Source IP is not sole identity proof.
+- Met by ADR 0001: sessions are bound to an Ed25519-derived `NodeId` through a Noise handshake; source IP is never consulted.
 
 ## P7-002 — Define control protocol envelope
 
