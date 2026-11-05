@@ -9,3 +9,13 @@ repository.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+async-channel = "2.5.0"
+async-io = "2.6.0"
+blueroute-client = { path = "../../crates/blueroute-client" }
+blueroute-core = { path = "../../crates/blueroute-core" }
+blueroute-protocol = { path = "../../crates/blueroute-protocol" }
+futures-lite = "2.6.0"
+ratatui = "0.30.2"
+zbus = { version = "5.19.0", default-features = false, features = ["async-io"] }

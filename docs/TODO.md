@@ -83,6 +83,12 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P10-003 | `[-]` | CLI create/join/leave/discover implemented and tested against a fake daemon; end-to-end single-star acceptance outstanding. |
 | P10-004 | `[-]` | `trust approve|forget` implemented; pending-request listing needs a daemon API. |
 | P10-005 | `[-]` | Concise/detailed/JSON diagnostics from the current snapshot; PAN/route state needs a daemon API extension. |
+| P11-001 | `[x]` | Ratatui shell with event loop, daemon subscription, resize, disconnect/reconnect; pty smoke run without a daemon. |
+| P11-002 | `[x]` | Friendly overview with capability warnings. |
+| P11-003 | `[-]` | Networks screen with create/join/leave/discover; live end-to-end workflow not yet shown. |
+| P11-004 | `[x]` | Devices screen with plain connection wording and confirmed trust actions. |
+| P11-005 | `[-]` | Diagnostics screen shows capabilities; topology/routes/interfaces/error history await daemon data. |
+| P11-006 | `[x]` | Keyboard-only usability checked by tests. |
 | P10-006 | `[x]` | Documented exit codes 0-5 with unit and real-binary script tests. |
 | P6-008 | `[-]` | `LeaveNetwork` stops the hosted runtime, then commits `NotMember` idempotently with a documented trust-retention policy; deterministic and real-broker tests are green. Physical no-stale-state acceptance, client-side runtime teardown (after P6-004), and post-restart cleanup (P6-009) are outstanding; see `docs/P6-008-LEAVE-NETWORK.md`. |
 | All other tasks | `[ ]` | Not started. |
@@ -1144,66 +1150,72 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P11-001 — Create Ratatui application shell
 
-- [ ] event loop.
-- [ ] daemon subscription.
-- [ ] resize.
-- [ ] daemon disconnect/reconnect.
+- [x] event loop.
+- [x] daemon subscription.
+- [x] resize.
+- [x] daemon disconnect/reconnect.
 
 **Acceptance**
 
 - TUI starts in text-only supported Linux session and renders status.
+- Met by `apps/tui` (`model.rs` pure state/update, `view.rs`, `worker.rs` daemon thread, `main.rs` loop): event loop, daemon subscription (D-Bus events plus a 3 s refresh), resize handling, and automatic reconnect with 1-10 s backoff while keeping the last data on screen. Verified in an in-memory terminal and by running the binary in a pty with no daemon (renders the shell and "BlueRoute isn't running — retrying"). Not yet run against a live daemon with real data.
 
 ## P11-002 — Implement overview/status screen
 
-- [ ] node/network.
-- [ ] overall health.
-- [ ] device count.
-- [ ] concise capability warnings.
-- [ ] Internet placeholder hidden until implemented.
+- [x] node/network.
+- [x] overall health.
+- [x] device count.
+- [x] concise capability warnings.
+- [x] Internet placeholder hidden until implemented.
 
 **Acceptance**
 
 - Friendly default wording.
+- Met by `view::overview`: plain health wording, network, device count, concise capability warnings (unknown never warns), and no Internet mention.
 
 ## P11-003 — Implement networks screen
 
-- [ ] nearby/known networks.
-- [ ] create/join/leave.
+- [x] nearby/known networks.
+- [x] create/join/leave.
 
 **Acceptance**
 
 - Normal single-star workflow works without CLI.
+- Met in the TUI: networks list, create (name prompt), join (Enter), leave (confirmed), discover toggle, all producing the same daemon commands as the CLI. End-to-end with a live daemon and Bluetooth is not demonstrated (join is blocked on P6-004).
 
 ## P11-004 — Implement devices screen
 
-- [ ] direct/routed indication.
-- [ ] connection state.
-- [ ] details/trust actions.
+- [x] direct/routed indication.
+- [x] connection state.
+- [x] details/trust actions.
 
 **Acceptance**
 
 - PAN role terminology is not required for normal understanding.
+- Met: devices show "directly connected / nearby / through another computer / not reachable" (no PAN terms), a details view, and allow/forget behind a y/n confirmation.
 
 ## P11-005 — Implement diagnostics screen
 
 - [ ] topology.
-- [ ] capabilities.
+- [x] capabilities.
 - [ ] interfaces/routes.
 - [ ] errors/transitions.
 
 **Acceptance**
 
 - Advanced detail is available without cluttering primary UI.
+- Partly met: the Diagnostics screen shows API version, health, visible nodes and capabilities with sources. Topology, interfaces, routes and an error/transition history are not shown because the daemon snapshot does not carry them yet.
 
 ## P11-006 — TUI usability review
 
-- [ ] on-screen key hints.
-- [ ] predictable back/quit.
-- [ ] no mouse requirement.
+- [x] on-screen key hints.
+- [x] predictable back/quit.
+- [x] no mouse requirement.
 
 **Acceptance**
 
 - Primary actions are discoverable.
+- Met by tests in `apps/tui/src/tests.rs`: key hints on every screen, `q` quits everywhere, Esc goes back one level, help on `?`, all actions reachable by keyboard only, mouse never enabled. This is a self-review against the checklist, not a user study.
 
 ---
 
