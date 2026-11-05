@@ -66,6 +66,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P6-006 | `[-]` | Host/client traffic probes, socket helper, and runbook are implemented (`docs/P6-006-APPLICATION-TRAFFIC.md`); the physical two-node ping/SSH/TCP/UDP acceptance run and evidence record are still pending. |
 | P7-001 | `[x]` | ADR 0001 selects TCP over the PAN, per-node Ed25519 identity, a Noise_XX handshake bound to the identity, and authority-signed membership credentials. |
 | P7-002 | `[x]` | Bounded length-prefixed control envelope with typed rejection of malformed/oversized/unknown-critical/replayed data and an identity- and network-bound inbound validator. |
+| P7-003 | `[x]` | `Hello` payload with bounded fields, identity check against the authenticated sender, and capability/feature/version negotiation independent of computer model. |
 | P6-008 | `[-]` | `LeaveNetwork` stops the hosted runtime, then commits `NotMember` idempotently with a documented trust-retention policy; deterministic and real-broker tests are green. Physical no-stale-state acceptance, client-side runtime teardown (after P6-004), and post-restart cleanup (P6-009) are outstanding; see `docs/P6-008-LEAVE-NETWORK.md`. |
 | All other tasks | `[ ]` | Not started. |
 
