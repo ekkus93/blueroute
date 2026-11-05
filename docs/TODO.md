@@ -70,6 +70,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P7-004 | `[x]` | Clock-injected session lifecycle: starts after data-plane availability, keepalive/loss detection, exponential backoff reconnect, one session per logical peer with deterministic duplicate tie-break, no leak across 200 reconnects. Transport execution of the actions is pending the handshake task. |
 | P7-005 | `[x]` | Deterministic seeded fuzz, round-trip, and compatibility tests show invalid peer bytes cannot panic the decoder, validator, or hello parser. |
 | P8-001 | `[x]` | `NeighborTable` separates candidate reachability from active PAN links with timestamps, expiry and capability annotations. |
+| P8-002 | `[x]` | `SegmentSubnets`: distinct per-segment prefixes, foreign-prefix avoidance, conflict detection, and safe reclamation. |
 | P6-008 | `[-]` | `LeaveNetwork` stops the hosted runtime, then commits `NotMember` idempotently with a documented trust-retention policy; deterministic and real-broker tests are green. Physical no-stale-state acceptance, client-side runtime teardown (after P6-004), and post-restart cleanup (P6-009) are outstanding; see `docs/P6-008-LEAVE-NETWORK.md`. |
 | All other tasks | `[ ]` | Not started. |
 
@@ -877,13 +878,14 @@ This is the first complete product slice.
 
 ## P8-002 — Implement distinct subnet allocation per PAN segment
 
-- [ ] non-overlapping prefixes.
-- [ ] host-route conflict detection.
-- [ ] safe prefix reclamation.
+- [x] non-overlapping prefixes.
+- [x] host-route conflict detection.
+- [x] safe prefix reclamation.
 
 **Acceptance**
 
 - Multiple PAN stars coexist without address overlap.
+- Met by `crates/blueroute-core/src/subnet.rs`: `SegmentSubnets` allocates deterministic non-overlapping /24s (256 distinct in the default pool), avoids foreign host prefixes, reports later conflicts without silently moving a prefix, and reclaims only after the segment is gone and no node still carries the prefix. Allocation is meant to run on the network authority and be distributed (P8-005).
 
 ## P8-003 — Implement forwarding on routing nodes
 

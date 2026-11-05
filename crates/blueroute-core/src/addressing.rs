@@ -90,7 +90,7 @@ pub fn normalized_ipv4_prefix(prefix: IpPrefix) -> Result<IpPrefix, CoreError> {
     )
 }
 
-fn ipv4_prefixes_overlap(left: IpPrefix, right: IpPrefix) -> bool {
+pub(crate) fn ipv4_prefixes_overlap(left: IpPrefix, right: IpPrefix) -> bool {
     let IpAddr::V4(left_address) = left.address else {
         return false;
     };

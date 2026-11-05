@@ -10,6 +10,7 @@ mod membership;
 mod neighbor;
 mod route;
 mod secret;
+mod subnet;
 mod topology;
 
 pub use addressing::{Ipv4StarAddressPlan, ensure_ipv4_segment_available, normalized_ipv4_prefix};
@@ -26,6 +27,7 @@ pub use membership::{MembershipRegistry, MembershipState, NetworkMembership, Pee
 pub use neighbor::{Neighbor, NeighborLink, NeighborTable};
 pub use route::{IpPrefix, Route, RouteDestination, RouteOwner};
 pub use secret::Secret;
+pub use subnet::SegmentSubnets;
 pub use topology::{LinkHealth, LinkState, PanLink, PanSegment, Reachability, TopologyGraph};
 
 /// The human-readable project name.
