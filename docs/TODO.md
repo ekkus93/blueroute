@@ -77,6 +77,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P9-002 | `[x]` | `select_roles`: deterministic capacity-aware NAP role selection across heterogeneous capabilities; no unnecessary hubs; client-only nodes supported. |
 | P9-003 | `[x]` | `diff_topology`: minimal capacity-aware ordered link changes; small metric changes produce no rebuild. |
 | P9-004 | `[x]` | `execute_diff` with injected-failure recovery tests. No production `TopologyBackend` yet. |
+| P9-006 | `[x]` | `AntiFlap`: hysteresis, failure backoff and known-good preference; noisy metrics do not trigger rebuilds. |
 | P6-008 | `[-]` | `LeaveNetwork` stops the hosted runtime, then commits `NotMember` idempotently with a documented trust-retention policy; deterministic and real-broker tests are green. Physical no-stale-state acceptance, client-side runtime teardown (after P6-004), and post-restart cleanup (P6-009) are outstanding; see `docs/P6-008-LEAVE-NETWORK.md`. |
 | All other tasks | `[ ]` | Not started. |
 
@@ -1045,13 +1046,14 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P9-006 — Add topology anti-flap policy
 
-- [ ] hysteresis/stability thresholds.
-- [ ] failure backoff.
-- [ ] prefer known-good links.
+- [x] hysteresis/stability thresholds.
+- [x] failure backoff.
+- [x] prefer known-good links.
 
 **Acceptance**
 
 - Noisy metrics do not trigger continuous rebuild.
+- Met by `crates/blueroute-core/src/anti_flap.rs` (`AntiFlap`): dwell + score-margin hysteresis with an urgent bypass for invalid current plans, exponential failure backoff, and known-good/active-link preference. A 300-round noisy-quality simulation produces at most 2 adoptions. To make known-good links matter, role selection now breaks hub ties by total link cost after hub score (P9-002 tests unchanged).
 
 ---
 

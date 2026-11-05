@@ -84,8 +84,8 @@ impl<'a> State<'a> {
     }
 
     /// Clients `hub` could take now: unlinked, attachable, with spare capacity, cheapest first.
-    fn coverable(&self, hub: NodeId) -> Vec<NodeId> {
-        let mut out = Vec::new();
+    fn coverable(&self, hub: NodeId) -> Vec<(NodeId, u32)> {
+        let mut out: Vec<(NodeId, u32)> = Vec::new();
         for link in self.adjacency.get(&hub).into_iter().flatten() {
             let Some(other) = link.connects(hub) else {
                 continue;
@@ -94,9 +94,9 @@ impl<'a> State<'a> {
                 && self.inputs.can_attach(other)
                 && self.free(other) > 0
                 && !self.already_paired(hub, other)
-                && !out.contains(&other)
+                && !out.iter().any(|(n, _)| *n == other)
             {
-                out.push(other);
+                out.push((other, link.cost()));
             }
         }
         out
@@ -124,7 +124,8 @@ pub fn select_roles(inputs: &TopologyInputs) -> TopologyPlan {
 
 fn assign_clients(state: &mut State<'_>) {
     loop {
-        let mut best: Option<(usize, i64, NodeId, Vec<NodeId>)> = None;
+        // (clients covered, hub score, total link cost, hub, clients)
+        let mut best: Option<(usize, i64, u64, NodeId, Vec<NodeId>)> = None;
         for hub in state.inputs.nodes.keys().copied() {
             if !state.inputs.can_host(hub) || state.free(hub) == 0 {
                 continue;
@@ -134,19 +135,27 @@ fn assign_clients(state: &mut State<'_>) {
             if clients.is_empty() {
                 continue;
             }
-            let key = (clients.len(), state.inputs.hub_score(hub), hub);
+            let cost: u64 = clients.iter().map(|(_, c)| u64::from(*c)).sum();
+            let score = state.inputs.hub_score(hub);
             let better = match &best {
                 None => true,
-                Some((n, score, id, _)) => {
-                    key.0 > *n
-                        || (key.0 == *n && (key.1 > *score || (key.1 == *score && key.2 < *id)))
+                Some((n, bs, bc, id, _)) => {
+                    // More coverage, then better hub, then cheaper links, then lowest id.
+                    (
+                        clients.len(),
+                        score,
+                        std::cmp::Reverse(cost),
+                        std::cmp::Reverse(hub),
+                    ) > (*n, *bs, std::cmp::Reverse(*bc), std::cmp::Reverse(*id))
                 }
             };
             if better {
-                best = Some((key.0, key.1, key.2, clients));
+                let covered = clients.len();
+                let ids: Vec<NodeId> = clients.into_iter().map(|(id, _)| id).collect();
+                best = Some((covered, score, cost, hub, ids));
             }
         }
-        let Some((_, _, hub, clients)) = best else {
+        let Some((_, _, _, hub, clients)) = best else {
             return;
         };
         for client in clients {
