@@ -76,6 +76,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P9-001 | `[x]` | Explicit, model-free `TopologyInputs` (capacity, neighbor availability, link quality/stability, cost, power and gateway placeholders). |
 | P9-002 | `[x]` | `select_roles`: deterministic capacity-aware NAP role selection across heterogeneous capabilities; no unnecessary hubs; client-only nodes supported. |
 | P9-003 | `[x]` | `diff_topology`: minimal capacity-aware ordered link changes; small metric changes produce no rebuild. |
+| P9-004 | `[x]` | `execute_diff` with injected-failure recovery tests. No production `TopologyBackend` yet. |
 | P6-008 | `[-]` | `LeaveNetwork` stops the hosted runtime, then commits `NotMember` idempotently with a documented trust-retention policy; deterministic and real-broker tests are green. Physical no-stale-state acceptance, client-side runtime teardown (after P6-004), and post-restart cleanup (P6-009) are outstanding; see `docs/P6-008-LEAVE-NETWORK.md`. |
 | All other tasks | `[ ]` | Not started. |
 
@@ -1021,14 +1022,15 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 ## P9-004 — Implement topology executor
 
-- [ ] create links.
-- [ ] remove obsolete links.
-- [ ] coordinate routing.
-- [ ] reconcile partial failures.
+- [x] create links.
+- [x] remove obsolete links.
+- [x] coordinate routing.
+- [x] reconcile partial failures.
 
 **Acceptance**
 
 - Injected failure leaves daemon able to recover to valid state.
+- Met in software by `crates/blueroute-core/src/topology_executor.rs` (`TopologyBackend`, `execute_diff`): applies ordered changes, skips removals whose replacement failed, re-reads actual links after any failure, and triggers routing once on change. Tested with injected create/remove/ambiguous failures and recovery on the next planning round. The Linux `TopologyBackend` implementation (BlueZ/NM) is not written; it depends on the P4/P5 PAN adapters and hardware validation (P9-005).
 
 ## P9-005 — Implement hub-loss reformation
 

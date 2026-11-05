@@ -15,6 +15,7 @@ mod routing;
 mod secret;
 mod subnet;
 mod topology;
+mod topology_executor;
 mod topology_policy;
 
 pub use addressing::{Ipv4StarAddressPlan, ensure_ipv4_segment_available, normalized_ipv4_prefix};
@@ -38,6 +39,7 @@ pub use routing::{
 pub use secret::Secret;
 pub use subnet::SegmentSubnets;
 pub use topology::{LinkHealth, LinkState, PanLink, PanSegment, Reachability, TopologyGraph};
+pub use topology_executor::{ExecFuture, ExecutionReport, TopologyBackend, execute_diff};
 pub use topology_policy::{
     CandidateLink, DEFAULT_LINK_COST, DEFAULT_UNKNOWN_CAPACITY, LinkStability, TopologyInputs,
 };

@@ -12,3 +12,6 @@ serde = { version = "1.0", features = ["derive"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+futures-lite = "2.6.0"
