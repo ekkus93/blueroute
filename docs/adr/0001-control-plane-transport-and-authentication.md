@@ -78,4 +78,5 @@ The decision needs to bind a control session to a stable BlueRoute identity and 
 ## Implementation status
 
 - Done (follow-up to P7-001): `blueroute-protocol::crypto` (Ed25519 identity, key-derived `NodeId`, Noise static-key binding signature, authority-signed time-bounded membership credentials with bounded clock skew) and `blueroute-linux::NodeKeyStore` (versioned `node-key` file, mode 0600, corrupt files rejected, legacy `node-id` never read). The daemon's `local_node` is now key-derived; an existing legacy `node-id` file is left in place and ignored, so dev fixtures must re-approve peers.
-- Remaining: the Noise XX handshake over TCP, authority pinning and credential issuance on join (P6-004 production wiring), and a deny list.
+- Done: `blueroute-protocol::handshake`, a sans-I/O `Noise_XX_25519_ChaChaPoly_SHA256` handshake whose encrypted payloads carry the Ed25519 key and a Noise-key binding signature. It proves the peer `NodeId`, can require an expected peer, and yields an AEAD session that rejects replay and tampering. Dependency: `snow` 0.10.0 (default features).
+- Remaining: the TCP listener/dialer that carries it, authority pinning and credential issuance on join (P6-004 production wiring), and a deny list.

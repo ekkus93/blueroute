@@ -2,6 +2,7 @@
 
 pub mod control;
 pub mod crypto;
+pub mod handshake;
 pub mod hello;
 pub mod session;
 
