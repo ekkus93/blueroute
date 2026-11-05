@@ -68,6 +68,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P7-002 | `[x]` | Bounded length-prefixed control envelope with typed rejection of malformed/oversized/unknown-critical/replayed data and an identity- and network-bound inbound validator. |
 | P7-003 | `[x]` | `Hello` payload with bounded fields, identity check against the authenticated sender, and capability/feature/version negotiation independent of computer model. |
 | P7-004 | `[x]` | Clock-injected session lifecycle: starts after data-plane availability, keepalive/loss detection, exponential backoff reconnect, one session per logical peer with deterministic duplicate tie-break, no leak across 200 reconnects. Transport execution of the actions is pending the handshake task. |
+| P7-005 | `[x]` | Deterministic seeded fuzz, round-trip, and compatibility tests show invalid peer bytes cannot panic the decoder, validator, or hello parser. |
 | P6-008 | `[-]` | `LeaveNetwork` stops the hosted runtime, then commits `NotMember` idempotently with a documented trust-retention policy; deterministic and real-broker tests are green. Physical no-stale-state acceptance, client-side runtime teardown (after P6-004), and post-restart cleanup (P6-009) are outstanding; see `docs/P6-008-LEAVE-NETWORK.md`. |
 | All other tasks | `[ ]` | Not started. |
 
@@ -848,13 +849,14 @@ This is the first complete product slice.
 
 ## P7-005 — Fuzz/property-test parser
 
-- [ ] malformed-input tests.
-- [ ] round-trip tests.
-- [ ] compatibility tests.
+- [x] malformed-input tests.
+- [x] round-trip tests.
+- [x] compatibility tests.
 
 **Acceptance**
 
 - Tested invalid peer data cannot panic daemon.
+- Met by `crates/blueroute-protocol/tests/control_fuzz.rs`: seeded deterministic fuzzing of the frame decoder, validator and hello parser (about 60k cases), round-trip, oversize, and compatibility tests. This is not coverage-guided fuzzing; a cargo-fuzz target can be added later.
 
 ---
 
