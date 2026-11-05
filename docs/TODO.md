@@ -71,6 +71,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P7-005 | `[x]` | Deterministic seeded fuzz, round-trip, and compatibility tests show invalid peer bytes cannot panic the decoder, validator, or hello parser. |
 | P8-001 | `[x]` | `NeighborTable` separates candidate reachability from active PAN links with timestamps, expiry and capability annotations. |
 | P8-002 | `[x]` | `SegmentSubnets`: distinct per-segment prefixes, foreign-prefix avoidance, conflict detection, and safe reclamation. |
+| P8-004 | `[x]` | `compute_routes`: deterministic, stability-preferring segment routes through capability-qualified routers, with unreachable detection. |
 | P6-008 | `[-]` | `LeaveNetwork` stops the hosted runtime, then commits `NotMember` idempotently with a documented trust-retention policy; deterministic and real-broker tests are green. Physical no-stale-state acceptance, client-side runtime teardown (after P6-004), and post-restart cleanup (P6-009) are outstanding; see `docs/P6-008-LEAVE-NETWORK.md`. |
 | All other tasks | `[ ]` | Not started. |
 
@@ -899,15 +900,16 @@ This is the first complete product slice.
 
 ## P8-004 — Implement route computation v1
 
-- [ ] compute paths.
-- [ ] deterministic desired route set.
-- [ ] stable-path preference.
-- [ ] unreachable detection.
-- [ ] respect node capability restrictions.
+- [x] compute paths.
+- [x] deterministic desired route set.
+- [x] stable-path preference.
+- [x] unreachable detection.
+- [x] respect node capability restrictions.
 
 **Acceptance**
 
 - Unit tests cover line/tree/redundant/partitioned and heterogeneous-capability graphs.
+- Met by `crates/blueroute-core/src/routing.rs` (`compute_routes`): segment-level Dijkstra where only nodes with a known `routing == true` transit; deterministic with previous-next-hop stability; unreachable segments reported. Tests: line, tree, redundant, partitioned, heterogeneous-capability, failed-link.
 
 ## P8-005 — Implement route distribution/application
 
