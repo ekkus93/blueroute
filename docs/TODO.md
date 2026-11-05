@@ -69,6 +69,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P7-003 | `[x]` | `Hello` payload with bounded fields, identity check against the authenticated sender, and capability/feature/version negotiation independent of computer model. |
 | P7-004 | `[x]` | Clock-injected session lifecycle: starts after data-plane availability, keepalive/loss detection, exponential backoff reconnect, one session per logical peer with deterministic duplicate tie-break, no leak across 200 reconnects. Transport execution of the actions is pending the handshake task. |
 | P7-005 | `[x]` | Deterministic seeded fuzz, round-trip, and compatibility tests show invalid peer bytes cannot panic the decoder, validator, or hello parser. |
+| P8-001 | `[x]` | `NeighborTable` separates candidate reachability from active PAN links with timestamps, expiry and capability annotations. |
 | P6-008 | `[-]` | `LeaveNetwork` stops the hosted runtime, then commits `NotMember` idempotently with a documented trust-retention policy; deterministic and real-broker tests are green. Physical no-stale-state acceptance, client-side runtime teardown (after P6-004), and post-restart cleanup (P6-009) are outstanding; see `docs/P6-008-LEAVE-NETWORK.md`. |
 | All other tasks | `[ ]` | Not started. |
 
@@ -864,14 +865,15 @@ This is the first complete product slice.
 
 ## P8-001 — Build neighbor observation model
 
-- [ ] direct PAN links.
-- [ ] candidate reachability separate from active links.
-- [ ] timestamps/expiry.
-- [ ] capability annotations.
+- [x] direct PAN links.
+- [x] candidate reachability separate from active links.
+- [x] timestamps/expiry.
+- [x] capability annotations.
 
 **Acceptance**
 
 - Physical/candidate graph is distinct from active routed graph.
+- Met by `crates/blueroute-core/src/neighbor.rs`: `NeighborTable` keeps candidates (TTL-expiring) apart from active links (state-driven), with first/last-seen timestamps and capability annotations.
 
 ## P8-002 — Implement distinct subnet allocation per PAN segment
 
