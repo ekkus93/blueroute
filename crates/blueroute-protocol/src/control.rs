@@ -58,7 +58,7 @@ impl MessageType {
     pub fn is_known(&self) -> bool {
         matches!(
             self.0.as_str(),
-            Self::HELLO | "join.request" | "join.credential" | "join.denied"
+            Self::HELLO | "join.request" | "join.credential" | "join.denied" | "routes.assign"
         )
     }
 }

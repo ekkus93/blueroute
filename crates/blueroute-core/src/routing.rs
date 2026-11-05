@@ -149,6 +149,64 @@ pub fn compute_routes(
     result
 }
 
+/// Most routes accepted in one assignment (bounds memory for hostile input).
+pub const MAX_ASSIGNED_ROUTES: usize = 256;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RouteRejection {
+    /// Only the network authority may assign routes.
+    SenderNotAuthority,
+    TooManyRoutes,
+    ForeignOwner,
+    /// v1 assigns segment routes only; other destination kinds are refused.
+    UnsupportedDestination,
+    UnknownSegment(SegmentId),
+    NextHopNotMember(NodeId),
+    NextHopIsLocal,
+    DuplicateDestination,
+}
+
+/// Validate a route assignment received over the control session. Fails closed: a single bad
+/// route rejects the whole assignment so a compromised or buggy sender cannot partially apply.
+pub fn validate_route_assignment(
+    routes: &[Route],
+    network: NetworkId,
+    sender: NodeId,
+    authority: NodeId,
+    local: NodeId,
+    members: &BTreeSet<NodeId>,
+    known_segments: &BTreeSet<SegmentId>,
+) -> Result<(), RouteRejection> {
+    if sender != authority {
+        return Err(RouteRejection::SenderNotAuthority);
+    }
+    if routes.len() > MAX_ASSIGNED_ROUTES {
+        return Err(RouteRejection::TooManyRoutes);
+    }
+    let mut seen = BTreeSet::new();
+    for route in routes {
+        if route.owner != RouteOwner::BlueRouteNetwork(network) {
+            return Err(RouteRejection::ForeignOwner);
+        }
+        let RouteDestination::Segment(segment) = &route.destination else {
+            return Err(RouteRejection::UnsupportedDestination);
+        };
+        if !known_segments.contains(segment) {
+            return Err(RouteRejection::UnknownSegment(*segment));
+        }
+        if route.next_hop == local {
+            return Err(RouteRejection::NextHopIsLocal);
+        }
+        if !members.contains(&route.next_hop) {
+            return Err(RouteRejection::NextHopNotMember(route.next_hop));
+        }
+        if !seen.insert(route.destination.clone()) {
+            return Err(RouteRejection::DuplicateDestination);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,6 +435,70 @@ mod tests {
         // Local is node 1 (NAP of S1).
         let c = compute_routes(&g, n(1), network(), &[]);
         assert_eq!(hop(&c, 2), Some(n(3)));
+    }
+
+    fn route(seg: u8, hop: u8) -> Route {
+        Route {
+            destination: RouteDestination::Segment(s(seg)),
+            next_hop: n(hop),
+            cost: 1,
+            owner: RouteOwner::BlueRouteNetwork(network()),
+        }
+    }
+
+    fn validate(routes: &[Route], sender: u8) -> Result<(), RouteRejection> {
+        validate_route_assignment(
+            routes,
+            network(),
+            n(sender),
+            n(1),
+            n(2),
+            &BTreeSet::from([n(1), n(2), n(3)]),
+            &BTreeSet::from([s(1), s(2)]),
+        )
+    }
+
+    #[test]
+    fn assignments_from_the_authority_for_members_are_accepted() {
+        assert_eq!(validate(&[route(1, 3), route(2, 1)], 1), Ok(()));
+        assert_eq!(validate(&[], 1), Ok(()));
+    }
+
+    #[test]
+    fn foreign_non_member_and_malformed_assignments_are_rejected() {
+        assert_eq!(
+            validate(&[route(1, 3)], 3),
+            Err(RouteRejection::SenderNotAuthority)
+        );
+        let mut foreign = route(1, 3);
+        foreign.owner = RouteOwner::BlueRouteNetwork(NetworkId::from_bytes([0; 16]));
+        assert_eq!(validate(&[foreign], 1), Err(RouteRejection::ForeignOwner));
+        assert_eq!(
+            validate(&[route(1, 9)], 1),
+            Err(RouteRejection::NextHopNotMember(n(9)))
+        );
+        assert_eq!(
+            validate(&[route(7, 3)], 1),
+            Err(RouteRejection::UnknownSegment(s(7)))
+        );
+        assert_eq!(
+            validate(&[route(1, 2)], 1),
+            Err(RouteRejection::NextHopIsLocal)
+        );
+        assert_eq!(
+            validate(&[route(1, 3), route(1, 1)], 1),
+            Err(RouteRejection::DuplicateDestination)
+        );
+        let mut internet = route(1, 3);
+        internet.destination = RouteDestination::Internet;
+        assert_eq!(
+            validate(&[internet], 1),
+            Err(RouteRejection::UnsupportedDestination)
+        );
+        let many = vec![route(1, 3); MAX_ASSIGNED_ROUTES + 1];
+        assert_eq!(validate(&many, 1), Err(RouteRejection::TooManyRoutes));
+        // One bad route rejects everything.
+        assert!(validate(&[route(1, 3), route(2, 9)], 1).is_err());
     }
 
     #[test]

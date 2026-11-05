@@ -72,6 +72,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P8-001 | `[x]` | `NeighborTable` separates candidate reachability from active PAN links with timestamps, expiry and capability annotations. |
 | P8-002 | `[x]` | `SegmentSubnets`: distinct per-segment prefixes, foreign-prefix avoidance, conflict detection, and safe reclamation. |
 | P8-004 | `[x]` | `compute_routes`: deterministic, stability-preferring segment routes through capability-qualified routers, with unreachable detection. |
+| P8-005 | `[-]` | Software complete and tested against a fake backend: authority-only assignment message, fail-closed validation, minimal route diff with stale removal, foreign routes untouched. Real route-table acceptance and per-member next-hop addressing are outstanding. |
 | P6-008 | `[-]` | `LeaveNetwork` stops the hosted runtime, then commits `NotMember` idempotently with a documented trust-retention policy; deterministic and real-broker tests are green. Physical no-stale-state acceptance, client-side runtime teardown (after P6-004), and post-restart cleanup (P6-009) are outstanding; see `docs/P6-008-LEAVE-NETWORK.md`. |
 | All other tasks | `[ ]` | Not started. |
 
@@ -913,14 +914,15 @@ This is the first complete product slice.
 
 ## P8-005 — Implement route distribution/application
 
-- [ ] distribute desired routes.
-- [ ] apply through Linux backend.
-- [ ] remove stale routes.
-- [ ] reject foreign/non-member routes.
+- [x] distribute desired routes.
+- [x] apply through Linux backend.
+- [x] remove stale routes.
+- [x] reject foreign/non-member routes.
 
 **Acceptance**
 
 - Route table matches expected topology after changes.
+- Met in software by `routes.assign` (`blueroute-protocol::routes`), `validate_route_assignment` (authority-only, owned-by-this-network, segment destinations, member next hops, all-or-nothing) and `blueroute-linux::route_sync` (plan/apply/reconcile over `IpNetworkBackend`; foreign routes are never planned for removal). Verified against an in-memory backend; kernel route-table behavior on real NetworkManager is unproven. Next-hop IPs per member are an input (`NextHopAddress`): multi-client address assignment within a segment is not yet defined and belongs with the routed-star hardware work.
 
 ## P8-006 — Prove two-hop TCP/IP
 

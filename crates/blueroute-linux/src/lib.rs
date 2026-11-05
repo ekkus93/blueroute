@@ -13,6 +13,7 @@ mod membership_store;
 mod network_discovery;
 mod networkmanager;
 mod pan;
+mod route_sync;
 mod secret_store;
 
 pub use bluez::BluezBackend;
@@ -31,6 +32,10 @@ pub use key_identity::{NodeKeyStore, SeedSource, SystemSeedSource};
 pub use membership_store::NetworkMembershipStore;
 pub use network_discovery::NetworkAdvertisement;
 pub use networkmanager::NetworkManagerBackend;
+pub use route_sync::{
+    DesiredRoutes, NextHopAddress, RoutePlan, apply_route_plan, plan_route_changes,
+    reconcile_routes, to_linux_routes,
+};
 pub use secret_store::SecretFileStore;
 
 use std::future::Future;

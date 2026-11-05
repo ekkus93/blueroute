@@ -27,7 +27,9 @@ pub use id::{DisplayName, LinkId, NetworkId, NodeId, SegmentId};
 pub use membership::{MembershipRegistry, MembershipState, NetworkMembership, PeerMembership};
 pub use neighbor::{Neighbor, NeighborLink, NeighborTable};
 pub use route::{IpPrefix, Route, RouteDestination, RouteOwner};
-pub use routing::{ComputedRoutes, compute_routes};
+pub use routing::{
+    ComputedRoutes, MAX_ASSIGNED_ROUTES, RouteRejection, compute_routes, validate_route_assignment,
+};
 pub use secret::Secret;
 pub use subnet::SegmentSubnets;
 pub use topology::{LinkHealth, LinkState, PanLink, PanSegment, Reachability, TopologyGraph};

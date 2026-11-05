@@ -5,6 +5,7 @@ pub mod crypto;
 pub mod handshake;
 pub mod hello;
 pub mod join;
+pub mod routes;
 pub mod session;
 
 use std::fmt;
