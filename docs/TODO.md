@@ -64,6 +64,7 @@ This file is the implementation backlog for BlueRoute. Task IDs are intended to 
 | P6-004 | `[!]` | Fail-closed join orchestration, rollback, and deterministic tests are merged; production `JoinNetwork` is blocked on authenticated P7 control bootstrap (see `docs/P6-004-JOIN-ORCHESTRATION.md`). |
 | P6-005 | `[x]` | Deterministic `NetworkId`-derived one-star IPv4 allocation, conflict detection, and NetworkManager apply/remove are merged with green CI; live Debian repeated-cycle acceptance is recorded in `docs/P6-005-HARDWARE-EVIDENCE-2026-09-02.md`. |
 | P6-006 | `[-]` | Host/client traffic probes, socket helper, and runbook are implemented (`docs/P6-006-APPLICATION-TRAFFIC.md`); the physical two-node ping/SSH/TCP/UDP acceptance run and evidence record are still pending. |
+| P6-008 | `[-]` | `LeaveNetwork` stops the hosted runtime, then commits `NotMember` idempotently with a documented trust-retention policy; deterministic and real-broker tests are green. Physical no-stale-state acceptance, client-side runtime teardown (after P6-004), and post-restart cleanup (P6-009) are outstanding; see `docs/P6-008-LEAVE-NETWORK.md`. |
 | All other tasks | `[ ]` | Not started. |
 
 ## Platform rule
@@ -757,13 +758,14 @@ This is the first complete product slice.
 
 ## P6-008 — Implement leave-network operation
 
-- [ ] tear down runtime membership.
-- [ ] remove BlueRoute-owned addresses/routes/profiles.
-- [ ] retain trust only according to policy.
+- [x] tear down runtime membership. *(Hosted star; joined-client runtime follows P6-004.)*
+- [ ] remove BlueRoute-owned addresses/routes/profiles. *(Hosted-star addresses/bridge are removed via the host runtime; hardware proof and post-restart cleanup are outstanding.)*
+- [x] retain trust only according to policy.
 
 **Acceptance**
 
 - Leave is idempotent and leaves no stale data-plane state.
+- In progress: idempotence is proven deterministically; the no-stale-state half needs a physical run. Details are in `docs/P6-008-LEAVE-NETWORK.md`.
 
 ## P6-009 — Implement daemon restart reconciliation
 

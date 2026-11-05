@@ -61,6 +61,7 @@ impl MockAuthority {
 struct FakeNetworkOperations {
     created_network: NetworkId,
     create_calls: Arc<AtomicUsize>,
+    leave_calls: Arc<AtomicUsize>,
     start_discovery_calls: Arc<AtomicUsize>,
     stop_discovery_calls: Arc<AtomicUsize>,
 }
@@ -70,6 +71,13 @@ impl NetworkOperations for FakeNetworkOperations {
         Box::pin(async move {
             self.create_calls.fetch_add(1, Ordering::SeqCst);
             Ok(self.created_network)
+        })
+    }
+
+    fn leave_network(&self) -> NetworkOperationFuture<'_, ()> {
+        Box::pin(async move {
+            self.leave_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
         })
     }
 
@@ -155,6 +163,7 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
 
         let created_network = NetworkId::from_bytes([8; 16]);
         let create_calls = Arc::new(AtomicUsize::new(0));
+        let leave_calls = Arc::new(AtomicUsize::new(0));
         let start_discovery_calls = Arc::new(AtomicUsize::new(0));
         let stop_discovery_calls = Arc::new(AtomicUsize::new(0));
         let peer_trust = FakePeerTrustOperations::default();
@@ -173,6 +182,7 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
             Arc::new(FakeNetworkOperations {
                 created_network,
                 create_calls: create_calls.clone(),
+                leave_calls: leave_calls.clone(),
                 start_discovery_calls: start_discovery_calls.clone(),
                 stop_discovery_calls: stop_discovery_calls.clone(),
             }),
@@ -253,11 +263,21 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
         );
         assert_eq!(trust_calls.load(Ordering::SeqCst), 0);
 
+        let leave_network = encode_command(&Command::LeaveNetwork)?;
+        let denied: zbus::Result<String> = proxy.call("Request", &(leave_network.clone(),)).await;
+        assert!(
+            denied
+                .expect_err("unauthorized leave must fail closed")
+                .to_string()
+                .contains("AccessDenied")
+        );
+        assert_eq!(leave_calls.load(Ordering::SeqCst), 0);
+
         authorized.store(true, Ordering::SeqCst);
         let payload: String = proxy.call("Request", &(create_network,)).await?;
         assert_eq!(decode_response(&payload)?, Response::Ack);
         assert_eq!(create_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(calls.load(Ordering::SeqCst), 4);
+        assert_eq!(calls.load(Ordering::SeqCst), 5);
 
         let payload: String = proxy.call("Request", &(join_network_command,)).await?;
         assert_eq!(decode_response(&payload)?, Response::Ack);
@@ -279,8 +299,22 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
         assert_eq!(status.current_network, Some(created_network));
         assert_eq!(
             calls.load(Ordering::SeqCst),
-            7,
+            8,
             "status inspection after join/trust mutations must remain read-only"
+        );
+
+        let payload: String = proxy.call("Request", &(leave_network,)).await?;
+        assert_eq!(decode_response(&payload)?, Response::Ack);
+        assert_eq!(leave_calls.load(Ordering::SeqCst), 1);
+        let payload: String = proxy
+            .call("Request", &(encode_command(&Command::GetStatus)?,))
+            .await?;
+        let Response::Status(status) = decode_response(&payload)? else {
+            panic!("GetStatus must return a status response");
+        };
+        assert_eq!(
+            status.current_network, None,
+            "leave must clear the current network"
         );
 
         let start_discovery = encode_command(&Command::StartDiscovery)?;
