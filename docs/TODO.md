@@ -2463,13 +2463,15 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 ## P12-002 — Implement Tauri-to-daemon bridge
 
 - [x] Rust backend uses `blueroute-client` (typed read-only bridge foundation, not yet a Tauri runtime).
-- [ ] narrow Tauri commands (typed Rust methods exist; Tauri command registration pending).
+- [x] narrow Tauri commands (`platform_check`, `overview`, `networks`, `devices` registered; each individually granted via the app manifest and default capability).
 - [ ] safe event forwarding.
 - [ ] no arbitrary command execution (bridge exposes no caller-supplied command or shell invocation; final Tauri audit pending).
 
 **Acceptance**
 
 - Frontend renders live daemon state without direct system D-Bus access.
+
+**Software partial (2026-11-07):** The Tauri 2 shell registers exactly four read-only commands (`platform_check`, `overview`, `networks`, `devices`), declared in `src-tauri/build.rs`'s app manifest and individually granted by `capabilities/default.json` (no plugins, shell, filesystem or opener access). Bridge types now have stable snake_case serde wire shapes, and the frontend has a typed `invoke` wrapper (`ui/src/daemon.ts`) with vitest coverage. Source `891e6cd8987dd623d57c4883607acbd2e995675d`, [exact-head CI #42409652334](https://github.com/ekkus93/blueroute/actions/runs/42409652334) **passed**. **P12-002 remains OPEN:** safe event forwarding, a final no-arbitrary-execution audit of the Tauri surface, and the acceptance (frontend rendering live daemon state in the running app) are not done; the commands were not exercised against a live daemon through the GUI. No Bluetooth hardware acceptance is claimed.
 
 **Software partial (2026-11-04):** `apps/desktop/src/lib.rs` now contains a compiled, typed **read-only desktop daemon bridge** built on the shared version-gated `BlueRouteClient`: `overview`, `networks`, and `devices` queries return typed values and coarse errors without exposing raw D-Bus, arbitrary command dispatch, or privileged mutations to the future web frontend. The overview explicitly leaves authenticated remote-peer counts unknown and Internet sharing unavailable even when local health is good. Unit tests cover fail-closed UI claims and typed error classification. Workspace dependencies are locked and the full CI suite passed at `e22a5b090da375f92250692cd9a102ed268feba6`, [exact-head CI #41810282987](https://github.com/ekkus93/blueroute/actions/runs/41810282987). **P12-002 remains OPEN:** Tauri 2 app initialization, command registration, event forwarding, frontend integration, and Debian desktop acceptance have not been implemented or demonstrated. No Bluetooth hardware acceptance is claimed.
 
