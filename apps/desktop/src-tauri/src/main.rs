@@ -3,9 +3,13 @@
 //! The frontend can call only the four read-only commands below. Each connects through
 //! the shared version-gated `blueroute-client` (via `blueroute-desktop`), so the web
 //! content never gets D-Bus, shell, filesystem or arbitrary daemon-command access, and
-//! every failure reaches it as a coarse, typed `DesktopError`.
-use blueroute_desktop::{DesktopBridge, DesktopError, DesktopOverview, PlatformCheck};
+//! every failure reaches it as a coarse, typed `DesktopError`. Daemon changes reach it only
+//! as payload-free `daemon-signal` events (connected / changed / disconnected).
+use blueroute_desktop::{
+    DesktopBridge, DesktopError, DesktopOverview, PlatformCheck, watch_daemon,
+};
 use blueroute_protocol::{NetworkSummary, NodeSummary};
+use tauri::Emitter;
 
 #[tauri::command]
 async fn platform_check() -> Result<PlatformCheck, DesktopError> {
@@ -35,6 +39,14 @@ fn main() {
             networks,
             devices
         ])
+        .setup(|app| {
+            // Payload-free signals only; the UI re-reads typed snapshots on each one.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(watch_daemon(move |signal| {
+                let _ = handle.emit("daemon-signal", signal);
+            }));
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("failed to run the BlueRoute desktop application");
 }

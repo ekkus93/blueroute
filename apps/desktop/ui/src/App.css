@@ -1,0 +1,46 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 1rem 1.25rem 3rem;
+}
+section {
+  margin-top: 1.5rem;
+}
+h1,
+h2 {
+  line-height: 1.25;
+}
+button {
+  font: inherit;
+  padding: 0.4rem 0.9rem;
+}
+:focus-visible {
+  outline: 3px solid Highlight;
+  outline-offset: 2px;
+}
+.banner {
+  border: 1px solid currentColor;
+  padding: 0.5rem 0.75rem;
+}
+.muted {
+  opacity: 0.75;
+}
+ul.plain {
+  list-style: none;
+  padding: 0;
+}
+ul.plain li {
+  padding: 0.4rem 0;
+  border-bottom: 1px solid rgb(128 128 128 / 0.35);
+}
+details {
+  margin-top: 0.5rem;
+}

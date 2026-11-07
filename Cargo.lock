@@ -439,6 +439,7 @@ dependencies = [
 name = "blueroute-desktop"
 version = "0.1.0"
 dependencies = [
+ "async-io",
  "blueroute-client",
  "blueroute-core",
  "blueroute-protocol",

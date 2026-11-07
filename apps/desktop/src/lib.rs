@@ -3,8 +3,10 @@
 //! A future Tauri 2 command layer can expose these narrow snapshots without
 //! granting web content raw D-Bus access or arbitrary daemon command dispatch.
 mod platform_check;
+mod watch;
 
 pub use platform_check::{ActionAvailability, PlatformCheck, PlatformIssue};
+pub use watch::{DaemonSignal, reconnect_delay, watch_daemon};
 
 use blueroute_client::{BlueRouteClient, ClientErrorKind};
 use blueroute_core::{HealthLevel, NetworkId, NodeId};
