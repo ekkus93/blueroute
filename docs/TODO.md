@@ -2458,6 +2458,8 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 - App builds on initial supported Debian baseline.
 
+**Software complete (2026-11-07):** `apps/desktop/src-tauri` (Tauri 2.12.5, no plugins/commands, empty capability set, restrictive CSP) loads a Vite + React 19 + TypeScript frontend (`apps/desktop`, prettier/`tsc`/vitest). Node 26.13.0 and npm 11.20.0 are pinned in `.node-version`, `package.json` `engines` and CI; dependencies are exact-pinned and locked. Source `6f53ac9e0b7bd0f6d5d48fcf1d9af6bac5b6d188`, [exact-head CI #42408573995](https://github.com/ekkus93/blueroute/actions/runs/42408573995) **passed** (Rust job including the Tauri crate, plus the new Desktop frontend job). A local `npx tauri build --debug --no-bundle` produced the binary on Debian 13. **Not demonstrated:** a release/bundled `.deb` build, a clean-machine build, or the window actually rendering on a desktop session; Debian packaging of the desktop app remains gated on P12 completion (P15). The shell has no daemon access yet (P12-002) and is not a usable application.
+
 ## P12-002 — Implement Tauri-to-daemon bridge
 
 - [x] Rust backend uses `blueroute-client` (typed read-only bridge foundation, not yet a Tauri runtime).
