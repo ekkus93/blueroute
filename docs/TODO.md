@@ -2447,11 +2447,11 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 ## P12-001 — Bootstrap Tauri desktop app
 
-- [ ] Tauri 2.
-- [ ] TypeScript frontend.
+- [x] Tauri 2 (`apps/desktop/src-tauri`, `tauri` 2.12.5 / `tauri-build` 2.7.4, no plugins or commands registered, empty capability set, restrictive CSP).
+- [x] TypeScript frontend.
 
-- [ ] React preferred unless ADR changes it.
-- [ ] formatting/type-check/tests.
+- [x] React preferred unless ADR changes it (React 19, Vite).
+- [x] formatting/type-check/tests (prettier, `tsc`, vitest; Node 26.13.0 / npm 11.20.0 pinned).
 
 
 **Acceptance**

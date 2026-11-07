@@ -1,0 +1,18 @@
+[package]
+name = "blueroute-desktop-app"
+description = "BlueRoute Tauri 2 desktop application shell."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "=2.7.4", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.5", features = [] }
+
+[lints]
+workspace = true

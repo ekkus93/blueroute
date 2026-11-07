@@ -9,6 +9,7 @@ members = [
     "apps/cli",
     "apps/tui",
     "apps/desktop",
+    "apps/desktop/src-tauri",
 ]
 
 [workspace.package]

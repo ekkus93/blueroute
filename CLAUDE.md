@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Pure Rust workspace (edition 2024, toolchain pinned to 1.95.0). No Node/frontend exists yet; do not infer a Node requirement. Python 3 is used only for `scripts/test_p6_006_*.py`.
+Rust workspace (edition 2024, toolchain pinned to 1.95.0). Only the desktop frontend in `apps/desktop` uses Node (pinned: Node 26.13.0, npm 11.20.0; always `npm ci`). Building the workspace needs the GTK/WebKit dev libraries listed in `docs/DEVELOPMENT.md`. Python 3 is used only for `scripts/test_p6_006_*.py`.
 
 ## Required checks (CI runs all of these with `--locked`)
 
@@ -23,6 +23,8 @@ dbus-run-session -- cargo test -p <pkg> --test <file> --locked -- --ignored --ex
 - `-p blueroute-daemon --test authorization authorization_is_read_only_by_default_and_polkit_gates_mutations`
 - `-p blueroute-client --test dbus_client client_queries_events_reconnects_and_fails_closed_on_incompatibility`
 - `-p blueroute --test cli_exit_contract cli_exit_statuses_propagate_typed_broker_failures`
+
+Desktop frontend checks (run in `apps/desktop`, also in CI): `npm run format:check`, `npm run typecheck`, `npm test`, `npm run build`.
 
 Max line width is 100. The workspace forbids `unsafe_code`, and `dbg!` is denied. Warnings fail CI.
 

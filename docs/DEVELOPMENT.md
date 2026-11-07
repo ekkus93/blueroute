@@ -21,7 +21,18 @@ sudo apt install -y \
   systemd
 ```
 
-Future Linux adapter or Tauri work may add development libraries. Add them only when the implementation actually requires them, and keep this document synchronized with CI/package metadata.
+Building the whole workspace also compiles the Tauri 2 desktop shell (`apps/desktop/src-tauri`), which needs the GTK/WebKit development libraries (the same list CI installs):
+
+```bash
+sudo apt install -y \
+  libwebkit2gtk-4.1-dev \
+  libgtk-3-dev \
+  libsoup-3.0-dev \
+  librsvg2-dev \
+  libayatana-appindicator3-dev
+```
+
+Keep this list synchronized with `.github/workflows/ci.yml` and package metadata.
 
 ## Rust toolchain
 
@@ -59,7 +70,22 @@ cargo fmt --all
 
 ## Frontend toolchain
 
-Node.js is not required for the current placeholder desktop crate. When the Tauri frontend is introduced, BlueRoute will pin an explicit supported Node.js release and package-manager version in repository metadata and CI. Until that task begins, contributors should not infer a Node requirement from their local environment.
+The desktop frontend (React + TypeScript, built with Vite) lives in `apps/desktop`; the Tauri 2 Rust shell is `apps/desktop/src-tauri`. Only the desktop frontend needs Node.js; the daemon, CLI and TUI do not.
+
+- Node.js is pinned to **26.13.0** (`.node-version`, `engines` in `apps/desktop/package.json`) and npm to **11.20.0** (the npm bundled with that Node release). `.npmrc` sets `engine-strict=true` and exact saves; CI verifies both versions.
+- Dependencies are pinned exactly and locked by `apps/desktop/package-lock.json`. Always install with `npm ci`.
+- Run from `apps/desktop`:
+
+```bash
+npm ci
+npm run format:check   # prettier (npm run format to fix)
+npm run typecheck
+npm test               # vitest
+npm run build          # type-check + vite build into ui/dist
+npx tauri build --debug --no-bundle   # build the desktop binary without packaging
+```
+
+Debian packaging of the desktop application is deliberately not part of this task (P15 gates it on P12 completion).
 
 ## Test classes
 
