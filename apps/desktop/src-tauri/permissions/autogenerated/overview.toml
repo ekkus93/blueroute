@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-overview"
+description = "Enables the overview command without any pre-configured scope."
+commands.allow = ["overview"]
+
+[[permission]]
+identifier = "deny-overview"
+description = "Denies the overview command without any pre-configured scope."
+commands.deny = ["overview"]

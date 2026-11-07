@@ -2,8 +2,10 @@
 //! The platform check never guesses that a missing observation is a working radio.
 use blueroute_core::{HealthLevel, NetworkBackend, NodeCapabilities};
 use blueroute_protocol::DaemonStatus;
+use serde::Serialize;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ActionAvailability {
     /// An observed local prerequisite exists; final policy checks still apply.
     PrerequisitesObserved,
@@ -13,7 +15,8 @@ pub enum ActionAvailability {
     Unknown,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PlatformIssue {
     AdapterMissingOrDisabled,
     AdapterUnverified,
@@ -29,7 +32,7 @@ pub enum PlatformIssue {
     ProductionJoinUnavailable,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct PlatformCheck {
     pub summary: &'static str,
     pub issues: Vec<PlatformIssue>,

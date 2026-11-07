@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-platform-check"
+description = "Enables the platform_check command without any pre-configured scope."
+commands.allow = ["platform_check"]
+
+[[permission]]
+identifier = "deny-platform-check"
+description = "Denies the platform_check command without any pre-configured scope."
+commands.deny = ["platform_check"]

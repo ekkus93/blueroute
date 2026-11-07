@@ -12,6 +12,8 @@ publish = false
 tauri-build = { version = "=2.7.4", features = [] }
 
 [dependencies]
+blueroute-desktop = { path = ".." }
+blueroute-protocol = { path = "../../../crates/blueroute-protocol" }
 tauri = { version = "=2.12.5", features = [] }
 
 [lints]

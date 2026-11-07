@@ -442,12 +442,16 @@ dependencies = [
  "blueroute-client",
  "blueroute-core",
  "blueroute-protocol",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
 name = "blueroute-desktop-app"
 version = "0.1.0"
 dependencies = [
+ "blueroute-desktop",
+ "blueroute-protocol",
  "tauri",
  "tauri-build",
 ]

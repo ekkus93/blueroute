@@ -9,8 +9,10 @@ pub use platform_check::{ActionAvailability, PlatformCheck, PlatformIssue};
 use blueroute_client::{BlueRouteClient, ClientErrorKind};
 use blueroute_core::{HealthLevel, NetworkId, NodeId};
 use blueroute_protocol::{Command, DaemonStatus, NetworkSummary, NodeSummary, Response};
+use serde::Serialize;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DesktopError {
     DaemonUnavailable,
     PermissionDenied,
@@ -30,7 +32,7 @@ impl From<ClientErrorKind> for DesktopError {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct DesktopOverview {
     pub local_node: Option<NodeId>,
     pub network: Option<NetworkId>,
@@ -159,6 +161,25 @@ mod tests {
         assert_eq!(
             DesktopError::from(ClientErrorKind::Operational),
             DesktopError::Operational
+        );
+    }
+
+    #[test]
+    fn frontend_wire_shapes_are_stable_and_expose_no_internet_sharing() {
+        let overview = DesktopOverview::from(DaemonStatus {
+            api_version: ApiVersion::CURRENT,
+            local_node: None,
+            current_network: None,
+            health: HealthLevel::Healthy,
+            capabilities: NodeCapabilities::default(),
+        });
+        let json = serde_json::to_value(&overview).unwrap();
+        assert_eq!(json["health"], "healthy");
+        assert_eq!(json["authenticated_remote_peers"], serde_json::Value::Null);
+        assert_eq!(json["internet_sharing_available"], false);
+        assert_eq!(
+            serde_json::to_value(DesktopError::DaemonUnavailable).unwrap(),
+            "daemon_unavailable"
         );
     }
 }
