@@ -2506,11 +2506,13 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 ## P12-005 — Implement create-network workflow
 
-- [ ] name/create/progress/success/error.
+- [x] name/create/progress/success/error (form with trimmed, locally validated name; \"Creating…\" progress; confirmation; plain-language errors).
 
 **Acceptance**
 
 - Non-technical user creates working network on a capable Linux node without terminal commands.
+
+**Software complete / acceptance OPEN (2026-11-07):** `create_network` is the single mutating Tauri command, individually granted in the capability and backed by `DesktopBridge::create_network`, which builds the fixed `CreateNetwork` daemon command; the daemon still enforces PolicyKit (the user may be prompted for a password). The form is enabled only when the platform check observed hosting prerequisites, and join/leave remain disabled. Source `0f73b18e35bbaf18690c6b8b2a752aed90378ba8`, [exact-head CI #42414350989](https://github.com/ekkus93/blueroute/actions/runs/42414350989) **passed**. **Not demonstrated:** a real create from the GUI against a running daemon with a PolicyKit prompt, or on Bluetooth hardware; the tests fake the daemon. Because acceptance requires that, P12-005 is **SOFTWARE COMPLETE / ACCEPTANCE (live daemon, hardware) DEFERRED**, not COMPLETE.
 
 ## P12-006 — Implement nearby-network join workflow
 
