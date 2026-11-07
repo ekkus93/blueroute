@@ -22,7 +22,8 @@ export type DesktopError =
   | "permission_denied"
   | "unsupported"
   | "operational"
-  | "unexpected_response";
+  | "unexpected_response"
+  | "invalid_name";
 
 export interface PlatformCheck {
   summary: string;
@@ -61,4 +62,6 @@ export const daemon = {
   overview: () => invoke<DesktopOverview>("overview"),
   networks: () => invoke<NetworkSummary[]>("networks"),
   devices: () => invoke<NodeSummary[]>("devices"),
+  /** The only mutation. The daemon authorizes it through PolicyKit. */
+  createNetwork: (name: string) => invoke<void>("create_network", { name }),
 } as const;

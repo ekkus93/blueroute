@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App";
 import type { DaemonSignal, SubscribeToSignals } from "./signals";
@@ -35,6 +35,7 @@ function fakeApi(overrides: Partial<DaemonApi> = {}): DaemonApi {
         { id: "node-2", name: "Bob's laptop", reachability: "routed" as const },
         { id: "node-3", name: "Old PC", reachability: "unreachable" as const },
       ]),
+    createNetwork: () => Promise.resolve(),
     ...overrides,
   };
 }
@@ -48,16 +49,16 @@ function fakeSubscribe() {
   return { subscribe, send: (signal: DaemonSignal) => emit(signal) };
 }
 
-test("shows plain-language state, never offers Internet sharing, and disables unwired actions", async () => {
+test("shows plain-language state, never offers Internet sharing, and disables the unwired join action", async () => {
   render(<App api={fakeApi()} subscribe={fakeSubscribe().subscribe} />);
   expect(await screen.findByRole("heading", { name: "Your network" })).toBeTruthy();
   expect(screen.getByText("Lab")).toBeTruthy();
   expect(screen.getByText(/Connected through another device/)).toBeTruthy();
   expect(screen.getByText(/Not reachable right now/)).toBeTruthy();
   expect(screen.getByText("Working well")).toBeTruthy();
-  for (const name of ["Create a network", "Join a nearby network"]) {
-    expect((screen.getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(true);
-  }
+  expect(
+    (screen.getByRole("button", { name: "Join a nearby network" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
   expect(screen.queryByText(/internet sharing/i)).toBeNull();
 });
 
@@ -101,4 +102,58 @@ test("a failing signal subscription does not break the page", async () => {
   const subscribe = vi.fn<SubscribeToSignals>(() => Promise.reject(new Error("no events")));
   render(<App api={fakeApi()} subscribe={subscribe} />);
   expect(await screen.findByRole("heading", { name: "Your network" })).toBeTruthy();
+});
+
+function typeName(value: string) {
+  fireEvent.change(screen.getByLabelText("Network name"), { target: { value } });
+}
+
+test("creates a network with the trimmed name, confirms it and refreshes", async () => {
+  const createNetwork = vi.fn(() => Promise.resolve());
+  const networks = vi.fn(() => Promise.resolve([{ id: "net-1", name: "Lab", member_count: 1 }]));
+  render(<App api={fakeApi({ createNetwork, networks })} subscribe={fakeSubscribe().subscribe} />);
+  await screen.findByRole("heading", { name: "Your network" });
+  const button = screen.getByRole("button", { name: "Create a network" }) as HTMLButtonElement;
+  expect(button.disabled).toBe(true);
+  typeName("  Workshop ");
+  expect(button.disabled).toBe(false);
+  fireEvent.click(button);
+  expect(await screen.findByText(/“Workshop” was created/)).toBeTruthy();
+  expect(createNetwork).toHaveBeenCalledExactlyOnceWith("Workshop");
+  await waitFor(() => expect(networks.mock.calls.length).toBeGreaterThan(1));
+});
+
+test("shows plain guidance when creating fails and lets the user retry", async () => {
+  const createNetwork = vi
+    .fn<DaemonApi["createNetwork"]>()
+    .mockImplementationOnce(() => Promise.reject("permission_denied"))
+    .mockImplementationOnce(() => Promise.reject("invalid_name"));
+  render(<App api={fakeApi({ createNetwork })} subscribe={fakeSubscribe().subscribe} />);
+  await screen.findByRole("heading", { name: "Your network" });
+  typeName("Workshop");
+  fireEvent.click(screen.getByRole("button", { name: "Create a network" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("do not have permission");
+  fireEvent.click(screen.getByRole("button", { name: "Create a network" }));
+  await waitFor(() =>
+    expect(screen.getByRole("alert").textContent).toContain("That name can't be used"),
+  );
+});
+
+test("does not offer creation when the computer cannot start a network", async () => {
+  const platformCheck = () =>
+    Promise.resolve({
+      summary: "Bluetooth is off.",
+      issues: ["adapter_missing_or_disabled" as const],
+      create: "blocked" as const,
+      join: "blocked" as const,
+      join_enabled: false,
+      internet_sharing_enabled: false,
+    });
+  render(<App api={fakeApi({ platformCheck })} subscribe={fakeSubscribe().subscribe} />);
+  await screen.findByRole("heading", { name: "Your network" });
+  expect((screen.getByLabelText("Network name") as HTMLInputElement).disabled).toBe(true);
+  expect(
+    (screen.getByRole("button", { name: "Create a network" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  expect(screen.getByText(/Starting a network: Not available on this computer/)).toBeTruthy();
 });

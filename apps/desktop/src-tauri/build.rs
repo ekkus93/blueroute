@@ -1,6 +1,13 @@
 //! Declares the application's complete Tauri command surface. Every command must be
 //! listed here and individually granted in `capabilities/`; nothing is allowed by default.
-const COMMANDS: &[&str] = &["platform_check", "overview", "networks", "devices"];
+//! `create_network` is the only mutating command.
+const COMMANDS: &[&str] = &[
+    "platform_check",
+    "overview",
+    "networks",
+    "devices",
+    "create_network",
+];
 
 fn main() {
     tauri_build::try_build(

@@ -1,9 +1,12 @@
-// Read-only desktop UI over typed daemon snapshots (P12-002/004/007/008/010, partial).
-// Creating, joining and leaving networks are not wired yet: those buttons stay disabled and
-// say so. There is deliberately no Internet-sharing UI (v1 keeps it off).
+// Desktop UI over typed daemon snapshots (P12-002/004/005/007/008, partial). Creating a network
+// is the only mutation. Joining and leaving are not wired yet: join stays disabled and says so.
+// There is deliberately no Internet-sharing UI (v1 keeps it off).
+import { useState } from "react";
 import "./App.css";
+import { daemon as realDaemon } from "./daemon";
+import type { DesktopError } from "./daemon";
 import { AVAILABILITY_TEXT, ERROR_TEXT, HEALTH_TEXT, ISSUE_TEXT, REACHABILITY_TEXT } from "./text";
-import { useDaemon } from "./useDaemon";
+import { normalizeError, useDaemon } from "./useDaemon";
 import type { DaemonApi, Snapshot } from "./useDaemon";
 import type { SubscribeToSignals } from "./signals";
 
@@ -13,7 +16,8 @@ export interface AppProps {
 }
 
 export function App({ api, subscribe }: AppProps) {
-  const { view, link, refresh } = useDaemon(api, subscribe);
+  const effectiveApi = api ?? realDaemon;
+  const { view, link, refresh } = useDaemon(effectiveApi, subscribe);
 
   return (
     <main>
@@ -38,12 +42,22 @@ export function App({ api, subscribe }: AppProps) {
         </section>
       )}
 
-      {view.phase === "ready" && <Ready snapshot={view.snapshot} />}
+      {view.phase === "ready" && (
+        <Ready snapshot={view.snapshot} api={effectiveApi} onChanged={refresh} />
+      )}
     </main>
   );
 }
 
-function Ready({ snapshot }: { snapshot: Snapshot }) {
+function Ready({
+  snapshot,
+  api,
+  onChanged,
+}: {
+  snapshot: Snapshot;
+  api: DaemonApi;
+  onChanged: () => void;
+}) {
   const { platform, overview, networks, devices } = snapshot;
   return (
     <>
@@ -57,18 +71,20 @@ function Ready({ snapshot }: { snapshot: Snapshot }) {
             ))}
           </ul>
         )}
+        <CreateNetwork
+          available={platform.create === "prerequisites_observed"}
+          availability={AVAILABILITY_TEXT[platform.create]}
+          api={api}
+          onCreated={onChanged}
+        />
         <p>
-          <button type="button" disabled aria-describedby="start-note">
-            Create a network
-          </button>{" "}
-          <button type="button" disabled aria-describedby="start-note">
+          <button type="button" disabled aria-describedby="join-note">
             Join a nearby network
           </button>
         </p>
-        <p id="start-note" className="muted">
-          Starting ({AVAILABILITY_TEXT[platform.create]}) and joining (
-          {AVAILABILITY_TEXT[platform.join]}) from this app are coming soon. For now, use the{" "}
-          <code>blueroute</code> command.
+        <p id="join-note" className="muted">
+          Joining ({AVAILABILITY_TEXT[platform.join]}) from this app is coming soon. For now, use
+          the <code>blueroute</code> command.
         </p>
       </section>
 
@@ -142,4 +158,73 @@ function deviceCount(count: number): string {
 function tri(value: boolean | null): string {
   if (value === null) return "not confirmed yet";
   return value ? "yes" : "no";
+}
+
+type CreateState =
+  | { phase: "idle" }
+  | { phase: "busy" }
+  | { phase: "done"; name: string }
+  | { phase: "failed"; error: DesktopError | "unknown" };
+
+function CreateNetwork({
+  available,
+  availability,
+  api,
+  onCreated,
+}: {
+  available: boolean;
+  availability: string;
+  api: DaemonApi;
+  onCreated: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [state, setState] = useState<CreateState>({ phase: "idle" });
+  const busy = state.phase === "busy";
+
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    const trimmed = name.trim();
+    if (!available || busy || trimmed === "") return;
+    setState({ phase: "busy" });
+    api.createNetwork(trimmed).then(
+      () => {
+        setState({ phase: "done", name: trimmed });
+        setName("");
+        onCreated();
+      },
+      (error: unknown) => setState({ phase: "failed", error: normalizeError(error) }),
+    );
+  };
+
+  return (
+    <form onSubmit={submit} aria-label="Create a network">
+      <p>
+        <label htmlFor="network-name">Network name</label>
+        <br />
+        <input
+          id="network-name"
+          type="text"
+          maxLength={64}
+          value={name}
+          disabled={!available || busy}
+          onChange={(event) => setName(event.target.value)}
+          aria-describedby="create-note"
+        />{" "}
+        <button type="submit" disabled={!available || busy || name.trim() === ""}>
+          {busy ? "Creating…" : "Create a network"}
+        </button>
+      </p>
+      <p id="create-note" className="muted">
+        {available
+          ? "You may be asked for your password to allow this."
+          : `Starting a network: ${availability}.`}
+      </p>
+      {state.phase === "done" && <p role="status">The network “{state.name}” was created.</p>}
+      {state.phase === "failed" && (
+        <p role="alert">
+          <strong>{ERROR_TEXT[state.error].title}.</strong> {ERROR_TEXT[state.error].help}
+        </p>
+      )}
+    </form>
+  );
 }

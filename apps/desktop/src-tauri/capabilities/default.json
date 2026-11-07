@@ -1,13 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: only the four read-only BlueRoute daemon snapshot commands plus listening (never emitting) for events. No plugins, filesystem, shell or opener access.",
+  "description": "Main window: the four read-only BlueRoute daemon snapshot commands, create_network, plus listening (never emitting) for events. No plugins, filesystem, shell or opener access.",
   "windows": ["main"],
   "permissions": [
     "allow-platform-check",
     "allow-overview",
     "allow-networks",
     "allow-devices",
+    "allow-create-network",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

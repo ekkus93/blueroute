@@ -47,6 +47,10 @@ export const ERROR_TEXT: Record<DesktopError | "unknown", { title: string; help:
     title: "BlueRoute's service gave an unexpected answer",
     help: "The app and the background service may be different versions. Update both to the same version.",
   },
+  invalid_name: {
+    title: "That name can't be used",
+    help: "Use 1 to 64 characters, without line breaks or other control characters.",
+  },
   unknown: {
     title: "Something went wrong",
     help: "Try again in a moment.",

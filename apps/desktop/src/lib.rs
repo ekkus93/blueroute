@@ -1,7 +1,8 @@
-//! Typed, read-only desktop-to-daemon boundary.
+//! Typed desktop-to-daemon boundary.
 //!
-//! A future Tauri 2 command layer can expose these narrow snapshots without
-//! granting web content raw D-Bus access or arbitrary daemon command dispatch.
+//! The Tauri command layer exposes these narrow operations without granting web content raw
+//! D-Bus access or arbitrary daemon command dispatch. Everything is a read-only snapshot except
+//! `create_network`, the single mutation, which the daemon still authorizes through PolicyKit.
 mod platform_check;
 mod watch;
 
@@ -9,7 +10,7 @@ pub use platform_check::{ActionAvailability, PlatformCheck, PlatformIssue};
 pub use watch::{DaemonSignal, reconnect_delay, watch_daemon};
 
 use blueroute_client::{BlueRouteClient, ClientErrorKind};
-use blueroute_core::{HealthLevel, NetworkId, NodeId};
+use blueroute_core::{DisplayName, HealthLevel, NetworkId, NodeId};
 use blueroute_protocol::{Command, DaemonStatus, NetworkSummary, NodeSummary, Response};
 use serde::Serialize;
 
@@ -21,6 +22,8 @@ pub enum DesktopError {
     Unsupported,
     Operational,
     UnexpectedResponse,
+    /// The requested name was rejected locally before contacting the daemon.
+    InvalidName,
 }
 
 impl From<ClientErrorKind> for DesktopError {
@@ -63,7 +66,13 @@ impl From<DaemonStatus> for DesktopOverview {
     }
 }
 
-/// No caller-provided command is accepted. This bridge is read-only by construction.
+/// Validate a user-typed network name exactly as the shared domain type does.
+fn network_name(raw: &str) -> Result<DisplayName, DesktopError> {
+    DisplayName::new(raw.trim()).map_err(|_| DesktopError::InvalidName)
+}
+
+/// No caller-provided command is accepted: each method builds its own fixed daemon command.
+/// Snapshots are read-only; `create_network` is the only mutation.
 pub struct DesktopBridge {
     client: BlueRouteClient,
 }
@@ -85,6 +94,21 @@ impl DesktopBridge {
             .await
             .map(|status| PlatformCheck::from_status(&status))
             .map_err(|error| DesktopError::from(error.kind()))
+    }
+
+    /// Create a network hosted by this computer. The daemon enforces PolicyKit authorization,
+    /// idempotency and capability checks; this method adds no extra privilege.
+    pub async fn create_network(&self, name: &str) -> Result<(), DesktopError> {
+        let name = network_name(name)?;
+        match self
+            .client
+            .request(&Command::CreateNetwork { name })
+            .await
+            .map_err(|error| DesktopError::from(error.kind()))?
+        {
+            Response::Ack => Ok(()),
+            _ => Err(DesktopError::UnexpectedResponse),
+        }
     }
 
     pub async fn overview(&self) -> Result<DesktopOverview, DesktopError> {
@@ -164,6 +188,14 @@ mod tests {
             DesktopError::from(ClientErrorKind::Operational),
             DesktopError::Operational
         );
+    }
+
+    #[test]
+    fn network_names_are_trimmed_and_validated_before_any_daemon_call() {
+        assert_eq!(network_name("  Workshop ").unwrap().as_str(), "Workshop");
+        for bad in ["", "   ", "bad\nname", &"x".repeat(65)] {
+            assert_eq!(network_name(bad), Err(DesktopError::InvalidName), "{bad:?}");
+        }
     }
 
     #[test]

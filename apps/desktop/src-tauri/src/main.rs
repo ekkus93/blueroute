@@ -1,6 +1,7 @@
 //! Tauri 2 shell for the BlueRoute desktop UI.
 //!
-//! The frontend can call only the four read-only commands below. Each connects through
+//! The frontend can call only the five commands below: four read-only snapshots plus
+//! `create_network`. Each connects through
 //! the shared version-gated `blueroute-client` (via `blueroute-desktop`), so the web
 //! content never gets D-Bus, shell, filesystem or arbitrary daemon-command access, and
 //! every failure reaches it as a coarse, typed `DesktopError`. Daemon changes reach it only
@@ -26,6 +27,12 @@ async fn networks() -> Result<Vec<NetworkSummary>, DesktopError> {
     DesktopBridge::connect().await?.networks().await
 }
 
+/// The only mutating command. The daemon authorizes it through PolicyKit.
+#[tauri::command]
+async fn create_network(name: String) -> Result<(), DesktopError> {
+    DesktopBridge::connect().await?.create_network(&name).await
+}
+
 #[tauri::command]
 async fn devices() -> Result<Vec<NodeSummary>, DesktopError> {
     DesktopBridge::connect().await?.devices().await
@@ -37,7 +44,8 @@ fn main() {
             platform_check,
             overview,
             networks,
-            devices
+            devices,
+            create_network
         ])
         .setup(|app| {
             // Payload-free signals only; the UI re-reads typed snapshots on each one.

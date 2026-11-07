@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-network"
+description = "Enables the create_network command without any pre-configured scope."
+commands.allow = ["create_network"]
+
+[[permission]]
+identifier = "deny-create-network"
+description = "Denies the create_network command without any pre-configured scope."
+commands.deny = ["create_network"]

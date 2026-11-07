@@ -15,6 +15,7 @@ export interface DaemonApi {
   overview: () => Promise<DesktopOverview>;
   networks: () => Promise<NetworkSummary[]>;
   devices: () => Promise<NodeSummary[]>;
+  createNetwork: (name: string) => Promise<void>;
 }
 
 export interface Snapshot {
@@ -36,6 +37,7 @@ const ERRORS: ReadonlySet<string> = new Set([
   "unsupported",
   "operational",
   "unexpected_response",
+  "invalid_name",
 ]);
 
 export function normalizeError(error: unknown): DesktopError | "unknown" {

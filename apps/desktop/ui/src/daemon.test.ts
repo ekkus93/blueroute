@@ -9,7 +9,7 @@ beforeEach(() => {
   invoke.mockReset();
 });
 
-test("each snapshot maps to exactly one read-only Tauri command", async () => {
+test("each call maps to exactly one fixed Tauri command", async () => {
   invoke.mockResolvedValue([]);
   await daemon.platformCheck();
   await daemon.overview();
