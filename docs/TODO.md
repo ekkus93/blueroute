@@ -2464,12 +2464,14 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 - [x] Rust backend uses `blueroute-client` (typed read-only bridge foundation, not yet a Tauri runtime).
 - [x] narrow Tauri commands (`platform_check`, `overview`, `networks`, `devices` registered; each individually granted via the app manifest and default capability).
-- [ ] safe event forwarding.
-- [ ] no arbitrary command execution (bridge exposes no caller-supplied command or shell invocation; final Tauri audit pending).
+- [x] safe event forwarding (payload-free `daemon-signal` connected/changed/disconnected only; bounded 1s–30s reconnect backoff; capability grants listen/unlisten, never emit).
+- [x] no arbitrary command execution (2026-11-07 audit: no Tauri plugins, no `std::process`/shell/fs use in desktop or `src-tauri`, exactly four app commands each granted individually, no `core:default`, no `withGlobalTauri`/dangerous config, restrictive CSP).
 
 **Acceptance**
 
 - Frontend renders live daemon state without direct system D-Bus access.
+
+**Software partial (2026-11-07, signals and read-only UI):** `apps/desktop/src/watch.rs` forwards only payload-free `connected`/`changed`/`disconnected` signals (daemon event payloads are never sent to web content). The React UI (`useDaemon`, coalesced refresh on each signal) renders live typed snapshots in plain language: first-run readiness, the network and device lists with friendly reachability wording (for example \"Connected through another device\"), IDs only under collapsed \"Technical details\", and actionable messages for each daemon error. Create/join buttons are intentionally disabled with an explanatory note; there is no Internet-sharing UI. Source `799d01203fd1b5cf606675a9062d0159d96f95a1`, [exact-head CI #42412516220](https://github.com/ekkus93/blueroute/actions/runs/42412516220) **passed**; the debug binary was also started locally and ran without crashing. **All P12-002 subtasks are done, but the acceptance is not claimed:** the UI has not been observed rendering live daemon state in a visible window or against a running daemon, only through jsdom tests with a faked daemon. P12-002 stays OPEN pending that observation. No Bluetooth hardware acceptance is claimed.
 
 **Software partial (2026-11-07):** The Tauri 2 shell registers exactly four read-only commands (`platform_check`, `overview`, `networks`, `devices`), declared in `src-tauri/build.rs`'s app manifest and individually granted by `capabilities/default.json` (no plugins, shell, filesystem or opener access). Bridge types now have stable snake_case serde wire shapes, and the frontend has a typed `invoke` wrapper (`ui/src/daemon.ts`) with vitest coverage. Source `891e6cd8987dd623d57c4883607acbd2e995675d`, [exact-head CI #42409652334](https://github.com/ekkus93/blueroute/actions/runs/42409652334) **passed**. **P12-002 remains OPEN:** safe event forwarding, a final no-arbitrary-execution audit of the Tauri surface, and the acceptance (frontend rendering live daemon state in the running app) are not done; the commands were not exercised against a live daemon through the GUI. No Bluetooth hardware acceptance is claimed.
 
@@ -2497,6 +2499,8 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 **Acceptance**
 
 - User sees actionable capability explanation, never “unsupported Chromebook” logic.
+
+**Software partial UI (2026-11-07):** The \"Get started\" section renders `platform_check()` in plain language (each `PlatformIssue` has actionable wording; no model-specific logic). Create/join controls are shown disabled because no mutating commands exist yet. Covered by jsdom tests at `799d012` ([CI #42412516220](https://github.com/ekkus93/blueroute/actions/runs/42412516220)). **P12-004 remains OPEN:** actual create/join availability, live platform acceptance and a visible-window check are not done.
 
 **Software partial (2026-11-04):** The typed desktop daemon bridge now exposes `platform_check()` backed by the version-checked local `DaemonStatus`. Its pure `PlatformCheck` model distinguishes missing/disabled versus unknown adapters, PANU versus NAP roles, the supported NetworkManager backend, and degraded/reconnecting/error daemon health; it computes separate create/join prerequisite states without treating unknown as supported. Production Join remains **disabled even when prerequisites are observed**, and Internet sharing remains hidden. Deterministic tests cover unknown, fully observed, unsupported and asymmetric PAN role cases. CI passed at `2b5d607fc41f043416ba040f2dbc63dc21810b0f`, [run #41815978661](https://github.com/ekkus93/blueroute/actions/runs/41815978661). **P12-004 remains OPEN**: Tauri/React first-run screen, UI integration, live platform acceptance and final action availability require implementation; this is a read-only model, not hardware evidence or permission to join.
 
