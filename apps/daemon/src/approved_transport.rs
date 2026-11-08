@@ -535,6 +535,81 @@ mod tests {
         drop(first);
     }
 
+    fn joiner_trust(
+        path: &Path,
+        host: &PinnedControlTlsPeer,
+        recorded_key: SpkiSha256,
+    ) -> DurablePeerTrustOperations {
+        // A prospective joiner: no membership at all, only the operator-confirmed host record.
+        let memberships = NetworkMembershipStore::new(path.join("joiner-memberships"));
+        let pending = Arc::new(crate::PendingJoinOperations::new(
+            NetworkMembershipStore::new(path.join("joiner-memberships")),
+            crate::PendingJoinStore::new(path.join("joiner-pending")),
+        ));
+        pending
+            .record_host(
+                crate::PendingJoinHost::new(host.network(), host.node(), recorded_key).unwrap(),
+            )
+            .unwrap();
+        DurablePeerTrustOperations::with_peer_pin_store(
+            memberships,
+            PeerPinStore::new(path.join("joiner-pins")),
+        )
+        .with_pending_join(pending)
+    }
+
+    #[test]
+    fn a_non_member_joiner_authenticates_only_the_recorded_host_over_mutual_tls() {
+        let client = LocalControlTlsIdentity::generate(node(1)).unwrap();
+        let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
+        let client_pin =
+            PinnedControlTlsPeer::new(network(), client.node(), client.fingerprint()).unwrap();
+        let server_pin =
+            PinnedControlTlsPeer::new(network(), server.node(), server.fingerprint()).unwrap();
+        let server_fingerprint = server.fingerprint();
+        let (client_socket, server_socket) = socket_pair();
+        let server_thread = thread::spawn(move || {
+            // The host is a member that has already approved and pinned the joiner.
+            let dir = TestDirectory::new();
+            let trust = trust_for(&dir.0, client_pin.node(), client_pin.fingerprint(), true);
+            accept_approved_control_session(server_socket, &server, &[client_pin], &trust, setup())
+                .map(|session| *session.session_id())
+        });
+        let dir = TestDirectory::new();
+        let trust = joiner_trust(&dir.0, &server_pin, server_fingerprint);
+        let session =
+            connect_approved_control_session(client_socket, &client, server_pin, &trust, setup())
+                .unwrap();
+        assert_eq!(
+            &server_thread.join().unwrap().unwrap(),
+            session.session_id()
+        );
+    }
+
+    #[test]
+    fn a_joiner_whose_recorded_key_differs_never_starts_tls() {
+        let client = LocalControlTlsIdentity::generate(node(1)).unwrap();
+        let server = LocalControlTlsIdentity::generate(node(2)).unwrap();
+        let other = LocalControlTlsIdentity::generate(node(3)).unwrap();
+        let server_pin =
+            PinnedControlTlsPeer::new(network(), server.node(), server.fingerprint()).unwrap();
+        let dir = TestDirectory::new();
+        // The operator confirmed a different key than the one the dial expects.
+        let trust = joiner_trust(&dir.0, &server_pin, other.fingerprint());
+        let (socket, mut remote) = socket_pair();
+        assert!(matches!(
+            connect_approved_control_session(socket, &client, server_pin, &trust, setup()),
+            Err(ControlSessionError::Ingress(
+                PinnedIngressError::Authorization(_)
+            ))
+        ));
+        remote
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let mut byte = [0_u8; 1];
+        assert_eq!(remote.read(&mut byte).unwrap(), 0);
+    }
+
     #[test]
     fn stale_revoked_pin_cannot_deny_a_different_approved_tls_peer() {
         let client = LocalControlTlsIdentity::generate(node(1)).unwrap();

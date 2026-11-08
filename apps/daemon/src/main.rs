@@ -65,18 +65,21 @@ async fn run() -> Result<(), Box<dyn Error>> {
     // P7 prerequisites.
     let peer_pin_store = PeerPinStore::new(peer_pin_directory(&state_directory));
     peer_pin_store.load()?;
-    let peer_trust_operations = Arc::new(DurablePeerTrustOperations::with_peer_pin_store(
-        NetworkMembershipStore::new(membership_path.clone()),
-        peer_pin_store,
-    ));
-    let join_network_operations = Arc::new(TransactionalJoinNetworkOperations::with_ipv4_pool(
-        NetworkMembershipStore::new(membership_path.clone()),
-        config.ipv4_address_pool,
-    )?);
     let pending_join_operations = Arc::new(PendingJoinOperations::new(
         NetworkMembershipStore::new(membership_path.clone()),
         PendingJoinStore::new(pending_join_directory(&state_directory)),
     ));
+    let peer_trust_operations = Arc::new(
+        DurablePeerTrustOperations::with_peer_pin_store(
+            NetworkMembershipStore::new(membership_path.clone()),
+            peer_pin_store,
+        )
+        .with_pending_join(pending_join_operations.clone()),
+    );
+    let join_network_operations = Arc::new(TransactionalJoinNetworkOperations::with_ipv4_pool(
+        NetworkMembershipStore::new(membership_path.clone()),
+        config.ipv4_address_pool,
+    )?);
     let network_operations = Arc::new(SingleStarNetworkOperations::new(
         NetworkMembershipStore::new(membership_path),
         config.clone(),

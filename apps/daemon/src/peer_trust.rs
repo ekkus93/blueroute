@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
 use blueroute_core::{CoreError, ErrorKind, NetworkId, NodeId};
@@ -8,7 +8,7 @@ use blueroute_linux::{BluetoothBackend, BluezBackend, NetworkMembershipStore, Pe
 use blueroute_protocol::peer_pin::SpkiSha256;
 
 use crate::peer_pin_store::PeerPinFileLock;
-use crate::{PeerPinStore, PinnedControlTlsPeer, current_network};
+use crate::{PeerPinStore, PendingJoinOperations, PinnedControlTlsPeer, current_network};
 
 pub type PeerTrustFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, CoreError>> + Send + 'a>>;
 
@@ -20,6 +20,8 @@ pub trait PeerTrustOperations: Send + Sync {
 pub struct DurablePeerTrustOperations {
     store: NetworkMembershipStore,
     pin_store: Option<PeerPinStore>,
+    // Joiner-side fallback (P6-004 option A), used only while this node is in no network.
+    pending_join: Option<Arc<PendingJoinOperations>>,
     // Serialize read/modify/write state transitions within the one D-Bus
     // daemon. This does not protect against unauthorized external file edits
     // or independently running daemon processes.
@@ -41,6 +43,7 @@ impl DurablePeerTrustOperations {
         Self {
             store,
             pin_store: None,
+            pending_join: None,
             state_lock: Mutex::new(()),
         }
     }
@@ -51,8 +54,18 @@ impl DurablePeerTrustOperations {
         Self {
             store,
             pin_store: Some(pins),
+            pending_join: None,
             state_lock: Mutex::new(()),
         }
+    }
+
+    /// Let a node that is in **no** network authorize exactly the operator-confirmed pending
+    /// join host (network, node and key) for pinned TLS. Every member-side decision, including
+    /// approval lists for inbound sessions, keeps its original member-only behavior; the
+    /// fallback never applies once this node has a current network.
+    pub fn with_pending_join(mut self, pending_join: Arc<PendingJoinOperations>) -> Self {
+        self.pending_join = Some(pending_join);
+        self
     }
 
     fn lock_state(&self) -> Result<PeerTrustStateGuard<'_>, CoreError> {
@@ -184,6 +197,14 @@ impl DurablePeerTrustOperations {
         operation: impl FnOnce() -> T,
     ) -> Result<T, CoreError> {
         let _guard = self.lock_state()?;
+        if let Some(pending) = &self.pending_join
+            && current_network(&self.store.load()?)?.is_none()
+        {
+            // Joiner: only the recorded host and its confirmed key are acceptable. The TLS
+            // layer has already proven possession of that key before this is consulted.
+            pending.require_host_pin(network, node, verified_spki_sha256)?;
+            return Ok(operation());
+        }
         self.require_peer_approved(network, node)?;
         let store = self.pin_store.as_ref().ok_or_else(|| {
             CoreError::new(
@@ -840,5 +861,115 @@ mod tests {
         );
         assert_eq!(trust.pin_store.as_ref().unwrap().load().unwrap().len(), 1);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    mod joiner {
+        use super::*;
+        use crate::{PendingJoinHost, PendingJoinStore};
+
+        fn pin(value: u8) -> SpkiSha256 {
+            SpkiSha256::from_verified_certificate_digest([value; 32]).unwrap()
+        }
+
+        struct Fixture {
+            root: std::path::PathBuf,
+            pending: Arc<PendingJoinOperations>,
+            trust: DurablePeerTrustOperations,
+            network: NetworkId,
+            host: NodeId,
+        }
+
+        fn fixture(label: &str, with_pending: bool) -> Fixture {
+            let (root, store) = temp_store(label);
+            let pending = Arc::new(PendingJoinOperations::new(
+                NetworkMembershipStore::new(root.join("memberships-v1")),
+                PendingJoinStore::new(root.join("pending")),
+            ));
+            let mut trust = DurablePeerTrustOperations::with_peer_pin_store(
+                store,
+                PeerPinStore::new(root.join("pins")),
+            );
+            if with_pending {
+                trust = trust.with_pending_join(pending.clone());
+            }
+            Fixture {
+                root,
+                pending,
+                trust,
+                network: NetworkId::from_bytes([0x51; 16]),
+                host: NodeId::from_bytes([0x62; 16]),
+            }
+        }
+
+        #[test]
+        fn recorded_host_and_exact_key_authorize_a_node_in_no_network() {
+            let f = fixture("joiner-ok", true);
+            f.pending
+                .record_host(PendingJoinHost::new(f.network, f.host, pin(7)).unwrap())
+                .unwrap();
+            assert_eq!(
+                f.trust
+                    .with_approved_pinned_tls_peer(f.network, f.host, pin(7), || 42)
+                    .unwrap(),
+                42
+            );
+            for (network, node, key) in [
+                (NetworkId::from_bytes([0x52; 16]), f.host, pin(7)),
+                (f.network, NodeId::from_bytes([0x63; 16]), pin(7)),
+                (f.network, f.host, pin(8)),
+            ] {
+                assert_eq!(
+                    f.trust
+                        .require_approved_pinned_tls_peer(network, node, key)
+                        .unwrap_err()
+                        .kind(),
+                    ErrorKind::AuthenticationFailed
+                );
+            }
+            let _ = fs::remove_dir_all(f.root);
+        }
+
+        #[test]
+        fn without_a_record_or_without_the_fallback_a_non_member_is_refused() {
+            let none = fixture("joiner-none", true);
+            assert!(
+                none.trust
+                    .require_approved_pinned_tls_peer(none.network, none.host, pin(7))
+                    .is_err()
+            );
+            let disabled = fixture("joiner-off", false);
+            disabled
+                .pending
+                .record_host(PendingJoinHost::new(disabled.network, disabled.host, pin(7)).unwrap())
+                .unwrap();
+            // The trust object was built without the fallback, so the record is ignored.
+            assert!(
+                disabled
+                    .trust
+                    .require_approved_pinned_tls_peer(disabled.network, disabled.host, pin(7))
+                    .is_err()
+            );
+            let _ = fs::remove_dir_all(none.root);
+            let _ = fs::remove_dir_all(disabled.root);
+        }
+
+        #[test]
+        fn once_a_member_only_member_rules_apply_and_the_record_is_ignored() {
+            let f = fixture("joiner-member", true);
+            f.pending
+                .record_host(PendingJoinHost::new(f.network, f.host, pin(7)).unwrap())
+                .unwrap();
+            seed_current_network(
+                &NetworkMembershipStore::new(f.root.join("memberships-v1")),
+                f.network,
+            );
+            // Now a member: the host is neither approved nor pinned in the member stores.
+            assert!(
+                f.trust
+                    .require_approved_pinned_tls_peer(f.network, f.host, pin(7))
+                    .is_err()
+            );
+            let _ = fs::remove_dir_all(f.root);
+        }
     }
 }
