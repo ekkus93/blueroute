@@ -1,6 +1,6 @@
 ---
 name: ci-check
-description: Run the BlueRoute CI checks locally (fmt, check, clippy, test, and the ignored D-Bus integration tests) and report failures.
+description: Run the BlueRoute CI checks locally (fmt, check, clippy, test, the ignored D-Bus integration tests, and the desktop frontend checks) and report failures.
 disable-model-invocation: true
 ---
 
@@ -16,5 +16,12 @@ Run these in order from the repo root and stop at the first failure, reporting t
    - `dbus-run-session -- cargo test -p blueroute-client --test dbus_client --locked -- --ignored --exact client_queries_events_reconnects_and_fails_closed_on_incompatibility`
    - `dbus-run-session -- cargo test -p blueroute --test cli_exit_contract --locked -- --ignored --exact cli_exit_statuses_propagate_typed_broker_failures`
 6. If scripts/ changed: `python3 -m unittest discover -s scripts -p 'test_p6_006_*.py' -v`
+
+7. Desktop frontend, mirroring the "Desktop frontend" CI job (run from `apps/desktop`; Node 26.13.0 / npm 11.20.0 are pinned, see `docs/DEVELOPMENT.md`; if the versions do not match, report it instead of working around it):
+   - `npm ci`
+   - `npm run format:check` (if it fails, run `npm run format` and re-check)
+   - `npm run typecheck`
+   - `npm test`
+   - `npm run build`
 
 Finish with a pass/fail summary per step. Packaging checks (systemd-analyze, Debian build) need sudo and run in CI only; mention them as not run locally.
