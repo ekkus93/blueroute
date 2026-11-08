@@ -14,6 +14,7 @@ mod join_network;
 mod outbound_control;
 mod peer_pin_store;
 mod peer_trust;
+mod pending_join;
 mod pinned_ingress;
 mod registered_transport;
 mod runtime_health;
@@ -69,6 +70,7 @@ pub use peer_pin_store::PeerPinStore;
 pub use peer_trust::{
     DurablePeerTrustOperations, PeerTrustFuture, PeerTrustOperations, pair_and_trust_bluetooth_peer,
 };
+pub use pending_join::{PendingJoinHost, PendingJoinOperations, PendingJoinStore};
 pub use pinned_ingress::{PinnedIngressError, PinnedSessionIngress, VerifiedTlsIdentity};
 pub use registered_transport::{
     AuthenticatedNapTicket, RegisteredControlSession, RegisteredNapControlOwner,

@@ -182,3 +182,13 @@ Options (needs a maintainer decision):
 - **C. Authenticate first with a one-shot, in-memory pin supplied with the join request.** Avoids new durable state, but loses revocation-before-commit semantics and survives neither daemon restart nor audit. Not recommended.
 
 Until one is chosen, D1 step 2 and D3 are **not implementable as written**, and no join wiring code should be started.
+
+### Decision on R1 (2026-11-07): option A accepted
+
+The maintainer chose **A, the joiner-side pending-join record**. D1 step 2 and D3 are amended as follows (this supersedes their original wording):
+
+- **D1 (amended):** the operator records the confirmed host `(NetworkId, NodeId, SPKI SHA-256)` as the single pending-join host through an explicit, PolicyKit-authorized action. The member-only approval layer is not used before the join. A different host is never replaced silently (clear first); a node already in a network cannot record or use one.
+- **D3 (amended):** the outbound dial and its supervision check `PendingJoinOperations::require_host_pin` (exact network, node and key; still in no network) instead of `require_approved_pinned_tls_peer`. The TLS handshake and exporter-bound Hello still prove possession of that key. The member-only functions are unchanged. After the join commits `Member`, the pin must be enrolled into the member pin store (host-side semantics) in the same durable step or the join does not commit, then the pending record is cleared.
+- **Cleared** on success, on any rollback and on leave, so a stale record cannot authorize a later attempt.
+
+Implemented so far (software only, gate still closed): `apps/daemon/src/pending_join.rs` (`PendingJoinHost`, `PendingJoinStore`, `PendingJoinOperations`) with an owner-only, versioned, size-bounded, single-record file that rejects symlinks, zero identities, corrupt or future formats. **Not yet done:** the PolicyKit-gated D-Bus/CLI action to record and clear the host, a joiner variant of `connect_registered_panu_control_session` and the supervision loop, the peer locator, `establish_panu`, the supervisor and the enrolment-on-commit step.
