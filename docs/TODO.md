@@ -2538,7 +2538,7 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 - Dashboard tracks topology changes accurately.
 
-**Software partial (2026-11-07):** The dashboard now has \"Leave this network\" with a confirmation step, backed by a second individually granted Tauri mutation, `leave_network` (no arguments; the daemon enforces PolicyKit and cleans up only BlueRoute-owned resources). A refused leave shows the actionable reason and keeps the network shown. Health, device count and \"Connected through another device\" wording were already present. **P12-007 remains OPEN:** the leave button is not demonstrated against a live daemon, and topology-change accuracy has no live check; the daemon-side leave behavior is covered by its own tests.
+**Software partial (2026-11-07):** The dashboard now has \"Leave this network\" with a confirmation step, backed by a second individually granted Tauri mutation, `leave_network` (no arguments; the daemon enforces PolicyKit and cleans up only BlueRoute-owned resources). A refused leave shows the actionable reason and keeps the network shown. Health, device count and \"Connected through another device\" wording were already present. Source `011c8dee1e1cf9759f0788d26741dcc8d3ae580d`, [exact-head CI #42431795156](https://github.com/ekkus93/blueroute/actions/runs/42431795156) **passed**. **P12-007 remains OPEN:** the leave button is not demonstrated against a live daemon, and topology-change accuracy has no live check; the daemon-side leave behavior is covered by its own tests.
 
 ## P12-008 — Implement device/details UI
 
