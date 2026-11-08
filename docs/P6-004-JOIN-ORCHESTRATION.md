@@ -104,7 +104,7 @@ The remaining implementation dependency is the minimum P7 control-plane work req
 
 ## Addendum (2026-11-07, PROPOSED): production wiring design
 
-**Status: proposal for review. Nothing here is implemented or accepted.** It records the decisions needed before the three production stubs (`preflight`, `establish_panu`, `start_control_session`/`stop_control_session`) can be wired. Production `JoinNetwork` stays fail-closed throughout. Where this text names an existing primitive, its contract is the one documented in P6-003, P7-001, P7-003 and P7-004; verify against the code before implementing.
+**Status: proposal. The four open questions below were answered by the maintainer on 2026-11-07 (see "Maintainer answers"), but a code review of the trust layer found a conflict in D1/D3 (see "Review finding R1") that must be resolved before implementation. Nothing here is implemented.** It records the decisions needed before the three production stubs (`preflight`, `establish_panu`, `start_control_session`/`stop_control_session`) can be wired. Production `JoinNetwork` stays fail-closed throughout. Where this text names an existing primitive, its contract is the one documented in P6-003, P7-001, P7-003 and P7-004; verify against the code before implementing.
 
 ### D1. Who the host is: operator-confirmed identity, not the advertisement
 
@@ -157,3 +157,28 @@ A `PeerLocator` boundary maps a `NetworkId` to candidate BlueZ `PeerHandle`s (de
 ### Consequences for P12
 
 The desktop Join workflow (P12-006) stays disabled until D5 step 3. The UI must collect the host identity (D1) and present the fingerprint comparison before enabling Join; it must not present advertised networks as joinable by themselves.
+
+### Maintainer answers (2026-11-07)
+
+1. Exactly one approved host per network; reject zero or several. **Accepted.**
+2. Typed host `NodeId` and fingerprint (CLI first; the GUI shows the fingerprint in groups and asks the user to confirm). Invitation codes/QR are a later, separately specified feature. **Accepted.**
+3. Supervisor loss after commit keeps durable `Member`, marks the runtime unhealthy and defers reconnect/reconciliation to P6-009/P6-010. **Accepted.**
+4. Configuring the owned PANU address before the authenticated dial is acceptable (derived from `NetworkId`, owned, conflict-checked, rolled back, never membership). **Accepted.**
+
+### Review finding R1 (2026-11-07): the existing approval layer cannot authorize a joiner
+
+Reading `apps/daemon/src/peer_trust.rs` and `outbound_control.rs` shows that D1 step 2 and D3 assume something the code does not provide:
+
+- `require_peer_approved`, `trust_peer`, `forget_peer`, `approved_control_pins` and `with_approved_pinned_tls_peer` all require that the **local** durable `current_network` equals the target network, and that the target network already has a `NetworkMembership` record. A prospective joiner has no current network, so these return `InvalidState`/no-current-network.
+- `connect_registered_panu_control_session` calls `require_approved_pinned_tls_peer` before the TCP dial and again after the handshake. For a joiner that call can never succeed, so the pinned dial cannot be used for an outbound join as it stands.
+- The join coordinator commits `Member` only at the very end (a deliberate rule, above), so the joiner is never "current" while it authenticates.
+
+The approval/pin layer was built for a node that is already in the network (the host admitting peers, or an existing member reconnecting). The joiner side has no equivalent.
+
+Options (needs a maintainer decision):
+
+- **A. Joiner-side pending-join record (recommended).** Add a durable, separate record: "intended join target = (NetworkId, host NodeId, confirmed SPKI)", created by an explicit PolicyKit-authorized operator action and cleared on success, failure or leave. It is **not** membership and does not change `current_network`. Add joiner-specific methods (for example `require_pending_join_host_pin`) used by the outbound dial and supervision in place of the member-only check, so the existing member-only functions keep their stricter contract untouched. This keeps the invariant that only a completed join creates `Member`.
+- **B. Persist a `Joining` membership early and let it count as current.** Smaller code change but it changes what `current_network` means, leaks half-joined state into status/UI and the host-side trust checks, and risks treating an unauthenticated, in-progress join as an approved network. Not recommended.
+- **C. Authenticate first with a one-shot, in-memory pin supplied with the join request.** Avoids new durable state, but loses revocation-before-commit semantics and survives neither daemon restart nor audit. Not recommended.
+
+Until one is chosen, D1 step 2 and D3 are **not implementable as written**, and no join wiring code should be started.
