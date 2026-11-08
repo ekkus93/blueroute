@@ -36,6 +36,7 @@ function fakeApi(overrides: Partial<DaemonApi> = {}): DaemonApi {
         { id: "node-3", name: "Old PC", reachability: "unreachable" as const },
       ]),
     createNetwork: () => Promise.resolve(),
+    leaveNetwork: () => Promise.resolve(),
     ...overrides,
   };
 }
@@ -197,4 +198,36 @@ test("the create workflow is a labelled form that submits from the keyboard", as
   fireEvent.change(input, { target: { value: "Lab 2" } });
   fireEvent.submit(screen.getByRole("form", { name: "Create a network" }));
   await waitFor(() => expect(createNetwork).toHaveBeenCalledWith("Lab 2"));
+});
+
+test("leaving needs a confirmation, then calls the daemon once and refreshes", async () => {
+  const leaveNetwork = vi.fn(() => Promise.resolve());
+  render(<App api={fakeApi({ leaveNetwork })} subscribe={fakeSubscribe().subscribe} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Leave this network" }));
+  expect(leaveNetwork).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Stay" }));
+  expect(screen.queryByRole("button", { name: "Yes, leave" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Leave this network" }));
+  fireEvent.click(screen.getByRole("button", { name: "Yes, leave" }));
+  await waitFor(() => expect(leaveNetwork).toHaveBeenCalledTimes(1));
+});
+
+test("a refused leave shows the reason and keeps the network", async () => {
+  const leaveNetwork = vi.fn(() => Promise.reject("permission_denied"));
+  render(<App api={fakeApi({ leaveNetwork })} subscribe={fakeSubscribe().subscribe} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Leave this network" }));
+  fireEvent.click(screen.getByRole("button", { name: "Yes, leave" }));
+  expect(await screen.findByText(/do not have permission/)).toBeTruthy();
+  expect(screen.getByText("Lab")).toBeTruthy();
+});
+
+test("there is no leave button when not in a network", async () => {
+  render(
+    <App
+      api={fakeApi({ networks: () => Promise.resolve([]) })}
+      subscribe={fakeSubscribe().subscribe}
+    />,
+  );
+  await screen.findByRole("heading", { name: "Your network" });
+  expect(screen.queryByRole("button", { name: "Leave this network" })).toBeNull();
 });

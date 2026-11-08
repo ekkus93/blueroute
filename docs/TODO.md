@@ -2525,6 +2525,8 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 - Compatible Linux node joins entirely through GUI.
 
+**BLOCKED (2026-11-07):** Not started. A GUI join needs a production `JoinNetwork`, which `CLAUDE.md` and the spec keep fail-closed until authenticated P6-004/P7 transport exists (advertisements, names and trust-only approvals are not authenticated membership). The Join button therefore stays disabled; a discovery list and trust prompt would present unauthenticated identities as joinable.
+
 ## P12-007 — Implement connected-network dashboard
 
 - [ ] friendly health.
@@ -2535,6 +2537,8 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 **Acceptance**
 
 - Dashboard tracks topology changes accurately.
+
+**Software partial (2026-11-07):** The dashboard now has \"Leave this network\" with a confirmation step, backed by a second individually granted Tauri mutation, `leave_network` (no arguments; the daemon enforces PolicyKit and cleans up only BlueRoute-owned resources). A refused leave shows the actionable reason and keeps the network shown. Health, device count and \"Connected through another device\" wording were already present. **P12-007 remains OPEN:** the leave button is not demonstrated against a live daemon, and topology-change accuracy has no live check; the daemon-side leave behavior is covered by its own tests.
 
 ## P12-008 — Implement device/details UI
 

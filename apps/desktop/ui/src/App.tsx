@@ -108,6 +108,7 @@ function Ready({
         <p>
           Status: <strong>{HEALTH_TEXT[overview.health]}</strong>
         </p>
+        {networks.length > 0 && <LeaveNetwork api={api} onLeft={onChanged} />}
       </section>
 
       <section aria-labelledby="devices-heading">
@@ -261,5 +262,55 @@ function CreateNetwork({
         </p>
       )}
     </form>
+  );
+}
+
+type LeaveState =
+  | { phase: "idle" }
+  | { phase: "confirm" }
+  | { phase: "busy" }
+  | { phase: "failed"; error: DesktopError | "unknown" };
+
+function LeaveNetwork({ api, onLeft }: { api: DaemonApi; onLeft: () => void }) {
+  const [state, setState] = useState<LeaveState>({ phase: "idle" });
+  const busy = state.phase === "busy";
+
+  const leave = () => {
+    setState({ phase: "busy" });
+    api.leaveNetwork().then(
+      () => {
+        setState({ phase: "idle" });
+        onLeft();
+      },
+      (error: unknown) => setState({ phase: "failed", error: normalizeError(error) }),
+    );
+  };
+
+  return (
+    <div>
+      {state.phase === "idle" || state.phase === "failed" ? (
+        <button type="button" onClick={() => setState({ phase: "confirm" })}>
+          Leave this network
+        </button>
+      ) : (
+        <div role="group" aria-label="Confirm leaving">
+          <p>
+            Leave this network? Other devices lose their connection through this computer. You may
+            be asked for your password.
+          </p>
+          <button type="button" onClick={leave} disabled={busy}>
+            {busy ? "Leaving…" : "Yes, leave"}
+          </button>{" "}
+          <button type="button" onClick={() => setState({ phase: "idle" })} disabled={busy}>
+            Stay
+          </button>
+        </div>
+      )}
+      {state.phase === "failed" && (
+        <p role="alert">
+          <strong>{ERROR_TEXT[state.error].title}.</strong> {ERROR_TEXT[state.error].help}
+        </p>
+      )}
+    </div>
   );
 }

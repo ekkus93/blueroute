@@ -72,7 +72,7 @@ fn network_name(raw: &str) -> Result<DisplayName, DesktopError> {
 }
 
 /// No caller-provided command is accepted: each method builds its own fixed daemon command.
-/// Snapshots are read-only; `create_network` is the only mutation.
+/// Snapshots are read-only; `create_network` and `leave_network` are the only mutations.
 pub struct DesktopBridge {
     client: BlueRouteClient,
 }
@@ -103,6 +103,20 @@ impl DesktopBridge {
         match self
             .client
             .request(&Command::CreateNetwork { name })
+            .await
+            .map_err(|error| DesktopError::from(error.kind()))?
+        {
+            Response::Ack => Ok(()),
+            _ => Err(DesktopError::UnexpectedResponse),
+        }
+    }
+
+    /// Leave the current network. The daemon enforces PolicyKit authorization and only cleans up
+    /// resources carrying BlueRoute ownership metadata; this method adds no extra privilege.
+    pub async fn leave_network(&self) -> Result<(), DesktopError> {
+        match self
+            .client
+            .request(&Command::LeaveNetwork)
             .await
             .map_err(|error| DesktopError::from(error.kind()))?
         {

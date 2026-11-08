@@ -18,6 +18,12 @@ test("each call maps to exactly one fixed Tauri command", async () => {
   expect(invoke.mock.calls).toEqual([["platform_check"], ["overview"], ["networks"], ["devices"]]);
 });
 
+test("leaving takes no arguments and maps to one fixed command", async () => {
+  invoke.mockResolvedValue(undefined);
+  await daemon.leaveNetwork();
+  expect(invoke.mock.calls).toEqual([["leave_network"]]);
+});
+
 test("typed daemon errors reach callers unchanged", async () => {
   invoke.mockImplementation(() => Promise.reject("daemon_unavailable"));
   const outcome = await daemon.overview().then(

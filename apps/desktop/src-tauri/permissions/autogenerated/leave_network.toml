@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-leave-network"
+description = "Enables the leave_network command without any pre-configured scope."
+commands.allow = ["leave_network"]
+
+[[permission]]
+identifier = "deny-leave-network"
+description = "Denies the leave_network command without any pre-configured scope."
+commands.deny = ["leave_network"]

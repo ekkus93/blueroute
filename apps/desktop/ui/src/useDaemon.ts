@@ -16,6 +16,7 @@ export interface DaemonApi {
   networks: () => Promise<NetworkSummary[]>;
   devices: () => Promise<NodeSummary[]>;
   createNetwork: (name: string) => Promise<void>;
+  leaveNetwork: () => Promise<void>;
 }
 
 export interface Snapshot {
