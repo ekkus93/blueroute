@@ -31,7 +31,16 @@ button {
   padding: 0.5rem 0.75rem;
 }
 .muted {
-  opacity: 0.75;
+  opacity: 0.85;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
 }
 ul.plain {
   list-style: none;

@@ -6,8 +6,9 @@ import "./App.css";
 import { daemon as realDaemon } from "./daemon";
 import type { DesktopError } from "./daemon";
 import { AVAILABILITY_TEXT, ERROR_TEXT, HEALTH_TEXT, ISSUE_TEXT, REACHABILITY_TEXT } from "./text";
+import { diagnose, GENERAL_TIPS } from "./diagnose";
 import { normalizeError, useDaemon } from "./useDaemon";
-import type { DaemonApi, Snapshot } from "./useDaemon";
+import type { DaemonApi, LinkState, Snapshot, View } from "./useDaemon";
 import type { SubscribeToSignals } from "./signals";
 
 export interface AppProps {
@@ -45,6 +46,8 @@ export function App({ api, subscribe }: AppProps) {
       {view.phase === "ready" && (
         <Ready snapshot={view.snapshot} api={effectiveApi} onChanged={refresh} />
       )}
+
+      <Diagnose view={view} link={link} />
     </main>
   );
 }
@@ -148,6 +151,38 @@ function Ready({
         )}
       </details>
     </>
+  );
+}
+
+function Diagnose({ view, link }: { view: View; link: LinkState }) {
+  const findings = diagnose(view, link);
+  return (
+    <section aria-labelledby="diagnose-heading">
+      <h2 id="diagnose-heading">Diagnose a problem</h2>
+      {view.phase === "loading" ? (
+        <p>Checking…</p>
+      ) : findings.length === 0 ? (
+        <p>BlueRoute has not reported any problems.</p>
+      ) : (
+        <ul className="plain" aria-label="Problems found">
+          {findings.map((finding) => (
+            <li key={finding.id}>
+              <strong>{finding.title}.</strong> {finding.help}
+            </li>
+          ))}
+        </ul>
+      )}
+      <details>
+        <summary>Other things to try</summary>
+        <ul className="plain">
+          {GENERAL_TIPS.map((tip) => (
+            <li key={tip.id}>
+              <strong>{tip.title}.</strong> {tip.help}
+            </li>
+          ))}
+        </ul>
+      </details>
+    </section>
   );
 }
 

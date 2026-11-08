@@ -2575,6 +2575,8 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 - Common UI errors point to useful guidance.
 
+**Software partial (2026-11-07):** A \"Diagnose a problem\" section (`ui/src/diagnose.ts`) turns the typed snapshot into guidance: Bluetooth off or missing, missing PAN capability, unsupported network manager, service unavailable, permission denied, version mismatch, reconnecting or degraded service, still-checking state and unreachable peers. Findings appear only for conditions the daemon reported. Address conflicts, routed-peer loss and driver/firmware quirks cannot be observed yet, so they are general tips under \"Other things to try\", not detected findings. **P12-010 remains OPEN:** those three need daemon-side signals, and no live-window check was done.
+
 ## P12-011 — Desktop accessibility pass
 
 - [ ] keyboard navigation.
@@ -2586,6 +2588,8 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 **Acceptance**
 
 - Primary create/join/leave workflow is keyboard operable.
+
+**Software partial (2026-11-07):** Create is a labelled native form that submits from the keyboard (tested), `:focus-visible` outlines are set, sections have headings and landmark labels, and `prefers-reduced-motion` is honored (the UI has no animation). Secondary text opacity was raised for contrast. **P12-011 remains OPEN:** join and leave do not exist yet, contrast has not been measured with a tool, and no screen-reader or live keyboard pass was done.
 
 ## P12-012 — Desktop end-to-end tests
 

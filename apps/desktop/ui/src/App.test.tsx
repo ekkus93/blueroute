@@ -76,8 +76,8 @@ test("keeps technical identifiers inside the collapsed technical details", async
 test("explains a missing daemon with guidance and offers retry", async () => {
   const api = fakeApi({ overview: () => Promise.reject("daemon_unavailable") });
   render(<App api={api} subscribe={fakeSubscribe().subscribe} />);
-  expect(await screen.findByRole("alert")).toBeTruthy();
-  expect(screen.getByText(/background service is not running/)).toBeTruthy();
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toMatch(/background service is not running/);
   expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
 });
 
@@ -156,4 +156,45 @@ test("does not offer creation when the computer cannot start a network", async (
     (screen.getByRole("button", { name: "Create a network" }) as HTMLButtonElement).disabled,
   ).toBe(true);
   expect(screen.getByText(/Starting a network: Not available on this computer/)).toBeTruthy();
+});
+
+test("Diagnose a problem reports only what the daemon reported, with guidance", async () => {
+  render(<App api={fakeApi()} subscribe={fakeSubscribe().subscribe} />);
+  const list = await screen.findByRole("list", { name: "Problems found" });
+  expect(list.textContent).toContain("Old PC can't be reached right now");
+  expect(list.textContent).not.toMatch(/Bluetooth is off/);
+  expect(screen.getByText("Other things to try").closest("details")?.open).toBe(false);
+});
+
+test("Diagnose a problem explains an unavailable service and a missing adapter", async () => {
+  const down = fakeApi({ overview: () => Promise.reject("daemon_unavailable") });
+  render(<App api={down} subscribe={fakeSubscribe().subscribe} />);
+  const list = await screen.findByRole("list", { name: "Problems found" });
+  expect(list.textContent).toContain("background service is not running");
+  cleanup();
+
+  const noBluetooth = fakeApi({
+    platformCheck: () =>
+      Promise.resolve({
+        summary: "Check Bluetooth.",
+        issues: ["adapter_missing_or_disabled", "pan_host_unsupported"],
+        create: "blocked",
+        join: "blocked",
+        join_enabled: false,
+        internet_sharing_enabled: false,
+      }),
+  });
+  render(<App api={noBluetooth} subscribe={fakeSubscribe().subscribe} />);
+  const found = await screen.findByRole("list", { name: "Problems found" });
+  expect(found.textContent).toContain("Bluetooth is off or missing");
+  expect(found.textContent).toContain("lacks a needed network feature");
+});
+
+test("the create workflow is a labelled form that submits from the keyboard", async () => {
+  const createNetwork = vi.fn(() => Promise.resolve());
+  render(<App api={fakeApi({ createNetwork })} subscribe={fakeSubscribe().subscribe} />);
+  const input = (await screen.findByLabelText("Network name")) as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "Lab 2" } });
+  fireEvent.submit(screen.getByRole("form", { name: "Create a network" }));
+  await waitFor(() => expect(createNetwork).toHaveBeenCalledWith("Lab 2"));
 });
