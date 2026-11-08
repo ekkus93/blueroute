@@ -31,7 +31,7 @@ pub struct ApiVersion {
 }
 
 impl ApiVersion {
-    pub const CURRENT: Self = Self { major: 1, minor: 1 };
+    pub const CURRENT: Self = Self { major: 1, minor: 2 };
 
     pub const fn new(major: u16, minor: u16) -> Self {
         Self { major, minor }
@@ -200,6 +200,16 @@ pub enum Command {
         node: NodeId,
     },
     GetDiagnostics,
+    /// Record the single host the operator confirmed out of band for a future join. This is
+    /// not membership and does not enable joining. `fingerprint` is canonical lowercase
+    /// SPKI SHA-256 hex, validated by the daemon.
+    RecordJoinHost {
+        network: NetworkId,
+        node: NodeId,
+        fingerprint: String,
+    },
+    /// Forget the recorded join host.
+    ClearJoinHost,
     /// Reserved for the future gateway phase. Current daemons must reject it.
     SetInternetSharing {
         enabled: bool,
@@ -442,6 +452,12 @@ mod tests {
             Command::ForgetPeer {
                 node: NodeId::from_bytes([4; 16]),
             },
+            Command::RecordJoinHost {
+                network: NetworkId::from_bytes([5; 16]),
+                node: NodeId::from_bytes([6; 16]),
+                fingerprint: "07".repeat(32),
+            },
+            Command::ClearJoinHost,
             Command::GetDiagnostics,
             Command::SetInternetSharing { enabled: false },
         ];

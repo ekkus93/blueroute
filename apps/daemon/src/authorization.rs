@@ -34,7 +34,9 @@ pub fn command_authorization(command: &Command) -> CommandAuthorization {
         | Command::StartDiscovery
         | Command::StopDiscovery
         | Command::TrustPeer { .. }
-        | Command::ForgetPeer { .. } => CommandAuthorization::PolicyKit(MODIFY_ACTION_ID),
+        | Command::ForgetPeer { .. }
+        | Command::RecordJoinHost { .. }
+        | Command::ClearJoinHost => CommandAuthorization::PolicyKit(MODIFY_ACTION_ID),
         Command::SetInternetSharing { .. } => {
             CommandAuthorization::PolicyKit(INTERNET_SHARING_ACTION_ID)
         }
@@ -56,6 +58,8 @@ pub fn command_operation(command: &Command) -> &'static str {
         Command::StopDiscovery => "stop_discovery",
         Command::TrustPeer { .. } => "trust_peer",
         Command::ForgetPeer { .. } => "forget_peer",
+        Command::RecordJoinHost { .. } => "record_join_host",
+        Command::ClearJoinHost => "clear_join_host",
         Command::GetDiagnostics => "get_diagnostics",
         Command::SetInternetSharing { .. } => "set_internet_sharing",
     }
@@ -159,6 +163,12 @@ mod tests {
             Command::ForgetPeer {
                 node: NodeId::from_bytes([4; 16]),
             },
+            Command::RecordJoinHost {
+                network: NetworkId::from_bytes([5; 16]),
+                node: NodeId::from_bytes([6; 16]),
+                fingerprint: "07".repeat(32),
+            },
+            Command::ClearJoinHost,
         ];
         for command in mutations {
             assert_eq!(

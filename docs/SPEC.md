@@ -401,6 +401,7 @@ Representative semantic operations:
 - `StopDiscovery`
 - `TrustPeer`
 - `ForgetPeer`
+- `RecordJoinHost` / `ClearJoinHost` (joiner-side host record; not membership, see P6-004 addendum)
 - `GetDiagnostics`
 - future `SetInternetSharing`
 

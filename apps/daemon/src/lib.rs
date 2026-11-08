@@ -97,6 +97,7 @@ pub struct DaemonService {
     network_operations: Option<Arc<dyn NetworkOperations>>,
     peer_trust_operations: Option<Arc<dyn PeerTrustOperations>>,
     join_network_operations: Option<Arc<dyn JoinNetworkOperations>>,
+    pending_join_operations: Option<Arc<PendingJoinOperations>>,
     mutation_in_progress: Arc<AtomicBool>,
     system_diagnostics: Arc<Mutex<Option<SystemDiagnosticMetadata>>>,
     local_control_tls_fingerprint: Option<SpkiSha256>,
@@ -120,6 +121,7 @@ impl DaemonService {
             network_operations: None,
             peer_trust_operations: None,
             join_network_operations: None,
+            pending_join_operations: None,
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
             system_diagnostics: Arc::new(Mutex::new(None)),
             local_control_tls_fingerprint: None,
@@ -136,6 +138,7 @@ impl DaemonService {
             network_operations: Some(network_operations),
             peer_trust_operations: None,
             join_network_operations: None,
+            pending_join_operations: None,
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
             system_diagnostics: Arc::new(Mutex::new(None)),
             local_control_tls_fingerprint: None,
@@ -153,6 +156,7 @@ impl DaemonService {
             network_operations: Some(network_operations),
             peer_trust_operations: Some(peer_trust_operations),
             join_network_operations: None,
+            pending_join_operations: None,
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
             system_diagnostics: Arc::new(Mutex::new(None)),
             local_control_tls_fingerprint: None,
@@ -165,6 +169,14 @@ impl DaemonService {
         join_network_operations: Arc<dyn JoinNetworkOperations>,
     ) -> Self {
         self.join_network_operations = Some(join_network_operations);
+        self
+    }
+
+    pub fn with_pending_join_operations(
+        mut self,
+        pending_join_operations: Arc<PendingJoinOperations>,
+    ) -> Self {
+        self.pending_join_operations = Some(pending_join_operations);
         self
     }
 
@@ -264,6 +276,14 @@ impl DaemonService {
         self.peer_trust_operations.as_ref().ok_or_else(|| {
             fdo::Error::NotSupported(
                 "peer trust operations are unavailable in this daemon instance".into(),
+            )
+        })
+    }
+
+    fn pending_join_operations(&self) -> fdo::Result<&Arc<PendingJoinOperations>> {
+        self.pending_join_operations.as_ref().ok_or_else(|| {
+            fdo::Error::NotSupported(
+                "pending-join operations are unavailable in this daemon instance".into(),
             )
         })
     }
@@ -500,6 +520,32 @@ impl DaemonService {
                     self.peer_trust_operations()?
                         .trust_peer(node)
                         .await
+                        .map_err(core_error_to_dbus)?;
+                    Self::encode_response(&Response::Ack)
+                }
+                Command::RecordJoinHost {
+                    network,
+                    node,
+                    fingerprint,
+                } => {
+                    self.ensure_not_local_node(node)?;
+                    let fingerprint =
+                        SpkiSha256::parse_canonical_hex(&fingerprint).map_err(|_| {
+                            fdo::Error::InvalidArgs(
+                                "join host fingerprint must be canonical lowercase SHA-256 hex"
+                                    .into(),
+                            )
+                        })?;
+                    let host = PendingJoinHost::new(network, node, fingerprint)
+                        .map_err(core_error_to_dbus)?;
+                    self.pending_join_operations()?
+                        .record_host(host)
+                        .map_err(core_error_to_dbus)?;
+                    Self::encode_response(&Response::Ack)
+                }
+                Command::ClearJoinHost => {
+                    self.pending_join_operations()?
+                        .clear()
                         .map_err(core_error_to_dbus)?;
                     Self::encode_response(&Response::Ack)
                 }

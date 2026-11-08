@@ -89,6 +89,15 @@ enum PeerCommand {
     Forget {
         node: String,
     },
+    /// Record the one host you confirmed out of band (compare its fingerprint on the host with
+    /// `blueroute peer local-key`). This does not join a network or grant membership.
+    SetJoinHost {
+        network: String,
+        node: String,
+        fingerprint: String,
+    },
+    /// Forget the recorded join host.
+    ClearJoinHost,
 }
 #[derive(Debug, Subcommand)]
 enum DiscoverCommand {
@@ -135,6 +144,15 @@ enum Operation {
     },
     ForgetPeer {
         node: NodeId,
+        json: bool,
+    },
+    SetJoinHost {
+        network: NetworkId,
+        node: NodeId,
+        fingerprint: String,
+        json: bool,
+    },
+    ClearJoinHost {
         json: bool,
     },
     CreateNetwork {
@@ -250,6 +268,24 @@ fn parse(args: &[String]) -> Result<Operation, String> {
                 .to_canonical_hex(),
             json,
         },
+        Some(CliCommand::Peer {
+            command:
+                PeerCommand::SetJoinHost {
+                    network,
+                    node,
+                    fingerprint,
+                },
+        }) => Operation::SetJoinHost {
+            network: parse_network_id(&network).map_err(str::to_owned)?,
+            node: parse_node_id(&node).map_err(str::to_owned)?,
+            fingerprint: SpkiSha256::parse_canonical_hex(&fingerprint)
+                .map_err(|_| "invalid canonical SPKI SHA-256 fingerprint")?
+                .to_canonical_hex(),
+            json,
+        },
+        Some(CliCommand::Peer {
+            command: PeerCommand::ClearJoinHost,
+        }) => Operation::ClearJoinHost { json },
         Some(CliCommand::Peer {
             command: PeerCommand::Trust { node },
         }) => Operation::TrustPeer {
@@ -857,6 +893,29 @@ fn run(args: &[String]) -> i32 {
                     _ => Err("daemon returned an unexpected trust response".into()),
                 })
         }
+        Operation::SetJoinHost {
+            network,
+            node,
+            fingerprint,
+            json,
+        } => futures_lite::future::block_on(client.request(&Command::RecordJoinHost {
+            network,
+            node,
+            fingerprint,
+        }))
+        .map_err(CliFailure::from)
+        .and_then(|response| match response {
+            Response::Ack => Ok(mutation_ack(json, "Join host recorded")),
+            _ => Err("daemon returned an unexpected join-host response".into()),
+        }),
+        Operation::ClearJoinHost { json } => {
+            futures_lite::future::block_on(client.request(&Command::ClearJoinHost))
+                .map_err(CliFailure::from)
+                .and_then(|response| match response {
+                    Response::Ack => Ok(mutation_ack(json, "Join host cleared")),
+                    _ => Err("daemon returned an unexpected join-host response".into()),
+                })
+        }
         Operation::ForgetPeer { node, json } => {
             futures_lite::future::block_on(client.request(&Command::ForgetPeer { node }))
                 .map_err(CliFailure::from)
@@ -1012,6 +1071,63 @@ mod tests {
         );
         assert!(parse(&args(&["diagnostics"])).is_err());
         assert!(parse(&args(&["network", "join"])).is_err());
+        let host_network = NetworkId::from_bytes([0x55; 16]);
+        let host_node = NodeId::from_bytes([0x66; 16]);
+        let key = "07".repeat(32);
+        assert_eq!(
+            parse(&args(&[
+                "peer",
+                "set-join-host",
+                &host_network.to_string(),
+                &host_node.to_string(),
+                &key,
+            ])),
+            Ok(Operation::SetJoinHost {
+                network: host_network,
+                node: host_node,
+                fingerprint: key.clone(),
+                json: false,
+            })
+        );
+        assert_eq!(
+            parse(&args(&["--json", "peer", "clear-join-host"])),
+            Ok(Operation::ClearJoinHost { json: true })
+        );
+        for bad in [
+            ["peer", "set-join-host", "x", "y", "z"]
+                .map(str::to_owned)
+                .to_vec(),
+            args(&[
+                "peer",
+                "set-join-host",
+                &host_network.to_string(),
+                &host_node.to_string(),
+                "DEADBEEF",
+            ]),
+            args(&[
+                "peer",
+                "set-join-host",
+                &NetworkId::from_bytes([0; 16]).to_string(),
+                &host_node.to_string(),
+                &key,
+            ]),
+            args(&[
+                "peer",
+                "set-join-host",
+                &host_network.to_string(),
+                &NodeId::from_bytes([0; 16]).to_string(),
+                &key,
+            ]),
+            args(&[
+                "peer",
+                "set-join-host",
+                &host_network.to_string(),
+                &host_node.to_string(),
+                &"AB".repeat(32),
+            ]),
+        ] {
+            assert!(parse(&bad).is_err(), "{bad:?}");
+        }
         let network = NetworkId::from_bytes([0x44; 16]);
         assert_eq!(
             parse(&args(&["network", "join", &network.to_string()])),
