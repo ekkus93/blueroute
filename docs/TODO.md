@@ -828,6 +828,8 @@ physical join acceptance remain OPEN. Production preflight remains fail-closed.
 
 - Compatible node joins without manual Bluetooth/network shell commands.
 
+**P6-004 production wiring design PROPOSED (2026-11-07, docs only):** [P6-004-JOIN-ORCHESTRATION.md](P6-004-JOIN-ORCHESTRATION.md) now has an unreviewed addendum covering host identity (D1), the untrusted peer locator (D2), the pinned authenticated dial (D3), per-network session ownership and link loss (D4) and staged, default-off enablement (D5), with four open questions for the maintainer. No code changed and no subtask is ticked; production `JoinNetwork` stays fail-closed.
+
 **P6-004 join transaction concurrency guard (software-only, 2026-10-17):**
 `TransactionalJoinNetworkOperations` now holds an atomic compare-and-swap
 in-flight guard across durable membership reads, PANU/IP/control attempts,

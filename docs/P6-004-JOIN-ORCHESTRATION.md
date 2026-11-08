@@ -101,3 +101,59 @@ Tests cover:
 P6-004 is **blocked, not complete**. The orchestration/state/rollback boundary and P6-005 address prerequisite are implemented, but production acceptance cannot be claimed until authenticated P7 control bootstrap exists and a real compatible node joins without manual Bluetooth/network shell commands.
 
 The remaining implementation dependency is the minimum P7 control-plane work required for authenticated join; P6-004 should then be resumed for production wiring and physical acceptance.
+
+## Addendum (2026-11-07, PROPOSED): production wiring design
+
+**Status: proposal for review. Nothing here is implemented or accepted.** It records the decisions needed before the three production stubs (`preflight`, `establish_panu`, `start_control_session`/`stop_control_session`) can be wired. Production `JoinNetwork` stays fail-closed throughout. Where this text names an existing primitive, its contract is the one documented in P6-003, P7-001, P7-003 and P7-004; verify against the code before implementing.
+
+### D1. Who the host is: operator-confirmed identity, not the advertisement
+
+`JoinNetwork { network }` keeps its wire shape. The runtime resolves the intended host **only** from durable local state that a human established:
+
+1. The host's `NodeId`, its control-TLS SPKI SHA-256 and its `NetworkId` are obtained from the host operator through a separate channel (`blueroute peer local-key` on the host; see P7-003-INDEPENDENT-KEY-COMPARISON.md).
+2. The joiner records durable P6-003 approval for that `NodeId` on that `NetworkId` and an independently confirmed fingerprint.
+3. A `JoinNetwork` for a network with **no** approved, confirmed host record fails before any Bluetooth mutation with a typed, actionable error (for example `PermissionDenied`/`InvalidState` with a diagnostic naming the missing step). Exactly one approved host per network is allowed in v1 (single star); zero or more than one fails closed rather than choosing.
+
+The P6-002 advertisement, BlueZ name/alias, MAC, `Trusted=true` and source IP are never used to choose *whom to trust*. They may only help find the BlueZ device to **connect to** (D2), and a wrong device simply fails authentication in D3.
+
+### D2. Which BlueZ device: untrusted locator, authenticated afterwards
+
+A `PeerLocator` boundary maps a `NetworkId` to candidate BlueZ `PeerHandle`s (devices currently advertising that network). Its result is an untrusted hint. Rules:
+
+- A locator that finds zero or several candidates fails closed with a "nearby network not found / ambiguous" error; it never picks one silently.
+- Establishing the PANU link to a candidate is the **only** mutation allowed before authentication. It is reversed by `disconnect_panu` if D3 fails.
+- No TCP connection is made, and no address is configured as a BlueRoute member, until D3's pre-dial checks pass. (IP configuration for the PANU interface is required to reach the NAP and happens before the TLS dial; it is owned, rolled back on failure and never treated as membership.)
+
+### D3. Authentication: the existing pinned dial, nothing weaker
+
+`start_control_session` uses `connect_registered_panu_control_session`, which already revalidates durable approval and the exact SPKI pin before the SYN, binds the socket to the owned PANU source address, then performs mutual TLS 1.3 and the exporter-bound Hello. The join runtime must:
+
+- supply the confirmed pin from D1 (`PinnedControlTlsPeer`) and never a pin learned from the connection being authenticated;
+- treat first-contact pin enrollment (`enroll_confirmed_control_candidate`) as a separate, explicitly operator-confirmed step with its own deadline, not an implicit side effect of join;
+- map every failure (TLS, pin mismatch, Hello, approval revoked) to rollback in the documented reverse order and surface cleanup failures alongside the primary error.
+
+### D4. Session ownership and link loss
+
+`JoinControlSession` today names only a `NetworkId` and owns nothing, so a successful join would leave an authenticated session with no owner. Required before membership may be committed:
+
+- The daemon owns **one supervisor task per joined network**. It holds the registered TLS session, runs `run_registered_panu_supervision_until_stopped` (heartbeats, approval revalidation, PANU-loss observation) and reports loss through the existing health/event path.
+- `JoinControlSession` becomes a handle to that task. `stop_control_session` cancels it and **waits for it to finish** (bounded), because dropping a future is not cleanup (see the join transition guard).
+- `Member` is committed only after the supervisor reports the session established. Loss after commit marks the runtime unhealthy and does not silently rejoin; reconnect and restart reconciliation stay with P6-009/P6-010.
+- Leave (P6-008) stops the supervisor before tearing down IP and PANU.
+
+### D5. Staged enablement
+
+1. Land D2's locator, `establish_panu`, and D4's supervisor behind fakes, with deterministic tests for every rollback path, a missing/ambiguous host, a wrong peer, revoked approval mid-join and supervisor stop.
+2. Keep `preflight` returning `CapabilityUnavailable` unless an explicit, default-off build or configuration flag marks the runtime hardware-verified. CI never sets it.
+3. Hardware acceptance (two machines, no manual Bluetooth/network shell commands, key confirmed out of band, rollback on induced failure) is recorded in `docs/HARDWARE_ACCEPTANCE_BACKLOG.md`. Only that evidence may remove the flag.
+
+### Open questions for the maintainer
+
+- **Single approved host per network:** confirm v1 should reject zero or several rather than offer a choice. (A future multi-star design would revisit this.)
+- **Operator inputs:** is entering the host `NodeId` and fingerprint in the CLI/GUI acceptable for the first release, or should an invitation code/QR format be specified first (SPEC §18 mentions it as future work)?
+- **Failure after commit:** confirm that supervisor loss marks the runtime unhealthy but keeps durable `Member` (reconciled by P6-009/P6-010) instead of auto-leaving.
+- **IP before authentication:** confirm that configuring the owned PANU address before the TLS dial is acceptable, given it is rolled back and never counted as membership.
+
+### Consequences for P12
+
+The desktop Join workflow (P12-006) stays disabled until D5 step 3. The UI must collect the host identity (D1) and present the fingerprint comparison before enabling Join; it must not present advertised networks as joinable by themselves.

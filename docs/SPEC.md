@@ -593,6 +593,8 @@ Messages must be bounded and validated. Source IP or Bluetooth display name alon
 
 **Current decision:** The selected transport is TCP over the PAN data plane with mutually authenticated TLS 1.3 and explicit per-node SPKI key pins. See [P7-001-CONTROL-TRANSPORT.md](P7-001-CONTROL-TRANSPORT.md). Key verification and live daemon transport integration remain implementation gates; this decision does not enable production joining by itself.
 
+A proposed production-join design (operator-confirmed host identity, untrusted peer locator, pinned dial, per-network supervisor) is recorded as an unreviewed addendum in [P6-004-JOIN-ORCHESTRATION.md](P6-004-JOIN-ORCHESTRATION.md); it changes no invariant until accepted.
+
 ## 18. Identity, pairing, and trust
 
 BlueRoute distinguishes:
