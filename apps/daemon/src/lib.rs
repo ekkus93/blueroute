@@ -10,6 +10,7 @@ mod control_listener;
 mod control_tls;
 mod control_worker;
 mod enrollment_transport;
+mod join_authorization;
 mod join_network;
 mod outbound_control;
 mod peer_pin_store;
@@ -58,6 +59,9 @@ pub use control_tls::{
 };
 pub use control_worker::{DaemonControlWorker, spawn_daemon_control_worker};
 pub use enrollment_transport::enroll_confirmed_control_candidate;
+pub use join_authorization::{
+    JoinCommitAuthorization, JoinCommitReceipt, PendingHostCommitAuthorization,
+};
 pub use join_network::{
     JoinControlSession, JoinIpLease, JoinNetworkFuture, JoinNetworkOperations, JoinPanLink,
     JoinRuntime, LinuxJoinRuntime, TransactionalJoinNetworkOperations,

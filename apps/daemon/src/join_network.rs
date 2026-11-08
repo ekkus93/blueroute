@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::net::IpAddr;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use blueroute_core::{
@@ -13,6 +14,7 @@ use blueroute_linux::{
     PanAttachment, PanRole, PeerHandle,
 };
 
+use crate::JoinCommitAuthorization;
 use crate::current_network;
 
 pub type JoinNetworkFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, CoreError>> + Send + 'a>>;
@@ -152,6 +154,9 @@ pub struct TransactionalJoinNetworkOperations<R = LinuxJoinRuntime> {
     runtime: R,
     expected_ipv4_pool: Ipv4AddressPool,
     join_in_progress: AtomicBool,
+    /// Binds the operator-confirmed host into durable member state at commit. `None` is only for
+    /// tests with fake runtimes; production wiring must supply it before join is ever enabled.
+    authorization: Option<Arc<dyn JoinCommitAuthorization>>,
 }
 
 impl TransactionalJoinNetworkOperations<LinuxJoinRuntime> {
@@ -186,7 +191,13 @@ where
             runtime,
             expected_ipv4_pool,
             join_in_progress: AtomicBool::new(false),
+            authorization: None,
         }
+    }
+
+    pub fn with_authorization(mut self, authorization: Arc<dyn JoinCommitAuthorization>) -> Self {
+        self.authorization = Some(authorization);
+        self
     }
 
     async fn rollback_after_control(
@@ -222,6 +233,38 @@ where
 {
     fn join_network(&self, network: NetworkId) -> JoinNetworkFuture<'_, ()> {
         Box::pin(async move {
+            let mut runtime_mutated = false;
+            let result = self.join_inner(network, &mut runtime_mutated).await;
+            // After any failed attempt that touched the runtime, forget the operator's pending
+            // host so stale intent cannot authorize a later attempt; retrying needs a fresh record.
+            if let (Err(error), true, Some(authorization)) =
+                (&result, runtime_mutated, &self.authorization)
+                && let Err(discard) = authorization.discard(network)
+            {
+                return Err(CoreError::with_diagnostic(
+                    error.kind(),
+                    error.message(),
+                    format!(
+                        "{}; also failed to clear the pending join host: {discard}",
+                        error.diagnostic().unwrap_or("no primary diagnostic")
+                    ),
+                ));
+            }
+            result
+        })
+    }
+}
+
+impl<R> TransactionalJoinNetworkOperations<R>
+where
+    R: JoinRuntime,
+{
+    async fn join_inner(
+        &self,
+        network: NetworkId,
+        runtime_mutated: &mut bool,
+    ) -> Result<(), CoreError> {
+        {
             // Reject the zero sentinel here, not only in the CLI parser:
             // another D-Bus/API caller must not drive PANU or durable state
             // with an invalid logical network identity.
@@ -258,6 +301,7 @@ where
             // PANU activation may have side effects even when its future
             // fails or is canceled. Never release ownership without cleanup.
             transition.mutation_started();
+            *runtime_mutated = true;
             let link = self.runtime.establish_panu(network).await?;
             let lease = match self.runtime.configure_ip(network, &link).await {
                 Ok(lease) => lease,
@@ -405,7 +449,39 @@ where
                 return Err(error);
             }
 
+            let receipt = match &self.authorization {
+                Some(authorization) => match authorization.prepare_commit(network, &mut registry) {
+                    Ok(receipt) => Some(receipt),
+                    Err(error) => {
+                        let (error, clean) = self
+                            .rollback_after_control(error, session, lease, link)
+                            .await;
+                        if clean {
+                            transition.reconciled();
+                        }
+                        return Err(error);
+                    }
+                },
+                None => None,
+            };
+
             if let Err(error) = self.store.save(&registry) {
+                let error = match (&self.authorization, receipt) {
+                    (Some(authorization), Some(receipt)) => {
+                        match authorization.undo_commit(receipt) {
+                            Ok(()) => error,
+                            Err(undo) => CoreError::with_diagnostic(
+                                error.kind(),
+                                error.message(),
+                                format!(
+                                    "{}; also failed to undo the host key pin: {undo}",
+                                    error.diagnostic().unwrap_or("no primary diagnostic")
+                                ),
+                            ),
+                        }
+                    }
+                    _ => error,
+                };
                 let (error, clean) = self
                     .rollback_after_control(error, session, lease, link)
                     .await;
@@ -417,7 +493,7 @@ where
 
             transition.reconciled();
             Ok(())
-        })
+        }
     }
 }
 
@@ -1349,5 +1425,149 @@ mod tests {
             assert!(operations.runtime.steps().is_empty());
             fs::remove_dir_all(root).unwrap();
         });
+    }
+
+    mod authorized_commit {
+        use blueroute_protocol::peer_pin::SpkiSha256;
+
+        use super::*;
+        use crate::{
+            PeerPinStore, PendingHostCommitAuthorization, PendingJoinHost, PendingJoinOperations,
+            PendingJoinStore,
+        };
+
+        fn network() -> NetworkId {
+            NetworkId::from_bytes([0x71; 16])
+        }
+
+        fn host() -> blueroute_core::NodeId {
+            blueroute_core::NodeId::from_bytes([0x72; 16])
+        }
+
+        fn key() -> SpkiSha256 {
+            SpkiSha256::from_verified_certificate_digest([0x73; 32]).unwrap()
+        }
+
+        fn operations(
+            label: &str,
+            runtime: FakeRuntime,
+        ) -> (
+            std::path::PathBuf,
+            TransactionalJoinNetworkOperations<FakeRuntime>,
+            std::sync::Arc<PendingJoinOperations>,
+        ) {
+            let (root, store) = temp_store(label);
+            let pending = std::sync::Arc::new(PendingJoinOperations::new(
+                NetworkMembershipStore::new(root.join("memberships-v1")),
+                PendingJoinStore::new(root.join("pending")),
+            ));
+            let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime)
+                .with_authorization(std::sync::Arc::new(PendingHostCommitAuthorization::new(
+                    pending.clone(),
+                    PeerPinStore::new(root.join("pins")),
+                )));
+            (root, operations, pending)
+        }
+
+        fn record(pending: &PendingJoinOperations) {
+            pending
+                .record_host(PendingJoinHost::new(network(), host(), key()).unwrap())
+                .unwrap();
+        }
+
+        #[test]
+        fn success_commits_member_with_trusted_pinned_host_and_clears_the_record() {
+            let (root, operations, pending) = operations("auth-ok", FakeRuntime::successful());
+            record(&pending);
+            futures_lite::future::block_on(operations.join_network(network())).unwrap();
+            let registry = NetworkMembershipStore::new(root.join("memberships-v1"))
+                .load()
+                .unwrap();
+            let membership = registry.network(&network()).unwrap();
+            assert_eq!(membership.state, MembershipState::Member);
+            assert!(membership.is_peer_trusted(&host()));
+            assert!(
+                PeerPinStore::new(root.join("pins"))
+                    .load()
+                    .unwrap()
+                    .authorize(network(), host(), true, key())
+                    .is_ok()
+            );
+            assert_eq!(pending.pending_host().unwrap(), None);
+            let _ = fs::remove_dir_all(root);
+        }
+
+        #[test]
+        fn a_missing_host_record_rolls_back_everything_and_commits_no_membership() {
+            let (root, operations, _pending) = operations("auth-none", FakeRuntime::successful());
+            let error =
+                futures_lite::future::block_on(operations.join_network(network())).unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::AuthenticationFailed);
+            assert_eq!(
+                operations.runtime.steps(),
+                vec![
+                    Step::Preflight,
+                    Step::Panu,
+                    Step::Address,
+                    Step::Control,
+                    Step::StopControl,
+                    Step::RemoveAddress,
+                    Step::DisconnectPanu,
+                ]
+            );
+            let registry = NetworkMembershipStore::new(root.join("memberships-v1"))
+                .load()
+                .unwrap();
+            assert!(registry.network(&network()).is_none());
+            assert!(
+                PeerPinStore::new(root.join("pins"))
+                    .load()
+                    .unwrap()
+                    .is_empty()
+            );
+            let _ = fs::remove_dir_all(root);
+        }
+
+        #[test]
+        fn a_failed_attempt_after_runtime_mutation_forgets_the_pending_host() {
+            let mut runtime = FakeRuntime::successful();
+            runtime.fail_control = true;
+            let (root, operations, pending) = operations("auth-fail", runtime);
+            record(&pending);
+            assert!(futures_lite::future::block_on(operations.join_network(network())).is_err());
+            assert_eq!(pending.pending_host().unwrap(), None);
+            assert!(
+                PeerPinStore::new(root.join("pins"))
+                    .load()
+                    .unwrap()
+                    .is_empty()
+            );
+            let _ = fs::remove_dir_all(root);
+        }
+
+        #[test]
+        fn a_refusal_before_any_runtime_mutation_keeps_the_pending_host() {
+            let (root, operations, pending) = operations("auth-early", FakeRuntime::successful());
+            record(&pending);
+            // Becomes a member of a different network after the host was recorded.
+            let store = NetworkMembershipStore::new(root.join("memberships-v1"));
+            let mut other = NetworkMembership::new(
+                NetworkId::from_bytes([0x74; 16]),
+                DisplayName::new("Other").unwrap(),
+            );
+            other.state = MembershipState::Member;
+            let mut registry = MembershipRegistry::default();
+            registry.remember_network(other);
+            store.save(&registry).unwrap();
+            assert!(futures_lite::future::block_on(operations.join_network(network())).is_err());
+            assert!(operations.runtime.steps().is_empty());
+            assert!(
+                PendingJoinStore::new(root.join("pending"))
+                    .load()
+                    .unwrap()
+                    .is_some()
+            );
+            let _ = fs::remove_dir_all(root);
+        }
     }
 }

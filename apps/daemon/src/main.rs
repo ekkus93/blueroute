@@ -5,9 +5,10 @@ use std::sync::Arc;
 use blueroute_core::{DaemonConfig, HealthLevel};
 use blueroute_daemon::{
     ControlTlsIdentityStore, DaemonService, DurablePeerTrustOperations, NetworkOperations,
-    PeerPinStore, PendingJoinOperations, PendingJoinStore, SingleStarNetworkOperations,
-    TransactionalJoinNetworkOperations, current_network, spawn_daemon_capability_health_worker,
-    spawn_daemon_control_worker, system_diagnostics_from_report,
+    PeerPinStore, PendingHostCommitAuthorization, PendingJoinOperations, PendingJoinStore,
+    SingleStarNetworkOperations, TransactionalJoinNetworkOperations, current_network,
+    spawn_daemon_capability_health_worker, spawn_daemon_control_worker,
+    system_diagnostics_from_report,
 };
 use blueroute_linux::{
     NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
@@ -76,10 +77,16 @@ async fn run() -> Result<(), Box<dyn Error>> {
         )
         .with_pending_join(pending_join_operations.clone()),
     );
-    let join_network_operations = Arc::new(TransactionalJoinNetworkOperations::with_ipv4_pool(
-        NetworkMembershipStore::new(membership_path.clone()),
-        config.ipv4_address_pool,
-    )?);
+    let join_network_operations = Arc::new(
+        TransactionalJoinNetworkOperations::with_ipv4_pool(
+            NetworkMembershipStore::new(membership_path.clone()),
+            config.ipv4_address_pool,
+        )?
+        .with_authorization(Arc::new(PendingHostCommitAuthorization::new(
+            pending_join_operations.clone(),
+            PeerPinStore::new(peer_pin_directory(&state_directory)),
+        ))),
+    );
     let network_operations = Arc::new(SingleStarNetworkOperations::new(
         NetworkMembershipStore::new(membership_path),
         config.clone(),
