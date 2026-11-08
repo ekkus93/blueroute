@@ -81,6 +81,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
         TransactionalJoinNetworkOperations::with_ipv4_pool(
             NetworkMembershipStore::new(membership_path.clone()),
             config.ipv4_address_pool,
+            pending_join_operations.clone(),
         )?
         .with_authorization(Arc::new(PendingHostCommitAuthorization::new(
             pending_join_operations.clone(),

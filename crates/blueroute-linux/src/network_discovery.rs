@@ -6,7 +6,7 @@ use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
 use blueroute_core::{CoreError, ErrorKind, NetworkId};
 
-use crate::{AdapterHandle, BluetoothBackend, BluezBackend};
+use crate::{AdapterHandle, BluetoothBackend, BluezBackend, PeerHandle};
 
 const BLUEZ_SERVICE: &str = "org.bluez";
 const BLUEZ_ROOT_PATH: &str = "/";
@@ -187,26 +187,69 @@ impl BluezBackend {
         &self,
         adapter: AdapterHandle,
     ) -> Result<Vec<NetworkId>, CoreError> {
-        let objects = managed_objects(self).await?;
-        ensure_adapter_present(self, &adapter).await?;
-        let mut networks = Vec::new();
-        for (path, interfaces) in &objects {
-            if !is_device_object_path_for_adapter(path.as_str(), &adapter) {
-                continue;
-            }
-            let Some(properties) = interfaces.iter().find_map(|(name, properties)| {
-                (name.as_str() == DEVICE_INTERFACE).then_some(properties)
-            }) else {
-                continue;
-            };
-            if let Some(network) = advertised_network_id(properties) {
-                networks.push(network);
-            }
-        }
+        let mut networks: Vec<NetworkId> = self
+            .advertising_devices(adapter)
+            .await?
+            .into_iter()
+            .map(|(_, network)| network)
+            .collect();
         networks.sort_unstable();
         networks.dedup();
         Ok(networks)
     }
+
+    /// BlueZ devices under one adapter that currently advertise `network`.
+    ///
+    /// This is an **untrusted locator hint**: an advertisement is not authenticated, so a
+    /// returned device may be an impostor or a stale cache entry. The caller must authenticate
+    /// whatever it connects to (pinned mutual TLS) and must fail closed on zero or several
+    /// candidates instead of choosing one.
+    pub async fn discovered_network_peers(
+        &self,
+        adapter: AdapterHandle,
+        network: NetworkId,
+    ) -> Result<Vec<PeerHandle>, CoreError> {
+        let mut peers: Vec<PeerHandle> = self
+            .advertising_devices(adapter)
+            .await?
+            .into_iter()
+            .filter(|(_, advertised)| *advertised == network)
+            .map(|(peer, _)| peer)
+            .collect();
+        peers.sort();
+        peers.dedup();
+        Ok(peers)
+    }
+
+    async fn advertising_devices(
+        &self,
+        adapter: AdapterHandle,
+    ) -> Result<Vec<(PeerHandle, NetworkId)>, CoreError> {
+        let objects = managed_objects(self).await?;
+        ensure_adapter_present(self, &adapter).await?;
+        advertising_devices_in(&objects, &adapter)
+    }
+}
+
+fn advertising_devices_in(
+    objects: &ManagedObjects,
+    adapter: &AdapterHandle,
+) -> Result<Vec<(PeerHandle, NetworkId)>, CoreError> {
+    let mut devices = Vec::new();
+    for (path, interfaces) in objects {
+        if !is_device_object_path_for_adapter(path.as_str(), adapter) {
+            continue;
+        }
+        let Some(properties) = interfaces.iter().find_map(|(name, properties)| {
+            (name.as_str() == DEVICE_INTERFACE).then_some(properties)
+        }) else {
+            continue;
+        };
+        if let Some(network) = advertised_network_id(properties) {
+            devices.push((PeerHandle::new(path.as_str())?, network));
+        }
+    }
+    Ok(devices)
 }
 
 fn encode_advertisement(network: NetworkId) -> Vec<u8> {
@@ -476,5 +519,57 @@ mod tests {
             "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF/service0001",
             &hci0
         ));
+    }
+
+    #[test]
+    fn peers_are_selected_by_advertised_network_not_by_name() {
+        use zbus::names::OwnedInterfaceName;
+        use zbus::zvariant::OwnedObjectPath;
+        let wanted = NetworkId::from_bytes([0x11; 16]);
+        let other = NetworkId::from_bytes([0x22; 16]);
+        let device = |network: Option<NetworkId>| {
+            let mut properties = HashMap::from([(
+                "Alias".to_owned(),
+                OwnedValue::from(Str::from("Same friendly name")),
+            )]);
+            if let Some(network) = network {
+                properties.insert(
+                    MANUFACTURER_DATA_PROPERTY.to_owned(),
+                    manufacturer_data_value(network),
+                );
+            }
+            HashMap::from([(
+                OwnedInterfaceName::try_from(DEVICE_INTERFACE).unwrap(),
+                properties,
+            )])
+        };
+        let path = |text: &str| OwnedObjectPath::try_from(text).unwrap();
+        let objects: ManagedObjects = HashMap::from([
+            (
+                path("/org/bluez/hci0/dev_AA_00_00_00_00_01"),
+                device(Some(wanted)),
+            ),
+            (
+                path("/org/bluez/hci0/dev_AA_00_00_00_00_02"),
+                device(Some(other)),
+            ),
+            (path("/org/bluez/hci0/dev_AA_00_00_00_00_03"), device(None)),
+            (
+                path("/org/bluez/hci1/dev_AA_00_00_00_00_04"),
+                device(Some(wanted)),
+            ),
+        ]);
+        let hci0 = AdapterHandle::new("/org/bluez/hci0").unwrap();
+        let found = advertising_devices_in(&objects, &hci0).unwrap();
+        let mut matching: Vec<_> = found
+            .iter()
+            .filter(|(_, network)| *network == wanted)
+            .map(|(peer, _)| peer.as_str().to_owned())
+            .collect();
+        matching.sort();
+        // Only the device on this adapter that advertises the network; other adapters, other
+        // networks and devices without an advertisement are excluded.
+        assert_eq!(matching, vec!["/org/bluez/hci0/dev_AA_00_00_00_00_01"]);
+        assert_eq!(found.len(), 2);
     }
 }

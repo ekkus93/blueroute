@@ -13,6 +13,7 @@ mod enrollment_transport;
 mod join_authorization;
 mod join_network;
 mod outbound_control;
+mod peer_locator;
 mod peer_pin_store;
 mod peer_trust;
 mod pending_join;
@@ -70,6 +71,7 @@ pub use outbound_control::{
     PanuControlRoute, connect_registered_panu_control_session, planned_panu_control_endpoint,
     run_registered_panu_supervision_until_stopped, supervise_registered_panu_control_session,
 };
+pub use peer_locator::{BluezPeerLocator, PeerLocator, select_single_peer};
 pub use peer_pin_store::PeerPinStore;
 pub use peer_trust::{
     DurablePeerTrustOperations, PeerTrustFuture, PeerTrustOperations, pair_and_trust_bluetooth_peer,

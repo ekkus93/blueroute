@@ -11,11 +11,11 @@ use blueroute_core::{
 use blueroute_linux::{
     BluezBackend, InterfaceAddress, IpNetworkBackend, IpNetworkObservationBackend,
     NetworkInterfaceHandle, NetworkManagerBackend, NetworkMembershipStore, NetworkStateBackend,
-    PanAttachment, PanRole, PeerHandle,
+    PanAttachment, PanBackend, PanRole, PeerHandle,
 };
 
-use crate::JoinCommitAuthorization;
 use crate::current_network;
+use crate::{BluezPeerLocator, JoinCommitAuthorization, PeerLocator, PendingJoinOperations};
 
 pub type JoinNetworkFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, CoreError>> + Send + 'a>>;
 
@@ -167,8 +167,9 @@ impl TransactionalJoinNetworkOperations<LinuxJoinRuntime> {
     pub fn with_ipv4_pool(
         store: NetworkMembershipStore,
         pool: Ipv4AddressPool,
+        pending: Arc<PendingJoinOperations>,
     ) -> Result<Self, CoreError> {
-        let runtime = LinuxJoinRuntime::new(pool)?;
+        let runtime = LinuxJoinRuntime::new(pool)?.with_pending_join(pending);
         Ok(Self::with_runtime_and_pool(store, runtime, pool))
     }
 }
@@ -497,35 +498,130 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+/// Production join runtime. It stays **closed by construction**: `hardware_verified` is `false`
+/// and nothing outside tests can set it, because the supervised control session and two-machine
+/// hardware evidence do not exist yet (P6-004). Defense in depth: both `preflight` and
+/// `establish_panu` check the flag, so a Bluetooth link is never made while it is off.
+#[derive(Clone)]
 pub struct LinuxJoinRuntime {
     pool: Ipv4AddressPool,
+    locator: Arc<dyn PeerLocator>,
+    pending: Option<Arc<PendingJoinOperations>>,
+    hardware_verified: bool,
+}
+
+impl Default for LinuxJoinRuntime {
+    fn default() -> Self {
+        Self {
+            pool: Ipv4AddressPool::default(),
+            locator: Arc::new(BluezPeerLocator),
+            pending: None,
+            hardware_verified: false,
+        }
+    }
+}
+
+impl std::fmt::Debug for LinuxJoinRuntime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LinuxJoinRuntime")
+            .field("pool", &self.pool)
+            .field("hardware_verified", &self.hardware_verified)
+            .finish_non_exhaustive()
+    }
 }
 
 impl LinuxJoinRuntime {
     pub fn new(pool: Ipv4AddressPool) -> Result<Self, CoreError> {
         pool.validate()?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            ..Self::default()
+        })
+    }
+
+    /// The operator-confirmed host record that must exist before any Bluetooth mutation.
+    pub fn with_pending_join(mut self, pending: Arc<PendingJoinOperations>) -> Self {
+        self.pending = Some(pending);
+        self
+    }
+
+    #[cfg(test)]
+    fn hardware_verified_for_tests(mut self) -> Self {
+        self.hardware_verified = true;
+        self
+    }
+
+    fn require_open(&self) -> Result<(), CoreError> {
+        if self.hardware_verified {
+            return Ok(());
+        }
+        Err(CoreError::with_diagnostic(
+            ErrorKind::CapabilityUnavailable,
+            "BlueRoute join requires P7 authenticated control-session support",
+            "P6-005 IPv4 planning and NetworkManager address application are available, but production JoinNetwork still refuses Bluetooth mutation until the supervised authenticated control session exists and two-machine hardware acceptance is recorded",
+        ))
+    }
+}
+
+/// Find the one candidate host and connect PANU to it. If the returned attachment fails
+/// validation the just-made link is torn down rather than reported as nothing.
+async fn establish_panu_with<Connect, ConnectFuture, Cleanup, CleanupFuture>(
+    locator: &dyn PeerLocator,
+    network: NetworkId,
+    connect: Connect,
+    cleanup: Cleanup,
+) -> Result<JoinPanLink, CoreError>
+where
+    Connect: FnOnce(PeerHandle) -> ConnectFuture,
+    ConnectFuture: Future<Output = Result<PanAttachment, CoreError>>,
+    Cleanup: FnOnce(PanAttachment) -> CleanupFuture,
+    CleanupFuture: Future<Output = Result<(), CoreError>>,
+{
+    let peer = locator.locate(network).await?;
+    let attachment = connect(peer.clone()).await?;
+    match JoinPanLink::new(peer, attachment.clone()) {
+        Ok(link) => Ok(link),
+        Err(error) => match cleanup(attachment).await {
+            Ok(()) => Err(error),
+            Err(cleanup_error) => Err(CoreError::with_diagnostic(
+                error.kind(),
+                error.message(),
+                format!("also failed to disconnect the unexpected PANU link: {cleanup_error}"),
+            )),
+        },
     }
 }
 
 impl JoinRuntime for LinuxJoinRuntime {
-    fn preflight(&self, _network: NetworkId) -> JoinNetworkFuture<'_, ()> {
-        Box::pin(async {
-            Err(CoreError::with_diagnostic(
-                ErrorKind::CapabilityUnavailable,
-                "BlueRoute join requires P7 authenticated control-session support",
-                "P6-005 IPv4 planning and NetworkManager address application are available, but production JoinNetwork still refuses Bluetooth mutation until authenticated control bootstrap is implemented",
-            ))
+    fn preflight(&self, network: NetworkId) -> JoinNetworkFuture<'_, ()> {
+        Box::pin(async move {
+            self.require_open()?;
+            // No Bluetooth mutation without an operator-confirmed host for this network.
+            let pending = self.pending.as_ref().ok_or_else(|| {
+                CoreError::new(
+                    ErrorKind::AuthenticationFailed,
+                    "join has no operator-confirmed host store configured",
+                )
+            })?;
+            pending.host_for(network)?;
+            Ok(())
         })
     }
 
-    fn establish_panu(&self, _network: NetworkId) -> JoinNetworkFuture<'_, JoinPanLink> {
-        Box::pin(async {
-            Err(CoreError::new(
-                ErrorKind::CapabilityUnavailable,
-                "production PANU join activation is blocked until authenticated control bootstrap is complete",
-            ))
+    fn establish_panu(&self, network: NetworkId) -> JoinNetworkFuture<'_, JoinPanLink> {
+        Box::pin(async move {
+            self.require_open()?;
+            let bluez = BluezBackend::connect_system().await?;
+            establish_panu_with(
+                self.locator.as_ref(),
+                network,
+                |peer| bluez.connect_panu(peer),
+                |attachment| {
+                    let bluez = &bluez;
+                    async move { bluez.disconnect_matching_panu(&attachment).await }
+                },
+            )
+            .await
         })
     }
 
@@ -1318,7 +1414,12 @@ mod tests {
     fn configured_ipv4_pool_is_retained_by_production_join_coordinator() {
         let (root, store) = temp_store("custom-pool");
         let pool = Ipv4AddressPool::new("192.168.200.0".parse().unwrap(), 24, 24).unwrap();
-        let operations = TransactionalJoinNetworkOperations::with_ipv4_pool(store, pool).unwrap();
+        let pending = Arc::new(PendingJoinOperations::new(
+            NetworkMembershipStore::new(root.join("pj-memberships")),
+            crate::PendingJoinStore::new(root.join("pj")),
+        ));
+        let operations =
+            TransactionalJoinNetworkOperations::with_ipv4_pool(store, pool, pending).unwrap();
         assert_eq!(operations.expected_ipv4_pool, pool);
         let error = futures_lite::future::block_on(
             operations.join_network(NetworkId::from_bytes([0x47; 16])),
@@ -1568,6 +1669,172 @@ mod tests {
                     .is_some()
             );
             let _ = fs::remove_dir_all(root);
+        }
+    }
+
+    mod production_runtime {
+        use std::sync::atomic::AtomicUsize;
+
+        use blueroute_protocol::peer_pin::SpkiSha256;
+
+        use super::*;
+        use crate::{PendingJoinHost, PendingJoinStore};
+
+        struct FakeLocator(Result<PeerHandle, CoreError>);
+
+        impl PeerLocator for FakeLocator {
+            fn locate(&self, _network: NetworkId) -> JoinNetworkFuture<'_, PeerHandle> {
+                let result = self.0.clone();
+                Box::pin(async move { result })
+            }
+        }
+
+        fn net() -> NetworkId {
+            NetworkId::from_bytes([0x81; 16])
+        }
+
+        fn peer(name: &str) -> PeerHandle {
+            PeerHandle::new(format!("/org/bluez/hci0/dev_{name}")).unwrap()
+        }
+
+        fn attachment(for_peer: Option<PeerHandle>, role: PanRole) -> PanAttachment {
+            PanAttachment {
+                role,
+                interface: NetworkInterfaceHandle::new("bnep-test").unwrap(),
+                peer: for_peer,
+            }
+        }
+
+        fn pending(label: &str) -> (std::path::PathBuf, Arc<PendingJoinOperations>) {
+            let (root, _) = temp_store(label);
+            let pending = Arc::new(PendingJoinOperations::new(
+                NetworkMembershipStore::new(root.join("memberships-v1")),
+                PendingJoinStore::new(root.join("pending")),
+            ));
+            (root, pending)
+        }
+
+        #[test]
+        fn the_production_runtime_is_closed_by_default_and_never_reaches_bluetooth() {
+            let runtime = LinuxJoinRuntime::default();
+            let preflight = futures_lite::future::block_on(runtime.preflight(net())).unwrap_err();
+            assert_eq!(preflight.kind(), ErrorKind::CapabilityUnavailable);
+            // Closed before any BlueZ connection: this would otherwise fail differently (no bus).
+            let panu = futures_lite::future::block_on(runtime.establish_panu(net())).unwrap_err();
+            assert_eq!(panu.kind(), ErrorKind::CapabilityUnavailable);
+        }
+
+        #[test]
+        fn even_when_open_preflight_needs_the_confirmed_host() {
+            let (root, pending) = pending("rt-preflight");
+            let without_store = LinuxJoinRuntime::default().hardware_verified_for_tests();
+            assert_eq!(
+                futures_lite::future::block_on(without_store.preflight(net()))
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::AuthenticationFailed
+            );
+            let runtime = LinuxJoinRuntime::default()
+                .hardware_verified_for_tests()
+                .with_pending_join(pending.clone());
+            assert_eq!(
+                futures_lite::future::block_on(runtime.preflight(net()))
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::AuthenticationFailed
+            );
+            let key = SpkiSha256::from_verified_certificate_digest([9; 32]).unwrap();
+            pending
+                .record_host(
+                    PendingJoinHost::new(net(), blueroute_core::NodeId::from_bytes([3; 16]), key)
+                        .unwrap(),
+                )
+                .unwrap();
+            futures_lite::future::block_on(runtime.preflight(net())).unwrap();
+            // A host recorded for another network is not enough.
+            assert!(
+                futures_lite::future::block_on(
+                    runtime.preflight(NetworkId::from_bytes([0x82; 16]))
+                )
+                .is_err()
+            );
+            let _ = fs::remove_dir_all(root);
+        }
+
+        #[test]
+        fn locator_failure_means_no_connection_attempt() {
+            let connects = AtomicUsize::new(0);
+            let locator = FakeLocator(Err(CoreError::new(
+                ErrorKind::InvalidState,
+                "several nearby devices",
+            )));
+            let error = futures_lite::future::block_on(establish_panu_with(
+                &locator,
+                net(),
+                |_| async {
+                    connects.fetch_add(1, Ordering::SeqCst);
+                    Err(CoreError::new(ErrorKind::Internal, "must not connect"))
+                },
+                |_| async { Ok(()) },
+            ))
+            .unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::InvalidState);
+            assert_eq!(connects.load(Ordering::SeqCst), 0);
+        }
+
+        #[test]
+        fn the_located_peer_is_connected_and_returned() {
+            let host = peer("AA_00_00_00_00_01");
+            let locator = FakeLocator(Ok(host.clone()));
+            let link = futures_lite::future::block_on(establish_panu_with(
+                &locator,
+                net(),
+                |peer| async move { Ok(attachment(Some(peer), PanRole::Panu)) },
+                |_| async { Err(CoreError::new(ErrorKind::Internal, "no cleanup expected")) },
+            ))
+            .unwrap();
+            assert_eq!(link.peer(), &host);
+        }
+
+        #[test]
+        fn an_attachment_for_a_different_peer_or_role_is_torn_down_not_adopted() {
+            let host = peer("AA_00_00_00_00_01");
+            for bad in [
+                attachment(Some(peer("BB_00_00_00_00_09")), PanRole::Panu),
+                attachment(Some(host.clone()), PanRole::Nap),
+                attachment(None, PanRole::Panu),
+            ] {
+                let cleaned = AtomicUsize::new(0);
+                let locator = FakeLocator(Ok(host.clone()));
+                let bad_for_connect = bad.clone();
+                let error = futures_lite::future::block_on(establish_panu_with(
+                    &locator,
+                    net(),
+                    |_| async move { Ok(bad_for_connect) },
+                    |seen| {
+                        assert_eq!(seen, bad);
+                        cleaned.fetch_add(1, Ordering::SeqCst);
+                        async { Ok(()) }
+                    },
+                ))
+                .unwrap_err();
+                assert_eq!(error.kind(), ErrorKind::InvalidState);
+                assert_eq!(cleaned.load(Ordering::SeqCst), 1);
+            }
+        }
+
+        #[test]
+        fn a_failed_teardown_of_an_unexpected_link_is_reported() {
+            let host = peer("AA_00_00_00_00_01");
+            let locator = FakeLocator(Ok(host.clone()));
+            let error = futures_lite::future::block_on(establish_panu_with(
+                &locator,
+                net(),
+                |_| async { Ok(attachment(Some(peer("BB_00_00_00_00_09")), PanRole::Panu)) },
+                |_| async { Err(CoreError::new(ErrorKind::PanFailure, "disconnect refused")) },
+            ))
+            .unwrap_err();
+            assert!(error.diagnostic().unwrap().contains("disconnect refused"));
         }
     }
 }
