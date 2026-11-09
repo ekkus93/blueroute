@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use blueroute_core::{
     CoreError, DisplayName, ErrorKind, Ipv4AddressPool, Ipv4StarAddressPlan, MembershipRegistry,
-    MembershipState, NetworkId, NetworkMembership, ensure_ipv4_segment_available,
+    MembershipRole, MembershipState, NetworkId, NetworkMembership, ensure_ipv4_segment_available,
 };
 use blueroute_linux::{
     BluezBackend, InterfaceAddress, IpNetworkBackend, IpNetworkObservationBackend,
@@ -311,6 +311,7 @@ where
                 .state
                 .transition(MembershipState::Leaving)?
                 .transition(MembershipState::NotMember)?;
+            membership.role = None;
             for peer in membership
                 .peers()
                 .map(|peer| peer.node_id)
@@ -935,12 +936,14 @@ fn mark_local_membership_joined(
             .state
             .transition(MembershipState::Joining)?
             .transition(MembershipState::Member)?;
+        membership.role = Some(MembershipRole::Client);
     } else {
         let mut membership = NetworkMembership::new(network, discovered_network_name(network)?);
         membership.state = membership
             .state
             .transition(MembershipState::Joining)?
             .transition(MembershipState::Member)?;
+        membership.role = Some(MembershipRole::Client);
         registry.remember_network(membership);
     }
     Ok(())
@@ -1859,6 +1862,7 @@ mod tests {
                 .unwrap();
             let membership = registry.network(&network()).unwrap();
             assert_eq!(membership.state, MembershipState::Member);
+            assert_eq!(membership.role, Some(MembershipRole::Client));
             assert!(membership.is_peer_trusted(&host()));
             assert!(
                 PeerPinStore::new(root.join("pins"))

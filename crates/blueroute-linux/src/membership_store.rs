@@ -5,13 +5,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use blueroute_core::{
-    CoreError, DisplayName, ErrorKind, MembershipRegistry, MembershipState, NetworkId,
-    NetworkMembership, NodeId,
+    CoreError, DisplayName, ErrorKind, MembershipRegistry, MembershipRole, MembershipState,
+    NetworkId, NetworkMembership, NodeId,
 };
 
 const FORMAT_HEADER_PREFIX: &str = "BLUEROUTE_MEMBERSHIP_V";
 const LEGACY_FORMAT_VERSION: u32 = 1;
-const CURRENT_FORMAT_VERSION: u32 = 2;
+const V2_FORMAT_VERSION: u32 = 2;
+const CURRENT_FORMAT_VERSION: u32 = 3;
 const MEMBERSHIP_FILE_MODE: u32 = 0o600;
 static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
 
@@ -193,6 +194,7 @@ fn migrate_to_current(serialized: &str) -> Result<MigrationResult, CoreError> {
     while version < CURRENT_FORMAT_VERSION {
         current = match version {
             LEGACY_FORMAT_VERSION => migrate_v1_to_v2(&current)?,
+            V2_FORMAT_VERSION => migrate_v2_to_v3(&current)?,
             _ => {
                 return Err(CoreError::new(
                     ErrorKind::PersistenceError,
@@ -230,7 +232,7 @@ fn detect_format_version(serialized: &str) -> Result<u32, CoreError> {
 
 fn migrate_v1_to_v2(serialized: &str) -> Result<String, CoreError> {
     let legacy_header = format_header(LEGACY_FORMAT_VERSION);
-    let current_header = format_header(CURRENT_FORMAT_VERSION);
+    let current_header = format_header(V2_FORMAT_VERSION);
     let mut lines = serialized.lines();
     if lines.next() != Some(legacy_header.as_str()) {
         return Err(CoreError::new(
@@ -247,6 +249,43 @@ fn migrate_v1_to_v2(serialized: &str) -> Result<String, CoreError> {
         migrated.push('\n');
     }
 
+    // v1 -> v2 only changes the header; the result is a valid v2 document.
+    Ok(migrated)
+}
+
+/// v2 -> v3 adds the network `role` field. Joining was never enabled before v3, so every v2
+/// `member` row is a hosted network; a `not-member` row has no role.
+fn migrate_v2_to_v3(serialized: &str) -> Result<String, CoreError> {
+    let v2_header = format_header(V2_FORMAT_VERSION);
+    let mut lines = serialized.lines();
+    if lines.next() != Some(v2_header.as_str()) {
+        return Err(CoreError::new(
+            ErrorKind::PersistenceError,
+            "network membership v2 migration received the wrong source schema",
+        ));
+    }
+    let mut migrated = format_header(CURRENT_FORMAT_VERSION);
+    migrated.push('\n');
+    for (offset, line) in lines.enumerate() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.first() == Some(&"network") {
+            if fields.len() != 4 {
+                return Err(malformed_line(
+                    offset + 2,
+                    "v2 network record must have 4 fields",
+                ));
+            }
+            let role = if fields[2] == "member" {
+                "host"
+            } else {
+                "none"
+            };
+            migrated.push_str(&format!("{line}\t{role}\n"));
+        } else {
+            migrated.push_str(line);
+            migrated.push('\n');
+        }
+    }
     // Validate the complete migrated document before any caller may rewrite disk state.
     parse_registry(&migrated)?;
     Ok(migrated)
@@ -268,8 +307,9 @@ fn serialize_registry(registry: &MembershipRegistry) -> Result<String, CoreError
         }
         let state = durable_state_code(membership.state)?;
         let encoded_name = encode_hex(membership.network_name.as_str().as_bytes());
+        let role = durable_role_code(membership.state, membership.role)?;
         output.push_str(&format!(
-            "network\t{}\t{state}\t{encoded_name}\n",
+            "network\t{}\t{state}\t{encoded_name}\t{role}\n",
             membership.network_id
         ));
 
@@ -352,8 +392,15 @@ fn parse_network_record<'a>(
     let display_name = DisplayName::new(name)
         .map_err(|error| malformed_value(line_number, "invalid network name", error))?;
 
+    let role = parse_durable_role(
+        required_field(fields, line_number, "membership role")?,
+        state,
+        line_number,
+    )?;
+
     let mut membership = NetworkMembership::new(network_id, display_name);
     membership.state = state;
+    membership.role = role;
     registry.remember_network(membership);
     Ok(())
 }
@@ -429,6 +476,47 @@ fn parse_durable_state(value: &str, line_number: usize) -> Result<MembershipStat
         "member" => Ok(MembershipState::Member),
         _ => Err(malformed_line(line_number, "invalid membership state")),
     }
+}
+
+/// A role is meaningful only while `Member`. A `Member` without one is representable on purpose
+/// ("unknown"); callers must refuse to act on it.
+fn durable_role_code(
+    state: MembershipState,
+    role: Option<MembershipRole>,
+) -> Result<&'static str, CoreError> {
+    match (state, role) {
+        (MembershipState::Member, Some(MembershipRole::Host)) => Ok("host"),
+        (MembershipState::Member, Some(MembershipRole::Client)) => Ok("client"),
+        (MembershipState::Member, None) | (MembershipState::NotMember, None) => Ok("none"),
+        (MembershipState::NotMember, Some(_)) => Err(CoreError::new(
+            ErrorKind::PersistenceError,
+            "cannot persist a membership role for a network this node is not a member of",
+        )),
+        (MembershipState::Joining | MembershipState::Leaving, _) => Err(CoreError::new(
+            ErrorKind::PersistenceError,
+            "cannot persist a transient network membership state",
+        )),
+    }
+}
+
+fn parse_durable_role(
+    value: &str,
+    state: MembershipState,
+    line_number: usize,
+) -> Result<Option<MembershipRole>, CoreError> {
+    let role = match value {
+        "host" => Some(MembershipRole::Host),
+        "client" => Some(MembershipRole::Client),
+        "none" => None,
+        _ => return Err(malformed_line(line_number, "invalid membership role")),
+    };
+    if role.is_some() && state != MembershipState::Member {
+        return Err(malformed_line(
+            line_number,
+            "a membership role requires the member state",
+        ));
+    }
+    Ok(role)
 }
 
 const fn bool_code(value: bool) -> &'static str {
@@ -753,8 +841,10 @@ mod tests {
         assert!(restored.is_peer_trusted(&trusted_nonmember));
 
         let rewritten = fs::read_to_string(&path).unwrap();
-        assert!(rewritten.starts_with("BLUEROUTE_MEMBERSHIP_V2\n"));
+        assert!(rewritten.starts_with("BLUEROUTE_MEMBERSHIP_V3\n"));
         assert!(!rewritten.contains("BLUEROUTE_MEMBERSHIP_V1"));
+        // Joining was never enabled before v3, so a legacy member is a hosted network.
+        assert_eq!(restored.role, Some(MembershipRole::Host));
         assert_eq!(NetworkMembershipStore::new(&path).load().unwrap(), migrated);
     }
 
@@ -769,7 +859,7 @@ mod tests {
         assert!(
             fs::read_to_string(path)
                 .unwrap()
-                .starts_with("BLUEROUTE_MEMBERSHIP_V2\n")
+                .starts_with("BLUEROUTE_MEMBERSHIP_V3\n")
         );
     }
 
@@ -864,5 +954,103 @@ mod tests {
             "BLUEROUTE_MEMBERSHIP_V2\n"
         );
         assert!(fs::symlink_metadata(path).unwrap().file_type().is_symlink());
+    }
+
+    fn network_line(id: NetworkId, state: &str, role: Option<&str>) -> String {
+        let name = "4c6162"; // "Lab"
+        match role {
+            Some(role) => format!("network\t{id}\t{state}\t{name}\t{role}\n"),
+            None => format!("network\t{id}\t{state}\t{name}\n"),
+        }
+    }
+
+    #[test]
+    fn v2_state_migrates_members_to_host_and_non_members_to_no_role() {
+        let directory = TestDirectory::new();
+        let path = directory.state_path();
+        let hosted = NetworkId::from_bytes([6; 16]);
+        let remembered = NetworkId::from_bytes([7; 16]);
+        let v2 = format!(
+            "BLUEROUTE_MEMBERSHIP_V2\n{}{}",
+            network_line(hosted, "member", None),
+            network_line(remembered, "not-member", None)
+        );
+        fs::write(&path, v2).unwrap();
+        let registry = NetworkMembershipStore::new(&path).load().unwrap();
+        assert_eq!(
+            registry.network(&hosted).unwrap().role,
+            Some(MembershipRole::Host)
+        );
+        assert_eq!(registry.network(&remembered).unwrap().role, None);
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .starts_with("BLUEROUTE_MEMBERSHIP_V3\n")
+        );
+    }
+
+    #[test]
+    fn roles_round_trip_and_an_unknown_member_role_is_preserved_as_unknown() {
+        let directory = TestDirectory::new();
+        let path = directory.state_path();
+        let mut host = network(1, "Hosted", true);
+        host.role = Some(MembershipRole::Host);
+        let mut client = network(2, "Joined", true);
+        client.role = Some(MembershipRole::Client);
+        let unknown = network(3, "Unknown role", true);
+        assert_eq!(unknown.state, MembershipState::Member);
+        let mut registry = MembershipRegistry::default();
+        for membership in [host.clone(), client.clone(), unknown.clone()] {
+            registry.remember_network(membership);
+        }
+        let store = NetworkMembershipStore::new(&path);
+        store.save(&registry).unwrap();
+        let loaded = store.load().unwrap();
+        assert_eq!(
+            loaded.network(&host.network_id).unwrap().role,
+            Some(MembershipRole::Host)
+        );
+        assert_eq!(
+            loaded.network(&client.network_id).unwrap().role,
+            Some(MembershipRole::Client)
+        );
+        // A member with no role stays unknown; nothing silently promotes it to host.
+        assert_eq!(loaded.network(&unknown.network_id).unwrap().role, None);
+    }
+
+    #[test]
+    fn a_role_on_a_non_member_or_an_invalid_role_is_rejected() {
+        let directory = TestDirectory::new();
+        let path = directory.state_path();
+        let id = NetworkId::from_bytes([8; 16]);
+        for body in [
+            network_line(id, "not-member", Some("host")),
+            network_line(id, "member", Some("admin")),
+            network_line(id, "member", Some("")),
+            format!(
+                "{}\tx\n",
+                network_line(id, "member", Some("host")).trim_end()
+            ),
+        ] {
+            fs::write(&path, format!("BLUEROUTE_MEMBERSHIP_V3\n{body}")).unwrap();
+            assert_eq!(
+                NetworkMembershipStore::new(&path)
+                    .load()
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::PersistenceError,
+                "{body:?}"
+            );
+        }
+        // Saving a role on a non-member is refused too.
+        let mut bad = network(9, "Bad", false);
+        bad.role = Some(MembershipRole::Host);
+        let mut registry = MembershipRegistry::default();
+        registry.remember_network(bad);
+        assert!(
+            NetworkMembershipStore::new(directory.state_path())
+                .save(&registry)
+                .is_err()
+        );
     }
 }

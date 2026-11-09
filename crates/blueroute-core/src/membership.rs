@@ -36,6 +36,16 @@ impl MembershipState {
     }
 }
 
+/// Why this node is a member: it created (hosts) the network, or joined someone else's.
+/// Startup reconciliation, leave and health all depend on it, and it must never be inferred from
+/// Bluetooth addresses, names or advertisements.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MembershipRole {
+    Host,
+    Client,
+}
+
 /// Durable membership/trust facts remembered for one peer in a BlueRoute network.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PeerMembership {
@@ -68,6 +78,9 @@ pub struct NetworkMembership {
     pub network_id: NetworkId,
     pub network_name: DisplayName,
     pub state: MembershipState,
+    /// Set when `Member` is committed and cleared on leave. `None` on a `Member` means the role
+    /// is unknown, and callers must refuse to act on it rather than guess.
+    pub role: Option<MembershipRole>,
     peers: BTreeMap<NodeId, PeerMembership>,
 }
 
@@ -77,6 +90,7 @@ impl NetworkMembership {
             network_id,
             network_name,
             state: MembershipState::NotMember,
+            role: None,
             peers: BTreeMap::new(),
         }
     }

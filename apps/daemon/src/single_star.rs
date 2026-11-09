@@ -9,7 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use blueroute_core::{
     CoreError, DaemonConfig, DisplayName, ErrorKind, Ipv4StarAddressPlan, MembershipRegistry,
-    MembershipState, NetworkId, NetworkMembership, NodeCapabilities, ensure_ipv4_segment_available,
+    MembershipRole, MembershipState, NetworkId, NetworkMembership, NodeCapabilities,
+    ensure_ipv4_segment_available,
 };
 use blueroute_linux::{
     ActiveIpv4Prefix, BluetoothBackend, BluezBackend, InterfaceAddress, IpNetworkBackend,
@@ -566,6 +567,7 @@ where
                 .state
                 .transition(MembershipState::Joining)?
                 .transition(MembershipState::Member)?;
+            membership.role = Some(MembershipRole::Host);
             registry.remember_network(membership);
 
             if let Err(persist_error) = self.store.save(&registry) {
@@ -723,12 +725,15 @@ where
             let Some(network) = current_network(&registry)? else {
                 return Ok(());
             };
-            if registry.network(&network).is_none() {
+            let Some(membership) = registry.network(&network) else {
                 return Err(CoreError::new(
                     ErrorKind::InvalidState,
                     "active BlueRoute membership is missing from durable state",
                 ));
-            }
+            };
+            // Host leave tears down a hosted network. Never run it for a joined client or for a
+            // member whose role is unknown: that would act on resources this node does not own.
+            require_host_role(membership.role, "leave")?;
             let bridge = bridge_name(network)?;
             let address = local_star_address(network, &self.config)?;
 
@@ -746,6 +751,7 @@ where
                 .state
                 .transition(MembershipState::Leaving)?
                 .transition(MembershipState::NotMember)?;
+            membership.role = None;
             for peer in membership
                 .peers()
                 .map(|peer| peer.node_id)
@@ -776,9 +782,12 @@ where
             let Some(network) = current_network(&registry)? else {
                 return Ok(());
             };
-            // Production JoinNetwork remains fail-closed, so a persisted local
-            // Member currently represents a host created by this daemon.
-            // Persisted role must be added before client join is enabled.
+            // The persisted role decides what this node is. A joined client must never be
+            // restored as a host, and an unknown role is never guessed (P6-009).
+            let role = registry
+                .network(&network)
+                .and_then(|membership| membership.role);
+            require_host_role(role, "restore")?;
             ensure_nap_capability(&self.capabilities)?;
             self.runtime
                 .start_host(
@@ -977,6 +986,23 @@ pub fn current_network(registry: &MembershipRegistry) -> Result<Option<NetworkId
         ));
     }
     Ok(current)
+}
+
+/// Host-only operations require a persisted `Host` role.
+fn require_host_role(role: Option<MembershipRole>, operation: &str) -> Result<(), CoreError> {
+    match role {
+        Some(MembershipRole::Host) => Ok(()),
+        Some(MembershipRole::Client) => Err(CoreError::new(
+            ErrorKind::InvalidState,
+            format!(
+                "refusing host {operation}: this node joined the network as a client (client restart reconciliation is P6-009)"
+            ),
+        )),
+        None => Err(CoreError::new(
+            ErrorKind::InvalidState,
+            format!("refusing host {operation}: the persisted membership role is unknown"),
+        )),
+    }
 }
 
 fn ensure_nap_capability(capabilities: &NodeCapabilities) -> Result<(), CoreError> {
@@ -1211,6 +1237,10 @@ mod tests {
     impl FakeRuntime {
         fn starts(&self) -> usize {
             self.state.starts.load(Ordering::SeqCst)
+        }
+
+        fn stops(&self) -> usize {
+            self.state.stops.load(Ordering::SeqCst)
         }
     }
 
@@ -1637,6 +1667,7 @@ mod tests {
             membership.state = MembershipState::Joining
                 .transition(MembershipState::Member)
                 .unwrap();
+            membership.role = Some(MembershipRole::Host);
             registry.remember_network(membership);
             store.save(&registry).unwrap();
             let operations = SingleStarNetworkOperations::with_runtime_and_generator(
@@ -1668,6 +1699,7 @@ mod tests {
             membership.state = MembershipState::Joining
                 .transition(MembershipState::Member)
                 .unwrap();
+            membership.role = Some(MembershipRole::Host);
             registry.remember_network(membership);
             store.save(&registry).unwrap();
             let runtime = FakeRuntime::default();
@@ -1702,6 +1734,7 @@ mod tests {
             membership.state = MembershipState::Joining
                 .transition(MembershipState::Member)
                 .unwrap();
+            membership.role = Some(MembershipRole::Host);
             registry.remember_network(membership);
             store.save(&registry).unwrap();
             let runtime = FakeRuntime::default();
@@ -1922,6 +1955,7 @@ mod tests {
                             DisplayName::new("Replaced host").unwrap(),
                         );
                         member.state = MembershipState::Member;
+                        member.role = Some(MembershipRole::Host);
                         registry.remember_network(member);
                         NetworkMembershipStore::new(&self.membership_path)
                             .save(&registry)
@@ -1962,6 +1996,7 @@ mod tests {
                     let mut member =
                         NetworkMembership::new(network, DisplayName::new("Host").unwrap());
                     member.state = MembershipState::Member;
+                    member.role = Some(MembershipRole::Host);
                     registry.remember_network(member);
                     store.save(&registry).unwrap();
                 }
@@ -2029,6 +2064,7 @@ mod tests {
                             DisplayName::new("Changed host").unwrap(),
                         );
                         member.state = MembershipState::Member;
+                        member.role = Some(MembershipRole::Host);
                         registry.remember_network(member);
                         NetworkMembershipStore::new(&self.membership_path)
                             .save(&registry)
@@ -2074,6 +2110,7 @@ mod tests {
                     let mut member =
                         NetworkMembership::new(network, DisplayName::new("Host").unwrap());
                     member.state = MembershipState::Member;
+                    member.role = Some(MembershipRole::Host);
                     registry.remember_network(member);
                     store.save(&registry).unwrap();
                 }
@@ -2146,6 +2183,7 @@ mod tests {
                             DisplayName::new("Replaced host").unwrap(),
                         );
                         member.state = MembershipState::Member;
+                        member.role = Some(MembershipRole::Host);
                         registry.remember_network(member);
                         NetworkMembershipStore::new(&self.membership_path)
                             .save(&registry)
@@ -2184,6 +2222,7 @@ mod tests {
                     let mut member =
                         NetworkMembership::new(network, DisplayName::new("Host").unwrap());
                     member.state = MembershipState::Member;
+                    member.role = Some(MembershipRole::Host);
                     registry.remember_network(member);
                     store.save(&registry).unwrap();
                 }
@@ -2217,6 +2256,105 @@ mod tests {
                 }
                 fs::remove_dir_all(root).unwrap();
             }
+        });
+    }
+
+    fn registry_with_role(network: NetworkId, role: Option<MembershipRole>) -> MembershipRegistry {
+        let mut membership =
+            NetworkMembership::new(network, DisplayName::new("Role test").unwrap());
+        membership.state = MembershipState::Member;
+        membership.role = role;
+        let mut registry = MembershipRegistry::default();
+        registry.remember_network(membership);
+        registry
+    }
+
+    #[test]
+    fn startup_never_restores_a_joined_client_or_an_unknown_role_as_a_host() {
+        futures_lite::future::block_on(async {
+            for (label, role) in [("client", Some(MembershipRole::Client)), ("unknown", None)] {
+                let (root, store) = temp_store(&format!("startup-role-{label}"));
+                let network = NetworkId::from_bytes([0x73; 16]);
+                store.save(&registry_with_role(network, role)).unwrap();
+                let runtime = FakeRuntime::default();
+                let operations = SingleStarNetworkOperations::with_runtime_and_generator(
+                    store,
+                    DaemonConfig::default(),
+                    nap_capabilities(Some(true)),
+                    runtime.clone(),
+                    SequenceGenerator::new([]),
+                );
+                let error = operations.reconcile_on_startup().await.unwrap_err();
+                assert_eq!(error.kind(), ErrorKind::InvalidState, "{label}");
+                // Nothing was hosted and the durable membership is untouched.
+                assert_eq!(runtime.starts(), 0, "{label}");
+                assert_eq!(
+                    current_network(&operations.store.load().unwrap()).unwrap(),
+                    Some(network)
+                );
+                fs::remove_dir_all(root).unwrap();
+            }
+        });
+    }
+
+    #[test]
+    fn host_leave_refuses_a_joined_client_or_an_unknown_role_and_touches_nothing() {
+        futures_lite::future::block_on(async {
+            for (label, role) in [("client", Some(MembershipRole::Client)), ("unknown", None)] {
+                let (root, store) = temp_store(&format!("leave-role-{label}"));
+                let network = NetworkId::from_bytes([0x74; 16]);
+                store.save(&registry_with_role(network, role)).unwrap();
+                let runtime = FakeRuntime::default();
+                let operations = SingleStarNetworkOperations::with_runtime_and_generator(
+                    store,
+                    DaemonConfig::default(),
+                    nap_capabilities(Some(true)),
+                    runtime.clone(),
+                    SequenceGenerator::new([]),
+                );
+                let error = operations.leave_network().await.unwrap_err();
+                assert_eq!(error.kind(), ErrorKind::InvalidState, "{label}");
+                assert_eq!(runtime.stops(), 0, "{label}");
+                let registry = operations.store.load().unwrap();
+                assert_eq!(registry.network(&network).unwrap().role, role);
+                assert_eq!(
+                    registry.network(&network).unwrap().state,
+                    MembershipState::Member
+                );
+                fs::remove_dir_all(root).unwrap();
+            }
+        });
+    }
+
+    #[test]
+    fn creating_records_the_host_role_and_host_leave_clears_it() {
+        futures_lite::future::block_on(async {
+            let (root, store) = temp_store("create-role");
+            let network = NetworkId::from_bytes([0x75; 16]);
+            let operations = SingleStarNetworkOperations::with_runtime_and_generator(
+                store,
+                DaemonConfig::default(),
+                nap_capabilities(Some(true)),
+                FakeRuntime::default(),
+                SequenceGenerator::new([network]),
+            );
+            operations
+                .create_network(DisplayName::new("Created").unwrap())
+                .await
+                .unwrap();
+            let registry = operations.store.load().unwrap();
+            assert_eq!(
+                registry.network(&network).unwrap().role,
+                Some(MembershipRole::Host)
+            );
+            operations.leave_network().await.unwrap();
+            let registry = operations.store.load().unwrap();
+            assert_eq!(registry.network(&network).unwrap().role, None);
+            assert_eq!(
+                registry.network(&network).unwrap().state,
+                MembershipState::NotMember
+            );
+            fs::remove_dir_all(root).unwrap();
         });
     }
 }

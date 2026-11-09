@@ -1,6 +1,6 @@
 # P6-009 — Joined-client restart reconciliation (design, PROPOSED)
 
-**Status: proposal for maintainer review, 2026-11-09. Nothing here is implemented.** It closes the
+**Status: accepted by the maintainer on 2026-11-09 (see "Maintainer answers"); implementation proceeds stage by stage.** It closes the
 remaining software gap before the P6-004 join gate may open (see the P6-004 addendum, "Review
 finding R2" and "joined-client leave"). Production `JoinNetwork` stays fail-closed throughout.
 Verify every code reference against the current tree before implementing.
@@ -106,3 +106,23 @@ the gate-opening change must assert it.
 
 Multi-star topology, roaming between hosts, and automatic host re-selection (one approved host per
 network in v1). Physical acceptance is recorded separately.
+
+## Maintainer answers (2026-11-09)
+
+1. Mapping every existing `Member` to `Host` in the v2→v3 migration: **accepted**.
+2. The BlueZ device path is persisted **as a hint** only; the locator remains the fallback.
+3. **Changed from the proposal:** the reconnector does **not** retry forever. It makes a bounded
+   number of attempts (N, with capped exponential backoff), then stops, leaves `Member` intact,
+   reports `Degraded` with an actionable message, and **waits for the user** (an explicit retry or
+   leave). A retry action must be available through the daemon API and the UI.
+4. Stale owned NetworkManager artifacts are kept and reported `Degraded`; no timer removes them.
+5. S1 to S4 are **mandatory** before the join flag may be enabled.
+
+### S1 schema (implemented 2026-11-09)
+Membership schema v3 adds a per-network `role` field: `host`, `client` or `none`. Migration maps a
+v2 `member` row to `host` and a `not-member` row to `none`. In memory the role is
+`Option<MembershipRole>`; it is set when `Member` is committed (create ⇒ `Host`, join ⇒ `Client`)
+and cleared when the node leaves. A `Member` with no role is never acted on: startup reconciliation
+and host leave refuse it, and the daemon reports `Degraded`.
+
+**S1 done (software):** `MembershipRole` in `blueroute-core`; `membership_store` schema v3 with the v2→v3 migration (members→`host`, others→`none`; a role on a non-member or an invalid role is rejected); create writes `Host`, join commit writes `Client`, both leaves clear it. `reconcile_on_startup` and host `leave_network` now require a persisted `Host` role: a `Client` or unknown role is refused (`InvalidState`, nothing hosted or torn down, durable membership untouched, daemon reports `Degraded`). Tests cover migration, round trips, invalid roles, both refusals and role set/clear on create and leave. **S2 to S6 remain open and the join flag stays unsettable.**

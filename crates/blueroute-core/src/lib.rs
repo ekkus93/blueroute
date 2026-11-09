@@ -39,7 +39,9 @@ pub use error::{CoreError, ErrorKind};
 pub use forwarding_policy::desired_ipv4_forwarding;
 pub use health::{HealthComponent, HealthLevel, NodeHealth};
 pub use id::{DisplayName, LinkId, NetworkId, NodeId, SegmentId};
-pub use membership::{MembershipRegistry, MembershipState, NetworkMembership, PeerMembership};
+pub use membership::{
+    MembershipRegistry, MembershipRole, MembershipState, NetworkMembership, PeerMembership,
+};
 pub use nap_admission::{NapAdmissionDecision, plan_nap_client_admission};
 pub use nap_admission_ledger::{NapAdmissionLedger, NapAdmissionTicket};
 pub use nap_admission_scope::{NetworkNapAdmission, NetworkNapTicket};
