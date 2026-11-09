@@ -8,10 +8,15 @@
 //! Order inside [`JoinCommitAuthorization::prepare_commit`]:
 //! 1. mark the host trusted in the (not yet saved) membership registry;
 //! 2. enroll the host key in the durable pin store;
-//! 3. clear the pending record, so a failed or later attempt can never reuse stale operator
-//!    intent (a retry requires recording the host again).
 //!
-//! Step 1 is in memory only; steps 2 and 3 are undone or fail closed, never half-applied.
+//! The pending record is cleared by [`JoinCommitAuthorization::finalize_commit`] only **after**
+//! membership is saved. Clearing it earlier would leave a window in which the live control
+//! session is authorized by neither the joiner fallback nor the member stores, and per-second
+//! supervision could drop it at the moment of commit. If finalizing fails, the coordinator
+//! restores the previous membership and calls `undo_commit`, so a stale record can never survive
+//! a completed join.
+//!
+//! Step 1 is in memory only; step 2 is undone on failure, never half-applied.
 
 use std::sync::Arc;
 
@@ -36,8 +41,12 @@ pub trait JoinCommitAuthorization: Send + Sync {
         registry: &mut MembershipRegistry,
     ) -> Result<JoinCommitReceipt, CoreError>;
 
+    /// Called after membership was saved: forget the operator's pending host so stale intent
+    /// cannot authorize a later attempt. On error the caller reverts the commit.
+    fn finalize_commit(&self, receipt: &JoinCommitReceipt) -> Result<(), CoreError>;
+
     /// Reverse the durable pin written by `prepare_commit` after the membership save failed.
-    fn undo_commit(&self, receipt: JoinCommitReceipt) -> Result<(), CoreError>;
+    fn undo_commit(&self, receipt: &JoinCommitReceipt) -> Result<(), CoreError>;
 
     /// Forget the operator's pending host after a join attempt that mutated the runtime failed.
     fn discard(&self, network: NetworkId) -> Result<(), CoreError>;
@@ -83,29 +92,20 @@ impl JoinCommitAuthorization for PendingHostCommitAuthorization {
         if pin_added {
             self.pins.save(&pins)?;
         }
-        let receipt = JoinCommitReceipt {
+        Ok(JoinCommitReceipt {
             network,
             node: host.node(),
             pin_added,
-        };
-        if let Err(error) = self.pending.clear() {
-            // Do not leave a pin behind for a join that will not commit.
-            let undo = revoke_added_pin(&self.pins, &receipt);
-            return Err(match undo {
-                Ok(()) => error,
-                Err(undo_error) => CoreError::with_diagnostic(
-                    error.kind(),
-                    error.message(),
-                    format!("also failed to remove the new pin: {undo_error}"),
-                ),
-            });
-        }
-        Ok(receipt)
+        })
     }
 
-    fn undo_commit(&self, receipt: JoinCommitReceipt) -> Result<(), CoreError> {
+    fn finalize_commit(&self, _receipt: &JoinCommitReceipt) -> Result<(), CoreError> {
+        self.pending.clear()
+    }
+
+    fn undo_commit(&self, receipt: &JoinCommitReceipt) -> Result<(), CoreError> {
         let _lock = self.pins.try_lock()?;
-        revoke_added_pin(&self.pins, &receipt)
+        revoke_added_pin(&self.pins, receipt)
     }
 
     fn discard(&self, _network: NetworkId) -> Result<(), CoreError> {
@@ -202,7 +202,7 @@ mod tests {
     }
 
     #[test]
-    fn commit_trusts_the_host_pins_its_key_and_clears_the_pending_record() {
+    fn commit_trusts_and_pins_the_host_then_finalize_clears_the_pending_record() {
         let f = fixture();
         record(&f, 7);
         let mut registry = joined_registry();
@@ -216,6 +216,9 @@ mod tests {
         );
         let pins = PeerPinStore::new(f.root.join("pins")).load().unwrap();
         assert!(pins.authorize(n(), host_node(), true, pin(7)).is_ok());
+        // Not cleared yet: the live session must stay authorized until membership is saved.
+        assert!(f.pending.pending_host().unwrap().is_some());
+        f.auth.finalize_commit(&receipt).unwrap();
         assert_eq!(f.pending.pending_host().unwrap(), None);
     }
 
@@ -265,7 +268,7 @@ mod tests {
         record(&f, 7);
         let mut registry = joined_registry();
         let receipt = f.auth.prepare_commit(n(), &mut registry).unwrap();
-        f.auth.undo_commit(receipt).unwrap();
+        f.auth.undo_commit(&receipt).unwrap();
         assert!(
             PeerPinStore::new(f.root.join("pins"))
                 .load()
@@ -282,7 +285,7 @@ mod tests {
         let mut registry = joined_registry();
         let receipt = f.auth.prepare_commit(n(), &mut registry).unwrap();
         assert!(!receipt.pin_added);
-        f.auth.undo_commit(receipt).unwrap();
+        f.auth.undo_commit(&receipt).unwrap();
         assert_eq!(store.load().unwrap().len(), 1);
     }
 

@@ -7,10 +7,12 @@ mod approved_transport;
 mod attempt_socket;
 mod authorization;
 mod control_listener;
+mod control_supervisor;
 mod control_tls;
 mod control_worker;
 mod enrollment_transport;
 mod join_authorization;
+mod join_control;
 mod join_network;
 mod outbound_control;
 mod peer_locator;
@@ -50,6 +52,7 @@ pub use control_listener::{
     CONTROL_TCP_PORT, ObservedControlListener, bind_owned_nap_control_listener,
     owned_nap_control_address,
 };
+pub use control_supervisor::{ControlSupervisors, Established, SupervisedState};
 pub use control_tls::{
     ActiveControlSession, AuthenticatedControlPeer, ControlSessionError,
     ControlTlsCertificateCandidate, ControlTlsError, ControlTlsIdentityStore, ControlTlsStream,
@@ -63,6 +66,7 @@ pub use enrollment_transport::enroll_confirmed_control_candidate;
 pub use join_authorization::{
     JoinCommitAuthorization, JoinCommitReceipt, PendingHostCommitAuthorization,
 };
+pub use join_control::{JoinControlConfig, run_join_control};
 pub use join_network::{
     JoinControlSession, JoinIpLease, JoinNetworkFuture, JoinNetworkOperations, JoinPanLink,
     JoinRuntime, LinuxJoinRuntime, TransactionalJoinNetworkOperations,

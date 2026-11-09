@@ -15,7 +15,10 @@ use blueroute_linux::{
 };
 
 use crate::current_network;
-use crate::{BluezPeerLocator, JoinCommitAuthorization, PeerLocator, PendingJoinOperations};
+use crate::{
+    BluezPeerLocator, ControlSupervisors, JoinCommitAuthorization, JoinControlConfig, PeerLocator,
+    PendingJoinOperations, PinnedControlTlsPeer, run_join_control,
+};
 
 pub type JoinNetworkFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, CoreError>> + Send + 'a>>;
 
@@ -168,8 +171,11 @@ impl TransactionalJoinNetworkOperations<LinuxJoinRuntime> {
         store: NetworkMembershipStore,
         pool: Ipv4AddressPool,
         pending: Arc<PendingJoinOperations>,
+        control: JoinControlConfig,
     ) -> Result<Self, CoreError> {
-        let runtime = LinuxJoinRuntime::new(pool)?.with_pending_join(pending);
+        let runtime = LinuxJoinRuntime::new(pool)?
+            .with_pending_join(pending)
+            .with_control(control);
         Ok(Self::with_runtime_and_pool(store, runtime, pool))
     }
 }
@@ -440,6 +446,7 @@ where
                 }
             }
 
+            let previous_registry = registry.clone();
             if let Err(error) = mark_local_membership_joined(&mut registry, network) {
                 let (error, clean) = self
                     .rollback_after_control(error, session, lease, link)
@@ -469,7 +476,7 @@ where
             if let Err(error) = self.store.save(&registry) {
                 let error = match (&self.authorization, receipt) {
                     (Some(authorization), Some(receipt)) => {
-                        match authorization.undo_commit(receipt) {
+                        match authorization.undo_commit(&receipt) {
                             Ok(()) => error,
                             Err(undo) => CoreError::with_diagnostic(
                                 error.kind(),
@@ -482,6 +489,36 @@ where
                         }
                     }
                     _ => error,
+                };
+                let (error, clean) = self
+                    .rollback_after_control(error, session, lease, link)
+                    .await;
+                if clean {
+                    transition.reconciled();
+                }
+                return Err(error);
+            }
+
+            // Forget the operator's pending host only now that membership is durable. If that
+            // fails, revert the whole commit: a stale record must never survive a join.
+            if let (Some(authorization), Some(receipt)) = (&self.authorization, &receipt)
+                && let Err(finalize_error) = authorization.finalize_commit(receipt)
+            {
+                let mut diagnostics = Vec::new();
+                if let Err(error) = self.store.save(&previous_registry) {
+                    diagnostics.push(format!("restoring membership failed: {error}"));
+                }
+                if let Err(error) = authorization.undo_commit(receipt) {
+                    diagnostics.push(format!("undoing the host key pin failed: {error}"));
+                }
+                let error = if diagnostics.is_empty() {
+                    finalize_error
+                } else {
+                    CoreError::with_diagnostic(
+                        finalize_error.kind(),
+                        finalize_error.message(),
+                        diagnostics.join("; "),
+                    )
                 };
                 let (error, clean) = self
                     .rollback_after_control(error, session, lease, link)
@@ -507,6 +544,8 @@ pub struct LinuxJoinRuntime {
     pool: Ipv4AddressPool,
     locator: Arc<dyn PeerLocator>,
     pending: Option<Arc<PendingJoinOperations>>,
+    control: Option<JoinControlConfig>,
+    supervisors: Arc<ControlSupervisors>,
     hardware_verified: bool,
 }
 
@@ -516,6 +555,8 @@ impl Default for LinuxJoinRuntime {
             pool: Ipv4AddressPool::default(),
             locator: Arc::new(BluezPeerLocator),
             pending: None,
+            control: None,
+            supervisors: Arc::new(ControlSupervisors::new()),
             hardware_verified: false,
         }
     }
@@ -543,6 +584,17 @@ impl LinuxJoinRuntime {
     pub fn with_pending_join(mut self, pending: Arc<PendingJoinOperations>) -> Self {
         self.pending = Some(pending);
         self
+    }
+
+    /// TLS identity, trust state and registry for the supervised control session.
+    pub fn with_control(mut self, control: JoinControlConfig) -> Self {
+        self.control = Some(control);
+        self
+    }
+
+    /// The workers that own live control sessions, so leave and health reporting can reach them.
+    pub fn supervisors(&self) -> Arc<ControlSupervisors> {
+        self.supervisors.clone()
     }
 
     #[cfg(test)]
@@ -680,25 +732,46 @@ impl JoinRuntime for LinuxJoinRuntime {
 
     fn start_control_session<'a>(
         &'a self,
-        _network: NetworkId,
-        _link: &'a JoinPanLink,
-        _lease: &'a JoinIpLease,
+        network: NetworkId,
+        link: &'a JoinPanLink,
+        lease: &'a JoinIpLease,
     ) -> JoinNetworkFuture<'a, JoinControlSession> {
-        Box::pin(async {
-            Err(CoreError::new(
-                ErrorKind::CapabilityUnavailable,
-                "P7 authenticated control-session support is required before PANU join can commit membership",
-            ))
+        Box::pin(async move {
+            self.require_open()?;
+            let control = self.control.clone().ok_or_else(|| {
+                CoreError::new(
+                    ErrorKind::CapabilityUnavailable,
+                    "join control-session configuration is missing",
+                )
+            })?;
+            let pending = self.pending.as_ref().ok_or_else(|| {
+                CoreError::new(
+                    ErrorKind::AuthenticationFailed,
+                    "join has no operator-confirmed host store configured",
+                )
+            })?;
+            // The pin always comes from the operator's record, never from the connection.
+            let host = pending.host_for(network)?;
+            let expected = PinnedControlTlsPeer::new(network, host.node(), host.fingerprint())
+                .map_err(|error| {
+                    CoreError::with_diagnostic(
+                        ErrorKind::AuthenticationFailed,
+                        "the confirmed host identity cannot be pinned",
+                        error.to_string(),
+                    )
+                })?;
+            let (link, lease, pool) = (link.clone(), lease.clone(), self.pool);
+            self.supervisors
+                .start(network, move |stop, established| {
+                    run_join_control(&control, expected, &link, &lease, pool, stop, established)
+                })
+                .await?;
+            Ok(JoinControlSession::new(network))
         })
     }
 
-    fn stop_control_session(&self, _session: JoinControlSession) -> JoinNetworkFuture<'_, ()> {
-        Box::pin(async {
-            Err(CoreError::new(
-                ErrorKind::CapabilityUnavailable,
-                "production control-session cleanup is not implemented for JoinNetwork yet",
-            ))
-        })
+    fn stop_control_session(&self, session: JoinControlSession) -> JoinNetworkFuture<'_, ()> {
+        Box::pin(async move { self.supervisors.stop(session.network()) })
     }
 }
 
@@ -1418,8 +1491,20 @@ mod tests {
             NetworkMembershipStore::new(root.join("pj-memberships")),
             crate::PendingJoinStore::new(root.join("pj")),
         ));
+        let node = blueroute_core::NodeId::from_bytes([0x48; 16]);
+        let control = JoinControlConfig {
+            local: Arc::new(crate::LocalControlTlsIdentity::generate(node).unwrap()),
+            trust: Arc::new(crate::DurablePeerTrustOperations::new(
+                NetworkMembershipStore::new(root.join("trust-memberships")),
+            )),
+            registry: Arc::new(Mutex::new(
+                blueroute_protocol::session::ControlSessionRegistry::new(),
+            )),
+            capabilities: blueroute_core::NodeCapabilities::default(),
+        };
         let operations =
-            TransactionalJoinNetworkOperations::with_ipv4_pool(store, pool, pending).unwrap();
+            TransactionalJoinNetworkOperations::with_ipv4_pool(store, pool, pending, control)
+                .unwrap();
         assert_eq!(operations.expected_ipv4_pool, pool);
         let error = futures_lite::future::block_on(
             operations.join_network(NetworkId::from_bytes([0x47; 16])),
@@ -1598,6 +1683,75 @@ mod tests {
             let _ = fs::remove_dir_all(root);
         }
 
+        struct FailingFinalize(PendingHostCommitAuthorization);
+
+        impl crate::JoinCommitAuthorization for FailingFinalize {
+            fn prepare_commit(
+                &self,
+                network: NetworkId,
+                registry: &mut MembershipRegistry,
+            ) -> Result<crate::JoinCommitReceipt, CoreError> {
+                self.0.prepare_commit(network, registry)
+            }
+
+            fn finalize_commit(
+                &self,
+                _receipt: &crate::JoinCommitReceipt,
+            ) -> Result<(), CoreError> {
+                Err(CoreError::new(
+                    ErrorKind::PersistenceError,
+                    "injected failure clearing the pending host",
+                ))
+            }
+
+            fn undo_commit(&self, receipt: &crate::JoinCommitReceipt) -> Result<(), CoreError> {
+                self.0.undo_commit(receipt)
+            }
+
+            fn discard(&self, network: NetworkId) -> Result<(), CoreError> {
+                self.0.discard(network)
+            }
+        }
+
+        #[test]
+        fn a_failed_finalize_reverts_membership_and_pin_so_no_stale_record_survives_a_join() {
+            let (root, store) = temp_store("auth-finalize");
+            let pending = std::sync::Arc::new(PendingJoinOperations::new(
+                NetworkMembershipStore::new(root.join("memberships-v1")),
+                PendingJoinStore::new(root.join("pending")),
+            ));
+            let operations =
+                TransactionalJoinNetworkOperations::with_runtime(store, FakeRuntime::successful())
+                    .with_authorization(std::sync::Arc::new(FailingFinalize(
+                        PendingHostCommitAuthorization::new(
+                            pending.clone(),
+                            PeerPinStore::new(root.join("pins")),
+                        ),
+                    )));
+            record(&pending);
+            let error =
+                futures_lite::future::block_on(operations.join_network(network())).unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::PersistenceError);
+            let registry = NetworkMembershipStore::new(root.join("memberships-v1"))
+                .load()
+                .unwrap();
+            assert!(registry.network(&network()).is_none());
+            assert!(
+                PeerPinStore::new(root.join("pins"))
+                    .load()
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(operations.runtime.steps().ends_with(&[
+                Step::StopControl,
+                Step::RemoveAddress,
+                Step::DisconnectPanu,
+            ]));
+            // The wrapper then forgets the operator's intent after the failed attempt.
+            assert_eq!(pending.pending_host().unwrap(), None);
+            let _ = fs::remove_dir_all(root);
+        }
+
         #[test]
         fn a_missing_host_record_rolls_back_everything_and_commits_no_membership() {
             let (root, operations, _pending) = operations("auth-none", FakeRuntime::successful());
@@ -1722,6 +1876,29 @@ mod tests {
             // Closed before any BlueZ connection: this would otherwise fail differently (no bus).
             let panu = futures_lite::future::block_on(runtime.establish_panu(net())).unwrap_err();
             assert_eq!(panu.kind(), ErrorKind::CapabilityUnavailable);
+            // The control session is closed too, and nothing was registered by the attempt.
+            let link = JoinPanLink::new(
+                peer("AA_00_00_00_00_01"),
+                attachment(Some(peer("AA_00_00_00_00_01")), PanRole::Panu),
+            )
+            .unwrap();
+            let lease = JoinIpLease::new(InterfaceAddress {
+                interface: link.interface().clone(),
+                prefix: Ipv4StarAddressPlan::for_network(net(), Ipv4AddressPool::default())
+                    .unwrap()
+                    .first_client,
+                owner: net(),
+            });
+            let control =
+                futures_lite::future::block_on(runtime.start_control_session(net(), &link, &lease))
+                    .unwrap_err();
+            assert_eq!(control.kind(), ErrorKind::CapabilityUnavailable);
+            assert_eq!(runtime.supervisors().state(net()), None);
+            // Stopping a network with no worker is a harmless no-op.
+            futures_lite::future::block_on(
+                runtime.stop_control_session(JoinControlSession::new(net())),
+            )
+            .unwrap();
         }
 
         #[test]

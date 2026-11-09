@@ -1,18 +1,19 @@
 use std::error::Error;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use blueroute_core::{DaemonConfig, HealthLevel};
 use blueroute_daemon::{
-    ControlTlsIdentityStore, DaemonService, DurablePeerTrustOperations, NetworkOperations,
-    PeerPinStore, PendingHostCommitAuthorization, PendingJoinOperations, PendingJoinStore,
-    SingleStarNetworkOperations, TransactionalJoinNetworkOperations, current_network,
-    spawn_daemon_capability_health_worker, spawn_daemon_control_worker,
+    ControlTlsIdentityStore, DaemonService, DurablePeerTrustOperations, JoinControlConfig,
+    NetworkOperations, PeerPinStore, PendingHostCommitAuthorization, PendingJoinOperations,
+    PendingJoinStore, SingleStarNetworkOperations, TransactionalJoinNetworkOperations,
+    current_network, spawn_daemon_capability_health_worker, spawn_daemon_control_worker,
     system_diagnostics_from_report,
 };
 use blueroute_linux::{
     NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
 };
+use blueroute_protocol::session::ControlSessionRegistry;
 use blueroute_protocol::{ApiVersion, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, DaemonStatus};
 use futures_lite::future;
 use zbus::connection::Builder;
@@ -82,6 +83,16 @@ async fn run() -> Result<(), Box<dyn Error>> {
             NetworkMembershipStore::new(membership_path.clone()),
             config.ipv4_address_pool,
             pending_join_operations.clone(),
+            JoinControlConfig {
+                // The identity file is deterministic, so loading it again yields the same key.
+                local: Arc::new(
+                    ControlTlsIdentityStore::new(control_tls_identity_path(&state_directory))
+                        .load_or_create(local_node)?,
+                ),
+                trust: peer_trust_operations.clone(),
+                registry: Arc::new(Mutex::new(ControlSessionRegistry::new())),
+                capabilities: capabilities.clone(),
+            },
         )?
         .with_authorization(Arc::new(PendingHostCommitAuthorization::new(
             pending_join_operations.clone(),
