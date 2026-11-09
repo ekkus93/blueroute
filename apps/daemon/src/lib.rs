@@ -518,10 +518,18 @@ impl DaemonService {
                     Self::encode_response(&Response::Ack)
                 }
                 Command::LeaveNetwork => {
-                    self.network_operations()?
-                        .leave_network()
-                        .await
-                        .map_err(core_error_to_dbus)?;
+                    // A node that joined someone else's network must reverse its join; only
+                    // otherwise is this a host leave.
+                    let left_as_client = match &self.join_network_operations {
+                        Some(join) => join.leave_joined().await.map_err(core_error_to_dbus)?,
+                        None => false,
+                    };
+                    if !left_as_client {
+                        self.network_operations()?
+                            .leave_network()
+                            .await
+                            .map_err(core_error_to_dbus)?;
+                    }
                     self.update_current_network(None)?;
                     Self::encode_response(&Response::Ack)
                 }
