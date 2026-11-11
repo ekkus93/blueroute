@@ -32,6 +32,13 @@ pub struct JoinCommitReceipt {
     pin_added: bool,
 }
 
+impl JoinCommitReceipt {
+    /// The host whose key this commit trusted.
+    pub const fn host(&self) -> NodeId {
+        self.node
+    }
+}
+
 pub trait JoinCommitAuthorization: Send + Sync {
     /// Trust the confirmed host in `registry` (in memory) and make the durable pin and pending
     /// record changes. On error nothing durable remains changed.

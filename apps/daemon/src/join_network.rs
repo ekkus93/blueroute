@@ -16,8 +16,8 @@ use blueroute_linux::{
 
 use crate::current_network;
 use crate::{
-    BluezPeerLocator, ControlSupervisors, JoinCommitAuthorization, JoinControlConfig, PeerLocator,
-    PendingJoinOperations, PinnedControlTlsPeer, run_join_control,
+    BluezPeerLocator, ClientRecord, ClientRecordStore, ControlSupervisors, JoinCommitAuthorization,
+    JoinControlConfig, PeerLocator, PendingJoinOperations, PinnedControlTlsPeer, run_join_control,
 };
 
 pub type JoinNetworkFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, CoreError>> + Send + 'a>>;
@@ -186,6 +186,7 @@ pub struct TransactionalJoinNetworkOperations<R = LinuxJoinRuntime> {
     /// Binds the operator-confirmed host into durable member state at commit. `None` is only for
     /// tests with fake runtimes; production wiring must supply it before join is ever enabled.
     authorization: Option<Arc<dyn JoinCommitAuthorization>>,
+    client_records: Option<Arc<ClientRecordStore>>,
 }
 
 impl TransactionalJoinNetworkOperations<LinuxJoinRuntime> {
@@ -225,7 +226,14 @@ where
             expected_ipv4_pool,
             join_in_progress: AtomicBool::new(false),
             authorization: None,
+            client_records: None,
         }
+    }
+
+    /// Persist the reconnect hint (P6-009 S2) after a join commits and clear it on leave.
+    pub fn with_client_records(mut self, records: Arc<ClientRecordStore>) -> Self {
+        self.client_records = Some(records);
+        self
     }
 
     pub fn with_authorization(mut self, authorization: Arc<dyn JoinCommitAuthorization>) -> Self {
@@ -326,6 +334,11 @@ where
                     error.to_string(),
                 )
             })?;
+            // A stale hint is harmless (it is network-scoped and overwritten by the next join),
+            // so a failed clear must not turn a completed leave into an error.
+            if let Some(records) = &self.client_records {
+                let _ = records.clear();
+            }
             self.runtime.forget_joined(network);
             Ok(true)
         })
@@ -597,6 +610,14 @@ where
                     transition.reconciled();
                 }
                 return Err(error);
+            }
+
+            // The reconnect hint is advisory (the locator is the fallback and the pinned
+            // handshake authenticates the host), so failing to write it must not undo a join
+            // whose membership is already durable.
+            if let (Some(records), Some(receipt)) = (&self.client_records, &receipt) {
+                let _ = ClientRecord::new(network, receipt.host(), Some(link.peer().clone()))
+                    .and_then(|record| records.save(Some(&record)));
             }
 
             // Keep the live link and lease so leave can reverse them; the control session stays
@@ -1872,6 +1893,69 @@ mod tests {
                     .is_ok()
             );
             assert_eq!(pending.pending_host().unwrap(), None);
+            let _ = fs::remove_dir_all(root);
+        }
+
+        fn with_records(
+            label: &str,
+            runtime: FakeRuntime,
+        ) -> (
+            std::path::PathBuf,
+            TransactionalJoinNetworkOperations<FakeRuntime>,
+            std::sync::Arc<PendingJoinOperations>,
+            std::sync::Arc<crate::ClientRecordStore>,
+        ) {
+            let (root, operations, pending) = operations(label, runtime);
+            let records = std::sync::Arc::new(crate::ClientRecordStore::new(root.join("client")));
+            (
+                root,
+                operations.with_client_records(records.clone()),
+                pending,
+                records,
+            )
+        }
+
+        #[test]
+        fn a_committed_join_records_the_host_and_the_device_hint() {
+            let (root, operations, pending, records) =
+                with_records("hint-write", FakeRuntime::successful());
+            record(&pending);
+            futures_lite::future::block_on(operations.join_network(network())).unwrap();
+            let stored = records.load_for(network()).unwrap().unwrap();
+            assert_eq!(stored.host(), host());
+            assert!(stored.device_hint().is_some());
+            let _ = fs::remove_dir_all(root);
+        }
+
+        #[test]
+        fn a_failed_join_leaves_no_client_record() {
+            let (root, operations, pending, records) =
+                with_records("hint-failed", FakeRuntime::successful());
+            // No pending host recorded, so the commit is refused.
+            let _ = futures_lite::future::block_on(operations.join_network(network())).unwrap_err();
+            assert_eq!(records.load().unwrap(), None);
+            drop(pending);
+            let _ = fs::remove_dir_all(root);
+        }
+
+        #[test]
+        fn leave_clears_the_record_and_a_failed_leave_keeps_it() {
+            let (root, operations, pending, records) =
+                with_records("hint-leave", FakeRuntime::successful());
+            record(&pending);
+            futures_lite::future::block_on(operations.join_network(network())).unwrap();
+            operations
+                .runtime
+                .fail_leave_address
+                .store(true, Ordering::SeqCst);
+            futures_lite::future::block_on(operations.leave_joined()).unwrap_err();
+            assert!(records.load_for(network()).unwrap().is_some());
+            operations
+                .runtime
+                .fail_leave_address
+                .store(false, Ordering::SeqCst);
+            assert!(futures_lite::future::block_on(operations.leave_joined()).unwrap());
+            assert_eq!(records.load().unwrap(), None);
             let _ = fs::remove_dir_all(root);
         }
 

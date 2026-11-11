@@ -4,11 +4,11 @@ use std::sync::{Arc, Mutex};
 
 use blueroute_core::{DaemonConfig, HealthLevel};
 use blueroute_daemon::{
-    ControlTlsIdentityStore, DaemonService, DurablePeerTrustOperations, JoinControlConfig,
-    NetworkOperations, PeerPinStore, PendingHostCommitAuthorization, PendingJoinOperations,
-    PendingJoinStore, SingleStarNetworkOperations, TransactionalJoinNetworkOperations,
-    current_network, spawn_daemon_capability_health_worker, spawn_daemon_control_worker,
-    system_diagnostics_from_report,
+    ClientRecordStore, ControlTlsIdentityStore, DaemonService, DurablePeerTrustOperations,
+    JoinControlConfig, NetworkOperations, PeerPinStore, PendingHostCommitAuthorization,
+    PendingJoinOperations, PendingJoinStore, SingleStarNetworkOperations,
+    TransactionalJoinNetworkOperations, current_network, spawn_daemon_capability_health_worker,
+    spawn_daemon_control_worker, system_diagnostics_from_report,
 };
 use blueroute_linux::{
     NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
@@ -94,6 +94,9 @@ async fn run() -> Result<(), Box<dyn Error>> {
                 capabilities: capabilities.clone(),
             },
         )?
+        .with_client_records(Arc::new(ClientRecordStore::new(client_record_directory(
+            &state_directory,
+        ))))
         .with_authorization(Arc::new(PendingHostCommitAuthorization::new(
             pending_join_operations.clone(),
             PeerPinStore::new(peer_pin_directory(&state_directory)),
@@ -169,6 +172,10 @@ fn network_membership_path(state_directory: &Path) -> PathBuf {
 
 fn peer_pin_directory(state_directory: &Path) -> PathBuf {
     state_directory.join("peer-keys")
+}
+
+fn client_record_directory(state_directory: &Path) -> PathBuf {
+    state_directory.join("client-record")
 }
 
 fn pending_join_directory(state_directory: &Path) -> PathBuf {

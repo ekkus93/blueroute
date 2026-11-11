@@ -6,6 +6,7 @@ mod approved_transport;
 #[allow(dead_code)]
 mod attempt_socket;
 mod authorization;
+mod client_record;
 mod control_listener;
 mod control_supervisor;
 mod control_tls;
@@ -48,6 +49,7 @@ use blueroute_protocol::{
     DiagnosticSnapshot, Event, NodeSummary, ProtocolCodecError, Response, SystemDiagnosticMetadata,
     decode_command, encode_event, encode_response,
 };
+pub use client_record::{ClientRecord, ClientRecordStore};
 pub use control_listener::{
     CONTROL_TCP_PORT, ObservedControlListener, bind_owned_nap_control_listener,
     owned_nap_control_address,
