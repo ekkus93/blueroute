@@ -226,8 +226,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        ControlTlsIdentityStore, DurablePeerTrustOperations, LinuxJoinRuntime,
-        PeerPinStore,
+        ControlTlsIdentityStore, DurablePeerTrustOperations, LinuxJoinRuntime, PeerPinStore,
     };
 
     fn control(label: &str) -> JoinControlConfig {
