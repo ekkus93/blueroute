@@ -17,7 +17,8 @@ use blueroute_linux::{
 use crate::current_network;
 use crate::{
     BluezPeerLocator, ClientRecord, ClientRecordStore, ControlSupervisors, JoinCommitAuthorization,
-    JoinControlConfig, PeerLocator, PendingJoinOperations, PinnedControlTlsPeer, run_join_control,
+    JoinControlConfig, PeerLocator, PendingJoinOperations, PinnedControlTlsPeer, SystemClientLeave,
+    leave_observed, run_join_control,
 };
 
 pub type JoinNetworkFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, CoreError>> + Send + 'a>>;
@@ -119,17 +120,18 @@ pub trait JoinRuntime: Send + Sync {
     ) -> JoinNetworkFuture<'a, JoinControlSession>;
     fn stop_control_session(&self, session: JoinControlSession) -> JoinNetworkFuture<'_, ()>;
 
-    /// A join committed: retain the live link and lease so a later leave can reverse them.
+    /// A join committed: retain the live link as an optimization. Leave never depends on it.
     fn adopt_joined(&self, _network: NetworkId, _link: JoinPanLink, _lease: JoinIpLease) {}
 
-    /// Whether this runtime holds a joined client for `network`.
-    fn joined_client(&self, _network: NetworkId) -> bool {
-        false
-    }
-
-    /// Reverse a committed join in reverse order (control session, IP, PANU). Idempotent: parts
-    /// already torn down are skipped, so a failed attempt can be retried.
-    fn leave_joined(&self, _network: NetworkId) -> JoinNetworkFuture<'_, ()> {
+    /// Reverse a committed join from observation: stop the control session, disconnect the PANU
+    /// link and remove this network's owned IP configuration, using ownership metadata rather
+    /// than remembered handles (`hint` is the recorded host device path). Idempotent, so a
+    /// failed attempt can be retried.
+    fn leave_joined(
+        &self,
+        _network: NetworkId,
+        _hint: Option<PeerHandle>,
+    ) -> JoinNetworkFuture<'_, ()> {
         Box::pin(async { Ok(()) })
     }
 
@@ -303,12 +305,25 @@ where
             let Some(network) = current_network(&registry)? else {
                 return Ok(false);
             };
-            if !self.runtime.joined_client(network) {
+            // The persisted role decides, never in-memory state, so a client that restarted
+            // can still leave. Hosts and unknown roles are left to host leave.
+            let is_client = registry.network(&network).is_some_and(|membership| {
+                membership.state == MembershipState::Member
+                    && membership.role == Some(MembershipRole::Client)
+            });
+            if !is_client {
                 return Ok(false);
             }
-            // Reverse order of join. A failure keeps `Member` and the unfinished parts so the
-            // user can retry; nothing is cleared that was not proven torn down.
-            self.runtime.leave_joined(network).await?;
+            // The recorded host device path is only a hint; a missing or unreadable record
+            // just means the live link is found through the retained handle or not at all.
+            let hint = self
+                .client_records
+                .as_ref()
+                .and_then(|records| records.load_for(network).ok().flatten())
+                .and_then(|record| record.device_hint().cloned());
+            // A failure keeps `Member` so the user can retry; nothing is cleared that was not
+            // proven torn down.
+            self.runtime.leave_joined(network, hint).await?;
             let membership = registry.network_mut(&network).ok_or_else(|| {
                 CoreError::new(
                     ErrorKind::InvalidState,
@@ -640,15 +655,8 @@ pub struct LinuxJoinRuntime {
     pending: Option<Arc<PendingJoinOperations>>,
     control: Option<JoinControlConfig>,
     supervisors: Arc<ControlSupervisors>,
-    joined: Arc<std::sync::Mutex<std::collections::HashMap<NetworkId, JoinedClient>>>,
+    retained: Arc<std::sync::Mutex<std::collections::HashMap<NetworkId, PanAttachment>>>,
     hardware_verified: bool,
-}
-
-/// Live resources of a committed join. `None` means that part was already torn down.
-#[derive(Clone, Debug)]
-struct JoinedClient {
-    lease: Option<JoinIpLease>,
-    link: Option<JoinPanLink>,
 }
 
 impl Default for LinuxJoinRuntime {
@@ -659,7 +667,7 @@ impl Default for LinuxJoinRuntime {
             pending: None,
             control: None,
             supervisors: Arc::new(ControlSupervisors::new()),
-            joined: Arc::default(),
+            retained: Arc::default(),
             hardware_verified: false,
         }
     }
@@ -877,73 +885,33 @@ impl JoinRuntime for LinuxJoinRuntime {
         Box::pin(async move { self.supervisors.stop(session.network()) })
     }
 
-    fn adopt_joined(&self, network: NetworkId, link: JoinPanLink, lease: JoinIpLease) {
-        if let Ok(mut joined) = self.joined.lock() {
-            joined.insert(
-                network,
-                JoinedClient {
-                    lease: Some(lease),
-                    link: Some(link),
-                },
-            );
+    fn adopt_joined(&self, network: NetworkId, link: JoinPanLink, _lease: JoinIpLease) {
+        if let Ok(mut retained) = self.retained.lock() {
+            retained.insert(network, link.attachment().clone());
         }
     }
 
-    fn joined_client(&self, network: NetworkId) -> bool {
-        self.joined
-            .lock()
-            .map(|joined| joined.contains_key(&network))
-            .unwrap_or(false)
-    }
-
-    fn leave_joined(&self, network: NetworkId) -> JoinNetworkFuture<'_, ()> {
+    fn leave_joined(
+        &self,
+        network: NetworkId,
+        hint: Option<PeerHandle>,
+    ) -> JoinNetworkFuture<'_, ()> {
         Box::pin(async move {
-            // 1. The control session first, so nothing keeps using the link while it is removed.
+            // The control session first, so nothing keeps using the link while it is removed.
             self.supervisors.stop(network)?;
-            // 2. The owned IP lease, then 3. the PANU link. Each part is taken out before its
-            // await and put back on failure, so a retry resumes exactly where this stopped.
-            let lease = self.take_joined_part(network, |joined| joined.lease.take())?;
-            if let Some(lease) = lease
-                && let Err(error) = self.remove_ip(lease.clone()).await
-            {
-                self.restore_joined_part(network, |joined| joined.lease = Some(lease));
-                return Err(error);
-            }
-            let link = self.take_joined_part(network, |joined| joined.link.take())?;
-            if let Some(link) = link
-                && let Err(error) = self.disconnect_panu(link.clone()).await
-            {
-                self.restore_joined_part(network, |joined| joined.link = Some(link));
-                return Err(error);
-            }
-            Ok(())
+            let retained = self
+                .retained
+                .lock()
+                .ok()
+                .and_then(|retained| retained.get(&network).cloned());
+            let backend = SystemClientLeave::connect().await?;
+            leave_observed(&backend, network, retained.as_ref(), hint.as_ref()).await
         })
     }
 
     fn forget_joined(&self, network: NetworkId) {
-        if let Ok(mut joined) = self.joined.lock() {
-            joined.remove(&network);
-        }
-    }
-}
-
-impl LinuxJoinRuntime {
-    fn take_joined_part<T>(
-        &self,
-        network: NetworkId,
-        take: impl FnOnce(&mut JoinedClient) -> Option<T>,
-    ) -> Result<Option<T>, CoreError> {
-        let mut joined = self.joined.lock().map_err(|_| {
-            CoreError::new(ErrorKind::Internal, "joined-client state lock poisoned")
-        })?;
-        Ok(joined.get_mut(&network).and_then(take))
-    }
-
-    fn restore_joined_part(&self, network: NetworkId, restore: impl FnOnce(&mut JoinedClient)) {
-        if let Ok(mut joined) = self.joined.lock()
-            && let Some(entry) = joined.get_mut(&network)
-        {
-            restore(entry);
+        if let Ok(mut retained) = self.retained.lock() {
+            retained.remove(&network);
         }
     }
 }
@@ -1045,6 +1013,10 @@ mod tests {
     }
 
     impl FakeRuntime {
+        fn joined_client(&self, _network: NetworkId) -> bool {
+            *self.joined.lock().unwrap()
+        }
+
         fn successful() -> Self {
             Self {
                 steps: Mutex::new(Vec::new()),
@@ -1190,11 +1162,11 @@ mod tests {
             *self.joined.lock().unwrap() = true;
         }
 
-        fn joined_client(&self, _network: NetworkId) -> bool {
-            *self.joined.lock().unwrap()
-        }
-
-        fn leave_joined(&self, _network: NetworkId) -> JoinNetworkFuture<'_, ()> {
+        fn leave_joined(
+            &self,
+            _network: NetworkId,
+            _hint: Option<PeerHandle>,
+        ) -> JoinNetworkFuture<'_, ()> {
             Box::pin(async move {
                 self.push(Step::StopControl);
                 self.push(Step::RemoveAddress);
@@ -2373,6 +2345,30 @@ mod tests {
             assert!(!futures_lite::future::block_on(operations.leave_joined()).unwrap());
             assert!(operations.runtime.steps().is_empty());
             assert_eq!(state(&root), Some(MembershipState::Member));
+            let _ = fs::remove_dir_all(root);
+        }
+
+        #[test]
+        fn a_restarted_client_with_a_persisted_client_role_can_leave_without_retained_state() {
+            let (root, store) = temp_store("leave-restarted");
+            let operations =
+                TransactionalJoinNetworkOperations::with_runtime(store, FakeRuntime::successful());
+            let mut membership = NetworkMembership::new(net(), DisplayName::new("Joined").unwrap());
+            membership.state = MembershipState::Member;
+            membership.role = Some(MembershipRole::Client);
+            let mut registry = MembershipRegistry::default();
+            registry.remember_network(membership);
+            operations.store.save(&registry).unwrap();
+            // A fresh runtime: nothing was adopted, as after a daemon restart.
+            assert!(!operations.runtime.joined_client(net()));
+            assert!(futures_lite::future::block_on(operations.leave_joined()).unwrap());
+            assert_eq!(
+                operations.runtime.steps(),
+                [Step::StopControl, Step::RemoveAddress, Step::DisconnectPanu]
+            );
+            assert_eq!(state(&root), Some(MembershipState::NotMember));
+            let membership = operations.store.load().unwrap();
+            assert_eq!(membership.network(&net()).unwrap().role, None);
             let _ = fs::remove_dir_all(root);
         }
 

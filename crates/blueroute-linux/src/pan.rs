@@ -162,6 +162,15 @@ impl BluezBackend {
         require_matching_panu_observation(expected, observed.as_ref())
     }
 
+    /// The live PANU attachment for `peer`, if BlueZ reports one. Read-only observation used by
+    /// restart-safe cleanup; it proves nothing about ownership by itself.
+    pub async fn observe_panu(
+        &self,
+        peer: &PeerHandle,
+    ) -> Result<Option<PanAttachment>, CoreError> {
+        current_panu_attachment(&self.connection, peer).await
+    }
+
     pub async fn disconnect_matching_panu(
         &self,
         expected: &PanAttachment,
