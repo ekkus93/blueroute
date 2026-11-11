@@ -18,8 +18,12 @@ use crate::current_network;
 use crate::{
     BluezPeerLocator, ClientRecord, ClientRecordStore, ControlSupervisors, JoinCommitAuthorization,
     JoinControlConfig, PeerLocator, PendingJoinOperations, PinnedControlTlsPeer, SystemClientLeave,
-    leave_observed, run_join_control,
+    SystemClientRuntime, leave_observed, run_join_control,
 };
+
+/// Links this process created, kept only as an optimization (leave and reconnect re-observe).
+pub(crate) type RetainedLinks =
+    Arc<std::sync::Mutex<std::collections::HashMap<NetworkId, PanAttachment>>>;
 
 pub type JoinNetworkFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, CoreError>> + Send + 'a>>;
 
@@ -655,7 +659,7 @@ pub struct LinuxJoinRuntime {
     pending: Option<Arc<PendingJoinOperations>>,
     control: Option<JoinControlConfig>,
     supervisors: Arc<ControlSupervisors>,
-    retained: Arc<std::sync::Mutex<std::collections::HashMap<NetworkId, PanAttachment>>>,
+    retained: RetainedLinks,
     hardware_verified: bool,
 }
 
@@ -715,20 +719,55 @@ impl LinuxJoinRuntime {
     }
 
     fn require_open(&self) -> Result<(), CoreError> {
-        if self.hardware_verified {
-            return Ok(());
-        }
-        Err(CoreError::with_diagnostic(
-            ErrorKind::CapabilityUnavailable,
-            "BlueRoute join requires P7 authenticated control-session support",
-            "P6-005 IPv4 planning and NetworkManager address application are available, but production JoinNetwork still refuses Bluetooth mutation until the supervised authenticated control session exists and two-machine hardware acceptance is recorded",
+        require_hardware_verified(self.hardware_verified)
+    }
+
+    /// The restart-reconciliation runtime. It shares the supervisors and retained links with
+    /// this runtime and inherits the same closed gate. `None` without a control configuration.
+    pub fn client_runtime(&self) -> Option<SystemClientRuntime> {
+        Some(SystemClientRuntime::new(
+            self.pool,
+            self.locator.clone(),
+            self.control.clone()?,
+            self.supervisors.clone(),
+            self.retained.clone(),
+            self.hardware_verified,
         ))
     }
 }
 
+/// The single definition of the closed gate, so join and reconnection cannot drift apart.
+pub(crate) fn require_hardware_verified(verified: bool) -> Result<(), CoreError> {
+    if verified {
+        return Ok(());
+    }
+    Err(CoreError::with_diagnostic(
+        ErrorKind::CapabilityUnavailable,
+        "BlueRoute join requires P7 authenticated control-session support",
+        "P6-005 IPv4 planning and NetworkManager address application are available, but production JoinNetwork still refuses Bluetooth mutation until the supervised authenticated control session exists and two-machine hardware acceptance is recorded",
+    ))
+}
+
+/// Start the supervised control session on its own worker, shared by join and restart
+/// reconciliation so both dial the same pinned way.
+pub(crate) async fn start_supervised_control(
+    supervisors: &ControlSupervisors,
+    control: JoinControlConfig,
+    pool: Ipv4AddressPool,
+    expected: PinnedControlTlsPeer,
+    link: JoinPanLink,
+    lease: JoinIpLease,
+) -> Result<(), CoreError> {
+    supervisors
+        .start(expected.network(), move |stop, established| {
+            run_join_control(&control, expected, &link, &lease, pool, stop, established)
+        })
+        .await
+}
+
 /// Find the one candidate host and connect PANU to it. If the returned attachment fails
 /// validation the just-made link is torn down rather than reported as nothing.
-async fn establish_panu_with<Connect, ConnectFuture, Cleanup, CleanupFuture>(
+pub(crate) async fn establish_panu_with<Connect, ConnectFuture, Cleanup, CleanupFuture>(
     locator: &dyn PeerLocator,
     network: NetworkId,
     connect: Connect,
@@ -871,12 +910,15 @@ impl JoinRuntime for LinuxJoinRuntime {
                         error.to_string(),
                     )
                 })?;
-            let (link, lease, pool) = (link.clone(), lease.clone(), self.pool);
-            self.supervisors
-                .start(network, move |stop, established| {
-                    run_join_control(&control, expected, &link, &lease, pool, stop, established)
-                })
-                .await?;
+            start_supervised_control(
+                &self.supervisors,
+                control,
+                self.pool,
+                expected,
+                link.clone(),
+                lease.clone(),
+            )
+            .await?;
             Ok(JoinControlSession::new(network))
         })
     }

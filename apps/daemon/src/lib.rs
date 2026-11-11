@@ -8,7 +8,9 @@ mod attempt_socket;
 mod authorization;
 mod client_leave;
 mod client_reconcile;
+mod client_reconnect;
 mod client_record;
+mod client_runtime;
 mod control_listener;
 mod control_supervisor;
 mod control_tls;
@@ -56,7 +58,9 @@ pub use client_reconcile::{
     ClientHost, ClientReconcileOutcome, ClientRuntime, ObservedClient, reconcile_client_once,
     single_approved_host,
 };
+pub use client_reconnect::{ReconnectEnd, ReconnectPolicy, ReconnectProgress, run_reconnect};
 pub use client_record::{ClientRecord, ClientRecordStore};
+pub use client_runtime::SystemClientRuntime;
 pub use control_listener::{
     CONTROL_TCP_PORT, ObservedControlListener, bind_owned_nap_control_listener,
     owned_nap_control_address,
