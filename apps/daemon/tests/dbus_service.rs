@@ -89,6 +89,11 @@ fn dbus_service_round_trip_and_event() -> Result<(), Box<dyn Error>> {
             assert_eq!(node.is_some(), expected_present);
         }
 
+        // Not a joined client: the link query is read-only and reports nothing.
+        let payload = encode_command(&Command::GetClientLink)?;
+        let result: String = proxy.call("Request", &(payload.as_str(),)).await?;
+        assert_eq!(decode_response(&result)?, Response::ClientLink(None));
+
         let malformed: zbus::Result<String> = proxy.call("Request", &("{",)).await;
         assert!(malformed.is_err(), "malformed requests must fail closed");
 

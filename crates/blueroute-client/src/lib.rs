@@ -178,6 +178,7 @@ fn response_kind(response: &Response) -> &'static str {
         Response::Nodes(_) => "nodes",
         Response::Node(_) => "node",
         Response::Diagnostics(_) => "diagnostics",
+        Response::ClientLink(_) => "client_link",
     }
 }
 

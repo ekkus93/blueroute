@@ -7,6 +7,7 @@ mod approved_transport;
 mod attempt_socket;
 mod authorization;
 mod client_leave;
+mod client_link;
 mod client_reconcile;
 mod client_reconnect;
 mod client_record;
@@ -54,6 +55,7 @@ use blueroute_protocol::{
     decode_command, encode_event, encode_response,
 };
 pub use client_leave::{ClientLeaveBackend, SystemClientLeave, leave_observed};
+pub use client_link::{ClientReconnector, health_for_client_link};
 pub use client_reconcile::{
     ClientHost, ClientReconcileOutcome, ClientRuntime, ObservedClient, reconcile_client_once,
     single_approved_host,
@@ -111,6 +113,26 @@ use zbus::message::Header;
 use zbus::object_server::SignalEmitter;
 use zbus::{Connection, interface};
 
+/// The two independent inputs to published health: what the capability monitor observes and
+/// what reconnecting a joined client implies. Published health is the worse of the two.
+struct HealthInputs {
+    observed: HealthLevel,
+    client: HealthLevel,
+}
+
+impl HealthInputs {
+    const fn new(observed: HealthLevel) -> Self {
+        Self {
+            observed,
+            client: HealthLevel::Healthy,
+        }
+    }
+
+    fn merged(&self) -> HealthLevel {
+        self.observed.max(self.client)
+    }
+}
+
 static NEXT_API_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Versioned local D-Bus interface implementation.
@@ -121,6 +143,8 @@ pub struct DaemonService {
     peer_trust_operations: Option<Arc<dyn PeerTrustOperations>>,
     join_network_operations: Option<Arc<dyn JoinNetworkOperations>>,
     pending_join_operations: Option<Arc<PendingJoinOperations>>,
+    client_reconnector: Option<Arc<ClientReconnector>>,
+    health_inputs: Arc<Mutex<HealthInputs>>,
     mutation_in_progress: Arc<AtomicBool>,
     system_diagnostics: Arc<Mutex<Option<SystemDiagnosticMetadata>>>,
     local_control_tls_fingerprint: Option<SpkiSha256>,
@@ -139,12 +163,15 @@ impl DaemonService {
     }
 
     pub fn from_status(status: DaemonStatus) -> Self {
+        let health_now = status.health;
         Self {
             status: Arc::new(Mutex::new(status)),
             network_operations: None,
             peer_trust_operations: None,
             join_network_operations: None,
             pending_join_operations: None,
+            client_reconnector: None,
+            health_inputs: Arc::new(Mutex::new(HealthInputs::new(health_now))),
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
             system_diagnostics: Arc::new(Mutex::new(None)),
             local_control_tls_fingerprint: None,
@@ -156,12 +183,15 @@ impl DaemonService {
         status: DaemonStatus,
         network_operations: Arc<dyn NetworkOperations>,
     ) -> Self {
+        let health_now = status.health;
         Self {
             status: Arc::new(Mutex::new(status)),
             network_operations: Some(network_operations),
             peer_trust_operations: None,
             join_network_operations: None,
             pending_join_operations: None,
+            client_reconnector: None,
+            health_inputs: Arc::new(Mutex::new(HealthInputs::new(health_now))),
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
             system_diagnostics: Arc::new(Mutex::new(None)),
             local_control_tls_fingerprint: None,
@@ -174,12 +204,15 @@ impl DaemonService {
         network_operations: Arc<dyn NetworkOperations>,
         peer_trust_operations: Arc<dyn PeerTrustOperations>,
     ) -> Self {
+        let health_now = status.health;
         Self {
             status: Arc::new(Mutex::new(status)),
             network_operations: Some(network_operations),
             peer_trust_operations: Some(peer_trust_operations),
             join_network_operations: None,
             pending_join_operations: None,
+            client_reconnector: None,
+            health_inputs: Arc::new(Mutex::new(HealthInputs::new(health_now))),
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
             system_diagnostics: Arc::new(Mutex::new(None)),
             local_control_tls_fingerprint: None,
@@ -256,6 +289,7 @@ impl DaemonService {
                 error.to_string(),
             )
         })?;
+        let observed_health = self.merge_observed_health(observed_health)?;
         let changed = status.health != observed_health
             || status.capabilities != observed_capabilities
             || *system != observed_system;
@@ -276,9 +310,43 @@ impl DaemonService {
                 error.to_string(),
             )
         })?;
+        let observed = self.merge_observed_health(observed)?;
         let changed = status.health != observed;
         status.health = observed;
         Ok(changed)
+    }
+
+    /// Record the capability-observed health and return what to publish: the worse of it and
+    /// what the joined-client reconnection implies. Always called with the status lock held,
+    /// so the lock order is status then health inputs.
+    fn merge_observed_health(&self, observed: HealthLevel) -> Result<HealthLevel, CoreError> {
+        let mut inputs = self.health_inputs.lock().map_err(|_| {
+            CoreError::new(
+                ErrorKind::Internal,
+                "BlueRoute health inputs lock was poisoned",
+            )
+        })?;
+        inputs.observed = observed;
+        Ok(inputs.merged())
+    }
+
+    /// Let a joined client's reconnection state feed daemon health. The observer touches only
+    /// the shared status and health inputs, so it holds no reference back to the service.
+    pub fn with_client_reconnector(mut self, reconnector: Arc<ClientReconnector>) -> Self {
+        let status = self.status.clone();
+        let inputs = self.health_inputs.clone();
+        reconnector.set_observer(Arc::new(move |state| {
+            let Ok(mut status) = status.lock() else {
+                return;
+            };
+            let Ok(mut inputs) = inputs.lock() else {
+                return;
+            };
+            inputs.client = health_for_client_link(state);
+            status.health = inputs.merged();
+        }));
+        self.client_reconnector = Some(reconnector);
+        self
     }
 
     fn encode_response(response: &Response) -> fdo::Result<String> {
@@ -530,7 +598,26 @@ impl DaemonService {
                     self.update_current_network(Some(network))?;
                     Self::encode_response(&Response::Ack)
                 }
+                Command::GetClientLink => Self::encode_response(&Response::ClientLink(
+                    self.client_reconnector
+                        .as_ref()
+                        .and_then(|reconnector| reconnector.state()),
+                )),
+                Command::RetryClientReconnect => {
+                    let reconnector = self.client_reconnector.as_ref().ok_or_else(|| {
+                        fdo::Error::NotSupported(
+                            "client reconnection is unavailable in this daemon instance".into(),
+                        )
+                    })?;
+                    reconnector.retry().map_err(core_error_to_dbus)?;
+                    Self::encode_response(&Response::Ack)
+                }
                 Command::LeaveNetwork => {
+                    // Stop reconnecting first so a run cannot bring a session back while the
+                    // leave tears it down.
+                    if let Some(reconnector) = &self.client_reconnector {
+                        reconnector.cancel();
+                    }
                     // A node that joined someone else's network must reverse its join; only
                     // otherwise is this a host leave.
                     let left_as_client = match &self.join_network_operations {
@@ -544,6 +631,9 @@ impl DaemonService {
                             .map_err(core_error_to_dbus)?;
                     }
                     self.update_current_network(None)?;
+                    if let Some(reconnector) = &self.client_reconnector {
+                        reconnector.cleared();
+                    }
                     Self::encode_response(&Response::Ack)
                 }
                 Command::TrustPeer { node } => {

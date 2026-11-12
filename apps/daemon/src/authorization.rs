@@ -26,6 +26,7 @@ pub fn command_authorization(command: &Command) -> CommandAuthorization {
         | Command::ListNetworks
         | Command::ListNodes
         | Command::GetNode { .. }
+        | Command::GetClientLink
         | Command::GetDiagnostics => CommandAuthorization::ReadOnly,
         Command::CreateNetwork { .. }
         | Command::JoinNetwork { .. }
@@ -36,7 +37,8 @@ pub fn command_authorization(command: &Command) -> CommandAuthorization {
         | Command::TrustPeer { .. }
         | Command::ForgetPeer { .. }
         | Command::RecordJoinHost { .. }
-        | Command::ClearJoinHost => CommandAuthorization::PolicyKit(MODIFY_ACTION_ID),
+        | Command::ClearJoinHost
+        | Command::RetryClientReconnect => CommandAuthorization::PolicyKit(MODIFY_ACTION_ID),
         Command::SetInternetSharing { .. } => {
             CommandAuthorization::PolicyKit(INTERNET_SHARING_ACTION_ID)
         }
@@ -60,6 +62,8 @@ pub fn command_operation(command: &Command) -> &'static str {
         Command::ForgetPeer { .. } => "forget_peer",
         Command::RecordJoinHost { .. } => "record_join_host",
         Command::ClearJoinHost => "clear_join_host",
+        Command::GetClientLink => "get_client_link",
+        Command::RetryClientReconnect => "retry_client_reconnect",
         Command::GetDiagnostics => "get_diagnostics",
         Command::SetInternetSharing { .. } => "set_internet_sharing",
     }
@@ -169,6 +173,7 @@ mod tests {
                 fingerprint: "07".repeat(32),
             },
             Command::ClearJoinHost,
+            Command::RetryClientReconnect,
         ];
         for command in mutations {
             assert_eq!(

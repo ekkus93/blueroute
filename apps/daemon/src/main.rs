@@ -2,13 +2,14 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use blueroute_core::{DaemonConfig, HealthLevel};
+use blueroute_core::{DaemonConfig, HealthLevel, MembershipRole};
 use blueroute_daemon::{
-    ClientRecordStore, ControlTlsIdentityStore, DaemonService, DurablePeerTrustOperations,
-    JoinControlConfig, NetworkOperations, PeerPinStore, PendingHostCommitAuthorization,
-    PendingJoinOperations, PendingJoinStore, SingleStarNetworkOperations,
-    TransactionalJoinNetworkOperations, current_network, spawn_daemon_capability_health_worker,
-    spawn_daemon_control_worker, system_diagnostics_from_report,
+    ClientReconnector, ClientRecordStore, ControlTlsIdentityStore, DaemonService,
+    DurablePeerTrustOperations, JoinControlConfig, NetworkOperations, PeerPinStore,
+    PendingHostCommitAuthorization, PendingJoinOperations, PendingJoinStore, ReconnectPolicy,
+    SingleStarNetworkOperations, TransactionalJoinNetworkOperations, current_network,
+    spawn_daemon_capability_health_worker, spawn_daemon_control_worker,
+    system_diagnostics_from_report,
 };
 use blueroute_linux::{
     NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
@@ -78,6 +79,9 @@ async fn run() -> Result<(), Box<dyn Error>> {
         )
         .with_pending_join(pending_join_operations.clone()),
     );
+    let client_records = Arc::new(ClientRecordStore::new(client_record_directory(
+        &state_directory,
+    )));
     let join_network_operations = Arc::new(
         TransactionalJoinNetworkOperations::with_ipv4_pool(
             NetworkMembershipStore::new(membership_path.clone()),
@@ -94,20 +98,38 @@ async fn run() -> Result<(), Box<dyn Error>> {
                 capabilities: capabilities.clone(),
             },
         )?
-        .with_client_records(Arc::new(ClientRecordStore::new(client_record_directory(
-            &state_directory,
-        ))))
+        .with_client_records(client_records.clone())
         .with_authorization(Arc::new(PendingHostCommitAuthorization::new(
             pending_join_operations.clone(),
             PeerPinStore::new(peer_pin_directory(&state_directory)),
         ))),
     );
+    // A persisted joined client is reconnected in the background (P6-009); the runtime shares
+    // the join path's closed gate, so nothing here can touch Bluetooth while join is closed.
+    let client_reconnector = join_network_operations.client_runtime().map(|runtime| {
+        ClientReconnector::new(
+            NetworkMembershipStore::new(membership_path.clone()),
+            PeerPinStore::new(peer_pin_directory(&state_directory)),
+            client_records.clone(),
+            Arc::new(runtime),
+            join_network_operations.supervisors(),
+            config.ipv4_address_pool,
+            ReconnectPolicy::default(),
+        )
+    });
+    // A persisted joined client is never restored as a host; the background reconnector below
+    // owns it.
+    let joined_client = current_network
+        .and_then(|network| membership_registry.network(&network))
+        .is_some_and(|membership| membership.role == Some(MembershipRole::Client));
     let network_operations = Arc::new(SingleStarNetworkOperations::new(
         NetworkMembershipStore::new(membership_path),
         config.clone(),
         capabilities.clone(),
     ));
-    let startup_reconciled = if let Err(error) = network_operations.reconcile_on_startup().await {
+    let startup_reconciled = if joined_client {
+        true
+    } else if let Err(error) = network_operations.reconcile_on_startup().await {
         if status.health == HealthLevel::Healthy {
             status.health = HealthLevel::Degraded;
         }
@@ -127,11 +149,27 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let system_diagnostics = system_diagnostics_from_report(&capability_report);
     let worker_network_operations: Arc<dyn NetworkOperations> = network_operations.clone();
     let worker_peer_trust = peer_trust_operations.clone();
-    let service = DaemonService::with_operations(status, network_operations, peer_trust_operations)
-        .with_join_network_operations(join_network_operations)
-        .with_pending_join_operations(pending_join_operations)
-        .with_system_diagnostics(system_diagnostics)
-        .with_local_control_tls_fingerprint(local_control_tls_identity.fingerprint());
+    let mut service =
+        DaemonService::with_operations(status, network_operations, peer_trust_operations)
+            .with_join_network_operations(join_network_operations)
+            .with_pending_join_operations(pending_join_operations)
+            .with_system_diagnostics(system_diagnostics)
+            .with_local_control_tls_fingerprint(local_control_tls_identity.fingerprint());
+    if let Some(reconnector) = client_reconnector {
+        service = service.with_client_reconnector(reconnector.clone());
+        // After the observer is installed, so health reflects the first attempt.
+        if let Err(error) = reconnector.start() {
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "component": "daemon_runtime",
+                    "event": "client_reconnect_start",
+                    "outcome": "failed",
+                    "failure_class": format!("{:?}", error.kind()),
+                })
+            );
+        }
+    }
 
     let service_for_health = service.clone();
     let _connection = Builder::system()?

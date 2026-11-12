@@ -9,13 +9,15 @@ The v1 local service uses:
 - service: `org.blueroute.Service1`
 - object: `/org/blueroute/Service1`
 - interface: `org.blueroute.Service1`
-- current semantic API version: `1.2`
+- current semantic API version: `1.3`
 
 Major versions are incompatible. Minor versions are additive. A client may use a server with the same major version when the client's minor version is less than or equal to the server's minor version. P5-005 is responsible for enforcing this negotiation before normal commands are sent.
 
 API 1.1 adds optional system metadata, live-observation slots, and bounded recent failures to `DiagnosticSnapshot`. An older 1.0 client can continue to consume the additive 1.1 response; newer interface/route/topology observations remain absent until implemented.
 
 API 1.2 adds the commands `RecordJoinHost { network, node, fingerprint }` and `ClearJoinHost`, both behind the existing `org.blueroute.modify` PolicyKit action. They only record or forget the operator-confirmed host for a future join (P6-004 addendum); they grant no membership and do not enable `JoinNetwork`. A 1.1 server rejects a 1.2 client at version negotiation.
+
+API 1.3 adds the read-only `GetClientLink` (response `ClientLink(Option<ClientLinkState>)`, `None` when this node is not a joined client) and `RetryClientReconnect` (behind `org.blueroute.modify`). `ClientLinkState` is `connecting { attempt }`, `waiting { attempt, retry_in_seconds }`, `established`, `needs_attention { reason }` or `gave_up { attempts }`, where `reason` is a user-safe message and never a raw diagnostic. They report and re-trigger the bounded restart reconnection of a persisted joined client (P6-009); `RetryClientReconnect` never changes membership and is refused with `InvalidState` when the node is not a joined client or a reconnection is already running. A 1.2 server rejects a 1.3 client at version negotiation.
 
 ## Payload encoding
 

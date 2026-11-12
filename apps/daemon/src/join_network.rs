@@ -211,6 +211,15 @@ impl TransactionalJoinNetworkOperations<LinuxJoinRuntime> {
             .with_control(control);
         Ok(Self::with_runtime_and_pool(store, runtime, pool))
     }
+
+    /// The restart-reconnection runtime sharing this coordinator's supervisors and gate.
+    pub fn client_runtime(&self) -> Option<SystemClientRuntime> {
+        self.runtime.client_runtime()
+    }
+
+    pub fn supervisors(&self) -> Arc<ControlSupervisors> {
+        self.runtime.supervisors()
+    }
 }
 
 impl<R> TransactionalJoinNetworkOperations<R>

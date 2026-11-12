@@ -402,6 +402,7 @@ Representative semantic operations:
 - `TrustPeer`
 - `ForgetPeer`
 - `RecordJoinHost` / `ClearJoinHost` (joiner-side host record; not membership, see P6-004 addendum)
+- `GetClientLink` / `RetryClientReconnect` (restart reconnection of a joined client; see P6-009). The reconnector makes a bounded number of attempts with capped backoff, then stops, keeps `Member`, reports `Degraded` and waits for the user. Health reports the worse of the capability observation and the reconnection state.
 - `GetDiagnostics`
 - future `SetInternetSharing`
 

@@ -31,7 +31,7 @@ pub struct ApiVersion {
 }
 
 impl ApiVersion {
-    pub const CURRENT: Self = Self { major: 1, minor: 2 };
+    pub const CURRENT: Self = Self { major: 1, minor: 3 };
 
     pub const fn new(major: u16, minor: u16) -> Self {
         Self { major, minor }
@@ -210,6 +210,11 @@ pub enum Command {
     },
     /// Forget the recorded join host.
     ClearJoinHost,
+    /// Read-only: what the joined-client reconnector is doing, if this node is a joined client.
+    GetClientLink,
+    /// Ask a joined client whose reconnection stopped to try again. It never changes
+    /// membership and is refused when this node is not a joined client or is already trying.
+    RetryClientReconnect,
     /// Reserved for the future gateway phase. Current daemons must reject it.
     SetInternetSharing {
         enabled: bool,
@@ -226,6 +231,25 @@ pub enum Response {
     Nodes(Vec<NodeSummary>),
     Node(Option<NodeSummary>),
     Diagnostics(Box<DiagnosticSnapshot>),
+    /// `None` when this node is not a joined client.
+    ClientLink(Option<ClientLinkState>),
+}
+
+/// What reconnecting a restarted joined client is doing (P6-009). `reason` is a user-safe
+/// message, never a raw diagnostic.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum ClientLinkState {
+    /// An attempt is running.
+    Connecting { attempt: u32 },
+    /// The last attempt failed; the next one starts in `retry_in_seconds`.
+    Waiting { attempt: u32, retry_in_seconds: u64 },
+    /// The authenticated control session is up.
+    Established,
+    /// Something needs a person; no further attempts are made until it is fixed.
+    NeedsAttention { reason: String },
+    /// The attempt budget is spent. Membership is intact; use `RetryClientReconnect`.
+    GaveUp { attempts: u32 },
 }
 
 /// State-change events published by the daemon to local clients.
@@ -458,6 +482,8 @@ mod tests {
                 fingerprint: "07".repeat(32),
             },
             Command::ClearJoinHost,
+            Command::GetClientLink,
+            Command::RetryClientReconnect,
             Command::GetDiagnostics,
             Command::SetInternetSharing { enabled: false },
         ];
@@ -514,6 +540,16 @@ mod tests {
             Response::Node(Some(node_summary(9))),
             Response::Node(None),
             Response::Diagnostics(Box::new(diagnostics)),
+            Response::ClientLink(None),
+            Response::ClientLink(Some(ClientLinkState::Established)),
+            Response::ClientLink(Some(ClientLinkState::Waiting {
+                attempt: 2,
+                retry_in_seconds: 4,
+            })),
+            Response::ClientLink(Some(ClientLinkState::NeedsAttention {
+                reason: "the host key did not match".into(),
+            })),
+            Response::ClientLink(Some(ClientLinkState::GaveUp { attempts: 8 })),
         ];
 
         for response in responses {
