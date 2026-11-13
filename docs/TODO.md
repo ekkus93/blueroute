@@ -2424,6 +2424,8 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 - [ ] nearby/known networks.
 - [ ] create/join/leave.
 
+**TUI actions (maintainer decision, 2026-11-12):** the TUI stays read-only. A mutation needs a PolicyKit prompt, which a full-screen raw-mode terminal cannot host, and production code may not launch `pkttyagent`. The networks view instead shows the exact command to run in a normal shell, with the current network filled in: `blueroute network leave` (and `network link`) in a network, `blueroute network create NAME` otherwise, and that join is not available yet. The create/join/leave box stays open with this recorded.
+
 **Acceptance**
 
 - Normal single-star workflow works without CLI.
@@ -2433,6 +2435,8 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 - [ ] direct/routed indication.
 - [ ] connection state.
 - [ ] details/trust actions.
+
+**TUI trust actions (2026-11-12):** read-only by the same decision as P11-003; the devices view shows `blueroute peer local-key`, `blueroute peer enroll NODE_ID FINGERPRINT` (with where to read the values) and `blueroute peer forget NODE_ID` to run in a shell.
 
 **Acceptance**
 

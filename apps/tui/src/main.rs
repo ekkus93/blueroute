@@ -89,7 +89,15 @@ fn format_overview(status: &DaemonStatus, peers: Option<&[blueroute_core::NodeId
     )
 }
 
-fn format_networks(networks: &[NetworkSummary]) -> String {
+/// Actions need a PolicyKit prompt, which a full-screen terminal cannot host, so the TUI shows
+/// the exact command to run in a normal shell instead (maintainer decision, 2026-11-12).
+const ACTIONS_NOTE: &str =
+    "Actions: run these in a normal shell, where you can be asked for your password:";
+
+fn format_networks(
+    networks: &[NetworkSummary],
+    current: Option<blueroute_core::NetworkId>,
+) -> String {
     let mut lines = vec!["Daemon-reported networks (discovery is not authentication):".to_owned()];
     if networks.is_empty() {
         lines.push("No networks reported.".to_owned());
@@ -107,7 +115,22 @@ fn format_networks(networks: &[NetworkSummary]) -> String {
             ));
         }
     }
-    lines.push("Creating, joining and leaving networks is not available in this view.".to_owned());
+    lines.push(String::new());
+    lines.push(ACTIONS_NOTE.to_owned());
+    match current {
+        Some(network) => {
+            lines.push(format!(
+                "  Leave network {network}:  blueroute network leave"
+            ));
+            lines.push("  Joined client link:       blueroute network link".to_owned());
+        }
+        None => {
+            lines.push("  Start a network:  blueroute network create NAME".to_owned());
+            lines.push(
+                "  Join a network:   not available yet (it needs authenticated join)".to_owned(),
+            );
+        }
+    }
     lines.join("\n")
 }
 
@@ -131,6 +154,13 @@ fn format_devices(nodes: &[NodeSummary]) -> String {
         }
     }
     lines.push("Peer trust is not TLS key enrollment or membership.".to_owned());
+    lines.push(String::new());
+    lines.push(ACTIONS_NOTE.to_owned());
+    lines.push("  This computer's identity:   blueroute peer local-key".to_owned());
+    lines
+        .push("  Admit a joining computer:   blueroute peer enroll NODE_ID FINGERPRINT".to_owned());
+    lines.push("    (read both on that computer with `blueroute peer local-key`)".to_owned());
+    lines.push("  Remove a computer:          blueroute peer forget NODE_ID".to_owned());
     lines.join("\n")
 }
 
@@ -169,7 +199,15 @@ async fn fetch_view(screen: Screen) -> String {
             Err(error) => offline_message(error.kind()).to_owned(),
         },
         Screen::Networks => match client.request(&Command::ListNetworks).await {
-            Ok(Response::Networks(networks)) => format_networks(&networks),
+            Ok(Response::Networks(networks)) => {
+                // Without status the action hints fall back to the not-in-a-network case.
+                let current = client
+                    .status()
+                    .await
+                    .ok()
+                    .and_then(|status| status.current_network);
+                format_networks(&networks, current)
+            }
             Ok(_) => "Daemon returned an unexpected network response.".to_owned(),
             Err(error) => offline_message(error.kind()).to_owned(),
         },
@@ -294,10 +332,17 @@ mod tests {
             name: DisplayName::new("Local Lab").unwrap(),
             member_count: 2,
         }];
-        let text = format_networks(&networks);
+        let text = format_networks(&networks, Some(id));
         assert!(text.contains("Local Lab"));
         assert!(text.contains("not live peers"));
-        assert!(format_networks(&[]).contains("No networks reported"));
+        // Actions are offered as shell commands, with the current network filled in.
+        assert!(text.contains(&format!("Leave network {id}:  blueroute network leave")));
+        assert!(!text.contains("network create"));
+        let outside = format_networks(&[], None);
+        assert!(outside.contains("No networks reported"));
+        assert!(outside.contains("blueroute network create NAME"));
+        assert!(outside.contains("Join a network:   not available yet"));
+        assert!(!outside.contains("network leave"));
         let nodes = vec![NodeSummary {
             id: NodeId::from_bytes([3; 16]),
             name: DisplayName::new("This computer").unwrap(),
@@ -305,6 +350,8 @@ mod tests {
         }];
         assert!(format_devices(&nodes).contains("This computer"));
         assert!(format_devices(&nodes).contains("not yet authenticated"));
+        assert!(format_devices(&nodes).contains("blueroute peer enroll NODE_ID FINGERPRINT"));
+        assert!(format_devices(&nodes).contains("blueroute peer forget NODE_ID"));
         assert!(format_devices(&[]).contains("No nodes reported"));
     }
 
