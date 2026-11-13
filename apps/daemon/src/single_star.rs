@@ -2726,7 +2726,8 @@ mod tests {
             assert!(create().await.is_err());
             assert_eq!(runtime.starts(), 0);
 
-            // The same daemon later observes usable hosting (no restart).
+            // The same daemon later observes usable hosting (no restart); observers are told.
+            let marks = service.state_publisher().marks();
             service
                 .update_runtime_observation(
                     blueroute_core::HealthLevel::Healthy,
@@ -2742,6 +2743,10 @@ mod tests {
                     .can_host_pan(),
                 Some(true),
                 "published readiness says hosting is available"
+            );
+            assert!(
+                service.state_publisher().marks() > marks,
+                "the readiness change must be announced to observers"
             );
             create()
                 .await

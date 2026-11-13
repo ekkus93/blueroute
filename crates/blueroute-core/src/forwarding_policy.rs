@@ -215,4 +215,59 @@ mod tests {
             ErrorKind::InvalidInput
         );
     }
+
+    #[test]
+    fn cr_f3_graph_updates_reach_the_forwarding_decision_and_refused_ones_do_not() {
+        // Router 2 bridges segment 1 (NAP 1) and segment 2 (its own).
+        let mut graph = build_graph(Some(true));
+        attach(
+            &mut graph,
+            1,
+            1,
+            1,
+            2,
+            LinkState::Active,
+            LinkHealth::Healthy,
+        );
+        attach(
+            &mut graph,
+            2,
+            2,
+            2,
+            3,
+            LinkState::Active,
+            LinkHealth::Healthy,
+        );
+        assert!(desired_ipv4_forwarding(&graph, node(2)).unwrap());
+
+        // Rebinding link 2 into segment 1 is refused, so forwarding is still wanted. (The old
+        // graph accepted it silently, and the router would have stopped forwarding.)
+        let before = graph.clone();
+        let rebound = PanLink {
+            id: LinkId::from_bytes([2; 16]),
+            segment_id: segment(1),
+            nap: node(1),
+            panu: node(3),
+            state: LinkState::Active,
+            health: LinkHealth::Healthy,
+            cost: 1,
+        };
+        assert!(graph.add_link(rebound).is_err());
+        assert_eq!(graph, before);
+        assert!(desired_ipv4_forwarding(&graph, node(2)).unwrap());
+
+        // An in-place state update of the same link is a real change, in both directions.
+        let mut down = graph
+            .links()
+            .find(|(id, _)| **id == LinkId::from_bytes([2; 16]))
+            .unwrap()
+            .1
+            .clone();
+        down.state = LinkState::Disconnected;
+        assert_eq!(graph.add_link(down.clone()), Ok(false));
+        assert!(!desired_ipv4_forwarding(&graph, node(2)).unwrap());
+        down.state = LinkState::Active;
+        assert_eq!(graph.add_link(down), Ok(false));
+        assert!(desired_ipv4_forwarding(&graph, node(2)).unwrap());
+    }
 }
