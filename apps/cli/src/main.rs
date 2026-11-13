@@ -433,7 +433,7 @@ fn format_diagnostics(
         return serde_json::to_string_pretty(snapshot);
     }
     let mut details = vec![format!(
-        "API: {}\nHealth: {:?}\nNetwork: {:?}\nReported nodes: {} (local-only until peer authentication)\nLocal control TLS SPKI SHA-256: {}\nSystem: {}\nRecent API failures: {} (bounded details below)\nCapabilities:\n{:#?}",
+        "API: {}\nHealth: {:?}\nNetwork: {:?}\nReported nodes: {} (this computer plus authenticated peers)\nLocal control TLS SPKI SHA-256: {}\nSystem: {}\nRecent API failures: {} (bounded details below)\nCapabilities:\n{:#?}",
         snapshot.api_version,
         snapshot.health,
         snapshot.current_network,
@@ -575,7 +575,7 @@ fn format_diagnostics_summary(snapshot: &DiagnosticSnapshot) -> String {
         )
     });
     format!(
-        "Health: {:?}\nNetwork: {:?}\nReported nodes: {} (local-only until peer authentication)\nBluetooth adapters: {}\nObserved peers: {} (not authenticated membership)\nAuthenticated control peers: {}\nInterfaces: {}\nRoutes: {}\nTopology: {}\nRecent API failures: {}\nUse 'blueroute diagnostics show' for details or '--json' for the full snapshot.",
+        "Health: {:?}\nNetwork: {:?}\nReported nodes: {} (this computer plus authenticated peers)\nBluetooth adapters: {}\nObserved peers: {} (not authenticated membership)\nAuthenticated control peers: {}\nInterfaces: {}\nRoutes: {}\nTopology: {}\nRecent API failures: {}\nUse 'blueroute diagnostics show' for details or '--json' for the full snapshot.",
         snapshot.health,
         snapshot.current_network,
         snapshot.visible_nodes,
@@ -1505,7 +1505,7 @@ mod tests {
         let output = format_diagnostics(&snapshot, false).unwrap();
         assert!(output.contains(&"ab".repeat(32)));
         assert!(output.contains("Health: Degraded"));
-        assert!(output.contains("local-only until peer authentication"));
+        assert!(output.contains("this computer plus authenticated peers"));
         assert!(output.contains("daemon=0.1.0"));
         assert!(!output.contains("verified remote peers"));
         let json = format_diagnostics(&snapshot, true).unwrap();
@@ -1719,7 +1719,7 @@ mod tests {
         assert!(unknown.contains("Interfaces: unavailable (not reported by daemon)"));
         assert!(unknown.contains("Bluetooth adapters: unavailable"));
         assert!(unknown.contains("Observed peers: unavailable"));
-        assert!(unknown.contains("local-only until peer authentication"));
+        assert!(unknown.contains("this computer plus authenticated peers"));
         snapshot.interfaces = Some(Vec::new());
         snapshot.routes = Some(Vec::new());
         snapshot.observed_peers = Some(Vec::new());

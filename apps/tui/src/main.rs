@@ -135,8 +135,7 @@ fn format_networks(
 }
 
 fn format_devices(nodes: &[NodeSummary]) -> String {
-    let mut lines =
-        vec!["Daemon-reported nodes (remote reachability is not yet authenticated):".to_owned()];
+    let mut lines = vec!["This computer and peers with an authenticated session to it:".to_owned()];
     if nodes.is_empty() {
         lines.push("No nodes reported.".to_owned());
     } else {
@@ -349,7 +348,7 @@ mod tests {
             reachability: Reachability::Local,
         }];
         assert!(format_devices(&nodes).contains("This computer"));
-        assert!(format_devices(&nodes).contains("not yet authenticated"));
+        assert!(format_devices(&nodes).contains("authenticated session"));
         assert!(format_devices(&nodes).contains("blueroute peer enroll NODE_ID FINGERPRINT"));
         assert!(format_devices(&nodes).contains("blueroute peer forget NODE_ID"));
         assert!(format_devices(&[]).contains("No nodes reported"));

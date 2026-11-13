@@ -377,13 +377,12 @@ impl DaemonService {
                 }
                 Self::encode_response(&Response::Diagnostics(Box::new(snapshot)))
             }
-            Command::ListNodes => {
-                let nodes: Vec<_> = self.local_node_summary()?.into_iter().collect();
-                Self::encode_response(&Response::Nodes(nodes))
-            }
+            Command::ListNodes => Self::encode_response(&Response::Nodes(self.node_summaries()?)),
             Command::GetNode { node } => {
-                let local = self.local_node_summary()?;
-                let matching = local.filter(|entry| entry.id == node);
+                let matching = self
+                    .node_summaries()?
+                    .into_iter()
+                    .find(|entry| entry.id == node);
                 Self::encode_response(&Response::Node(matching))
             }
             Command::CreateNetwork { name } => {
@@ -626,6 +625,29 @@ impl DaemonService {
     /// never infer remote identity or reachability from untrusted advertisements
     /// or a durable trust record. The label is explicitly generic until P10
     /// device naming and verified P7 peer inventory are wired to this query.
+    /// The local node, then (on a host) every peer holding an authenticated control session.
+    /// Those peers proved their pinned key over mutual TLS with current approval, and on a
+    /// single star their session runs over the PANU link to this host, so they are direct links.
+    /// Nothing else (discovery, trust alone, advertisements) ever becomes a node here.
+    fn node_summaries(&self) -> fdo::Result<Vec<NodeSummary>> {
+        let local = self.local_node_summary()?;
+        let local_id = local.as_ref().map(|node| node.id);
+        let mut nodes: Vec<NodeSummary> = local.into_iter().collect();
+        if let Some(peers) = &self.control_peers {
+            for peer in peers.snapshot() {
+                if Some(peer) == local_id {
+                    continue;
+                }
+                nodes.push(NodeSummary {
+                    id: peer,
+                    name: authenticated_peer_name(peer).map_err(core_error_to_dbus)?,
+                    reachability: Reachability::DirectLink,
+                });
+            }
+        }
+        Ok(nodes)
+    }
+
     fn local_node_summary(&self) -> fdo::Result<Option<NodeSummary>> {
         let Some(node) = self
             .status_snapshot()
@@ -682,7 +704,19 @@ impl DaemonService {
             api_version: status.api_version,
             health: status.health,
             current_network: status.current_network,
-            visible_nodes: u32::from(status.local_node.is_some()),
+            // The same nodes `ListNodes` reports: this computer plus authenticated peers.
+            visible_nodes: u32::from(status.local_node.is_some())
+                + self.control_peers.as_ref().map_or(0, |peers| {
+                    let local = status.local_node;
+                    u32::try_from(
+                        peers
+                            .snapshot()
+                            .into_iter()
+                            .filter(|peer| Some(*peer) != local)
+                            .count(),
+                    )
+                    .unwrap_or(u32::MAX)
+                }),
             capabilities: status.capabilities,
             local_control_tls_spki_sha256: self
                 .local_control_tls_fingerprint
@@ -885,6 +919,13 @@ impl Drop for MutationGuard<'_> {
     }
 }
 
+/// The control protocol carries no display name, so an authenticated peer is labelled by the
+/// start of its NodeId. The label is never used to identify or authorize anything.
+fn authenticated_peer_name(peer: NodeId) -> Result<DisplayName, CoreError> {
+    let id = peer.to_string();
+    DisplayName::new(format!("Device {}", &id[..8]))
+}
+
 /// Emit one already-typed protocol event through the daemon's D-Bus signal.
 pub async fn emit_event(connection: &Connection, event: &Event) -> Result<(), DaemonServiceError> {
     let payload = encode_event(event).map_err(DaemonServiceError::Protocol)?;
@@ -971,6 +1012,63 @@ mod local_node_tests {
                 .unwrap_err();
             assert!(matches!(refused, fdo::Error::NotSupported(_)));
             let _ = std::fs::remove_dir_all(dir);
+        });
+    }
+
+    #[test]
+    fn authenticated_control_peers_are_listed_as_direct_nodes_and_nothing_else_is() {
+        futures_lite::future::block_on(async {
+            let local = NodeId::from_bytes([0x73; 16]);
+            let peer = NodeId::from_bytes([0xab; 16]);
+            let peers = AuthenticatedControlPeers::default();
+            let service =
+                DaemonService::new(local, HealthLevel::Healthy, NodeCapabilities::default())
+                    .with_control_peers(peers.clone());
+            let nodes = || async {
+                let Response::Nodes(nodes) =
+                    decode(&service.execute(Command::ListNodes).await.unwrap())
+                else {
+                    panic!("expected nodes");
+                };
+                nodes
+            };
+            // No session: only this computer.
+            assert_eq!(nodes().await.len(), 1);
+            assert_eq!(service.diagnostics_snapshot().unwrap().visible_nodes, 1);
+
+            // An authenticated peer appears as a direct link with a neutral, ID-derived label.
+            peers.set_for_tests(vec![peer]);
+            let listed = nodes().await;
+            assert_eq!(listed.len(), 2);
+            assert_eq!(listed[0].reachability, Reachability::Local);
+            assert_eq!(listed[1].id, peer);
+            assert_eq!(listed[1].reachability, Reachability::DirectLink);
+            assert_eq!(listed[1].name.as_str(), "Device abababab");
+            assert_eq!(service.diagnostics_snapshot().unwrap().visible_nodes, 2);
+            let Response::Node(Some(found)) = decode(
+                &service
+                    .execute(Command::GetNode { node: peer })
+                    .await
+                    .unwrap(),
+            ) else {
+                panic!("an authenticated peer must be found");
+            };
+            assert_eq!(found.id, peer);
+
+            // When the session ends, the peer is gone again; unknown IDs are never invented.
+            peers.set_for_tests(Vec::new());
+            assert_eq!(nodes().await.len(), 1);
+            let Response::Node(None) = decode(
+                &service
+                    .execute(Command::GetNode { node: peer })
+                    .await
+                    .unwrap(),
+            ) else {
+                panic!("a peer without a session must not be listed");
+            };
+            // The local node is never duplicated even if it appeared in the peer list.
+            peers.set_for_tests(vec![local]);
+            assert_eq!(nodes().await.len(), 1);
         });
     }
 

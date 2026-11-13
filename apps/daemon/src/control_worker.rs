@@ -42,6 +42,13 @@ impl AuthenticatedControlPeers {
         self.0.lock().map(|peers| peers.clone()).unwrap_or_default()
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_for_tests(&self, peers: Vec<NodeId>) {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = peers;
+        }
+    }
+
     fn publish(&self, sessions: &[RegisteredControlSession<'_>]) {
         let mut peers: Vec<NodeId> = sessions.iter().map(|session| session.peer()).collect();
         peers.sort_by_key(|peer| *peer.as_bytes());

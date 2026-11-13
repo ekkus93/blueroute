@@ -2264,6 +2264,8 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 - [x] `blueroute status` (typed D-Bus status; human/JSON).
 - [x] `blueroute capability show` (typed capability summary; human/JSON).
 - [-] `blueroute node list/show` (CLI human/JSON and daemon D-Bus local-node-only behavior qualified at `0743af18` including real-broker and daemon-restart tests; authenticated remote peers, names and reachability not integrated).
+
+**Authenticated peers listed (software, 2026-11-12):** on a host, `ListNodes`/`GetNode` (and so `node list`/`node show`, the TUI and the desktop device list) now include every peer holding an authenticated control session, as `DirectLink`, after the local node; diagnostics' `visible_nodes` counts the same set. Discovery, trust alone and advertisements still never produce a node, the local node is never duplicated, and a peer disappears when its session ends. The protocol carries no display name, so a peer is labelled `Device <first 8 hex of its NodeId>`, never used for identity. **Still open:** peer display names, joined-client views of other members (P8-005), and hardware evidence; the box stays partial.
 - [x] `blueroute network list` (read-only typed D-Bus, human/JSON; software-qualified under CI #38463280247 on `1471551`).
 
 **Software partial:** stable JSON serialization round-trips and no direct BlueZ/NetworkManager access; exact-head [CI 38461039721](https://github.com/ekkus93/blueroute/actions/runs/38461039721) passed.
@@ -2574,6 +2576,8 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 - [ ] display name.
 - [ ] online/offline/path.
 - [ ] advanced capability/technical details.
+
+**Software partial (2026-11-12):** a host's device list now includes authenticated peers ("Connected directly", with the full NodeId under Technical details), from the daemon change above. Real display names, offline history and per-device capability details are not available: the control protocol carries none of them yet.
 
 **Acceptance**
 
