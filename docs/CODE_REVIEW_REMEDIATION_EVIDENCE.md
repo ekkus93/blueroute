@@ -428,3 +428,38 @@ Accepted low-severity limitations, documented rather than changed:
 
 No issue was found in client owner binding, the shared watcher, lock ordering, capability
 freshness, removal scope and maintainer scripts, graph atomicity, or `useDaemon` ownership.
+
+## CR-VALIDATE — software candidate (2026-11-13)
+
+**Candidate:** `42ae7abe77607663bc1fb208698723aaac3ee4d2` (the review fix on top of
+`259380f`, whose exact-head [CI 43518870135](https://github.com/ekkus93/blueroute/actions/runs/43518870135) passed). Rows 02 and 04 ran at `259380f`;
+the fix touches only `apps/daemon/src/lib.rs` and a daemon bus test, so they are unaffected. Toolchain 1.95.0, Node 26.13.0, npm 11.20.0.
+
+| Subtask | Commands | Result |
+| --- | --- | --- |
+| 01 | `cargo fmt --all -- --check`; `cargo check --workspace --locked`; `cargo clippy --workspace --all-targets --locked -- -D warnings`; `cargo test --workspace --locked` | clean; clean; clean; 888 passed, 0 failed, 32 ignored (the bus suites, run below) |
+| 02 | `cargo test -p blueroute-daemon --features experimental-join --locked`; default build `join_network::tests` (incl. `default_builds_cannot_open_the_join_gate`) | 369 passed; 37 passed. CI and the package build without features. |
+| 03 | `dbus-run-session -- cargo test …` for `dbus_service`, `authorization`, `dbus_client`, `cli_exit_contract`, `bridge_end_to_end`, `owner_race`, `owner_watch`, `watcher`, `state_events`, `watch_integration`, TUI `tui_watcher`; `python3 scripts/test_p6_006_loopback.py`, `scripts/test_p6_006_socket_traffic.py` | 1, 1, 1, 1, 1, 6, 3, 6, 8, 2, 1 passed; Python: TCP/UDP PASS, 5 unit tests OK |
+| 04 | `npm ci`; `npm run format:check`; `npm run lint`; `npm run typecheck`; `npm test`; `npm run build` | all pass; 43 tests (8 `useDaemon` incl. StrictMode). No theme tokens changed (text only), so no contrast change to validate. |
+| 05 | `bash packaging/debian/build-package.sh`; `dpkg-deb --field/--contents`; packaged-script `test-maintainer-lifecycle.sh`; `test-package-upgrade.sh` | `blueroute_0.1.0_amd64.deb` sha256 `33fc67f27941cc6f6e362ffb6fd2ef41abac3d3fed7859afdc0c8b55a1da0615` (Depends: dbus, bluez, network-manager, polkitd, systemd); `blueroute-desktop_0.1.0_amd64.deb` sha256 `a656333cf30190842516c4a2f8040fca966c4c4fac2bd8d3f514b1348e86b0f2` (Depends `blueroute (= 0.1.0)`, WebKitGTK 4.1 and shlibs); build verified every built frontend asset is embedded, and the bundle carries the new stale-data text; lifecycle and isolated dpkg upgrade/migration/remove-failure/remove/purge tests pass. Hashes are of this local build; package builds are not bit-reproducible. |
+| 06 | exact-head CI | [CI 43520783589](https://github.com/ekkus93/blueroute/actions/runs/43520783589) passed at `42ae7ab` (Rust and Desktop frontend jobs, including every new bus-suite step) |
+| 07 | invariant regressions inside the 888 passing tests, by name: authorization 27, pin 57, exporter 6, revocation 8, rollback 3, foreign 28, identity 29, migration 3, replay 8, sharing 3 | all pass |
+
+**Limitations:** nothing here is installed-system or hardware evidence. CR-F5 and CR-F4's
+hardware claims stay with CR-QUALIFY.
+
+
+## CR-CLOSEOUT — software milestone (2026-11-13)
+
+- **01 review:** each fix was reviewed against its requirements while it was accepted (entries
+  above), and the whole diff was reviewed independently (CR-CLOSEOUT-01 entry); its one defect is
+  fixed at `42ae7ab`.
+- **02 linkage:** every finding has a fix commit, regressions that fail when the defect is
+  restored (CR-INTEGRATION), and exact-head CI: run 43518870135 at `259380f` covers F1–F8 and the
+  integration suites; [CI 43520783589](https://github.com/ekkus93/blueroute/actions/runs/43520783589) passed at `42ae7ab` (Rust and Desktop frontend jobs, including every new bus-suite step) covers the review fix.
+- **03 original tasks:** the 8 original status rows touched by CR-F7 keep their checkbox states
+  (checked mechanically against the baseline); only "Code review" notes were added. Physical,
+  join, routing, support and release criteria remain open as before.
+- **04:** not complete. CR-QUALIFY (installed-system and Bluetooth-rig evidence) has not run, so
+  CR-F5 stays SOFTWARE COMPLETE / QUALIFICATION DEFERRED and the remediation is a **software
+  milestone**, not COMPLETE. Nothing here implies completion of the wider product roadmap.

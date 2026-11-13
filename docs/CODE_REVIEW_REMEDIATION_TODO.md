@@ -1,6 +1,6 @@
 # Code Review Remediation TODO
 
-**Status:** IN PROGRESS. **Baseline:** `4ca5042ee28743dd30782379fbcf8fa1ed15df77`.  
+**Status:** SOFTWARE MILESTONE COMPLETE (2026-11-13, `42ae7ab`); CR-QUALIFY and CR-CLOSEOUT-04 open. **Baseline:** `4ca5042ee28743dd30782379fbcf8fa1ed15df77`.  
 **Companion specification:** [CODE_REVIEW_REMEDIATION_SPEC.md](CODE_REVIEW_REMEDIATION_SPEC.md).  
 **Original implementation backlog:** [TODO.md](TODO.md). **Evidence:** [CODE_REVIEW_REMEDIATION_EVIDENCE.md](CODE_REVIEW_REMEDIATION_EVIDENCE.md).
 
@@ -30,9 +30,9 @@
 | CR-F6 | Effect-generation resource ownership | P3 | CR-BASE; watcher contract from CR-F2 | `[x]` |
 | CR-F7 | Current documentation and acceptance reconciliation | P3 | Baseline fixes can start immediately; final pass follows implementation | `[x]` |
 | CR-INTEGRATION | Real producer-to-consumer regression coverage | Acceptance | CR-F1/F2/F3/F4/F5/F6/F8 software work | `[x]` |
-| CR-VALIDATE | Full toolchain, package, and exact-revision CI checks | Acceptance | Implemented software; CR-INTEGRATION | `[ ]` |
-| CR-QUALIFY | Isolated installed-system and physical cleanup evidence | Acceptance | CR-F5 software; candidate packages | `[ ]` |
-| CR-CLOSEOUT | Reviewed finding closure and original-gate reconciliation | Release gate | All applicable work and evidence above | `[ ]` |
+| CR-VALIDATE | Full toolchain, package, and exact-revision CI checks | Acceptance | Implemented software; CR-INTEGRATION | `[x]` |
+| CR-QUALIFY | Isolated installed-system and physical cleanup evidence | Acceptance | CR-F5 software; candidate packages | `[!]` |
+| CR-CLOSEOUT | Reviewed finding closure and original-gate reconciliation | Release gate | All applicable work and evidence above | `[-]` |
 
 ## CR-BASE — Preserve the baseline and establish failing regressions
 
@@ -291,23 +291,25 @@ pass with corrected behavior. Passing helper tests or mock notifications alone a
 
 ## CR-VALIDATE — Qualify the exact software candidate
 
-- [ ] **CR-VALIDATE-01:** Run Rust formatting, locked workspace check, strict all-target Clippy,
+- [x] **CR-VALIDATE-01:** Run Rust formatting, locked workspace check, strict all-target Clippy,
   and the full locked workspace test suite at the candidate SHA.
-- [ ] **CR-VALIDATE-02:** Run daemon `experimental-join` software tests while verifying ordinary
+- [x] **CR-VALIDATE-02:** Run daemon `experimental-join` software tests while verifying ordinary
   package/default builds retain the closed production join gate.
-- [ ] **CR-VALIDATE-03:** Run all five existing isolated broker checks plus new owner/watch/
+- [x] **CR-VALIDATE-03:** Run all five existing isolated broker checks plus new owner/watch/
   publication regressions and the Python socket-tooling tests.
-- [ ] **CR-VALIDATE-04:** Run pinned frontend install, format/lint/type checks, component/StrictMode
+- [x] **CR-VALIDATE-04:** Run pinned frontend install, format/lint/type checks, component/StrictMode
   tests, and production build; validate any changed theme token contrast.
-- [ ] **CR-VALIDATE-05:** Build both Debian packages, inspect manifests/dependencies/embedded
+- [x] **CR-VALIDATE-05:** Build both Debian packages, inspect manifests/dependencies/embedded
   frontend, and execute the packaged lifecycle and isolated upgrade/migration/removal/purge tests.
-- [ ] **CR-VALIDATE-06:** Record actual commands, test results, revision, package hashes, and
+- [x] **CR-VALIDATE-06:** Record actual commands, test results, revision, package hashes, and
   limitations; inspect exact-head CI through Ralph Bridge per repository procedure.
-- [ ] **CR-VALIDATE-07:** Recheck authorization, pin/exporter/revocation, rollback, foreign-state
+- [x] **CR-VALIDATE-07:** Recheck authorization, pin/exporter/revocation, rollback, foreign-state
   preservation, stable identity, schema migration, no replay, and disabled sharing regressions.
 
 **Acceptance:** Required software checks and exact-revision CI pass. Any hardware deferral is
 explicitly recorded; software success alone does not complete CR-F5 or CR-CLOSEOUT.
+
+**Accepted (2026-11-13, `42ae7ab`):** met; see [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-validate--software-candidate-2026-11-13).
 
 ## CR-QUALIFY — Validate active-network cleanup in an isolated system
 
@@ -331,19 +333,25 @@ explicitly recorded; software success alone does not complete CR-F5 or CR-CLOSEO
 **Acceptance:** Observed installed-system state supports the cleanup claims, and physical PAN
 claims have identified hardware evidence. Synthetic dpkg roots are not sufficient qualification.
 
+**Blocked (2026-11-13):** needs a disposable VM or test machine with real NetworkManager and
+systemd, and a designated Bluetooth test rig; none is available to this work. Kept open.
+
 ## CR-CLOSEOUT — Review all findings and reconcile original gates
 
-- [ ] **CR-CLOSEOUT-01:** Review each F1–F8 fix against the companion specification, original
+- [x] **CR-CLOSEOUT-01:** Review each F1–F8 fix against the companion specification, original
   reproduction, adverse cases, security invariants, and integration evidence.
-- [ ] **CR-CLOSEOUT-02:** Confirm all eight findings have source/commit, regression or
+- [x] **CR-CLOSEOUT-02:** Confirm all eight findings have source/commit, regression or
   documentation-comparison results, software outcome, and required qualification evidence linked below.
-- [ ] **CR-CLOSEOUT-03:** Recheck affected original tasks; retain every unsatisfied physical,
+- [x] **CR-CLOSEOUT-03:** Recheck affected original tasks; retain every unsatisfied physical,
   product, join/routing, support, and release acceptance criterion.
-- [ ] **CR-CLOSEOUT-04:** Resolve remaining contradictions or blockers before marking the
+- [-] **CR-CLOSEOUT-04:** Resolve remaining contradictions or blockers before marking the
   remediation COMPLETE. Record a software milestone separately if hardware remains deferred.
 
 **Acceptance:** Every applicable criterion is evidenced, all eight findings are resolved, and
 the final status does not imply completion of the rest of the product roadmap.
+
+**Progress (2026-11-13):** software milestone recorded; 01–03 met, 04 waits on CR-QUALIFY. See
+[evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-closeout--software-milestone-2026-11-13).
 
 ## Evidence ledger
 
@@ -352,15 +360,15 @@ Fill entries as work is qualified. Link concrete records; do not replace evidenc
 | Task / finding | Fix SHA / source | Regression and software results | Installed-system / physical evidence | Remaining gate | Status |
 | --- | --- | --- | --- | --- | --- |
 | CR-BASE | `a57539e`; F5 fixtures `0b0beab` | Baseline failures recorded in [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-base--baseline-and-reproductions-2026-11-13) | Preserve recorded baseline scope | None | COMPLETE |
-| CR-F8 / F8 | `b3ba0bd` | 5 `owner_race` tests pass (2 fail with the baseline client); all checks and bus suites green | Not required for the owner-race defect | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
-| CR-F2 / F2 | `e283b4e` | `owner_watch` (3), `watcher` (5), setup race in `owner_race`; UI stale-label tests; all checks green | Private broker sufficient for the reported defect | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
-| CR-F1 / F1 | `4de29b1` | `state_events` (7), daemon-to-watcher, link-phase and peer-snapshot tests; all checks green | Radio claims remain separate | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
-| CR-F3 / F3 | `4583c6e` | 11 `cr_f3` tests (4 failed on baseline); workspace green | Not required for pure graph consistency | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
-| CR-F4 / F4 | `6025bbf` | 5 `cr_f4` tests (1 failed on baseline); workspace green | Adapter behavior if claimed (not claimed) | Exact-head CI recorded under CR-VALIDATE | SOFTWARE COMPLETE |
+| CR-F8 / F8 | `b3ba0bd` | 5 `owner_race` tests pass (2 fail with the baseline client); all checks and bus suites green | Not required for the owner-race defect | None (CI 43518870135) | COMPLETE |
+| CR-F2 / F2 | `e283b4e` | `owner_watch` (3), `watcher` (5), setup race in `owner_race`; UI stale-label tests; all checks green | Private broker sufficient for the reported defect | None (CI 43518870135) | COMPLETE |
+| CR-F1 / F1 | `4de29b1`; review fix `42ae7ab` | `state_events` (8), daemon-to-watcher, link-phase and peer-snapshot tests; all checks green | Radio claims remain separate | None (CI 43520783589) | COMPLETE |
+| CR-F3 / F3 | `4583c6e` | 11 `cr_f3` tests (4 failed on baseline); workspace green | Not required for pure graph consistency | None (CI 43518870135) | COMPLETE |
+| CR-F4 / F4 | `6025bbf` | 5 `cr_f4` tests (1 failed on baseline); workspace green | Adapter behavior if claimed (not claimed) | None (CI 43518870135) | SOFTWARE COMPLETE |
 | CR-F5 / F5 | `0b0beab` | 10 removal, 4 binary, lifecycle and real-dpkg tests green locally | Required: CR-QUALIFY (open) | Installed-system/physical qualification | SOFTWARE COMPLETE / QUALIFICATION DEFERRED |
-| CR-F6 / F6 | `25e6984` | 8 `useDaemon` tests (4 fail with the baseline hook); desktop checks green | Not required for effect ownership | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
-| CR-F7 / F7 | This commit (docs) | Facts rechecked against source and packages; 0 broken links | Preserve existing records (preserved) | Final comparison at CR-CLOSEOUT | COMPLETE |
+| CR-F6 / F6 | `25e6984` | 8 `useDaemon` tests (4 fail with the baseline hook); desktop checks green | Not required for effect ownership | None (CI 43518870135) | COMPLETE |
+| CR-F7 / F7 | `73537c1` (docs) | Facts rechecked against source and packages; 0 broken links | Preserve existing records (preserved) | Final comparison at CR-CLOSEOUT | COMPLETE |
 | CR-INTEGRATION | `d1d86a5` | Real watchers, producers and consumers on private buses; every restored defect fails | Isolated-system results where relevant (CR-QUALIFY) | Boundary regressions included in CI (done) | COMPLETE |
-| CR-VALIDATE | Pending | Pending | No physical claim from CI | Exact candidate software/package qualification | NOT STARTED |
-| CR-QUALIFY | Pending | Pending | Pending | All required installed-system and physical checks | NOT STARTED |
-| CR-CLOSEOUT | Pending | Pending | Pending where required | Full finding and original-gate review | NOT STARTED |
+| CR-VALIDATE | `42ae7ab` | All checks, bus suites, packages, packaging tests; CI 43520783589 | No physical claim from CI | None | COMPLETE |
+| CR-QUALIFY | — | — | Not run: no VM or Bluetooth rig available | All required installed-system and physical checks | BLOCKED (equipment) |
+| CR-CLOSEOUT | `42ae7ab` | Independent review, one defect fixed; original states unchanged | Pending CR-QUALIFY | CR-CLOSEOUT-04 after CR-QUALIFY | SOFTWARE MILESTONE |
