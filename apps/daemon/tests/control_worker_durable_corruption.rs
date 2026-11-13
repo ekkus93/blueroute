@@ -67,6 +67,17 @@ impl NetworkOperations for StaleNap {
     }
 }
 
+/// Test hosts carry an explicit policy ceiling; an unknown ceiling refuses every peer.
+fn worker_capabilities() -> NodeCapabilities {
+    NodeCapabilities {
+        connection_policy_ceiling: Some(blueroute_core::Sourced::new(
+            32,
+            blueroute_core::CapabilitySource::Configured,
+        )),
+        ..NodeCapabilities::default()
+    }
+}
+
 fn save_host(path: &std::path::Path) {
     let mut network = NetworkMembership::new(
         NetworkId::from_bytes([7; 16]),
@@ -97,7 +108,7 @@ fn malformed_durable_host_retires_listener_and_requires_explicit_repair() {
         backend.clone(),
         trust,
         identity,
-        NodeCapabilities::default(),
+        worker_capabilities(),
     )
     .unwrap();
 

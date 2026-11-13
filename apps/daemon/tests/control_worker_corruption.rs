@@ -18,6 +18,17 @@ use blueroute_daemon::{
 use blueroute_linux::NetworkMembershipStore;
 use blueroute_protocol::NetworkSummary;
 
+/// Test hosts carry an explicit policy ceiling; an unknown ceiling refuses every peer.
+fn worker_capabilities() -> NodeCapabilities {
+    NodeCapabilities {
+        connection_policy_ceiling: Some(blueroute_core::Sourced::new(
+            32,
+            blueroute_core::CapabilitySource::Configured,
+        )),
+        ..NodeCapabilities::default()
+    }
+}
+
 fn save_host(path: &Path) {
     let mut host = NetworkMembership::new(
         NetworkId::from_bytes([7; 16]),
@@ -109,7 +120,7 @@ fn corrupt_membership_blocks_worker_startup_and_rebind_until_repair() {
         backend.clone(),
         trust,
         local,
-        NodeCapabilities::default(),
+        worker_capabilities(),
     )
     .unwrap();
 

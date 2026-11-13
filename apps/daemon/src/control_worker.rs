@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use blueroute_core::{NetworkId, NodeCapabilities, NodeId};
+use blueroute_core::{NetworkId, NodeCapabilities, NodeId, Sourced};
 use blueroute_linux::NetworkMembershipStore;
 use blueroute_protocol::control::{ControlMessage, HelloFacts};
 use blueroute_protocol::session::{ConnectionDeadline, ConnectionStage, ControlSessionRegistry};
@@ -178,6 +178,28 @@ fn session_clock_ms(admitted: Instant, now: Instant) -> Option<u64> {
     u64::try_from(elapsed.as_millis())
         .ok()?
         .checked_add(ACTIVE_CLOCK_BASE_MS)
+}
+
+/// P6-007: admit a newly authenticated peer only while the hosted star is below the local NAP
+/// policy ceiling. A peer that already holds a session never counts twice, and an unknown or zero
+/// ceiling refuses everyone (fail closed). Only the ceiling is read from the startup capability
+/// snapshot: it is configuration, not an observation, and NAP ownership is observed separately.
+fn within_policy_ceiling(
+    ceiling: Option<&Sourced<u16>>,
+    active: impl IntoIterator<Item = NodeId>,
+    candidate: NodeId,
+) -> Result<(), &'static str> {
+    let ceiling = match ceiling {
+        Some(ceiling) if ceiling.value > 0 => usize::from(ceiling.value),
+        _ => return Err("the NAP client policy ceiling is unknown"),
+    };
+    let peers: std::collections::BTreeSet<[u8; 16]> =
+        active.into_iter().map(|peer| *peer.as_bytes()).collect();
+    if peers.contains(candidate.as_bytes()) || peers.len() < ceiling {
+        Ok(())
+    } else {
+        Err("the NAP client policy ceiling is reached")
+    }
 }
 
 fn heartbeat_due(last_sent: Instant, now: Instant) -> bool {
@@ -366,7 +388,24 @@ fn run_worker(
                     control_setup(network, capabilities.clone()),
                     Arc::clone(&registry),
                 )) {
-                    Ok(Some(registered)) => {
+                    Ok(Some(mut registered)) => {
+                        if let Err(reason) = within_policy_ceiling(
+                            capabilities.connection_policy_ceiling.as_ref(),
+                            sessions.iter().map(RegisteredControlSession::peer),
+                            registered.peer(),
+                        ) {
+                            // Tell the peer, then drop the session: that closes the socket and
+                            // retires its registry generation. Its PANU link is not touched.
+                            eprintln!("BlueRoute refused an authenticated peer: {reason}");
+                            if let Some(deadline) = Instant::now().checked_add(GOODBYE_WRITE_BUDGET)
+                            {
+                                let _ = registered.send_goodbye_until(deadline);
+                            }
+                            drop(registered);
+                            peers.publish(&sessions);
+                            thread::park_timeout(POLL_INTERVAL);
+                            continue;
+                        }
                         let admitted = Instant::now();
                         registered_at.insert(*registered.session_id(), admitted);
                         heartbeat_sent_at.insert(*registered.session_id(), admitted);
@@ -389,6 +428,17 @@ fn run_worker(
 
 #[cfg(test)]
 mod tests {
+
+    /// Test hosts carry an explicit policy ceiling; an unknown ceiling refuses every peer.
+    fn worker_capabilities() -> NodeCapabilities {
+        NodeCapabilities {
+            connection_policy_ceiling: Some(blueroute_core::Sourced::new(
+                32,
+                blueroute_core::CapabilitySource::Configured,
+            )),
+            ..NodeCapabilities::default()
+        }
+    }
     use super::*;
 
     fn save_host_membership(path: &std::path::Path) {
@@ -548,7 +598,7 @@ mod tests {
             operations.clone(),
             trust,
             local,
-            NodeCapabilities::default(),
+            worker_capabilities(),
         )
         .unwrap();
 
@@ -600,7 +650,7 @@ mod tests {
             operations.clone(),
             trust,
             local,
-            NodeCapabilities::default(),
+            worker_capabilities(),
         )
         .unwrap();
         let wait_until = Instant::now() + Duration::from_secs(2);
@@ -677,7 +727,7 @@ mod tests {
             operations.clone(),
             Arc::clone(&host_trust),
             host,
-            NodeCapabilities::default(),
+            worker_capabilities(),
         )
         .unwrap();
         let ready_before = Instant::now() + Duration::from_secs(3);
@@ -799,7 +849,7 @@ mod tests {
             operations.clone(),
             Arc::clone(&host_trust),
             host,
-            NodeCapabilities::default(),
+            worker_capabilities(),
         )
         .unwrap();
         let ready_before = Instant::now() + Duration::from_secs(3);
@@ -975,7 +1025,7 @@ mod tests {
             operations.clone(),
             Arc::clone(&host_trust),
             host,
-            NodeCapabilities::default(),
+            worker_capabilities(),
         )
         .unwrap();
         let ready_before = Instant::now() + Duration::from_secs(3);
@@ -1190,7 +1240,7 @@ mod tests {
             operations.clone(),
             Arc::clone(&host_trust),
             host,
-            NodeCapabilities::default(),
+            worker_capabilities(),
         )
         .unwrap();
         let ready_before = Instant::now() + Duration::from_secs(3);
@@ -1303,7 +1353,7 @@ mod tests {
             operations.clone(),
             Arc::clone(&host_trust),
             host,
-            NodeCapabilities::default(),
+            worker_capabilities(),
         )
         .unwrap();
         let ready_before = Instant::now() + Duration::from_secs(3);
@@ -1422,7 +1472,7 @@ mod tests {
             operations.clone(),
             Arc::clone(&host_trust),
             host,
-            NodeCapabilities::default(),
+            worker_capabilities(),
         )
         .unwrap();
         let ready_before = Instant::now() + Duration::from_secs(3);
@@ -1570,7 +1620,7 @@ mod tests {
             operations.clone(),
             Arc::clone(&host_trust),
             host,
-            NodeCapabilities::default(),
+            worker_capabilities(),
         )
         .unwrap();
         let ready_before = Instant::now() + Duration::from_secs(3);
@@ -1703,7 +1753,7 @@ mod tests {
             operations.clone(),
             Arc::clone(&host_trust),
             host,
-            NodeCapabilities::default(),
+            worker_capabilities(),
         )
         .unwrap();
         let ready_before = Instant::now() + Duration::from_secs(3);
@@ -1927,7 +1977,7 @@ mod tests {
             operations.clone(),
             Arc::clone(&host_trust),
             host,
-            NodeCapabilities::default(),
+            worker_capabilities(),
         )
         .unwrap();
         let ready_before = Instant::now() + Duration::from_secs(3);
@@ -2045,7 +2095,7 @@ mod tests {
             operations.clone(),
             trust,
             local,
-            NodeCapabilities::default(),
+            worker_capabilities(),
         )
         .unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -2111,7 +2161,7 @@ mod tests {
             operations.clone(),
             trust,
             local,
-            NodeCapabilities::default(),
+            worker_capabilities(),
         )
         .unwrap();
 
@@ -2185,7 +2235,7 @@ mod tests {
             operations.clone(),
             trust,
             local,
-            NodeCapabilities::default(),
+            worker_capabilities(),
         )
         .unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -2245,7 +2295,7 @@ mod tests {
             operations.clone(),
             trust,
             local,
-            NodeCapabilities::default(),
+            worker_capabilities(),
         )
         .unwrap();
 
@@ -2288,7 +2338,7 @@ mod tests {
             operations.clone(),
             trust,
             local,
-            NodeCapabilities::default(),
+            worker_capabilities(),
         )
         .unwrap();
         let wait_until = Instant::now() + Duration::from_secs(2);
@@ -2324,7 +2374,7 @@ mod tests {
             operations.clone(),
             trust,
             local,
-            NodeCapabilities::default(),
+            worker_capabilities(),
         )
         .unwrap();
 
@@ -2395,6 +2445,179 @@ mod tests {
             peers: AuthenticatedControlPeers::default(),
         });
         completion.recv_timeout(Duration::from_secs(1)).unwrap();
+    }
+
+    #[test]
+    fn running_worker_refuses_a_peer_over_the_policy_ceiling_until_a_slot_frees() {
+        use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
+        use blueroute_core::{CapabilitySource, NodeId};
+
+        let root = std::env::temp_dir().join(format!(
+            "blueroute-control-worker-ceiling-{}",
+            std::process::id()
+        ));
+        let host_path = root.join("host-membership");
+        let first_path = root.join("first-membership");
+        let second_path = root.join("second-membership");
+        for path in [&host_path, &first_path, &second_path] {
+            save_host_membership(path);
+        }
+        let network = NetworkId::from_bytes([7; 16]);
+        let host = LocalControlTlsIdentity::generate(NodeId::from_bytes([8; 16])).unwrap();
+        let first = LocalControlTlsIdentity::generate(NodeId::from_bytes([9; 16])).unwrap();
+        let second = LocalControlTlsIdentity::generate(NodeId::from_bytes([10; 16])).unwrap();
+        let host_node = host.node();
+        let host_fingerprint = host.fingerprint();
+        let host_trust = Arc::new(DurablePeerTrustOperations::with_peer_pin_store(
+            NetworkMembershipStore::new(host_path.clone()),
+            PeerPinStore::new(root.join("host-pins")),
+        ));
+        let first_trust = DurablePeerTrustOperations::with_peer_pin_store(
+            NetworkMembershipStore::new(first_path),
+            PeerPinStore::new(root.join("first-pins")),
+        );
+        let second_trust = DurablePeerTrustOperations::with_peer_pin_store(
+            NetworkMembershipStore::new(second_path),
+            PeerPinStore::new(root.join("second-pins")),
+        );
+        for peer in [&first, &second] {
+            future::block_on(host_trust.trust_peer(peer.node())).unwrap();
+            host_trust
+                .enroll_verified_key(network, peer.node(), peer.fingerprint(), peer.fingerprint())
+                .unwrap();
+        }
+        for trust in [&first_trust, &second_trust] {
+            future::block_on(trust.trust_peer(host_node)).unwrap();
+            trust
+                .enroll_verified_key(network, host_node, host_fingerprint, host_fingerprint)
+                .unwrap();
+        }
+
+        let operations = Arc::new(HostedNapOperations::default());
+        let one_client = NodeCapabilities {
+            connection_policy_ceiling: Some(Sourced::new(1, CapabilitySource::Configured)),
+            ..NodeCapabilities::default()
+        };
+        let worker = spawn_daemon_control_worker(
+            NetworkMembershipStore::new(host_path),
+            operations.clone(),
+            Arc::clone(&host_trust),
+            host,
+            one_client,
+        )
+        .unwrap();
+        let ready_before = Instant::now() + Duration::from_secs(3);
+        let endpoint = loop {
+            if let Some(endpoint) = *operations.endpoint.lock().unwrap() {
+                break endpoint;
+            }
+            assert!(
+                Instant::now() < ready_before,
+                "guarded test NAP did not bind"
+            );
+            thread::sleep(Duration::from_millis(5));
+        };
+        let peers = worker.authenticated_peers();
+        let wait_for = |expected: Vec<NodeId>| {
+            let by = Instant::now() + Duration::from_secs(3);
+            while peers.snapshot() != expected {
+                assert!(
+                    Instant::now() < by,
+                    "peers {:?} != {expected:?}",
+                    peers.snapshot()
+                );
+                thread::sleep(Duration::from_millis(5));
+            }
+        };
+        let expected = PinnedControlTlsPeer::new(network, host_node, host_fingerprint).unwrap();
+        fn connect<'a>(
+            endpoint: std::net::SocketAddrV4,
+            identity: &LocalControlTlsIdentity,
+            trust: &'a DurablePeerTrustOperations,
+            expected: PinnedControlTlsPeer,
+        ) -> RegisteredControlSession<'a> {
+            crate::connect_registered_control_session(
+                std::net::TcpStream::connect(endpoint).unwrap(),
+                identity,
+                expected,
+                trust,
+                control_setup(expected.network(), NodeCapabilities::default()),
+                Arc::new(Mutex::new(ControlSessionRegistry::new())),
+            )
+            .expect("mutual TLS authenticates before the ceiling is checked")
+        }
+        let closed_within = |session: &mut RegisteredControlSession<'_>, seconds: u64| {
+            let started = Instant::now();
+            let by = started + Duration::from_secs(seconds);
+            loop {
+                let now_ms =
+                    ACTIVE_CLOCK_BASE_MS + u64::try_from(started.elapsed().as_millis()).unwrap();
+                match session.receive_next_with_budget_at(now_ms, Duration::from_millis(80)) {
+                    Ok(ControlSessionRead::Frames(frames))
+                        if frames
+                            .iter()
+                            .any(|frame| matches!(frame.message, ControlMessage::Goodbye)) =>
+                    {
+                        return true;
+                    }
+                    Ok(ControlSessionRead::Idle | ControlSessionRead::Frames(_)) => {
+                        if Instant::now() >= by {
+                            return false;
+                        }
+                    }
+                    Ok(ControlSessionRead::Closed) | Err(_) => return true,
+                }
+            }
+        };
+
+        let mut first_session = connect(endpoint, &first, &first_trust, expected);
+        wait_for(vec![first.node()]);
+
+        // Over the ceiling: authenticated, then told Goodbye and closed; never listed.
+        let mut refused = connect(endpoint, &second, &second_trust, expected);
+        assert!(
+            closed_within(&mut refused, 4),
+            "over-ceiling peer kept its session"
+        );
+        assert_eq!(peers.snapshot(), vec![first.node()]);
+        assert!(!first_session.is_terminal());
+
+        // The first peer leaves; its slot frees and the second is admitted on retry.
+        first_session
+            .send_goodbye_until(Instant::now() + Duration::from_secs(2))
+            .unwrap();
+        wait_for(Vec::new());
+        let mut admitted = connect(endpoint, &second, &second_trust, expected);
+        wait_for(vec![second.node()]);
+        assert!(
+            !closed_within(&mut admitted, 1),
+            "a peer under the ceiling was refused"
+        );
+
+        worker.shutdown().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn admission_stops_at_the_policy_ceiling_and_never_counts_a_peer_twice() {
+        use blueroute_core::{CapabilitySource, NodeId};
+        let node = |value: u8| NodeId::from_bytes([value; 16]);
+        let two = Sourced::new(2, CapabilitySource::ConservativeDefault);
+        assert_eq!(within_policy_ceiling(Some(&two), [], node(1)), Ok(()));
+        assert_eq!(
+            within_policy_ceiling(Some(&two), [node(1)], node(2)),
+            Ok(())
+        );
+        assert!(within_policy_ceiling(Some(&two), [node(1), node(2)], node(3)).is_err());
+        // An already-admitted peer is not a new client.
+        assert_eq!(
+            within_policy_ceiling(Some(&two), [node(1), node(2)], node(2)),
+            Ok(())
+        );
+        // Unknown or zero ceilings refuse everyone.
+        assert!(within_policy_ceiling(None, [], node(1)).is_err());
+        let zero = Sourced::new(0, CapabilitySource::Configured);
+        assert!(within_policy_ceiling(Some(&zero), [], node(1)).is_err());
     }
 
     #[test]

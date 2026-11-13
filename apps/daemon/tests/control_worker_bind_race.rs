@@ -20,6 +20,17 @@ use blueroute_daemon::{
 use blueroute_linux::NetworkMembershipStore;
 use blueroute_protocol::NetworkSummary;
 
+/// Test hosts carry an explicit policy ceiling; an unknown ceiling refuses every peer.
+fn worker_capabilities() -> NodeCapabilities {
+    NodeCapabilities {
+        connection_policy_ceiling: Some(blueroute_core::Sourced::new(
+            32,
+            blueroute_core::CapabilitySource::Configured,
+        )),
+        ..NodeCapabilities::default()
+    }
+}
+
 fn save_host(path: &Path, network: NetworkId) {
     let mut host = NetworkMembership::new(network, DisplayName::new("Bind race test").unwrap());
     host.state = MembershipState::Member;
@@ -121,7 +132,7 @@ fn durable_network_switch_during_bind_rejects_stale_listener_then_recovers() {
         backend.clone(),
         trust,
         local,
-        NodeCapabilities::default(),
+        worker_capabilities(),
     )
     .unwrap();
 
