@@ -94,6 +94,12 @@ enum PeerCommand {
     Trust {
         node: String,
     },
+    /// On the host: trust a joining computer and pin its key. Read both values on the joining
+    /// computer with `blueroute peer local-key` and compare them out of band.
+    Enroll {
+        node: String,
+        fingerprint: String,
+    },
     Forget {
         node: String,
     },
@@ -148,6 +154,11 @@ enum Operation {
     },
     TrustPeer {
         node: NodeId,
+        json: bool,
+    },
+    EnrollPeer {
+        node: NodeId,
+        fingerprint: String,
         json: bool,
     },
     ForgetPeer {
@@ -310,6 +321,15 @@ fn parse(args: &[String]) -> Result<Operation, String> {
             command: PeerCommand::Trust { node },
         }) => Operation::TrustPeer {
             node: parse_node_id(&node).map_err(str::to_owned)?,
+            json,
+        },
+        Some(CliCommand::Peer {
+            command: PeerCommand::Enroll { node, fingerprint },
+        }) => Operation::EnrollPeer {
+            node: parse_node_id(&node).map_err(str::to_owned)?,
+            fingerprint: SpkiSha256::parse_canonical_hex(&fingerprint)
+                .map_err(|_| "invalid canonical SPKI SHA-256 fingerprint")?
+                .to_canonical_hex(),
             json,
         },
         Some(CliCommand::Peer {
@@ -977,6 +997,18 @@ fn run(args: &[String]) -> i32 {
                     _ => Err("daemon returned an unexpected trust response".into()),
                 })
         }
+        Operation::EnrollPeer {
+            node,
+            fingerprint,
+            json,
+        } => futures_lite::future::block_on(
+            client.request(&Command::EnrollPeerKey { node, fingerprint }),
+        )
+        .map_err(CliFailure::from)
+        .and_then(|response| match response {
+            Response::Ack => Ok(mutation_ack(json, "Peer key enrolled")),
+            _ => Err("daemon returned an unexpected enrollment response".into()),
+        }),
         Operation::SetJoinHost {
             network,
             node,
@@ -1230,6 +1262,32 @@ mod tests {
         assert_eq!(
             parse(&args(&["--json", "peer", "clear-join-host"])),
             Ok(Operation::ClearJoinHost { json: true })
+        );
+        assert_eq!(
+            parse(&args(&["peer", "enroll", &host_node.to_string(), &key])),
+            Ok(Operation::EnrollPeer {
+                node: host_node,
+                fingerprint: key.clone(),
+                json: false,
+            })
+        );
+        assert!(
+            parse(&args(&[
+                "peer",
+                "enroll",
+                &host_node.to_string(),
+                "not-hex"
+            ]))
+            .is_err()
+        );
+        assert!(
+            parse(&args(&[
+                "peer",
+                "enroll",
+                &NodeId::from_bytes([0; 16]).to_string(),
+                &key
+            ]))
+            .is_err()
         );
         for bad in [
             ["peer", "set-join-host", "x", "y", "z"]

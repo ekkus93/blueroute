@@ -402,6 +402,7 @@ Representative semantic operations:
 - `TrustPeer`
 - `ForgetPeer`
 - `RecordJoinHost` / `ClearJoinHost` (joiner-side host record; not membership, see P6-004 addendum)
+- `EnrollPeerKey` (API 1.5, P7-003: on a node in a network, trust a peer and pin the control key its operator read out with `peer local-key`; typed before first contact, then proven by mutual TLS on every connection. A different existing pin is refused; `ForgetPeer` removes both)
 - `GetClientLink` / `RetryClientReconnect` (restart and link-loss reconnection of a joined client; see P6-009 and P6-010). Once established, the reconnector watches the supervised control session; when it ends by itself (link, TLS or idle loss) a fresh bounded reconnect starts, while a session stopped by a leave is not a loss. The reconnector makes a bounded number of attempts with capped backoff, then stops, keeps `Member`, reports `Degraded` and waits for the user. Health reports the worse of the capability observation and the reconnection state.
 - `GetDiagnostics` (API 1.4 adds `authenticated_control_peers`: the host's peers with a live authenticated control session, reported against the labelled policy ceiling; control sessions, not PANU links, and not a radio limit)
 - future `SetInternetSharing`

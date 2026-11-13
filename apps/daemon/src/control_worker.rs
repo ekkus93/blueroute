@@ -2480,11 +2480,12 @@ mod tests {
             NetworkMembershipStore::new(second_path),
             PeerPinStore::new(root.join("second-pins")),
         );
+        // The host enrolls each joiner the production way: the operator types its key.
         for peer in [&first, &second] {
-            future::block_on(host_trust.trust_peer(peer.node())).unwrap();
-            host_trust
-                .enroll_verified_key(network, peer.node(), peer.fingerprint(), peer.fingerprint())
-                .unwrap();
+            assert!(
+                future::block_on(host_trust.enroll_peer_key(peer.node(), peer.fingerprint()))
+                    .unwrap()
+            );
         }
         for trust in [&first_trust, &second_trust] {
             future::block_on(trust.trust_peer(host_node)).unwrap();

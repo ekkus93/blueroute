@@ -670,6 +670,21 @@ impl DaemonService {
                         .map_err(core_error_to_dbus)?;
                     Self::encode_response(&Response::Ack)
                 }
+                Command::EnrollPeerKey { node, fingerprint } => {
+                    self.ensure_not_local_node(node)?;
+                    let fingerprint =
+                        SpkiSha256::parse_canonical_hex(&fingerprint).map_err(|_| {
+                            fdo::Error::InvalidArgs(
+                                "peer key fingerprint must be canonical lowercase SHA-256 hex"
+                                    .into(),
+                            )
+                        })?;
+                    self.peer_trust_operations()?
+                        .enroll_peer_key(node, fingerprint)
+                        .await
+                        .map_err(core_error_to_dbus)?;
+                    Self::encode_response(&Response::Ack)
+                }
                 Command::RecordJoinHost {
                     network,
                     node,

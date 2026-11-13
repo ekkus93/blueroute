@@ -38,6 +38,7 @@ pub fn command_authorization(command: &Command) -> CommandAuthorization {
         | Command::ForgetPeer { .. }
         | Command::RecordJoinHost { .. }
         | Command::ClearJoinHost
+        | Command::EnrollPeerKey { .. }
         | Command::RetryClientReconnect => CommandAuthorization::PolicyKit(MODIFY_ACTION_ID),
         Command::SetInternetSharing { .. } => {
             CommandAuthorization::PolicyKit(INTERNET_SHARING_ACTION_ID)
@@ -62,6 +63,7 @@ pub fn command_operation(command: &Command) -> &'static str {
         Command::ForgetPeer { .. } => "forget_peer",
         Command::RecordJoinHost { .. } => "record_join_host",
         Command::ClearJoinHost => "clear_join_host",
+        Command::EnrollPeerKey { .. } => "enroll_peer_key",
         Command::GetClientLink => "get_client_link",
         Command::RetryClientReconnect => "retry_client_reconnect",
         Command::GetDiagnostics => "get_diagnostics",
@@ -173,6 +175,10 @@ mod tests {
                 fingerprint: "07".repeat(32),
             },
             Command::ClearJoinHost,
+            Command::EnrollPeerKey {
+                node: NodeId::from_bytes([8; 16]),
+                fingerprint: "09".repeat(32),
+            },
             Command::RetryClientReconnect,
         ];
         for command in mutations {

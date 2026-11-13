@@ -9,7 +9,7 @@ The v1 local service uses:
 - service: `org.blueroute.Service1`
 - object: `/org/blueroute/Service1`
 - interface: `org.blueroute.Service1`
-- current semantic API version: `1.4`
+- current semantic API version: `1.5`
 
 Major versions are incompatible. Minor versions are additive. A client may use a server with the same major version when the client's minor version is less than or equal to the server's minor version. P5-005 is responsible for enforcing this negotiation before normal commands are sent.
 
@@ -20,6 +20,8 @@ API 1.2 adds the commands `RecordJoinHost { network, node, fingerprint }` and `C
 API 1.3 adds the read-only `GetClientLink` (response `ClientLink(Option<ClientLinkState>)`, `None` when this node is not a joined client) and `RetryClientReconnect` (behind `org.blueroute.modify`). `ClientLinkState` is `connecting { attempt }`, `waiting { attempt, retry_in_seconds }`, `established`, `needs_attention { reason }` or `gave_up { attempts }`, where `reason` is a user-safe message and never a raw diagnostic. They report and re-trigger the bounded restart reconnection of a persisted joined client (P6-009); `RetryClientReconnect` never changes membership and is refused with `InvalidState` when the node is not a joined client or a reconnection is already running. A 1.2 server rejects a 1.3 client at version negotiation.
 
 API 1.4 adds `authenticated_control_peers: Option<Vec<NodeId>>` to `DiagnosticSnapshot` (P6-007). On a host it lists, sorted, the peers that currently hold a control session authenticated by pinned TLS 1.3, the exporter-bound Hello and current durable approval (rechecked every supervision tick); it is `None` when the daemon runs no host control worker. It counts control sessions, not observed PANU links, and is never a measured radio capacity. A 1.3 server rejects a 1.4 client at version negotiation.
+
+API 1.5 adds `EnrollPeerKey { node, fingerprint }` behind `org.blueroute.modify` (P7-003). On a node that is in a network, it trusts `node` and pins `fingerprint` (canonical lowercase SPKI SHA-256 hex) in one step; the operator reads both values on the peer with `blueroute peer local-key` and compares them out of band. It is refused with `InvalidState` when the node is in no network, and with `AuthenticationFailed` when a different key is already pinned for that peer; repeating the same pin is a no-op. Possession of the key is still proven by mutual TLS 1.3 on every connection. A 1.4 server rejects a 1.5 client at version negotiation.
 
 ## Payload encoding
 

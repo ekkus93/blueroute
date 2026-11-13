@@ -31,7 +31,7 @@ pub struct ApiVersion {
 }
 
 impl ApiVersion {
-    pub const CURRENT: Self = Self { major: 1, minor: 4 };
+    pub const CURRENT: Self = Self { major: 1, minor: 5 };
 
     pub const fn new(major: u16, minor: u16) -> Self {
         Self { major, minor }
@@ -216,6 +216,14 @@ pub enum Command {
     },
     /// Forget the recorded join host.
     ClearJoinHost,
+    /// API 1.5 (P7-003): on a node in a network, trust `node` and pin its control key, typed by
+    /// the operator from that peer's own `peer local-key` (obtained out of band). The peer still
+    /// proves possession of the key with mutual TLS at its first connection. `fingerprint` is
+    /// canonical lowercase SPKI SHA-256 hex. A different existing pin for the node is refused.
+    EnrollPeerKey {
+        node: NodeId,
+        fingerprint: String,
+    },
     /// Read-only: what the joined-client reconnector is doing, if this node is a joined client.
     GetClientLink,
     /// Ask a joined client whose reconnection stopped to try again. It never changes
@@ -488,6 +496,10 @@ mod tests {
                 fingerprint: "07".repeat(32),
             },
             Command::ClearJoinHost,
+            Command::EnrollPeerKey {
+                node: NodeId::from_bytes([8; 16]),
+                fingerprint: "09".repeat(32),
+            },
             Command::GetClientLink,
             Command::RetryClientReconnect,
             Command::GetDiagnostics,

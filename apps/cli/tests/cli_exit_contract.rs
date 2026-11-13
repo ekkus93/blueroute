@@ -121,6 +121,9 @@ fn cli_exit_statuses_propagate_typed_broker_failures() -> Result<(), Box<dyn std
                 Some("create_network") => Ok(r#"{"type":"ack"}"#.into()),
                 Some("get_client_link") => Ok(r#"{"type":"client_link","data":null}"#.into()),
                 // Typed refusals on the other mutations.
+                Some("enroll_peer_key") => Err(fdo::Error::AccessDenied(
+                    "mock PolicyKit authorization denied".into(),
+                )),
                 Some("retry_client_reconnect") => Err(fdo::Error::AccessDenied(
                     "mock PolicyKit authorization denied".into(),
                 )),
@@ -146,6 +149,7 @@ fn cli_exit_statuses_propagate_typed_broker_failures() -> Result<(), Box<dyn std
         let broker_address = std::env::var("DBUS_SESSION_BUS_ADDRESS")?;
         let peer = blueroute_core::NodeId::from_bytes([7; 16]).to_string();
         let network = blueroute_core::NetworkId::from_bytes([8; 16]).to_string();
+        let key = "0a".repeat(32);
         let run = |arguments: &[&str]| {
             Command::new(env!("CARGO_BIN_EXE_blueroute"))
                 .env("DBUS_SYSTEM_BUS_ADDRESS", &broker_address)
@@ -158,6 +162,7 @@ fn cli_exit_statuses_propagate_typed_broker_failures() -> Result<(), Box<dyn std
             (vec!["peer", "trust", peer.as_str()], 4),
             (vec!["network", "list"], 1),
             (vec!["network", "reconnect"], 4),
+            (vec!["peer", "enroll", peer.as_str(), key.as_str()], 4),
             (vec!["network", "leave"], 5),
             (vec!["peer", "forget", peer.as_str()], 1),
             (vec!["discover", "start"], 1),

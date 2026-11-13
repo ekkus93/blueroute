@@ -15,6 +15,18 @@ pub type PeerTrustFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, CoreErro
 pub trait PeerTrustOperations: Send + Sync {
     fn trust_peer(&self, node: NodeId) -> PeerTrustFuture<'_, ()>;
     fn forget_peer(&self, node: NodeId) -> PeerTrustFuture<'_, ()>;
+
+    /// Trust `node` in the current network and pin the key the operator typed from that peer's
+    /// own `peer local-key`. `Ok(false)` when exactly that pin already existed.
+    fn enroll_peer_key(&self, node: NodeId, fingerprint: SpkiSha256) -> PeerTrustFuture<'_, bool> {
+        let _ = (node, fingerprint);
+        Box::pin(async {
+            Err(CoreError::new(
+                ErrorKind::CapabilityUnavailable,
+                "peer key enrollment is not available in this daemon instance",
+            ))
+        })
+    }
 }
 
 pub struct DurablePeerTrustOperations {
@@ -263,8 +275,10 @@ impl DurablePeerTrustOperations {
         )
     }
 
-    /// Synthetic policy seam for tests and internal callers. Production
-    /// enrollment must use the opaque TLS-verified peer entry point above.
+    /// Synthetic policy seam for tests and internal callers. Production enrollment uses either
+    /// the opaque TLS-verified peer entry point above or `enroll_peer_key`, where an operator
+    /// types a key obtained out of band before first contact (P7-003, maintainer decision
+    /// 2026-11-12); TLS then proves possession of that exact key on every connection.
     #[cfg(test)]
     pub(crate) fn enroll_verified_key(
         &self,
@@ -330,6 +344,19 @@ impl DurablePeerTrustOperations {
 }
 
 impl PeerTrustOperations for DurablePeerTrustOperations {
+    fn enroll_peer_key(&self, node: NodeId, fingerprint: SpkiSha256) -> PeerTrustFuture<'_, bool> {
+        Box::pin(async move {
+            require_nonzero_peer_identity(node)?;
+            let network = current_network(&self.store.load()?)?.ok_or_else(no_current_network)?;
+            // Trust first: the pin requires current approval. Trust alone grants no TLS access,
+            // so a refused pin (a different key already enrolled) leaves nothing usable.
+            self.trust_peer(node).await?;
+            // The operator-typed key stands in for both inputs: there is no connection yet, and
+            // every later connection must prove possession of exactly this key.
+            self.enroll_key_inner(network, node, fingerprint, fingerprint, None)
+        })
+    }
+
     fn trust_peer(&self, node: NodeId) -> PeerTrustFuture<'_, ()> {
         Box::pin(async move {
             require_nonzero_peer_identity(node)?;
@@ -553,6 +580,64 @@ mod tests {
                 check(fingerprint).unwrap_err().kind(),
                 ErrorKind::AuthenticationFailed,
             );
+            fs::remove_dir_all(root).unwrap();
+        });
+    }
+
+    #[test]
+    fn operator_typed_enrollment_trusts_and_pins_exactly_that_key() {
+        futures_lite::future::block_on(async {
+            let (root, store) = temp_store("p7-typed-enrollment");
+            let network = NetworkId::from_bytes([0x61; 16]);
+            let node = NodeId::from_bytes([0x62; 16]);
+            let key = SpkiSha256::from_verified_certificate_digest([0x63; 32]).unwrap();
+            let other_key = SpkiSha256::from_verified_certificate_digest([0x64; 32]).unwrap();
+
+            // No current network: nothing to enroll into, and nothing is written.
+            let pin_store = PeerPinStore::new(root.join("peer-keys"));
+            let trust = DurablePeerTrustOperations::with_peer_pin_store(
+                NetworkMembershipStore::new(root.join("memberships-v1")),
+                pin_store,
+            );
+            assert_eq!(
+                trust.enroll_peer_key(node, key).await.unwrap_err().kind(),
+                ErrorKind::InvalidState
+            );
+            assert!(trust.pin_store.as_ref().unwrap().load().unwrap().is_empty());
+
+            seed_current_network(&store, network);
+            let check = |key| trust.require_approved_pinned_tls_peer(network, node, key);
+            assert!(check(key).is_err());
+            // One step trusts the peer and pins the typed key; the listener check now passes
+            // for exactly that key and no other.
+            assert!(trust.enroll_peer_key(node, key).await.unwrap());
+            check(key).unwrap();
+            assert_eq!(
+                check(other_key).unwrap_err().kind(),
+                ErrorKind::AuthenticationFailed
+            );
+            assert_eq!(trust.approved_control_pins(network).unwrap().len(), 1);
+            // Repeating it is idempotent; a different key for the same node is refused.
+            assert!(!trust.enroll_peer_key(node, key).await.unwrap());
+            assert_eq!(
+                trust
+                    .enroll_peer_key(node, other_key)
+                    .await
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::AuthenticationFailed
+            );
+            check(key).unwrap();
+            // The all-zero identity is refused before any state change.
+            assert!(
+                trust
+                    .enroll_peer_key(NodeId::from_bytes([0; 16]), key)
+                    .await
+                    .is_err()
+            );
+            // Forget removes both the trust and the pin.
+            trust.forget_peer(node).await.unwrap();
+            assert!(check(key).is_err());
             fs::remove_dir_all(root).unwrap();
         });
     }
