@@ -22,6 +22,7 @@ fn snapshot() -> DiagnosticSnapshot {
         interfaces: None,
         routes: None,
         topology: None,
+        authenticated_control_peers: None,
         recent_errors: Vec::new(),
     }
 }

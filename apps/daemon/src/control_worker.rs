@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use blueroute_core::{NetworkId, NodeCapabilities};
+use blueroute_core::{NetworkId, NodeCapabilities, NodeId};
 use blueroute_linux::NetworkMembershipStore;
 use blueroute_protocol::control::{ControlMessage, HelloFacts};
 use blueroute_protocol::session::{ConnectionDeadline, ConnectionStage, ControlSessionRegistry};
@@ -31,6 +31,27 @@ const HEARTBEAT_WRITE_BUDGET: Duration = Duration::from_millis(100);
 const GOODBYE_WRITE_BUDGET: Duration = Duration::from_millis(100);
 const ACTIVE_CLOCK_BASE_MS: u64 = 3;
 
+/// The peers that currently hold an authenticated control session on this host (P6-007
+/// diagnostics). Updated by the worker every tick; empty when no listener is bound.
+#[derive(Clone, Default)]
+pub struct AuthenticatedControlPeers(Arc<Mutex<Vec<NodeId>>>);
+
+impl AuthenticatedControlPeers {
+    /// Sorted and without duplicates. A poisoned lock reads as empty rather than stale.
+    pub fn snapshot(&self) -> Vec<NodeId> {
+        self.0.lock().map(|peers| peers.clone()).unwrap_or_default()
+    }
+
+    fn publish(&self, sessions: &[RegisteredControlSession<'_>]) {
+        let mut peers: Vec<NodeId> = sessions.iter().map(|session| session.peer()).collect();
+        peers.sort_by_key(|peer| *peer.as_bytes());
+        peers.dedup();
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = peers;
+        }
+    }
+}
+
 /// A daemon-lifetime owner for the NAP control worker.
 ///
 /// Drop requests cancellation and wakes the worker's idle park. Call
@@ -39,9 +60,15 @@ const ACTIVE_CLOCK_BASE_MS: u64 = 3;
 pub struct DaemonControlWorker {
     stop: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
+    peers: AuthenticatedControlPeers,
 }
 
 impl DaemonControlWorker {
+    /// A live view of the host's authenticated control peers, for diagnostics.
+    pub fn authenticated_peers(&self) -> AuthenticatedControlPeers {
+        self.peers.clone()
+    }
+
     fn request_stop(&self) {
         self.stop.store(true, Ordering::Release);
         if let Some(handle) = &self.handle {
@@ -72,8 +99,29 @@ pub fn spawn_daemon_control_worker(
     local: LocalControlTlsIdentity,
     capabilities: NodeCapabilities,
 ) -> std::io::Result<DaemonControlWorker> {
+    spawn_daemon_control_worker_with_peers(
+        membership,
+        operations,
+        trust,
+        local,
+        capabilities,
+        AuthenticatedControlPeers::default(),
+    )
+}
+
+/// As `spawn_daemon_control_worker`, publishing into a handle created beforehand (so the D-Bus
+/// service can hold it before the worker starts).
+pub fn spawn_daemon_control_worker_with_peers(
+    membership: NetworkMembershipStore,
+    operations: Arc<dyn NetworkOperations>,
+    trust: Arc<DurablePeerTrustOperations>,
+    local: LocalControlTlsIdentity,
+    capabilities: NodeCapabilities,
+    peers: AuthenticatedControlPeers,
+) -> std::io::Result<DaemonControlWorker> {
     let stop = Arc::new(AtomicBool::new(false));
     let worker_stop = Arc::clone(&stop);
+    let worker_peers = peers.clone();
     let handle = thread::Builder::new()
         .name("blueroute-control-tls".to_owned())
         .spawn(move || {
@@ -84,11 +132,15 @@ pub fn spawn_daemon_control_worker(
                 local,
                 capabilities,
                 worker_stop,
-            )
+                &worker_peers,
+            );
+            // Nothing is supervised any more once the worker has exited.
+            worker_peers.publish(&[]);
         })?;
     Ok(DaemonControlWorker {
         stop,
         handle: Some(handle),
+        peers,
     })
 }
 
@@ -140,6 +192,7 @@ fn run_worker(
     local: LocalControlTlsIdentity,
     capabilities: NodeCapabilities,
     stop: Arc<AtomicBool>,
+    peers: &AuthenticatedControlPeers,
 ) {
     let registry = Arc::new(Mutex::new(ControlSessionRegistry::new()));
     let mut listener: Option<ObservedControlListener> = None;
@@ -151,6 +204,7 @@ fn run_worker(
             sessions.clear();
             registered_at.clear();
             heartbeat_sent_at.clear();
+            peers.publish(&sessions);
             // A backend may still report a stale owned NAP after a local
             // leave or corrupted membership state. Never bind a TCP ingress
             // listener until durable local-host membership is valid.
@@ -328,6 +382,7 @@ fn run_worker(
                 listener = None;
             }
         }
+        peers.publish(&sessions);
         thread::park_timeout(POLL_INTERVAL);
     }
 }
@@ -786,6 +841,19 @@ mod tests {
         second_session
             .send_heartbeat_until(Instant::now() + Duration::from_secs(2))
             .unwrap();
+        // Diagnostics list both authenticated peers, sorted, once the worker has admitted them.
+        let peers = worker.authenticated_peers();
+        let mut both = vec![first.node(), second.node()];
+        both.sort_by_key(|node| *node.as_bytes());
+        let listed_by = Instant::now() + Duration::from_secs(3);
+        while peers.snapshot() != both {
+            assert!(
+                Instant::now() < listed_by,
+                "peers not published: {:?}",
+                peers.snapshot()
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
 
         future::block_on(host_trust.forget_peer(first.node())).unwrap();
         let started = Instant::now();
@@ -813,6 +881,12 @@ mod tests {
         // Revoking the first peer must not retire the unrelated registered
         // generation or prevent it from exchanging another control frame.
         assert!(!second_session.is_terminal());
+        // The revoked peer drops out of the published list; the other stays.
+        let narrowed_by = Instant::now() + Duration::from_secs(3);
+        while peers.snapshot() != vec![second.node()] {
+            assert!(Instant::now() < narrowed_by, "revoked peer still listed");
+            thread::sleep(Duration::from_millis(5));
+        }
         second_session
             .send_heartbeat_until(Instant::now() + Duration::from_secs(2))
             .unwrap();
@@ -840,6 +914,8 @@ mod tests {
         }
         assert!(second_session.is_terminal());
         assert!(std::net::TcpListener::bind(endpoint).is_ok());
+        // Nothing is supervised after shutdown.
+        assert!(peers.snapshot().is_empty());
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -2294,6 +2370,7 @@ mod tests {
         let worker = DaemonControlWorker {
             stop,
             handle: Some(handle),
+            peers: AuthenticatedControlPeers::default(),
         };
         worker.shutdown().unwrap();
         completion.recv_timeout(Duration::from_secs(1)).unwrap();
@@ -2315,6 +2392,7 @@ mod tests {
         drop(DaemonControlWorker {
             stop,
             handle: Some(handle),
+            peers: AuthenticatedControlPeers::default(),
         });
         completion.recv_timeout(Duration::from_secs(1)).unwrap();
     }

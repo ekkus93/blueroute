@@ -444,6 +444,14 @@ fn format_diagnostics(
         },
     ));
     details.push(format_diagnostic_entries(
+        &format!(
+            "Authenticated control peers on this host ({})",
+            control_peer_capacity(snapshot)
+        ),
+        snapshot.authenticated_control_peers.as_deref(),
+        |peer| peer.to_string(),
+    ));
+    details.push(format_diagnostic_entries(
         "Interfaces",
         snapshot.interfaces.as_deref(),
         |interface| {
@@ -485,6 +493,31 @@ fn format_diagnostics(
     Ok(details.join("\n"))
 }
 
+/// "N of a policy ceiling of M (source)", labelled so it is never read as a measured radio limit
+/// or as an observed PANU count.
+fn control_peer_capacity(snapshot: &DiagnosticSnapshot) -> String {
+    let Some(peers) = &snapshot.authenticated_control_peers else {
+        return "unavailable (not reported by daemon)".to_owned();
+    };
+    let ceiling = snapshot
+        .capabilities
+        .connection_policy_ceiling
+        .as_ref()
+        .map_or_else(
+            || "an unknown policy ceiling".to_owned(),
+            |ceiling| {
+                format!(
+                    "a policy ceiling of {} ({:?}; not a measured controller limit)",
+                    ceiling.value, ceiling.source
+                )
+            },
+        );
+    format!(
+        "{} of {ceiling}; control sessions, not observed PANU links",
+        peers.len()
+    )
+}
+
 /// Short read-only health overview for automation and first-line support.
 /// Missing observations are never displayed as observed zero, and discovery
 /// counts never imply authenticated remote membership.
@@ -501,12 +534,13 @@ fn format_diagnostics_summary(snapshot: &DiagnosticSnapshot) -> String {
         )
     });
     format!(
-        "Health: {:?}\nNetwork: {:?}\nReported nodes: {} (local-only until peer authentication)\nBluetooth adapters: {}\nObserved peers: {} (not authenticated membership)\nInterfaces: {}\nRoutes: {}\nTopology: {}\nRecent API failures: {}\nUse 'blueroute diagnostics show' for details or '--json' for the full snapshot.",
+        "Health: {:?}\nNetwork: {:?}\nReported nodes: {} (local-only until peer authentication)\nBluetooth adapters: {}\nObserved peers: {} (not authenticated membership)\nAuthenticated control peers: {}\nInterfaces: {}\nRoutes: {}\nTopology: {}\nRecent API failures: {}\nUse 'blueroute diagnostics show' for details or '--json' for the full snapshot.",
         snapshot.health,
         snapshot.current_network,
         snapshot.visible_nodes,
         count(snapshot.system.as_ref().map(|system| system.adapters.len())),
         count(snapshot.observed_peers.as_ref().map(Vec::len)),
+        control_peer_capacity(snapshot),
         count(snapshot.interfaces.as_ref().map(Vec::len)),
         count(snapshot.routes.as_ref().map(Vec::len)),
         topology.unwrap_or_else(|| "unavailable (not reported by daemon)".to_owned()),
@@ -1360,6 +1394,7 @@ mod tests {
             interfaces: None,
             routes: None,
             topology: None,
+            authenticated_control_peers: None,
             recent_errors: Vec::new(),
         };
         snapshot.system = Some(SystemDiagnosticMetadata {
@@ -1396,6 +1431,7 @@ mod tests {
             interfaces: None,
             routes: None,
             topology: None,
+            authenticated_control_peers: None,
             recent_errors: vec![],
         };
         let unknown = format_diagnostics(&snapshot, false).unwrap();
@@ -1447,6 +1483,7 @@ mod tests {
             interfaces: None,
             routes: None,
             topology: None,
+            authenticated_control_peers: None,
             recent_errors: Vec::new(),
         };
         snapshot
@@ -1503,6 +1540,7 @@ mod tests {
             interfaces: Some(interfaces),
             routes: None,
             topology: None,
+            authenticated_control_peers: None,
             recent_errors: vec![],
         };
         let human = format_diagnostics(&snapshot, false).unwrap();
@@ -1512,6 +1550,46 @@ mod tests {
         assert!(!human.contains("bnep32"));
         let json = format_diagnostics(&snapshot, true).unwrap();
         assert!(json.contains("bnep39"));
+    }
+
+    #[test]
+    fn control_peers_render_against_the_labelled_policy_ceiling() {
+        use blueroute_core::{CapabilitySource, Sourced};
+        let mut snapshot = DiagnosticSnapshot {
+            api_version: ApiVersion::CURRENT,
+            health: HealthLevel::Healthy,
+            current_network: None,
+            visible_nodes: 1,
+            capabilities: NodeCapabilities::default(),
+            local_control_tls_spki_sha256: None,
+            system: None,
+            observed_peers: None,
+            interfaces: None,
+            routes: None,
+            topology: None,
+            authenticated_control_peers: None,
+            recent_errors: Vec::new(),
+        };
+        // Not reported is never shown as zero.
+        let missing = format_diagnostics_summary(&snapshot);
+        assert!(missing.contains("Authenticated control peers: unavailable"));
+
+        let peer = NodeId::from_bytes([0x31; 16]);
+        snapshot.authenticated_control_peers = Some(vec![peer]);
+        snapshot.capabilities.connection_policy_ceiling =
+            Some(Sourced::new(4, CapabilitySource::ConservativeDefault));
+        let summary = format_diagnostics_summary(&snapshot);
+        assert!(summary.contains("1 of a policy ceiling of 4 (ConservativeDefault"));
+        assert!(summary.contains("not a measured controller limit"));
+        assert!(summary.contains("not observed PANU links"));
+        let detail = format_diagnostics(&snapshot, false).unwrap();
+        assert!(detail.contains(&peer.to_string()));
+
+        snapshot.capabilities.connection_policy_ceiling = None;
+        snapshot.authenticated_control_peers = Some(Vec::new());
+        assert!(format_diagnostics_summary(&snapshot).contains("0 of an unknown policy ceiling"));
+        let json = format_diagnostics(&snapshot, true).unwrap();
+        assert!(json.contains("\"authenticated_control_peers\": []"));
     }
 
     #[test]
@@ -1537,6 +1615,7 @@ mod tests {
             interfaces: None,
             routes: None,
             topology: None,
+            authenticated_control_peers: None,
             recent_errors: Vec::new(),
         };
         let unknown = format_diagnostics_summary(&snapshot);
@@ -1631,6 +1710,7 @@ mod tests {
             interfaces: None,
             routes: None,
             topology: None,
+            authenticated_control_peers: None,
             recent_errors: Vec::new(),
         };
         let json =

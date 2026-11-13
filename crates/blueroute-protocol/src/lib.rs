@@ -31,7 +31,7 @@ pub struct ApiVersion {
 }
 
 impl ApiVersion {
-    pub const CURRENT: Self = Self { major: 1, minor: 3 };
+    pub const CURRENT: Self = Self { major: 1, minor: 4 };
 
     pub const fn new(major: u16, minor: u16) -> Self {
         Self { major, minor }
@@ -120,6 +120,12 @@ pub struct DiagnosticSnapshot {
     pub routes: Option<Vec<Route>>,
     #[serde(default)]
     pub topology: Option<DiagnosticTopology>,
+    /// Hosting only (API 1.4): peers with a live control session on this host, each one
+    /// authenticated by its pinned TLS key, the exporter-bound Hello and current durable approval
+    /// (rechecked every supervision tick). `None` when this daemon runs no host control worker.
+    /// This counts control sessions, not observed PANU links, and is not a radio capacity.
+    #[serde(default)]
+    pub authenticated_control_peers: Option<Vec<NodeId>>,
     #[serde(default)]
     pub recent_errors: Vec<DiagnosticFailure>,
 }
@@ -525,6 +531,7 @@ mod tests {
             interfaces: None,
             routes: None,
             topology: None,
+            authenticated_control_peers: None,
             recent_errors: Vec::new(),
         };
         let responses = vec![
@@ -577,6 +584,7 @@ mod tests {
             interfaces: None,
             routes: None,
             topology: None,
+            authenticated_control_peers: None,
             recent_errors: Vec::new(),
         };
         let mut value = serde_json::to_value(&snapshot).unwrap();

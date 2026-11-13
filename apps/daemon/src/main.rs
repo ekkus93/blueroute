@@ -4,11 +4,11 @@ use std::sync::{Arc, Mutex};
 
 use blueroute_core::{DaemonConfig, HealthLevel, MembershipRole};
 use blueroute_daemon::{
-    ClientReconnector, ClientRecordStore, ControlTlsIdentityStore, DaemonService,
-    DurablePeerTrustOperations, JoinControlConfig, NetworkOperations, PeerPinStore,
+    AuthenticatedControlPeers, ClientReconnector, ClientRecordStore, ControlTlsIdentityStore,
+    DaemonService, DurablePeerTrustOperations, JoinControlConfig, NetworkOperations, PeerPinStore,
     PendingHostCommitAuthorization, PendingJoinOperations, PendingJoinStore, ReconnectPolicy,
     SingleStarNetworkOperations, TransactionalJoinNetworkOperations, current_network,
-    spawn_daemon_capability_health_worker, spawn_daemon_control_worker,
+    spawn_daemon_capability_health_worker, spawn_daemon_control_worker_with_peers,
     system_diagnostics_from_report,
 };
 use blueroute_linux::{
@@ -149,12 +149,14 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let system_diagnostics = system_diagnostics_from_report(&capability_report);
     let worker_network_operations: Arc<dyn NetworkOperations> = network_operations.clone();
     let worker_peer_trust = peer_trust_operations.clone();
+    let control_peers = AuthenticatedControlPeers::default();
     let mut service =
         DaemonService::with_operations(status, network_operations, peer_trust_operations)
             .with_join_network_operations(join_network_operations)
             .with_pending_join_operations(pending_join_operations)
             .with_system_diagnostics(system_diagnostics)
-            .with_local_control_tls_fingerprint(local_control_tls_identity.fingerprint());
+            .with_local_control_tls_fingerprint(local_control_tls_identity.fingerprint())
+            .with_control_peers(control_peers.clone());
     if let Some(reconnector) = client_reconnector {
         service = service.with_client_reconnector(reconnector.clone());
         // After the observer is installed, so health reflects the first attempt.
@@ -180,12 +182,13 @@ async fn run() -> Result<(), Box<dyn Error>> {
 
     // Run blocking mutual-TLS I/O off the D-Bus executor. No remote session
     // authorizes network membership until production JoinNetwork is integrated.
-    let _control_worker = spawn_daemon_control_worker(
+    let _control_worker = spawn_daemon_control_worker_with_peers(
         NetworkMembershipStore::new(network_membership_path(&state_directory)),
         worker_network_operations,
         worker_peer_trust,
         local_control_tls_identity,
         capabilities,
+        control_peers,
     )?;
     // Probe live BlueZ/NetworkManager availability without blocking the
     // D-Bus executor. A failed startup host restoration must not be disguised

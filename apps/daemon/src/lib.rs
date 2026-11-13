@@ -78,7 +78,10 @@ pub use control_tls::{
     exchange_control_tls_candidate, exchange_control_tls_certificate, export_control_session_id,
     verify_control_tls_peer,
 };
-pub use control_worker::{DaemonControlWorker, spawn_daemon_control_worker};
+pub use control_worker::{
+    AuthenticatedControlPeers, DaemonControlWorker, spawn_daemon_control_worker,
+    spawn_daemon_control_worker_with_peers,
+};
 pub use enrollment_transport::enroll_confirmed_control_candidate;
 pub use join_authorization::{
     JoinCommitAuthorization, JoinCommitReceipt, PendingHostCommitAuthorization,
@@ -146,6 +149,7 @@ pub struct DaemonService {
     join_network_operations: Option<Arc<dyn JoinNetworkOperations>>,
     pending_join_operations: Option<Arc<PendingJoinOperations>>,
     client_reconnector: Option<Arc<ClientReconnector>>,
+    control_peers: Option<AuthenticatedControlPeers>,
     health_inputs: Arc<Mutex<HealthInputs>>,
     mutation_in_progress: Arc<AtomicBool>,
     system_diagnostics: Arc<Mutex<Option<SystemDiagnosticMetadata>>>,
@@ -173,6 +177,7 @@ impl DaemonService {
             join_network_operations: None,
             pending_join_operations: None,
             client_reconnector: None,
+            control_peers: None,
             health_inputs: Arc::new(Mutex::new(HealthInputs::new(health_now))),
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
             system_diagnostics: Arc::new(Mutex::new(None)),
@@ -193,6 +198,7 @@ impl DaemonService {
             join_network_operations: None,
             pending_join_operations: None,
             client_reconnector: None,
+            control_peers: None,
             health_inputs: Arc::new(Mutex::new(HealthInputs::new(health_now))),
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
             system_diagnostics: Arc::new(Mutex::new(None)),
@@ -214,6 +220,7 @@ impl DaemonService {
             join_network_operations: None,
             pending_join_operations: None,
             client_reconnector: None,
+            control_peers: None,
             health_inputs: Arc::new(Mutex::new(HealthInputs::new(health_now))),
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
             system_diagnostics: Arc::new(Mutex::new(None)),
@@ -334,6 +341,12 @@ impl DaemonService {
 
     /// Let a joined client's reconnection state feed daemon health. The observer touches only
     /// the shared status and health inputs, so it holds no reference back to the service.
+    /// Report the host control worker's authenticated peers in diagnostics (P6-007).
+    pub fn with_control_peers(mut self, peers: AuthenticatedControlPeers) -> Self {
+        self.control_peers = Some(peers);
+        self
+    }
+
     pub fn with_client_reconnector(mut self, reconnector: Arc<ClientReconnector>) -> Self {
         let status = self.status.clone();
         let inputs = self.health_inputs.clone();
@@ -472,6 +485,10 @@ impl DaemonService {
             interfaces: None,
             routes: None,
             topology: None,
+            authenticated_control_peers: self
+                .control_peers
+                .as_ref()
+                .map(AuthenticatedControlPeers::snapshot),
             recent_errors,
         })
     }

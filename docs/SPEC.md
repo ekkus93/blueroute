@@ -403,7 +403,7 @@ Representative semantic operations:
 - `ForgetPeer`
 - `RecordJoinHost` / `ClearJoinHost` (joiner-side host record; not membership, see P6-004 addendum)
 - `GetClientLink` / `RetryClientReconnect` (restart and link-loss reconnection of a joined client; see P6-009 and P6-010). Once established, the reconnector watches the supervised control session; when it ends by itself (link, TLS or idle loss) a fresh bounded reconnect starts, while a session stopped by a leave is not a loss. The reconnector makes a bounded number of attempts with capped backoff, then stops, keeps `Member`, reports `Degraded` and waits for the user. Health reports the worse of the capability observation and the reconnection state.
-- `GetDiagnostics`
+- `GetDiagnostics` (API 1.4 adds `authenticated_control_peers`: the host's peers with a live authenticated control session, reported against the labelled policy ceiling; control sessions, not PANU links, and not a radio limit)
 - future `SetInternetSharing`
 
 Representative events:
