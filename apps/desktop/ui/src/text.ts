@@ -5,6 +5,7 @@ import type {
   ClientLinkState,
   DesktopError,
   HealthLevel,
+  LimitSource,
   PlatformIssue,
   Reachability,
 } from "./daemon";
@@ -84,6 +85,14 @@ export function clientLinkText(link: ClientLinkState): string {
       return "Could not reach the computer that runs this network, so BlueRoute stopped trying. You are still part of the network.";
   }
 }
+
+/** Where the client limit comes from, in plain words. */
+export const LIMIT_SOURCE_TEXT: Record<LimitSource, string> = {
+  conservative_default: "BlueRoute's cautious default",
+  configured: "set by your administrator",
+  measured: "measured on this computer",
+  discovered: "reported by this computer's Bluetooth",
+};
 
 export const REACHABILITY_TEXT: Record<Reachability, string> = {
   local: "This computer",

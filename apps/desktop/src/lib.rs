@@ -11,7 +11,7 @@ pub use platform_check::{ActionAvailability, PlatformCheck, PlatformIssue};
 pub use watch::{DaemonSignal, reconnect_delay, watch_daemon};
 
 use blueroute_client::{BlueRouteClient, ClientErrorKind};
-use blueroute_core::{DisplayName, HealthLevel, NetworkId, NodeId};
+use blueroute_core::{DisplayName, HealthLevel, NetworkId, NodeId, Sourced};
 use blueroute_protocol::{
     ClientLinkState, Command, DaemonStatus, NetworkSummary, NodeSummary, Response,
 };
@@ -55,6 +55,9 @@ pub struct DesktopOverview {
     pub authenticated_remote_peers: Option<u32>,
     /// v1 has no production Internet sharing.
     pub internet_sharing_available: bool,
+    /// How many computers may connect at once while this computer runs a network, and where
+    /// that number comes from. A policy setting, never a measured Bluetooth limit.
+    pub client_limit: Option<Sourced<u16>>,
 }
 
 impl From<DaemonStatus> for DesktopOverview {
@@ -68,6 +71,7 @@ impl From<DaemonStatus> for DesktopOverview {
             can_join: status.capabilities.can_join_pan(),
             authenticated_remote_peers: None,
             internet_sharing_available: false,
+            client_limit: status.capabilities.connection_policy_ceiling.clone(),
         }
     }
 }
@@ -291,6 +295,22 @@ mod tests {
         assert_eq!(json["health"], "healthy");
         assert_eq!(json["authenticated_remote_peers"], serde_json::Value::Null);
         assert_eq!(json["internet_sharing_available"], false);
+        assert_eq!(json["client_limit"], serde_json::Value::Null);
+        let capabilities = NodeCapabilities {
+            connection_policy_ceiling: Some(Sourced::new(4, CapabilitySource::ConservativeDefault)),
+            ..NodeCapabilities::default()
+        };
+        let limited = DesktopOverview::from(DaemonStatus {
+            api_version: ApiVersion::CURRENT,
+            local_node: None,
+            current_network: None,
+            health: HealthLevel::Healthy,
+            capabilities,
+        });
+        assert_eq!(
+            serde_json::to_value(&limited).unwrap()["client_limit"],
+            serde_json::json!({"value": 4, "source": "conservative_default"})
+        );
         assert_eq!(
             serde_json::to_value(DesktopError::DaemonUnavailable).unwrap(),
             "daemon_unavailable"

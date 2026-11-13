@@ -28,6 +28,7 @@ function fakeApi(overrides: Partial<DaemonApi> = {}): DaemonApi {
         can_join: null,
         authenticated_remote_peers: null,
         internet_sharing_available: false,
+        client_limit: { value: 4, source: "conservative_default" as const },
       }),
     networks: () => Promise.resolve([{ id: "net-1", name: "Lab", member_count: 1 }]),
     devices: () =>
@@ -310,6 +311,7 @@ test("explains BlueRoute plainly and shows health as a labelled badge", async ()
         can_join: null,
         authenticated_remote_peers: null,
         internet_sharing_available: false,
+        client_limit: { value: 4, source: "conservative_default" as const },
       }),
   });
   render(<App api={degraded} subscribe={fakeSubscribe().subscribe} />);
@@ -365,12 +367,15 @@ test("a remembered network this computer is not in shows only in settings, with 
       can_join: null,
       authenticated_remote_peers: null,
       internet_sharing_available: false,
+      client_limit: null,
     });
   render(<App api={fakeApi({ overview })} subscribe={fakeSubscribe().subscribe} />);
   await screen.findByRole("region", { name: "Your network" });
   expect(yourNetwork().getByText("You are not part of a network yet.")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Leave this network" })).toBeNull();
   expect(screen.getByRole("list", { name: "Remembered networks" }).textContent).toContain("Lab");
+  // A limit the daemon does not report is shown as such, never as a number.
+  expect(screen.getByText("Advanced").closest("details")?.textContent).toContain("not reported");
 });
 
 test("an address conflict when creating explains the clash in plain words", async () => {
@@ -400,4 +405,13 @@ test("Diagnose a problem reports a client link that gave up or needs attention",
   render(<App api={fakeApi({ clientLink: attention })} subscribe={fakeSubscribe().subscribe} />);
   const found = await screen.findByRole("list", { name: "Problems found" });
   expect(found.textContent).toContain("the host key is missing");
+});
+
+test("settings show the client limit as a labelled setting, not a measured limit", async () => {
+  render(<App api={fakeApi()} subscribe={fakeSubscribe().subscribe} />);
+  const settings = await screen.findByRole("region", { name: "Settings" });
+  const advanced = within(settings).getByText("Advanced").closest("details");
+  expect(advanced?.open).toBe(false);
+  expect(advanced?.textContent).toContain("4 (BlueRoute's cautious default)");
+  expect(advanced?.textContent).toContain("not a measured Bluetooth limit");
 });

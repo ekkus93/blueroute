@@ -44,7 +44,11 @@ export interface DesktopOverview {
   can_join: boolean | null;
   authenticated_remote_peers: number | null;
   internet_sharing_available: boolean;
+  /** A policy setting, never a measured Bluetooth limit. */
+  client_limit: { value: number; source: LimitSource } | null;
 }
+
+export type LimitSource = "discovered" | "measured" | "configured" | "conservative_default";
 
 export interface NetworkSummary {
   id: string;

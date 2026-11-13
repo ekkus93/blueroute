@@ -12,6 +12,7 @@ import {
   ERROR_TEXT,
   HEALTH_TEXT,
   ISSUE_TEXT,
+  LIMIT_SOURCE_TEXT,
   REACHABILITY_TEXT,
 } from "./text";
 import { diagnose, GENERAL_TIPS } from "./diagnose";
@@ -150,6 +151,21 @@ function Ready({
           api={api}
           onRenamed={onChanged}
         />
+        <details>
+          <summary>Advanced</summary>
+          <dl>
+            <dt>Computers that can connect at once while this computer runs a network</dt>
+            <dd>
+              {overview.client_limit === null
+                ? "not reported"
+                : `${overview.client_limit.value} (${LIMIT_SOURCE_TEXT[overview.client_limit.source]})`}
+            </dd>
+          </dl>
+          <p className="muted">
+            This is a setting that keeps networks stable, not a measured Bluetooth limit. Your
+            administrator can change it.
+          </p>
+        </details>
         <h3>Remembered networks</h3>
         {networks.length === 0 ? (
           <EmptyState>No networks are remembered on this computer.</EmptyState>
