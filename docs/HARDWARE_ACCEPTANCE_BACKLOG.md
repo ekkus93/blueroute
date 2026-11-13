@@ -53,6 +53,13 @@ cargo build --release --locked -p blueroute-daemon --features experimental-join
 
 Check `blueroute diagnostics show` reports a daemon version ending in `+experimental-join`, and that the service log contains the `experimental_join_enabled` warning. Then confirm keys out of band: on the host, `blueroute network create NAME` and `blueroute peer enroll JOINER_NODE JOINER_KEY`; on the joiner, `blueroute peer set-join-host NETWORK HOST_NODE HOST_KEY` and `blueroute network join NETWORK` (values from each machine's `blueroute peer local-key`). Never install a feature build on a machine that is not part of the test rig, and record the exact commit and build command with the evidence.
 
+## Package removal cleanup (CR-QUALIFY, NOT STARTED)
+
+Removing the package now removes the networking BlueRoute owns, or fails visibly (CR-F5). This is
+tested only with fakes and an isolated dpkg database. The installed-system procedure (a disposable
+VM, no Bluetooth needed) and the Bluetooth-rig teardown and recovery checks are in
+[CR-QUALIFY-PROCEDURE.md](CR-QUALIFY-PROCEDURE.md), with its evidence checklist.
+
 ## P6-009 joined-client restart checklist (S6, NOT STARTED)
 
 Software for joined-client restart reconciliation is in place (design stages S1 to S5c, see [P6-009-CLIENT-RECONCILIATION.md](P6-009-CLIENT-RECONCILIATION.md)). None of it has run against a radio. **Precondition:** a joined client can only exist with the join gate open (`hardware_verified`), which stays unsettable in production until authenticated P7 transport and P6-004 two-machine acceptance exist. Run these on a two-machine rig (one NAP host, one PANU client) with a gate-open build, recording the full environment listed under *Required evidence* above, plus `blueroute --json network link`, `blueroute --json status` and `sudo journalctl -u blueroute.service` for each run. Keep Wi-Fi isolated so Bluetooth carries the checked traffic.

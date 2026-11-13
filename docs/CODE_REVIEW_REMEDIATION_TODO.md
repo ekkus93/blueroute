@@ -334,7 +334,8 @@ explicitly recorded; software success alone does not complete CR-F5 or CR-CLOSEO
 claims have identified hardware evidence. Synthetic dpkg roots are not sufficient qualification.
 
 **Blocked (2026-11-13):** needs a disposable VM or test machine with real NetworkManager and
-systemd, and a designated Bluetooth test rig; none is available to this work. Kept open.
+systemd, and a designated Bluetooth test rig; none is available to this work. Kept open. The
+procedure and evidence checklist are in [CR-QUALIFY-PROCEDURE.md](CR-QUALIFY-PROCEDURE.md).
 
 ## CR-CLOSEOUT — Review all findings and reconcile original gates
 
