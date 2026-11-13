@@ -442,7 +442,7 @@ capabilities, system diagnostics, authenticated control peers and the joined cli
 One publisher thread owns emission. It is woken by marks from the request path and the workers and
 also rechecks the in-memory snapshots every 250 ms and the network list every second, so a change
 reaches connected observers within one second even from a producer that does not mark. It emits
-outside every state lock; unchanged observations emit nothing; bursts coalesce into one pending
+outside every state lock; unchanged observations and failed reads emit nothing (a failed read's caller already has the error, and announcing it would make every front end repeat it); bursts coalesce into one pending
 invalidation that is never dropped; a failed emission is logged without payload and retried, and
 never turns a committed change into a failed request. Receivers treat a signal only as "reread":
 the revision orders signals of one daemon process and is not a state version. Front ends also

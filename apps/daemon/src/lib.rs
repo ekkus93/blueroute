@@ -617,14 +617,17 @@ impl DaemonService {
     }
 
     /// Everything a client can read from memory, as one comparable value: status, diagnostics
-    /// (health, capabilities, system, authenticated peers, recent failures), nodes and names,
-    /// and the joined client's link. `None` only if a lock is poisoned.
+    /// (health, capabilities, system, authenticated peers), nodes and names, and the joined
+    /// client's link. `None` only if a lock is poisoned.
+    ///
+    /// Recent failures are left out: a failed read adds one, and announcing that would make every
+    /// front end reread, fail again and loop. A failed mutation is still announced, because
+    /// every mutating request publishes.
     pub(crate) fn observable_state(&self) -> Option<String> {
         let status = encode_response(&Response::Status(self.status_snapshot().ok()?)).ok()?;
-        let diagnostics = encode_response(&Response::Diagnostics(Box::new(
-            self.diagnostics_snapshot().ok()?,
-        )))
-        .ok()?;
+        let mut snapshot = self.diagnostics_snapshot().ok()?;
+        snapshot.recent_errors.clear();
+        let diagnostics = encode_response(&Response::Diagnostics(Box::new(snapshot))).ok()?;
         let nodes = encode_response(&Response::Nodes(self.node_summaries().ok()?)).ok()?;
         let link = encode_response(&Response::ClientLink(
             self.client_reconnector
@@ -912,12 +915,10 @@ impl DaemonService {
             self.record_recent_failure(operation, error);
         }
         // After every state update the request made, and outside every lock. A mutation is
-        // announced whether or not it succeeded; a failed read changes only recent failures,
-        // which the publisher notices by itself.
+        // announced whether or not it succeeded. A failed read is not: its caller already has the
+        // error, and announcing it would make every front end repeat the failing read in a loop.
         if mutating {
             self.state_publisher.committed();
-        } else if result.is_err() {
-            self.state_publisher.observed();
         }
         result
     }

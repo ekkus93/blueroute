@@ -61,6 +61,7 @@ impl Authority {
 #[derive(Default)]
 struct Networks {
     list: Mutex<Vec<NetworkSummary>>,
+    fail_list: Arc<AtomicBool>,
 }
 
 impl NetworkOperations for Networks {
@@ -84,7 +85,15 @@ impl NetworkOperations for Networks {
     }
 
     fn list_networks(&self) -> NetworkOperationFuture<'_, Vec<NetworkSummary>> {
-        Box::pin(async move { Ok(self.list.lock().unwrap().clone()) })
+        Box::pin(async move {
+            if self.fail_list.load(Ordering::SeqCst) {
+                return Err(blueroute_core::CoreError::new(
+                    blueroute_core::ErrorKind::PersistenceError,
+                    "membership store unreadable",
+                ));
+            }
+            Ok(self.list.lock().unwrap().clone())
+        })
     }
 
     fn start_discovery(&self) -> NetworkOperationFuture<'_, ()> {
@@ -100,6 +109,7 @@ struct Daemon {
     service: DaemonService,
     connection: Connection,
     allow: Arc<AtomicBool>,
+    fail_list: Arc<AtomicBool>,
     _authority: Connection,
     _publisher: StatePublisherWorker,
 }
@@ -113,6 +123,7 @@ async fn daemon_with(
     configure: impl FnOnce(DaemonService) -> DaemonService,
 ) -> Result<Daemon, Box<dyn Error>> {
     let allow = Arc::new(AtomicBool::new(true));
+    let fail_list = Arc::new(AtomicBool::new(false));
     let authority = Builder::session()?
         .name(POLICYKIT_SERVICE)?
         .serve_at(
@@ -131,7 +142,10 @@ async fn daemon_with(
             health: HealthLevel::Healthy,
             capabilities: NodeCapabilities::default(),
         },
-        Arc::new(Networks::default()),
+        Arc::new(Networks {
+            list: Mutex::default(),
+            fail_list: fail_list.clone(),
+        }),
     ));
     let connection = Builder::session()?
         .name(DBUS_SERVICE_NAME)?
@@ -143,6 +157,7 @@ async fn daemon_with(
         service,
         connection,
         allow,
+        fail_list,
         _authority: authority,
         _publisher: publisher,
     })
@@ -446,4 +461,20 @@ fn tempfile_dir() -> Result<std::path::PathBuf, Box<dyn Error>> {
     ));
     std::fs::create_dir_all(&path)?;
     Ok(path)
+}
+
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn cr_f1_failing_reads_do_not_make_observers_reread_in_a_loop() {
+    let _bus = lock();
+    future::block_on(async {
+        let daemon = daemon().await.unwrap();
+        let mut observer = observer().await.unwrap();
+        daemon.fail_list.store(true, Ordering::SeqCst);
+        // A front end rereads on every signal; a read that keeps failing must not cause one.
+        for _ in 0..5 {
+            assert!(observer.request(&Command::ListNetworks).await.is_err());
+        }
+        assert_eq!(observer.drain().await, 0, "a failed read was announced");
+    })
 }

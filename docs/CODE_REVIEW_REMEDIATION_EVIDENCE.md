@@ -398,3 +398,33 @@ CI with the GitHub CLI and records run IDs.
 
 Full local run at `d1d86a5`: fmt, check, clippy clean; 888 workspace tests pass (31 ignored are
 the bus suites, all run separately and passing); desktop 43 tests and build pass.
+
+## CR-CLOSEOUT-01 — independent review of 4ca5042..HEAD (2026-11-13)
+
+An independent review read the whole remediation diff against the specification (lock order,
+emission off locks, publisher shutdown, owner races, instance lock lifetime, maintainer-script
+paths, cleanup scope, graph atomicity, effect ownership) and found one real defect:
+
+- **Failed reads caused a reread loop (fixed).** A failed read added a timestamped entry to recent
+  failures, which was part of the compared snapshot, and also marked the publisher. Every failed
+  read therefore emitted `StateChanged`, every front end reread, and a read that keeps failing
+  (unreadable membership store, discovery after bluetoothd stops) looped. Any local user could
+  also force broadcasts. Fixed in the next commit: recent failures are no longer compared and a
+  failed read marks nothing; failed mutations are still announced (every mutating request
+  publishes). Regression `state_events::cr_f1_failing_reads_do_not_make_observers_reread_in_a_loop`
+  failed before the fix ("a failed read was announced") and passes after. This supersedes the CR-F1
+  inventory row "recent failures … `observed()` for failed reads".
+
+Accepted low-severity limitations, documented rather than changed:
+
+- A daemon restart in the instant between subscribing to owner changes and resolving the owner can
+  queue a stale notice, ending a fresh subscription with `OwnerLost`; the watcher reconnects after
+  1 s. Fail-safe (already noted under CR-F2).
+- The publisher's baseline is taken just after the daemon starts serving; a change within those
+  microseconds before the baseline could go unannounced to a client that read before it. Startup
+  only.
+- `DPKG_ROOT` relocates paths only. A chrootless dpkg run (not normal operation) would still run
+  cleanup against the host's buses; it touches only networks recorded in that root's state.
+
+No issue was found in client owner binding, the shared watcher, lock ordering, capability
+freshness, removal scope and maintainer scripts, graph atomicity, or `useDaemon` ownership.
