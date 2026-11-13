@@ -88,8 +88,8 @@ pub use join_authorization::{
 };
 pub use join_control::{JoinControlConfig, run_join_control};
 pub use join_network::{
-    JoinControlSession, JoinIpLease, JoinNetworkFuture, JoinNetworkOperations, JoinPanLink,
-    JoinRuntime, LinuxJoinRuntime, TransactionalJoinNetworkOperations,
+    EXPERIMENTAL_JOIN, JoinControlSession, JoinIpLease, JoinNetworkFuture, JoinNetworkOperations,
+    JoinPanLink, JoinRuntime, LinuxJoinRuntime, TransactionalJoinNetworkOperations,
 };
 pub use outbound_control::{
     PanuControlRoute, connect_registered_panu_control_session, planned_panu_control_endpoint,

@@ -20,7 +20,12 @@ const HEALTH_RECHECK_INTERVAL: Duration = Duration::from_secs(15);
 /// representation. No remote peer claim or previously cached adapter is used.
 pub fn system_diagnostics_from_report(report: &SystemCapabilityReport) -> SystemDiagnosticMetadata {
     SystemDiagnosticMetadata {
-        daemon_version: env!("CARGO_PKG_VERSION").to_owned(),
+        // A hardware-test build must never be mistaken for a release in diagnostics.
+        daemon_version: if crate::EXPERIMENTAL_JOIN {
+            concat!(env!("CARGO_PKG_VERSION"), "+experimental-join").to_owned()
+        } else {
+            env!("CARGO_PKG_VERSION").to_owned()
+        },
         platform: "Linux".to_owned(),
         kernel_release: report.kernel_release.clone(),
         bluez_version: report.bluez_version.clone(),

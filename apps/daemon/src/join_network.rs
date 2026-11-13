@@ -195,7 +195,38 @@ pub struct TransactionalJoinNetworkOperations<R = LinuxJoinRuntime> {
     client_records: Option<Arc<ClientRecordStore>>,
 }
 
+/// Whether this binary was built to allow opening the join gate for hardware testing. A `cfg!`
+/// constant, so every line around it is still compiled and linted in normal builds.
+pub const EXPERIMENTAL_JOIN: bool = cfg!(feature = "experimental-join");
+
 impl TransactionalJoinNetworkOperations<LinuxJoinRuntime> {
+    /// Open the join gate for two-machine hardware testing (P6-004 D5). Refused unless the
+    /// binary was built with `experimental-join` **and** everything join depends on is wired:
+    /// the operator-confirmed host record, the control TLS configuration, the commit-time host
+    /// authorization and the restart record store (P6-009). A build without the feature can
+    /// only refuse, so packaged and CI builds stay closed.
+    pub fn open_join_gate_for_hardware_testing(self) -> Result<Self, CoreError> {
+        self.open_join_gate(EXPERIMENTAL_JOIN)
+    }
+
+    fn open_join_gate(mut self, built_with_feature: bool) -> Result<Self, CoreError> {
+        let refuse = |why: &'static str| Err(CoreError::new(ErrorKind::CapabilityUnavailable, why));
+        if !built_with_feature {
+            return refuse("this daemon was not built with the experimental-join feature");
+        }
+        if self.runtime.pending.is_none() || self.runtime.control.is_none() {
+            return refuse("join cannot open without the confirmed-host record and control TLS");
+        }
+        if self.authorization.is_none() {
+            return refuse("join cannot open without commit-time host authorization");
+        }
+        if self.client_records.is_none() {
+            return refuse("join cannot open without the restart record store");
+        }
+        self.runtime.hardware_verified = true;
+        Ok(self)
+    }
+
     pub fn new(store: NetworkMembershipStore) -> Self {
         Self::with_runtime(store, LinuxJoinRuntime::default())
     }
@@ -1714,6 +1745,100 @@ mod tests {
             assert!(operations.store.load().unwrap().is_empty());
             fs::remove_dir_all(root).unwrap();
         });
+    }
+
+    #[test]
+    fn the_join_gate_opens_only_in_a_feature_build_with_everything_wired() {
+        let (root, store) = temp_store("gate-open");
+        let pool = Ipv4AddressPool::default();
+        let pending = Arc::new(PendingJoinOperations::new(
+            NetworkMembershipStore::new(root.join("pj-memberships")),
+            crate::PendingJoinStore::new(root.join("pj")),
+        ));
+        let node = blueroute_core::NodeId::from_bytes([0x49; 16]);
+        let control = || JoinControlConfig {
+            local: Arc::new(crate::LocalControlTlsIdentity::generate(node).unwrap()),
+            trust: Arc::new(crate::DurablePeerTrustOperations::new(
+                NetworkMembershipStore::new(root.join("trust-memberships")),
+            )),
+            registry: Arc::new(Mutex::new(
+                blueroute_protocol::session::ControlSessionRegistry::new(),
+            )),
+            capabilities: blueroute_core::NodeCapabilities::default(),
+        };
+        let bare = || {
+            TransactionalJoinNetworkOperations::with_ipv4_pool(
+                NetworkMembershipStore::new(store.path().to_path_buf()),
+                pool,
+                pending.clone(),
+                control(),
+            )
+            .unwrap()
+        };
+        let authorization = || -> Arc<dyn JoinCommitAuthorization> {
+            Arc::new(crate::PendingHostCommitAuthorization::new(
+                pending.clone(),
+                crate::PeerPinStore::new(root.join("pins")),
+            ))
+        };
+        let records = || Arc::new(ClientRecordStore::new(root.join("client-record")));
+        let refused = |result: Result<TransactionalJoinNetworkOperations, CoreError>| {
+            assert_eq!(
+                result.err().unwrap().kind(),
+                ErrorKind::CapabilityUnavailable
+            );
+        };
+
+        // A build without the feature can only refuse, even fully wired: this is what CI and
+        // the package build.
+        let wired = || {
+            bare()
+                .with_authorization(authorization())
+                .with_client_records(records())
+        };
+        refused(wired().open_join_gate(false));
+        if !EXPERIMENTAL_JOIN {
+            refused(wired().open_join_gate_for_hardware_testing());
+        }
+        // With the feature, every dependency must be present.
+        refused(bare().with_client_records(records()).open_join_gate(true));
+        refused(
+            bare()
+                .with_authorization(authorization())
+                .open_join_gate(true),
+        );
+        let without_control = TransactionalJoinNetworkOperations::with_runtime_and_pool(
+            NetworkMembershipStore::new(store.path().to_path_buf()),
+            LinuxJoinRuntime::new(pool).unwrap(),
+            pool,
+        )
+        .with_authorization(authorization())
+        .with_client_records(records());
+        refused(without_control.open_join_gate(true));
+
+        let open = wired().open_join_gate(true).unwrap();
+        assert!(open.runtime.hardware_verified);
+        // Restart reconnection shares the same opened gate.
+        assert!(open.client_runtime().is_some());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Guards against the feature ever becoming a default: CI and the Debian package build
+    /// without features, so this must hold there.
+    #[cfg(not(feature = "experimental-join"))]
+    #[test]
+    fn default_builds_cannot_open_the_join_gate() {
+        const { assert!(!EXPERIMENTAL_JOIN) };
+        let manifest = include_str!("../Cargo.toml");
+        let features = manifest
+            .split_once("[features]")
+            .map_or("", |(_, rest)| rest);
+        // Only a real `default = [...]` key inside the [features] table counts; comments do not.
+        let declares_default = features
+            .lines()
+            .take_while(|line| !line.trim_start().starts_with('['))
+            .any(|line| line.trim_start().starts_with("default"));
+        assert!(!declares_default, "no default features may be declared");
     }
 
     #[test]

@@ -24,5 +24,10 @@ zbus = { version = "5.19.0", default-features = false, features = ["async-io"] }
 [dev-dependencies]
 async-io = "2.6.0"
 
+[features]
+# Opens the production join gate for two-machine hardware testing (P6-004 D5). Never a default,
+# never set by CI or the Debian package; only hardware evidence may remove the gate for good.
+experimental-join = []
+
 [lints]
 workspace = true

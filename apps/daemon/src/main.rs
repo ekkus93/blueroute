@@ -5,11 +5,11 @@ use std::sync::{Arc, Mutex};
 use blueroute_core::{DaemonConfig, HealthLevel, MembershipRole};
 use blueroute_daemon::{
     AuthenticatedControlPeers, ClientReconnector, ClientRecordStore, ControlTlsIdentityStore,
-    DaemonService, DurablePeerTrustOperations, JoinControlConfig, NetworkOperations, PeerPinStore,
-    PendingHostCommitAuthorization, PendingJoinOperations, PendingJoinStore, ReconnectPolicy,
-    SingleStarNetworkOperations, TransactionalJoinNetworkOperations, current_network,
-    spawn_daemon_capability_health_worker, spawn_daemon_control_worker_with_peers,
-    system_diagnostics_from_report,
+    DaemonService, DurablePeerTrustOperations, EXPERIMENTAL_JOIN, JoinControlConfig,
+    NetworkOperations, PeerPinStore, PendingHostCommitAuthorization, PendingJoinOperations,
+    PendingJoinStore, ReconnectPolicy, SingleStarNetworkOperations,
+    TransactionalJoinNetworkOperations, current_network, spawn_daemon_capability_health_worker,
+    spawn_daemon_control_worker_with_peers, system_diagnostics_from_report,
 };
 use blueroute_linux::{
     NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
@@ -21,6 +21,27 @@ use zbus::connection::Builder;
 
 const DEFAULT_STATE_DIRECTORY: &str = "/var/lib/blueroute";
 const STATE_DIRECTORY_ENV: &str = "BLUEROUTE_STATE_DIR";
+
+/// Keep the join gate closed, unless this is an `experimental-join` hardware-test build, in which
+/// case open it only with everything join depends on wired, and say so loudly.
+fn configure_join_gate(
+    operations: TransactionalJoinNetworkOperations,
+) -> Result<TransactionalJoinNetworkOperations, Box<dyn Error>> {
+    if !EXPERIMENTAL_JOIN {
+        return Ok(operations);
+    }
+    let opened = operations.open_join_gate_for_hardware_testing()?;
+    eprintln!(
+        "{}",
+        serde_json::json!({
+            "component": "daemon_runtime",
+            "event": "experimental_join_enabled",
+            "outcome": "warning",
+            "detail": "join gate OPEN: hardware-test build; not for general use",
+        })
+    );
+    Ok(opened)
+}
 
 fn main() {
     if let Err(error) = future::block_on(run()) {
@@ -82,7 +103,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let client_records = Arc::new(ClientRecordStore::new(client_record_directory(
         &state_directory,
     )));
-    let join_network_operations = Arc::new(
+    let join_network_operations = Arc::new(configure_join_gate(
         TransactionalJoinNetworkOperations::with_ipv4_pool(
             NetworkMembershipStore::new(membership_path.clone()),
             config.ipv4_address_pool,
@@ -103,7 +124,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
             pending_join_operations.clone(),
             PeerPinStore::new(peer_pin_directory(&state_directory)),
         ))),
-    );
+    )?);
     // A persisted joined client is reconnected in the background (P6-009); the runtime shares
     // the join path's closed gate, so nothing here can touch Bluetooth while join is closed.
     let client_reconnector = join_network_operations.client_runtime().map(|runtime| {

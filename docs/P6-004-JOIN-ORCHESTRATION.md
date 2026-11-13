@@ -147,6 +147,8 @@ A `PeerLocator` boundary maps a `NetworkId` to candidate BlueZ `PeerHandle`s (de
 2. Keep `preflight` returning `CapabilityUnavailable` unless an explicit, default-off build or configuration flag marks the runtime hardware-verified. CI never sets it.
 3. Hardware acceptance (two machines, no manual Bluetooth/network shell commands, key confirmed out of band, rollback on induced failure) is recorded in `docs/HARDWARE_ACCEPTANCE_BACKLOG.md`. Only that evidence may remove the flag.
 
+**Step 2 implemented (2026-11-12, maintainer chose a Cargo feature):** the daemon has a default-off `experimental-join` feature, read as `EXPERIMENTAL_JOIN = cfg!(feature = "experimental-join")` so normal builds compile and lint every line. `TransactionalJoinNetworkOperations::open_join_gate_for_hardware_testing` is the only way to open the gate. It refuses unless the binary has the feature **and** the confirmed-host record, the control TLS configuration, the commit-time host authorization and the P6-009 restart record store are all wired; `main.rs` calls it last, after everything is attached, and a feature build missing any of them fails to start. A feature build logs an `experimental_join_enabled` warning at startup and reports its version as `<version>+experimental-join` in diagnostics. A test fails if the feature ever becomes a default, and CI and the Debian package build without features, so they cannot open the gate. P6-009 S1 to S4 (role, host hint, observation-based leave, reconciler) are all in place, which the gate-opening change was required to confirm.
+
 ### Open questions for the maintainer
 
 - **Single approved host per network:** confirm v1 should reject zero or several rather than offer a choice. (A future multi-star design would revisit this.)

@@ -43,6 +43,16 @@ Use real Linux namespace/veth/routing tests, BlueZ and NetworkManager fakes, bro
 | P16-007 | Actual PANU-only/client-only device can join without NAP role | Software test simulated policy restrictions. |
 | P17-005, P17-006 | Final tested-support matrix, multi-controller evidence and v1 physical signoff | Draft docs and software-ready release candidate only; not final release. |
 
+## Building a join-capable test rig (P6-004)
+
+Production builds, CI and the Debian package keep join closed. For two-machine acceptance only, build and install the daemon with the gate open on **both** machines:
+
+```sh
+cargo build --release --locked -p blueroute-daemon --features experimental-join
+```
+
+Check `blueroute diagnostics show` reports a daemon version ending in `+experimental-join`, and that the service log contains the `experimental_join_enabled` warning. Then confirm keys out of band: on the host, `blueroute network create NAME` and `blueroute peer enroll JOINER_NODE JOINER_KEY`; on the joiner, `blueroute peer set-join-host NETWORK HOST_NODE HOST_KEY` and `blueroute network join NETWORK` (values from each machine's `blueroute peer local-key`). Never install a feature build on a machine that is not part of the test rig, and record the exact commit and build command with the evidence.
+
 ## P6-009 joined-client restart checklist (S6, NOT STARTED)
 
 Software for joined-client restart reconciliation is in place (design stages S1 to S5c, see [P6-009-CLIENT-RECONCILIATION.md](P6-009-CLIENT-RECONCILIATION.md)). None of it has run against a radio. **Precondition:** a joined client can only exist with the join gate open (`hardware_verified`), which stays unsettable in production until authenticated P7 transport and P6-004 two-machine acceptance exist. Run these on a two-machine rig (one NAP host, one PANU client) with a gate-open build, recording the full environment listed under *Required evidence* above, plus `blueroute --json network link`, `blueroute --json status` and `sudo journalctl -u blueroute.service` for each run. Keep Wi-Fi isolated so Bluetooth carries the checked traffic.
