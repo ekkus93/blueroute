@@ -9,7 +9,7 @@ The v1 local service uses:
 - service: `org.blueroute.Service1`
 - object: `/org/blueroute/Service1`
 - interface: `org.blueroute.Service1`
-- current semantic API version: `1.6`
+- current semantic API version: `1.7`
 
 Major versions are incompatible. Minor versions are additive. A client may use a server with the same major version when the client's minor version is less than or equal to the server's minor version. P5-005 is responsible for enforcing this negotiation before normal commands are sent.
 
@@ -24,6 +24,16 @@ API 1.4 adds `authenticated_control_peers: Option<Vec<NodeId>>` to `DiagnosticSn
 API 1.5 adds `EnrollPeerKey { node, fingerprint }` behind `org.blueroute.modify` (P7-003). On a node that is in a network, it trusts `node` and pins `fingerprint` (canonical lowercase SPKI SHA-256 hex) in one step; the operator reads both values on the peer with `blueroute peer local-key` and compares them out of band. It is refused with `InvalidState` when the node is in no network, and with `AuthenticationFailed` when a different key is already pinned for that peer; repeating the same pin is a no-op. Possession of the key is still proven by mutual TLS 1.3 on every connection. A 1.4 server rejects a 1.5 client at version negotiation.
 
 API 1.6 adds the first BlueRoute-specific D-Bus error name, `org.blueroute.Error.AddressConflict` (`blueroute_protocol::ADDRESS_CONFLICT_ERROR`). `CreateNetwork` and `JoinNetwork` return it when the network's private IPv4 range overlaps one already in use on the computer; every other failure keeps its standard `org.freedesktop.DBus.Error.*` name. Clients classify failures only by exact error name, never by message text: `blueroute-client` maps this name to `ClientErrorKind::AddressConflict`. The CLI keeps exit status `1` (the exit contract is unchanged) but reports `"kind": "address_conflict"` in its JSON error with specific advice, and the desktop shows `address_conflict`. A 1.5 client treats the new name as an ordinary operational failure.
+
+API 1.7 adds the D-Bus signal `StateChanged(revision: u64)` on `org.blueroute.Service1`
+(`blueroute_protocol::STATE_CHANGED_SIGNAL`). The daemon emits it after any change a client could
+observe in its snapshots (see SPEC §11 for producers and timing). It carries no state: a receiver
+rereads. The revision increases with every emission of one daemon process; signals are coalesced,
+so one may stand for several changes, and an occasional one may change nothing visible. It is a
+separate signal rather than a new `Event` variant, so a 1.6 client, which only matches `Event`,
+never receives anything it cannot decode. `blueroute-client` exposes it through
+`BlueRouteClient::changes()` / `EventSubscription::next_change()`, and the shared watcher reports it
+as a change. A 1.6 server rejects a 1.7 client at version negotiation.
 
 ## Payload encoding
 

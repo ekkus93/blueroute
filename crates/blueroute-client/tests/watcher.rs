@@ -315,3 +315,66 @@ fn cr_f2_the_watcher_stops_when_its_consumer_does() -> Result<(), Box<dyn Error>
         Ok(())
     })
 }
+
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn cr_f1_a_real_daemon_change_reaches_the_production_watcher() -> Result<(), Box<dyn Error>> {
+    use blueroute_core::{NodeCapabilities, NodeId};
+    use blueroute_daemon::{DaemonService, spawn_state_publisher};
+
+    let _bus = BUS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    future::block_on(async {
+        // The real service and publisher, as the daemon's main wires them.
+        let service = DaemonService::new(
+            NodeId::from_bytes([0xc1; 16]),
+            HealthLevel::Healthy,
+            NodeCapabilities::default(),
+        );
+        let connection = Builder::session()?
+            .name(DBUS_SERVICE_NAME)?
+            .serve_at(DBUS_OBJECT_PATH, service.clone())?
+            .build()
+            .await?;
+        let _publisher = spawn_state_publisher(connection.clone(), service.clone())?;
+
+        let log = Log::default();
+        let signals = log.signals.clone();
+        let watcher = watch(
+            connect,
+            |_| Timer::after(Duration::from_millis(10)).map(|_| ()),
+            move |signal| {
+                signals.lock().unwrap().push(signal);
+                ControlFlow::Continue(())
+            },
+        );
+        future::or(
+            async {
+                watcher.await;
+                Err::<(), Box<dyn Error>>("the watcher stopped on its own".into())
+            },
+            async {
+                log.until(LOSS_BOUND, |log| log.count(Connected) == 1)
+                    .await
+                    .ok_or("never connected")?;
+                // A worker observation, with no typed Event and no manual refresh.
+                let changed_at = Instant::now();
+                service.update_runtime_observation(
+                    HealthLevel::Degraded,
+                    NodeCapabilities::default(),
+                    None,
+                )?;
+                log.until(Duration::from_secs(1), |log| log.count(Changed) >= 1)
+                    .await
+                    .ok_or("the change did not reach the watcher within 1s")?;
+                eprintln!(
+                    "daemon change reached the watcher in {:?}",
+                    changed_at.elapsed()
+                );
+                Ok(())
+            },
+        )
+        .await
+    })
+}

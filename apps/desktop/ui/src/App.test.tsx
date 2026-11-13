@@ -156,6 +156,23 @@ test("refreshes on daemon signals and shows a reconnecting banner when the link 
   );
 });
 
+test("rereads once the live subscription is up, so an earlier change is not missed", async () => {
+  // The first read sees "Lab"; the daemon then changes before the subscription exists, so no
+  // signal for that change will ever come. The "connected" signal itself must cause a reread.
+  const names = ["Lab", "Lab 2"];
+  let call = 0;
+  const api = fakeApi({
+    networks: () =>
+      Promise.resolve([{ id: "net-1", name: names[Math.min(call++, 1)] ?? "?", member_count: 2 }]),
+  });
+  const bus = fakeSubscribe();
+  render(<App api={api} subscribe={bus.subscribe} />);
+  await screen.findByRole("region", { name: "Your network" });
+  await yourNetwork().findByText("Lab");
+  act(() => bus.send("connected"));
+  await waitFor(() => expect(yourNetwork().getByText("Lab 2")).toBeTruthy());
+});
+
 test("a failing signal subscription does not break the page", async () => {
   const subscribe = vi.fn<SubscribeToSignals>(() => Promise.reject(new Error("no events")));
   render(<App api={fakeApi()} subscribe={subscribe} />);

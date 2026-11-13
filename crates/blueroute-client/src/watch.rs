@@ -20,7 +20,8 @@ const MAX_DELAY: Duration = Duration::from_secs(30);
 pub enum WatchSignal {
     /// A version-checked, owner-bound event subscription is established; reread snapshots.
     Connected,
-    /// The daemon reported a change; reread snapshots. The event itself is dropped.
+    /// The daemon reported a change (a `StateChanged` invalidation or a typed event); reread
+    /// snapshots. Whatever it carried is dropped.
     Changed,
     /// The link is lost or unavailable; anything shown from before is no longer current.
     Disconnected,
@@ -54,14 +55,14 @@ pub async fn watch<Connect, Connecting, Sleep, Sleeping>(
     let mut reported_loss = false;
     loop {
         if let Ok(client) = connect().await
-            && let Ok(mut events) = client.events().await
+            && let Ok(mut changes) = client.changes().await
         {
             attempt = 0;
             reported_loss = false;
             if notify(WatchSignal::Connected).is_break() {
                 return;
             }
-            while events.next_event().await.is_ok() {
+            while changes.next_change().await.is_ok() {
                 if notify(WatchSignal::Changed).is_break() {
                     return;
                 }

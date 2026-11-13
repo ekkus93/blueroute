@@ -30,6 +30,7 @@ mod pinned_ingress;
 mod registered_transport;
 mod runtime_health;
 mod single_star;
+mod state_publisher;
 
 use std::fmt;
 use std::sync::atomic::AtomicU64;
@@ -116,6 +117,9 @@ pub use single_star::{
     LinuxStarHostRuntime, NetworkIdGenerator, NetworkOperationFuture, NetworkOperations,
     SingleStarNetworkOperations, StarHostRuntime, SystemNetworkIdGenerator, current_network,
 };
+pub use state_publisher::{
+    NETWORK_RECHECK, STATE_RECHECK, StatePublisher, StatePublisherWorker, spawn_state_publisher,
+};
 use zbus::fdo;
 use zbus::message::Header;
 use zbus::object_server::SignalEmitter;
@@ -161,6 +165,8 @@ pub struct DaemonService {
     system_diagnostics: Arc<Mutex<Option<SystemDiagnosticMetadata>>>,
     local_control_tls_fingerprint: Option<SpkiSha256>,
     recent_errors: Arc<Mutex<Vec<DiagnosticFailure>>>,
+    /// Where every observable change is announced (CR-F1).
+    state_publisher: Arc<StatePublisher>,
 }
 
 impl DaemonService {
@@ -191,6 +197,7 @@ impl DaemonService {
             system_diagnostics: Arc::new(Mutex::new(None)),
             local_control_tls_fingerprint: None,
             recent_errors: Arc::new(Mutex::new(Vec::new())),
+            state_publisher: Arc::default(),
         }
     }
 
@@ -214,6 +221,7 @@ impl DaemonService {
             system_diagnostics: Arc::new(Mutex::new(None)),
             local_control_tls_fingerprint: None,
             recent_errors: Arc::new(Mutex::new(Vec::new())),
+            state_publisher: Arc::default(),
         }
     }
 
@@ -238,6 +246,7 @@ impl DaemonService {
             system_diagnostics: Arc::new(Mutex::new(None)),
             local_control_tls_fingerprint: None,
             recent_errors: Arc::new(Mutex::new(Vec::new())),
+            state_publisher: Arc::default(),
         }
     }
 
@@ -317,6 +326,11 @@ impl DaemonService {
         status.health = observed_health;
         status.capabilities = observed_capabilities;
         *system = observed_system;
+        drop(system);
+        drop(status);
+        if changed {
+            self.state_publisher.observed();
+        }
         Ok(changed)
     }
 
@@ -334,6 +348,10 @@ impl DaemonService {
         let observed = self.merge_observed_health(observed)?;
         let changed = status.health != observed;
         status.health = observed;
+        drop(status);
+        if changed {
+            self.state_publisher.observed();
+        }
         Ok(changed)
     }
 
@@ -563,18 +581,59 @@ impl DaemonService {
     pub fn with_client_reconnector(mut self, reconnector: Arc<ClientReconnector>) -> Self {
         let status = self.status.clone();
         let inputs = self.health_inputs.clone();
+        let publisher = self.state_publisher.clone();
         reconnector.set_observer(Arc::new(move |state| {
-            let Ok(mut status) = status.lock() else {
-                return;
-            };
-            let Ok(mut inputs) = inputs.lock() else {
-                return;
-            };
-            inputs.client = health_for_client_link(state);
-            status.health = inputs.merged();
+            {
+                let Ok(mut status) = status.lock() else {
+                    return;
+                };
+                let Ok(mut inputs) = inputs.lock() else {
+                    return;
+                };
+                inputs.client = health_for_client_link(state);
+                status.health = inputs.merged();
+            }
+            // Every link phase is announced, even when the merged health stays the same.
+            publisher.observed();
         }));
         self.client_reconnector = Some(reconnector);
         self
+    }
+
+    /// Where this service announces observable changes; shared by every clone.
+    pub fn state_publisher(&self) -> Arc<StatePublisher> {
+        self.state_publisher.clone()
+    }
+
+    /// Everything a client can read from memory, as one comparable value: status, diagnostics
+    /// (health, capabilities, system, authenticated peers, recent failures), nodes and names,
+    /// and the joined client's link. `None` only if a lock is poisoned.
+    pub(crate) fn observable_state(&self) -> Option<String> {
+        let status = encode_response(&Response::Status(self.status_snapshot().ok()?)).ok()?;
+        let diagnostics = encode_response(&Response::Diagnostics(Box::new(
+            self.diagnostics_snapshot().ok()?,
+        )))
+        .ok()?;
+        let nodes = encode_response(&Response::Nodes(self.node_summaries().ok()?)).ok()?;
+        let link = encode_response(&Response::ClientLink(
+            self.client_reconnector
+                .as_ref()
+                .and_then(|reconnector| reconnector.state()),
+        ))
+        .ok()?;
+        Some([status, diagnostics, nodes, link].join("\n"))
+    }
+
+    /// The network list as `ListNetworks` reports it. `None` when it cannot be read; a read that
+    /// starts failing or recovers is itself a change worth announcing.
+    pub(crate) async fn observable_networks(&self) -> Option<String> {
+        let networks = self
+            .network_operations
+            .as_ref()?
+            .list_networks()
+            .await
+            .ok()?;
+        encode_response(&Response::Networks(networks)).ok()
     }
 
     fn encode_response(response: &Response) -> fdo::Result<String> {
@@ -812,14 +871,15 @@ impl DaemonService {
             }
         };
         let operation = command_operation(&command);
+        let mutating = matches!(
+            authorization::command_authorization(&command),
+            CommandAuthorization::PolicyKit(_)
+        );
         let result = async {
             authorization::authorize_command(connection, &header, &command).await?;
-            let _mutation = matches!(
-                authorization::command_authorization(&command),
-                CommandAuthorization::PolicyKit(_)
-            )
-            .then(|| MutationGuard::claim(&self.mutation_in_progress))
-            .transpose()?;
+            let _mutation = mutating
+                .then(|| MutationGuard::claim(&self.mutation_in_progress))
+                .transpose()?;
 
             self.execute(command).await
         }
@@ -840,11 +900,23 @@ impl DaemonService {
         if let Err(error) = &result {
             self.record_recent_failure(operation, error);
         }
+        // After every state update the request made, and outside every lock. A mutation is
+        // announced whether or not it succeeded; a failed read changes only recent failures,
+        // which the publisher notices by itself.
+        if mutating {
+            self.state_publisher.committed();
+        } else if result.is_err() {
+            self.state_publisher.observed();
+        }
         result
     }
 
     #[zbus(signal)]
     async fn event(emitter: &SignalEmitter<'_>, payload: &str) -> zbus::Result<()>;
+
+    /// API 1.7: something observable changed; reread. See `STATE_CHANGED_SIGNAL`.
+    #[zbus(signal)]
+    async fn state_changed(emitter: &SignalEmitter<'_>, revision: u64) -> zbus::Result<()>;
 }
 
 /// What a request can fail with on the bus. Standard errors keep their standard names; failures a

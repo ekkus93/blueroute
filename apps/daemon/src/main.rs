@@ -9,7 +9,7 @@ use blueroute_daemon::{
     JoinControlConfig, NetworkOperations, PeerPinStore, PendingHostCommitAuthorization,
     PendingJoinOperations, PendingJoinStore, ReconnectPolicy, SingleStarNetworkOperations,
     TransactionalJoinNetworkOperations, current_network, spawn_daemon_control_worker_with_peers,
-    spawn_daemon_runtime_worker, system_diagnostics_from_report,
+    spawn_daemon_runtime_worker, spawn_state_publisher, system_diagnostics_from_report,
 };
 use blueroute_linux::{
     NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
@@ -218,11 +218,14 @@ async fn run() -> Result<(), Box<dyn Error>> {
     }
 
     let service_for_health = service.clone();
-    let _connection = Builder::system()?
+    let service_for_publisher = service.clone();
+    let connection = Builder::system()?
         .name(DBUS_SERVICE_NAME)?
         .serve_at(DBUS_OBJECT_PATH, service)?
         .build()
         .await?;
+    // Announce every observable change to connected front ends (CR-F1).
+    let _state_publisher = spawn_state_publisher(connection.clone(), service_for_publisher)?;
 
     // Run blocking mutual-TLS I/O off the D-Bus executor. No remote session
     // authorizes network membership until production JoinNetwork is integrated.

@@ -86,6 +86,9 @@ jobs:
       - name: Run client owner-binding tests (CR-F8)
         run: dbus-run-session -- cargo test -p blueroute-client --test owner_race --locked -- --ignored
 
+      - name: Run state publication tests (CR-F1)
+        run: dbus-run-session -- cargo test -p blueroute-daemon --test state_events --locked -- --ignored
+
       - name: Run owner-loss and watcher tests (CR-F2)
         run: |
           dbus-run-session -- cargo test -p blueroute-client --test owner_watch --locked -- --ignored

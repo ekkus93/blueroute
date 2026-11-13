@@ -241,7 +241,7 @@ This specification describes the product target. The following status records wh
 Status reviewed 2026-11-12. "Implemented" means implemented and tested in software; physical Bluetooth acceptance is tracked separately and is still outstanding for everything joining involves.
 
 - `blueroute-core` contains hardware-independent identifiers, configuration, membership (schema v3 with a persisted host/client role), health, capability, address allocation, NAP admission policy, topology and route-planning models.
-- `blueroute-protocol` contains the versioned local D-Bus command/response/event types (API 1.5), bounded control-frame codecs, replay/session models and strict peer claims.
+- `blueroute-protocol` contains the versioned local D-Bus command/response/event types (API 1.7), bounded control-frame codecs, replay/session models and strict peer claims.
 - `blueroute-linux` contains direct system-D-Bus adapters for BlueZ and NetworkManager, PAN lifecycle operations, address/route/forwarding ownership helpers, durable state stores, service-owner observation and the read-only system capability probe.
 - `blueroute-client` provides the version-gated system-D-Bus client used by every front end.
 - `blueroute-daemon`:
@@ -429,6 +429,21 @@ Representative events:
 - health changed;
 - Internet availability changed;
 - authorization required/failed.
+
+The typed events above are the protocol's vocabulary; the current daemon does not emit them yet.
+What it does emit (API 1.7) is the payload-free `StateChanged(revision u64)` signal, after every
+change a client could observe in its snapshots: a mutating request (announced whether it succeeded
+or not, since a failure is recorded in diagnostics), and worker observations of health,
+capabilities, system diagnostics, authenticated control peers and the joined client's link phase.
+One publisher thread owns emission. It is woken by marks from the request path and the workers and
+also rechecks the in-memory snapshots every 250 ms and the network list every second, so a change
+reaches connected observers within one second even from a producer that does not mark. It emits
+outside every state lock; unchanged observations emit nothing; bursts coalesce into one pending
+invalidation that is never dropped; a failed emission is logged without payload and retried, and
+never turns a committed change into a failed request. Receivers treat a signal only as "reread":
+the revision orders signals of one daemon process and is not a state version. Front ends also
+reread when a new owner-bound subscription is established, so a change between their first read
+and the subscription is never missed (CR-F1).
 
 All public IPC interfaces are versioned. Clients must fail clearly on incompatible daemon versions.
 

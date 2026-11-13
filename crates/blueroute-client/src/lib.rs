@@ -10,7 +10,8 @@ use async_io::Timer;
 use blueroute_core::NodeCapabilities;
 use blueroute_protocol::{
     ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, DaemonStatus,
-    Event, ProtocolCodecError, Response, decode_event, decode_response, encode_command,
+    Event, ProtocolCodecError, Response, STATE_CHANGED_SIGNAL, decode_event, decode_response,
+    encode_command,
 };
 use futures_lite::StreamExt;
 use zbus::fdo::{DBusProxy, NameOwnerChangedStream};
@@ -131,6 +132,17 @@ impl BlueRouteClient {
     /// [`ClientError::OwnerLost`] when that owner gives it up or disappears, even if the daemon
     /// never emits another event (CR-F2, WATCH-1).
     pub async fn events(&self) -> Result<EventSubscription, ClientError> {
+        self.subscribe(false).await
+    }
+
+    /// Like [`Self::events`], but also delivers the daemon's `StateChanged` invalidations
+    /// (API 1.7) as [`Change::State`] through [`EventSubscription::next_change`]. This is what a
+    /// live view needs: any change it could display, not only typed events (CR-F1).
+    pub async fn changes(&self) -> Result<EventSubscription, ClientError> {
+        self.subscribe(true).await
+    }
+
+    async fn subscribe(&self, with_state: bool) -> Result<EventSubscription, ClientError> {
         // Watch the name before resolving its owner, so no ownership change can fall between
         // the two steps unobserved.
         let owner_changes = DBusProxy::new(&self.connection)
@@ -145,13 +157,34 @@ impl BlueRouteClient {
             .receive_signal("Event")
             .await
             .map_err(ClientError::Bus)?;
+        let state = if with_state {
+            Some(
+                proxy
+                    .receive_signal(STATE_CHANGED_SIGNAL)
+                    .await
+                    .map_err(ClientError::Bus)?,
+            )
+        } else {
+            None
+        };
         Ok(EventSubscription {
             connection: self.connection.clone(),
             owner: owner.name,
             stream,
+            state,
             owner_changes,
         })
     }
+}
+
+/// One thing a [`BlueRouteClient::changes`] subscription reports.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Change {
+    /// A typed daemon event.
+    Event(Event),
+    /// Something observable changed; reread. The revision only orders signals of one daemon
+    /// process and is not a state version (see `blueroute_protocol::STATE_CHANGED_SIGNAL`).
+    State { revision: u64 },
 }
 
 /// Event stream that rechecks daemon compatibility before accepting every event payload.
@@ -160,6 +193,8 @@ pub struct EventSubscription {
     /// The unique bus name the subscription is bound to.
     owner: OwnedUniqueName,
     stream: SignalStream<'static>,
+    /// `StateChanged` invalidations, for a [`BlueRouteClient::changes`] subscription.
+    state: Option<SignalStream<'static>>,
     /// Ownership changes of the daemon's well-known name only.
     owner_changes: NameOwnerChangedStream,
 }
@@ -167,45 +202,82 @@ pub struct EventSubscription {
 /// What the next thing to happen on a subscription was.
 enum Next {
     Event(Option<zbus::Message>),
+    State(Option<zbus::Message>),
     OwnerChanged(bool),
 }
 
 impl EventSubscription {
+    /// The next typed event. On a [`BlueRouteClient::changes`] subscription, invalidations are
+    /// skipped; use [`Self::next_change`] there.
     pub async fn next_event(&mut self) -> Result<Event, ClientError> {
-        let message = loop {
+        loop {
+            if let Change::Event(event) = self.next_change().await? {
+                return Ok(event);
+            }
+        }
+    }
+
+    /// The next event or invalidation. Ends with [`ClientError::OwnerLost`] when the bound owner
+    /// goes away, and every item is accepted only after that same owner's version is rechecked.
+    pub async fn next_change(&mut self) -> Result<Change, ClientError> {
+        let next = loop {
             let owner = &self.owner;
-            let next =
+            let state = &mut self.state;
+            let signals =
                 futures_lite::future::or(async { Next::Event(self.stream.next().await) }, async {
-                    match self.owner_changes.next().await {
-                        // A change that leaves the name with this owner is not a loss: it is
-                        // the queued notice of this owner taking the name.
-                        Some(change) => {
-                            Next::OwnerChanged(
-                                change.args().ok().and_then(|args| {
-                                    args.new_owner().as_ref().map(|new| new == owner)
-                                }) != Some(true),
-                            )
-                        }
-                        // The bus connection itself is gone.
-                        None => Next::OwnerChanged(true),
+                    match state {
+                        Some(state) => Next::State(state.next().await),
+                        None => futures_lite::future::pending().await,
                     }
-                })
-                .await;
+                });
+            let next = futures_lite::future::or(signals, async {
+                match self.owner_changes.next().await {
+                    // A change that leaves the name with this owner is not a loss: it is
+                    // the queued notice of this owner taking the name.
+                    Some(change) => Next::OwnerChanged(
+                        change
+                            .args()
+                            .ok()
+                            .and_then(|args| args.new_owner().as_ref().map(|new| new == owner))
+                            != Some(true),
+                    ),
+                    // The bus connection itself is gone.
+                    None => Next::OwnerChanged(true),
+                }
+            })
+            .await;
             match next {
-                Next::Event(Some(message)) => break message,
-                Next::Event(None) => return Err(ClientError::EventStreamClosed),
+                Next::Event(Some(message)) => break Next::Event(Some(message)),
+                Next::State(Some(message)) => break Next::State(Some(message)),
+                Next::Event(None) | Next::State(None) => {
+                    return Err(ClientError::EventStreamClosed);
+                }
                 Next::OwnerChanged(true) => return Err(ClientError::OwnerLost),
                 Next::OwnerChanged(false) => {}
             }
         };
-        // The stream only carries this owner's signals; recheck that same owner's version so an
-        // event is never accepted on the strength of a different owner's check.
+        // The streams only carry this owner's signals; recheck that same owner's version so
+        // nothing is accepted on the strength of a different owner's check.
         negotiate_version_at(&self.connection, &self.owner).await?;
-        let payload: String = message
-            .body()
-            .deserialize()
-            .map_err(|error| ClientError::InvalidTransportPayload(error.to_string()))?;
-        decode_event(&payload).map_err(ClientError::Protocol)
+        match next {
+            Next::Event(Some(message)) => {
+                let payload: String = message
+                    .body()
+                    .deserialize()
+                    .map_err(|error| ClientError::InvalidTransportPayload(error.to_string()))?;
+                decode_event(&payload)
+                    .map(Change::Event)
+                    .map_err(ClientError::Protocol)
+            }
+            Next::State(Some(message)) => {
+                let revision: u64 = message
+                    .body()
+                    .deserialize()
+                    .map_err(|error| ClientError::InvalidTransportPayload(error.to_string()))?;
+                Ok(Change::State { revision })
+            }
+            _ => Err(ClientError::EventStreamClosed),
+        }
     }
 }
 

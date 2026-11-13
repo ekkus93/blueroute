@@ -31,7 +31,7 @@ pub struct ApiVersion {
 }
 
 impl ApiVersion {
-    pub const CURRENT: Self = Self { major: 1, minor: 6 };
+    pub const CURRENT: Self = Self { major: 1, minor: 7 };
 
     pub const fn new(major: u16, minor: u16) -> Self {
         Self { major, minor }
@@ -373,6 +373,14 @@ pub fn encode_event(event: &Event) -> Result<String, ProtocolCodecError> {
 pub fn decode_event(payload: &str) -> Result<Event, ProtocolCodecError> {
     decode_json(payload)
 }
+
+/// The D-Bus signal (API 1.7) the daemon emits after any change a client could observe in its
+/// snapshots: a committed request, or a worker observation such as health, capabilities,
+/// authenticated peers or the joined client's link. Its only argument is a `u64` revision that
+/// increases with every emission of one daemon process; it carries no state. Signals are
+/// coalesced, so one signal can stand for several changes and an occasional signal may change
+/// nothing visible. A receiver rereads whatever it shows. Clients older than 1.7 never match it.
+pub const STATE_CHANGED_SIGNAL: &str = "StateChanged";
 
 /// The human-readable project name.
 pub const PROJECT_NAME: &str = "BlueRoute";

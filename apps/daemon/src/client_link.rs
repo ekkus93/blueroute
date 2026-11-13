@@ -1014,6 +1014,41 @@ mod tests {
         assert_eq!(health(), HealthLevel::Healthy);
     }
 
+    #[test]
+    fn every_link_phase_is_announced_even_when_health_does_not_change() {
+        use crate::DaemonService;
+        // Connecting 1 → Waiting 1 → Connecting 2 → Gave up: health only moves Healthy →
+        // Reconnecting → Degraded, yet observers must reread at each phase (CR-F1-05).
+        let fx = fixture(
+            Some(MembershipRole::Client),
+            true,
+            vec![transient(), transient()],
+            2,
+        );
+        let service = DaemonService::new(
+            NodeId::from_bytes([0x85; 16]),
+            HealthLevel::Healthy,
+            blueroute_core::NodeCapabilities::default(),
+        )
+        .with_client_reconnector(fx.reconnector.clone());
+        let publisher = service.state_publisher();
+        let before = service.observable_state().unwrap();
+        fx.reconnector.start().unwrap();
+        fx.reconnector.wait_for_run();
+        assert_eq!(
+            fx.reconnector.state(),
+            Some(ClientLinkState::GaveUp { attempts: 2 })
+        );
+        assert!(
+            publisher.marks() >= 4,
+            "only {} marks for four phases",
+            publisher.marks()
+        );
+        let after = service.observable_state().unwrap();
+        assert_ne!(before, after);
+        assert!(after.contains("gave_up"), "{after}");
+    }
+
     fn established_after(fx: &Fixture, supervisor_starts: usize) {
         until(|| {
             fx.runtime.supervisor_starts.load(Ordering::SeqCst) == supervisor_starts
