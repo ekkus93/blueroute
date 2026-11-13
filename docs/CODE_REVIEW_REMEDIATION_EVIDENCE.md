@@ -163,3 +163,62 @@ private-bus `dbus_service`, `authorization`, `dbus_client`, `cli_exit_contract`,
 
 **Scope note:** the desktop's own subscription lifetime under StrictMode is CR-F6, which builds
 on this watcher contract.
+
+## CR-F1 — publish actual daemon changes (2026-11-13)
+
+**Decision (user, 2026-11-13):** a new payload-free D-Bus signal `StateChanged(revision u64)`,
+API 1.7, rather than new `Event` variants (which 1.6 clients would fail to decode) or stretched
+existing events. Documented in `docs/P5-PROTOCOL.md` (API 1.7) and `docs/SPEC.md` §11 before
+acceptance.
+
+**Fix:** `4de29b19432d9b5447087e93e4d7cc31ecfe5232`.
+
+CR-F1-01 inventory and policy (`apps/daemon/src/state_publisher.rs`):
+
+| Observable snapshot | Producer | How it is published |
+| --- | --- | --- |
+| Status: current network | request dispatch (create, join where enabled, leave) | `committed()` after the request, success or failure |
+| Status/diagnostics: health, capabilities, system | runtime worker (`update_runtime_observation`, `update_runtime_health`) | `observed()` after the locks are released, only if changed |
+| Health + `GetClientLink` phase | client reconnector observer | `observed()` on every phase, even with unchanged health |
+| Nodes / diagnostics: authenticated control peers | control worker | 250 ms in-memory recheck (no mark) |
+| Nodes: device name | `SetDeviceName` | `committed()` |
+| Diagnostics: recent failures | request dispatch | `committed()` for mutations; `observed()` for failed reads |
+| Networks (membership store, live discovery) | requests; background store/discovery changes | `committed()`; 1 s network recheck |
+| Trust, pins, join host records (not shown in snapshots but committed) | requests | `committed()` |
+
+Policy: one emitter thread; marks set an atomic flag and unpark it (bounded, coalescing, cannot
+drop the last invalidation); snapshots are cloned under their locks, compared as encoded
+responses, and the signal is emitted with no lock held. Ordering: revisions increase per daemon
+process; duplicates are possible after a forced (committed) publication with no visible change;
+receivers only reread. Failure: payload-free `state_changed_signal` log on the first failure and on
+recovery; the invalidation stays pending and is retried on every recheck; the mutation's result is
+never affected. `DiagnosticSnapshot.interfaces` (read live from NetworkManager on request) is not
+rechecked.
+
+CR-F1-07: the shared watcher reports `Connected` only after a fresh owner-bound subscription
+exists, and both front ends reread on `Connected` (TUI `app.rs` link test; desktop "rereads once
+the live subscription is up" test), so a change between the first read and the subscription is
+not missed, and every new compatible owner is reread rather than replayed.
+
+**Regressions:**
+
+| Test | Covers | Result |
+| --- | --- | --- |
+| `state_events::cr_f1_a_worker_health_change_reaches_a_connected_subscriber` | worker → signal → reread; ≈0.3 ms | pass (baseline **fail**: nothing in 1 s) |
+| `state_events::cr_f1_another_clients_committed_create_and_leave_reach_every_observer` | committed create and leave by another client reach two independent observers; reread shows committed state; ≈2 ms | pass |
+| `state_events::cr_f1_a_rename_is_announced` | `SetDeviceName` | pass |
+| `state_events::cr_f1_a_refused_mutation_announces_no_success` | PolicyKit-refused create: signal for the recorded failure, reread shows no network | pass |
+| `state_events::cr_f1_unchanged_observations_and_reads_announce_nothing` | unchanged samples and reads: zero signals | pass |
+| `state_events::cr_f1_a_burst_coalesces_and_the_final_state_is_announced` | 200 changes → 1 signal; final state visible | pass |
+| `state_events::cr_f1_an_emission_failure_keeps_the_change_pending_and_never_fails_the_mutation` | emission fails (interface removed); mutation still succeeds; pending signal delivered once emission works | pass |
+| `watcher::cr_f1_a_real_daemon_change_reaches_the_production_watcher` | real `DaemonService` + publisher → production `watch` → `Changed`; ≈5 ms | pass |
+| `client_link::every_link_phase_is_announced_even_when_health_does_not_change` | four phases marked, health moved twice | pass |
+| `lib::authenticated_peer_arrival_and_departure_change_the_published_snapshot` | peer arrival/departure visible to the recheck | pass |
+
+All signals were produced by real request dispatch or worker update paths; no test calls an emit
+function. `state_events` passed three consecutive runs (≈3.6 s each). Checks at the fix: fmt,
+clippy, workspace tests, all nine private-bus suites, desktop format/lint/typecheck/test/build.
+
+**Not claimed:** radio-loss detection within one second (the 15 s hardware probe interval is
+unchanged); authenticated peer arrival through a real TLS session is exercised only through the
+snapshot it updates.

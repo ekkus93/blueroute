@@ -1315,6 +1315,25 @@ mod local_node_tests {
     }
 
     #[test]
+    fn authenticated_peer_arrival_and_departure_change_the_published_snapshot() {
+        // The control worker does not mark the publisher; its 250 ms recheck compares this
+        // snapshot, so peer arrival, departure and revocation must all show in it (CR-F1-04).
+        let peers = AuthenticatedControlPeers::default();
+        let service = DaemonService::new(
+            NodeId::from_bytes([0x71; 16]),
+            HealthLevel::Healthy,
+            NodeCapabilities::default(),
+        )
+        .with_control_peers(peers.clone());
+        let alone = service.observable_state().unwrap();
+        peers.set_for_tests(vec![NodeId::from_bytes([0x72; 16])]);
+        let joined = service.observable_state().unwrap();
+        assert_ne!(alone, joined);
+        peers.set_for_tests(Vec::new());
+        assert_eq!(service.observable_state().unwrap(), alone);
+    }
+
+    #[test]
     fn client_link_dispatch_without_a_reconnector_reads_none_and_refuses_retry() {
         futures_lite::future::block_on(async {
             let service = DaemonService::new(

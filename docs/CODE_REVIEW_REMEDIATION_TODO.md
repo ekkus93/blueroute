@@ -23,7 +23,7 @@
 | CR-BASE | Durable baseline and reproductions | Foundation | None | `[-]` |
 | CR-F8 | Owner-bound compatibility and command delivery | P2 | CR-BASE | `[x]` |
 | CR-F2 | Idle owner-loss detection and watcher recovery | P2 | CR-BASE; owner contract from CR-F8 | `[x]` |
-| CR-F1 | Committed state publication and observer refresh | P2 | CR-BASE; CR-F2 for integrated acceptance | `[ ]` |
+| CR-F1 | Committed state publication and observer refresh | P2 | CR-BASE; CR-F2 for integrated acceptance | `[x]` |
 | CR-F3 | Consistent graph insertion/update semantics | P2 | CR-BASE | `[ ]` |
 | CR-F4 | Fresh operational capabilities after recovery | P2 | CR-BASE; CR-F1 for observer acceptance | `[ ]` |
 | CR-F5 | Ownership-safe remove/purge cleanup | P2 | CR-BASE; lifecycle design | `[ ]` |
@@ -109,27 +109,30 @@ refreshes state on the bounded retry schedule without a synthetic Event or manua
 
 **Requirements:** EVENT-1–EVENT-6. **Original tasks:** P11-001/002; P12-002/007/010; P13-008.
 
-- [ ] **CR-F1-01:** Inventory snapshot fields/producers and choose a central publication path,
+- [x] **CR-F1-01:** Inventory snapshot fields/producers and choose a central publication path,
   bounded queue/coalescing policy, ordering semantics, and failure reporting.
-- [ ] **CR-F1-02:** Specify event/signal compatibility before adding wire variants. Reuse correct
+- [x] **CR-F1-02:** Specify event/signal compatibility before adding wire variants. Reuse correct
   existing semantics where possible; do not fabricate unrelated state-change events.
-- [ ] **CR-F1-03:** Publish committed create/join-where-enabled/leave and rename changes after
+- [x] **CR-F1-03:** Publish committed create/join-where-enabled/leave and rename changes after
   required persistence and public state updates.
-- [ ] **CR-F1-04:** Publish runtime capability/system/health changes and authenticated peer
+- [x] **CR-F1-04:** Publish runtime capability/system/health changes and authenticated peer
   arrival, departure, and revocation from actual worker observation updates.
-- [ ] **CR-F1-05:** Publish client-link detail transitions even when aggregate health stays the
+- [x] **CR-F1-05:** Publish client-link detail transitions even when aggregate health stays the
   same; cover observable discovery/list and diagnostics changes as applicable.
-- [ ] **CR-F1-06:** Emit outside state locks; preserve successful mutation results if signaling
+- [x] **CR-F1-06:** Emit outside state locks; preserve successful mutation results if signaling
   fails; keep the latest dirty state pending for bounded retry/reconciliation.
-- [ ] **CR-F1-07:** Close the initial snapshot/subscription race and refresh on every newly
+- [x] **CR-F1-07:** Close the initial snapshot/subscription race and refresh on every newly
   established compatible owner.
-- [ ] **CR-F1-08:** Add private-broker tests driven by real service mutations/worker updates,
+- [x] **CR-F1-08:** Add private-broker tests driven by real service mutations/worker updates,
   without manually calling `emit_event` to create the expected notification.
-- [ ] **CR-F1-09:** Cover rollback/no false success, unchanged samples, burst coalescing,
+- [x] **CR-F1-09:** Cover rollback/no false success, unchanged samples, burst coalescing,
   saturation, emitter failure, independent observers, and the post-publication latency bound.
 
 **Acceptance:** An already connected observer rereads current committed state after another
 client or worker changes it. No producer can silently leave the final snapshot uninformed.
+
+**Accepted (2026-11-13, `4de29b1`):** met with the user-chosen `StateChanged` signal (API 1.7);
+see [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-f1--publish-actual-daemon-changes-2026-11-13).
 
 ## CR-F3 — Preserve graph consistency
 
@@ -330,7 +333,7 @@ Fill entries as work is qualified. Link concrete records; do not replace evidenc
 | CR-BASE | Reproduction tests at the CR-BASE commit | Baseline failures recorded in [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-base--baseline-and-reproductions-2026-11-13) | Preserve recorded baseline scope | CR-BASE-04 F5 fixtures (with CR-F5-01) | IN PROGRESS |
 | CR-F8 / F8 | `b3ba0bd` | 5 `owner_race` tests pass (2 fail with the baseline client); all checks and bus suites green | Not required for the owner-race defect | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
 | CR-F2 / F2 | `e283b4e` | `owner_watch` (3), `watcher` (5), setup race in `owner_race`; UI stale-label tests; all checks green | Private broker sufficient for the reported defect | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
-| CR-F1 / F1 | Pending | Pending | Radio claims remain separate | Real producer-to-observer delivery | NOT STARTED |
+| CR-F1 / F1 | `4de29b1` | `state_events` (7), daemon-to-watcher, link-phase and peer-snapshot tests; all checks green | Radio claims remain separate | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
 | CR-F3 / F3 | Pending | Pending | Not required for pure graph consistency | Atomic mutation and consumer invariants | NOT STARTED |
 | CR-F4 / F4 | Pending | Pending | Adapter behavior if claimed | Same-instance software recovery; preserve hardware gates | NOT STARTED |
 | CR-F5 / F5 | Pending | Pending | Required: CR-QUALIFY | Owned cleanup, foreign preservation, failure/retry | NOT STARTED |
