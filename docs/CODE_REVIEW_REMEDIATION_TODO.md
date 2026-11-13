@@ -27,7 +27,7 @@
 | CR-F3 | Consistent graph insertion/update semantics | P2 | CR-BASE | `[ ]` |
 | CR-F4 | Fresh operational capabilities after recovery | P2 | CR-BASE; CR-F1 for observer acceptance | `[ ]` |
 | CR-F5 | Ownership-safe remove/purge cleanup | P2 | CR-BASE; lifecycle design | `[ ]` |
-| CR-F6 | Effect-generation resource ownership | P3 | CR-BASE; watcher contract from CR-F2 | `[ ]` |
+| CR-F6 | Effect-generation resource ownership | P3 | CR-BASE; watcher contract from CR-F2 | `[x]` |
 | CR-F7 | Current documentation and acceptance reconciliation | P3 | Baseline fixes can start immediately; final pass follows implementation | `[ ]` |
 | CR-INTEGRATION | Real producer-to-consumer regression coverage | Acceptance | CR-F1/F2/F3/F4/F5/F6/F8 software work | `[ ]` |
 | CR-VALIDATE | Full toolchain, package, and exact-revision CI checks | Acceptance | Implemented software; CR-INTEGRATION | `[ ]` |
@@ -210,21 +210,23 @@ foreign networking and retained user state remain intact. Full closure requires 
 
 **Requirements:** UI-1–UI-3. **Original tasks:** P12-002/012.
 
-- [ ] **CR-F6-01:** Replace shared-liveness ownership decisions with effect-local disposal or
+- [x] **CR-F6-01:** Replace shared-liveness ownership decisions with effect-local disposal or
   generation tracking for subscriptions, callbacks, loaders, and the refresh handler.
-- [ ] **CR-F6-02:** Immediately unsubscribe late results for disposed setups exactly once;
+- [x] **CR-F6-02:** Immediately unsubscribe late results for disposed setups exactly once;
   ignore old callbacks and fetch completions after replay or dependency replacement.
-- [ ] **CR-F6-03:** Keep coalescing bounded per active generation so an obsolete request cannot
+- [x] **CR-F6-03:** Keep coalescing bounded per active generation so an obsolete request cannot
   block, replay, or overwrite the replacement API's current load.
-- [ ] **CR-F6-04:** Test StrictMode replay with deferred subscription results in both orders,
+- [x] **CR-F6-04:** Test StrictMode replay with deferred subscription results in both orders,
   pending reads during unmount, rapid remount, and changed `api`/`subscribe` dependencies.
-- [ ] **CR-F6-05:** Assert one listener while mounted and zero after unmount; late old events
+- [x] **CR-F6-05:** Assert one listener while mounted and zero after unmount; late old events
   cause neither state changes nor new daemon reads. Test rejected setup and signal bursts.
-- [ ] **CR-F6-06:** Keep StrictMode and all lint rules enabled; verify visible current data as
+- [x] **CR-F6-06:** Keep StrictMode and all lint rules enabled; verify visible current data as
   well as unsubscribe counts.
 
 **Acceptance:** The baseline `[0, 1]` unsubscribe leak becomes complete cleanup; old generations
 cannot interfere with current view/link/loading behavior.
+
+**Accepted (2026-11-13, `25e6984`):** met; see [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-f6--effect-generation-resource-ownership-2026-11-13).
 
 ## CR-F7 — Reconcile documentation with validated behavior
 
@@ -337,7 +339,7 @@ Fill entries as work is qualified. Link concrete records; do not replace evidenc
 | CR-F3 / F3 | Pending | Pending | Not required for pure graph consistency | Atomic mutation and consumer invariants | NOT STARTED |
 | CR-F4 / F4 | Pending | Pending | Adapter behavior if claimed | Same-instance software recovery; preserve hardware gates | NOT STARTED |
 | CR-F5 / F5 | Pending | Pending | Required: CR-QUALIFY | Owned cleanup, foreign preservation, failure/retry | NOT STARTED |
-| CR-F6 / F6 | Pending | Pending | Not required for effect ownership | No listener or stale-generation leak | NOT STARTED |
+| CR-F6 / F6 | `25e6984` | 8 `useDaemon` tests (4 fail with the baseline hook); desktop checks green | Not required for effect ownership | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
 | CR-F7 / F7 | Pending | Pending | Preserve existing records | Current summaries and final acceptance accuracy | NOT STARTED |
 | CR-INTEGRATION | Pending | Pending | Isolated-system results where relevant | Boundary regressions included in CI | NOT STARTED |
 | CR-VALIDATE | Pending | Pending | No physical claim from CI | Exact candidate software/package qualification | NOT STARTED |

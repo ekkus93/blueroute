@@ -222,3 +222,31 @@ clippy, workspace tests, all nine private-bus suites, desktop format/lint/typech
 **Not claimed:** radio-loss detection within one second (the 15 s hardware probe interval is
 unchanged); authenticated peer arrival through a real TLS session is exercised only through the
 snapshot it updates.
+
+## CR-F6 — effect-generation resource ownership (2026-11-13)
+
+**Fix:** `25e698475f14722d45801e38a81ad1c9f367a23f`. `apps/desktop/ui/src/useDaemon.ts`: the
+shared `alive`/`inFlight`/`pending` refs are gone. Each effect run keeps `disposed`, `inFlight`,
+`pending` and its `unsubscribe` as closure locals. A late `subscribe` result of a disposed run calls
+its `stop` immediately (once) and is never stored; signal callbacks and read completions of a
+disposed run return without touching link/view state or starting reads; cleanup stops the stored
+subscription once and clears the shared refresh handler only if it is still this run's. StrictMode
+remains on in `main.tsx`; no lint rule is disabled (`oxlint --deny-warnings` clean).
+
+**Regressions** (`apps/desktop/ui/src/useDaemon.test.tsx`, jsdom; the probe renders
+`phase:network:link`, so visible data is asserted with the counts):
+
+| Test | Covers | With the fix | With the baseline hook |
+| --- | --- | --- | --- |
+| StrictMode replay … (in order) | UI-1: stops `[1, 0]` while mounted (one live listener), `[1, 1]` after unmount | pass | **fail** |
+| StrictMode replay … (in reverse) | the other resolution order | pass | **fail** |
+| a disposed generation's late signals and reads … | UI-2: replayed callback inert (no link change, no reads); current one works; nothing after unmount | pass | **fail** |
+| changing api and subscribe … | UI-2/3: old subscription stopped; obsolete read finishing late cannot overwrite "Office"; old callback inert; new coalescing not blocked | pass | **fail** |
+| reads pending at unmount … | completions after unmount start nothing | pass | pass |
+| rapid remounts … | three mount/unmount cycles then a mount: one live, `[1, 1, 1]` released, zero after unmount | pass | pass |
+| a rejected subscription … | page still loads; nothing to release | pass | pass |
+| a burst of signals during a load … | 20 signals during a load → one follow-up read | pass | pass |
+
+The baseline column was produced by restoring the committed hook, running the file (4 failed,
+4 passed) and restoring the fix. Desktop checks at the fix: format, lint, typecheck, 43 tests,
+build.
