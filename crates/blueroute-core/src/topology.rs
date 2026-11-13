@@ -62,26 +62,43 @@ impl PanLink {
     }
 }
 
+/// One NAP's PAN segment. Its members are always the NAP, the PANU of every link in the segment,
+/// and any member added explicitly with [`PanSegment::add_member`] before the segment is inserted.
+/// Explicit members must be nodes of the graph; they stay members until removed from the graph,
+/// whatever happens to links. The graph keeps `members` in step with its links.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PanSegment {
     pub id: SegmentId,
     pub nap: NodeId,
     members: BTreeSet<NodeId>,
+    explicit: BTreeSet<NodeId>,
 }
 
 impl PanSegment {
     pub fn new(id: SegmentId, nap: NodeId) -> Self {
         let mut members = BTreeSet::new();
         members.insert(nap);
-        Self { id, nap, members }
+        Self {
+            id,
+            nap,
+            members,
+            explicit: BTreeSet::new(),
+        }
     }
 
+    /// Add a member that has no link (yet). Returns whether it was new.
     pub fn add_member(&mut self, node: NodeId) -> bool {
+        self.explicit.insert(node);
         self.members.insert(node)
     }
 
     pub fn members(&self) -> impl Iterator<Item = &NodeId> {
         self.members.iter()
+    }
+
+    /// Whether `node` stays a member regardless of links: the NAP or an explicit member.
+    fn keeps(&self, node: &NodeId) -> bool {
+        *node == self.nap || self.explicit.contains(node)
     }
 }
 
@@ -104,6 +121,7 @@ impl TopologyGraph {
         self.segments.retain(|_, segment| segment.nap != id);
         for segment in self.segments.values_mut() {
             segment.members.remove(&id);
+            segment.explicit.remove(&id);
         }
         Some(removed)
     }
@@ -112,6 +130,11 @@ impl TopologyGraph {
         self.nodes.get(id)
     }
 
+    /// Insert a segment. `Ok(true)`: a new segment. `Ok(false)`: the segment already exists with
+    /// the same NAP; it is kept, with its link members, and any new explicit members are added.
+    /// A different NAP for an existing SegmentId is refused (its links would no longer match),
+    /// as are a NAP or explicit member that is not a node of the graph. A refused call changes
+    /// nothing (CR-F3, GRAPH-1/2/4).
     pub fn add_segment(&mut self, segment: PanSegment) -> Result<bool, CoreError> {
         if !self.nodes.contains_key(&segment.nap) {
             return Err(CoreError::new(
@@ -119,9 +142,40 @@ impl TopologyGraph {
                 "PAN segment NAP is not present in the topology",
             ));
         }
-        Ok(self.segments.insert(segment.id, segment).is_none())
+        if segment
+            .explicit
+            .iter()
+            .any(|member| !self.nodes.contains_key(member))
+        {
+            return Err(CoreError::new(
+                ErrorKind::TopologyFailure,
+                "PAN segment member is not present in the topology",
+            ));
+        }
+        match self.segments.get_mut(&segment.id) {
+            Some(existing) if existing.nap != segment.nap => Err(CoreError::new(
+                ErrorKind::TopologyFailure,
+                "PAN segment already exists with a different NAP",
+            )),
+            Some(existing) => {
+                for member in segment.explicit {
+                    existing.explicit.insert(member);
+                    existing.members.insert(member);
+                }
+                Ok(false)
+            }
+            None => {
+                self.segments.insert(segment.id, segment);
+                Ok(true)
+            }
+        }
     }
 
+    /// Insert a link. `Ok(true)`: a new link, whose PANU becomes a segment member. `Ok(false)`:
+    /// the LinkId exists with the same segment, NAP and PANU, and only its state, health and cost
+    /// are updated. The same LinkId with a different segment or endpoint is refused rather than
+    /// rebound, as are unknown endpoints or segment and a NAP that is not the segment's. Every
+    /// check runs before anything changes, so a refused call changes nothing (CR-F3).
     pub fn add_link(&mut self, link: PanLink) -> Result<bool, CoreError> {
         if link.nap == link.panu {
             return Err(CoreError::new(
@@ -147,17 +201,34 @@ impl TopologyGraph {
                 "PAN link NAP does not match the segment NAP",
             ));
         }
-        segment.add_member(link.panu);
-        Ok(self.links.insert(link.id, link).is_none())
+        if let Some(existing) = self.links.get_mut(&link.id) {
+            if existing.segment_id != link.segment_id
+                || existing.nap != link.nap
+                || existing.panu != link.panu
+            {
+                return Err(CoreError::new(
+                    ErrorKind::TopologyFailure,
+                    "PAN link already exists with different endpoints or segment",
+                ));
+            }
+            existing.state = link.state;
+            existing.health = link.health;
+            existing.cost = link.cost;
+            return Ok(false);
+        }
+        segment.members.insert(link.panu);
+        self.links.insert(link.id, link);
+        Ok(true)
     }
 
     pub fn remove_link(&mut self, id: &LinkId) -> Option<PanLink> {
         let removed = self.links.remove(id)?;
         if let Some(segment) = self.segments.get_mut(&removed.segment_id) {
-            let still_attached = self
-                .links
-                .values()
-                .any(|link| link.segment_id == removed.segment_id && link.panu == removed.panu);
+            let still_attached = segment.keeps(&removed.panu)
+                || self
+                    .links
+                    .values()
+                    .any(|link| link.segment_id == removed.segment_id && link.panu == removed.panu);
             if !still_attached {
                 segment.members.remove(&removed.panu);
             }
@@ -409,8 +480,8 @@ mod tests {
         assert_eq!(graph.links().count(), 0);
     }
 
-    // CR-F3 regressions (docs/CODE_REVIEW_REMEDIATION_TODO.md). They state the corrected
-    // contract and fail on baseline 4ca5042; CR-F3 removes the `ignore`.
+    // CR-F3 regressions (docs/CODE_REVIEW_REMEDIATION_TODO.md, GRAPH-1..GRAPH-4). The first four
+    // failed on baseline 4ca5042.
 
     fn members_of(graph: &TopologyGraph, id: u8) -> Vec<NodeId> {
         graph
@@ -434,7 +505,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "CR-F3 regression: fails on baseline 4ca5042 until CR-F3 is fixed"]
     fn cr_f3_identical_segment_reinsertion_keeps_attached_members() {
         let mut graph = star_with_one_client();
         graph
@@ -444,7 +514,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "CR-F3 regression: fails on baseline 4ca5042 until CR-F3 is fixed"]
     fn cr_f3_segment_nap_change_under_existing_links_is_rejected_atomically() {
         let mut graph = star_with_one_client();
         let before = graph.clone();
@@ -457,7 +526,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "CR-F3 regression: fails on baseline 4ca5042 until CR-F3 is fixed"]
     fn cr_f3_link_identity_rebinding_is_rejected_without_stale_membership() {
         let mut graph = star_with_one_client();
         let before = graph.clone();
@@ -467,7 +535,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "CR-F3 regression: fails on baseline 4ca5042 until CR-F3 is fixed"]
     fn cr_f3_every_link_matches_its_segment_after_mutations() {
         let mut graph = star_with_one_client();
         // Whatever these return, the graph must stay internally consistent.
@@ -492,5 +559,159 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// GRAPH-3: every link's endpoints exist, its segment exists with the same NAP, and its PANU
+    /// is a member; every member is the NAP, an explicit member, or the PANU of a link there.
+    fn assert_consistent(graph: &TopologyGraph) {
+        for (_, link) in graph.links() {
+            assert!(graph.node(&link.nap).is_some() && graph.node(&link.panu).is_some());
+            let (_, segment) = graph
+                .segments()
+                .find(|(id, _)| **id == link.segment_id)
+                .expect("every link references an existing segment");
+            assert_eq!(segment.nap, link.nap);
+            assert!(segment.members().any(|member| *member == link.panu));
+        }
+        for (_, segment) in graph.segments() {
+            for member in segment.members() {
+                assert!(
+                    graph.node(member).is_some(),
+                    "member {member:?} is not a node"
+                );
+                assert!(
+                    segment.keeps(member)
+                        || graph
+                            .links()
+                            .any(|(_, link)| link.segment_id == segment.id && link.panu == *member),
+                    "stale member {member:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cr_f3_a_property_update_keeps_identity_and_membership() {
+        let mut graph = star_with_one_client();
+        let mut failed = active_link(1, 1, 1, 2);
+        failed.health = LinkHealth::Failed;
+        failed.cost = 9;
+        assert_eq!(graph.add_link(failed), Ok(false));
+        let (_, stored) = graph.links().next().unwrap();
+        assert_eq!((stored.health, stored.cost), (LinkHealth::Failed, 9));
+        assert_eq!(members_of(&graph, 1), vec![node(1), node(2)]);
+        assert_consistent(&graph);
+        // Downstream: a failed link no longer carries traffic, and recovers in place.
+        assert_eq!(graph.shortest_path(node(1), node(2)), None);
+        assert_eq!(graph.add_link(active_link(1, 1, 1, 2)), Ok(false));
+        assert_eq!(
+            graph.shortest_path(node(1), node(2)),
+            Some(vec![node(1), node(2)])
+        );
+    }
+
+    #[test]
+    fn cr_f3_a_link_cannot_move_to_another_segment_or_nap() {
+        let mut graph = star_with_one_client();
+        graph
+            .add_segment(PanSegment::new(segment(4), node(4)))
+            .unwrap();
+        let before = graph.clone();
+        // Same LinkId, another segment with its own (matching) NAP.
+        assert!(graph.add_link(active_link(1, 4, 4, 2)).is_err());
+        // Same LinkId, swapped roles.
+        assert!(graph.add_link(active_link(1, 1, 2, 1)).is_err());
+        // Invalid in themselves: unknown segment, unknown endpoint, NAP not the segment's.
+        assert!(graph.add_link(active_link(1, 9, 1, 2)).is_err());
+        assert!(graph.add_link(active_link(1, 1, 1, 9)).is_err());
+        assert!(graph.add_link(active_link(5, 1, 4, 2)).is_err());
+        assert_eq!(graph, before);
+        assert_consistent(&graph);
+    }
+
+    #[test]
+    fn cr_f3_a_member_with_two_links_stays_until_the_last_is_removed() {
+        let mut graph = star_with_one_client();
+        graph.add_link(active_link(2, 1, 1, 2)).unwrap();
+        assert_eq!(members_of(&graph, 1), vec![node(1), node(2)]);
+        graph.remove_link(&link(1)).unwrap();
+        assert_eq!(members_of(&graph, 1), vec![node(1), node(2)]);
+        assert_consistent(&graph);
+        graph.remove_link(&link(2)).unwrap();
+        assert_eq!(members_of(&graph, 1), vec![node(1)]);
+        assert_consistent(&graph);
+    }
+
+    #[test]
+    fn cr_f3_removal_after_a_property_update_cleans_membership() {
+        let mut graph = star_with_one_client();
+        let mut degraded = active_link(1, 1, 1, 2);
+        degraded.health = LinkHealth::Degraded;
+        graph.add_link(degraded).unwrap();
+        graph.remove_link(&link(1)).unwrap();
+        assert_eq!(members_of(&graph, 1), vec![node(1)]);
+        assert_consistent(&graph);
+    }
+
+    #[test]
+    fn cr_f3_explicit_members_are_known_nodes_and_survive_link_changes() {
+        let mut graph = star_with_one_client();
+        // An explicit member that is not a node is refused, atomically.
+        let mut unknown = PanSegment::new(segment(1), node(1));
+        unknown.add_member(node(9));
+        let before = graph.clone();
+        assert!(graph.add_segment(unknown).is_err());
+        assert_eq!(graph, before);
+
+        // Reinsertion may add an explicit member (node 2, which also has a link) …
+        let mut with_member = PanSegment::new(segment(1), node(1));
+        with_member.add_member(node(2));
+        assert_eq!(graph.add_segment(with_member), Ok(false));
+        // … which stays when its link goes, until the node itself goes.
+        graph.remove_link(&link(1)).unwrap();
+        assert_eq!(members_of(&graph, 1), vec![node(1), node(2)]);
+        assert_consistent(&graph);
+        graph.remove_node(node(2));
+        assert_eq!(members_of(&graph, 1), vec![node(1)]);
+        assert_consistent(&graph);
+    }
+
+    #[test]
+    fn cr_f3_duplicate_inserts_report_whether_anything_was_new() {
+        let mut graph = star_with_one_client();
+        assert_eq!(
+            graph.add_segment(PanSegment::new(segment(1), node(1))),
+            Ok(false)
+        );
+        assert_eq!(graph.add_link(active_link(1, 1, 1, 2)), Ok(false));
+        assert_eq!(graph.add_link(active_link(2, 1, 1, 3)), Ok(true));
+        assert_eq!(
+            graph.add_segment(PanSegment::new(segment(4), node(4))),
+            Ok(true)
+        );
+        assert_eq!(graph.links().count(), 2);
+        assert_consistent(&graph);
+    }
+
+    #[test]
+    fn cr_f3_refused_changes_leave_paths_deterministic() {
+        // A two-segment route 2 – 1 – 4 – 3, as the routed tests build it.
+        let mut graph = star_with_one_client();
+        graph
+            .add_segment(PanSegment::new(segment(4), node(4)))
+            .unwrap();
+        graph.add_link(active_link(2, 1, 1, 4)).unwrap();
+        graph.add_link(active_link(3, 4, 4, 3)).unwrap();
+        let path = graph.shortest_path(node(2), node(3));
+        assert_eq!(path, Some(vec![node(2), node(1), node(4), node(3)]));
+        // Refused rebinding and NAP change do not disturb routing.
+        assert!(graph.add_link(active_link(3, 4, 4, 2)).is_err());
+        assert!(
+            graph
+                .add_segment(PanSegment::new(segment(4), node(1)))
+                .is_err()
+        );
+        assert_eq!(graph.shortest_path(node(2), node(3)), path);
+        assert_consistent(&graph);
     }
 }

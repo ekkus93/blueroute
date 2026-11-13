@@ -319,6 +319,8 @@ Hardware-independent domain logic:
 
 It must contain no Dell/Chromebook assumptions, shell commands, BlueZ object paths, NetworkManager object paths, or UI types.
 
+Topology graph invariants (CR-F3): every link's endpoints are nodes, its segment exists and has the same NAP, and its PANU is a member of that segment; a segment's members are exactly its NAP, the PANUs of its links, and members added explicitly before insertion (which must be nodes, and stay until the node is removed). `add_segment` returns `true` for a new segment; reinserting an existing SegmentId with the same NAP keeps it and its members (`false`); a different NAP is refused. `add_link` returns `true` for a new link; the same LinkId with the same segment and endpoints updates only state, health and cost (`false`); any other change of an existing LinkId is refused rather than rebound. Every check runs before mutation, so a refused call leaves the whole graph unchanged, and removing one of several links to a member keeps it a member.
+
 ### `blueroute-protocol`
 
 Shared versioned protocol types:
