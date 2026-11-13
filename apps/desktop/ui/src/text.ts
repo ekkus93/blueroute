@@ -48,6 +48,10 @@ export const ERROR_TEXT: Record<DesktopError | "unknown", { title: string; help:
     title: "BlueRoute's service gave an unexpected answer",
     help: "The app and the background service may be different versions. Update both to the same version.",
   },
+  address_conflict: {
+    title: "This network's addresses are already in use on this computer",
+    help: "Another connection here, such as a VPN or a virtual machine network, uses the same private address range. Disconnect or change that connection, then try again. BlueRoute never changes connections it does not own.",
+  },
   invalid_name: {
     title: "That name can't be used",
     help: "Use 1 to 64 characters, without line breaks or other control characters.",

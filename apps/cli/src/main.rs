@@ -836,6 +836,8 @@ fn mutation_ack(json: bool, success: &'static str) -> String {
 struct CliFailure {
     code: i32,
     message: String,
+    /// A specific, typed failure with its own guidance; the exit code stays its category's.
+    detail: Option<error_guidance::Detail>,
 }
 
 impl From<ClientError> for CliFailure {
@@ -844,11 +846,14 @@ impl From<ClientError> for CliFailure {
             ClientErrorKind::Unavailable => 3,
             ClientErrorKind::Authorization => 4,
             ClientErrorKind::Unsupported => 5,
-            ClientErrorKind::Operational => 1,
+            ClientErrorKind::Operational | ClientErrorKind::AddressConflict => 1,
         };
+        let detail = (error.kind() == ClientErrorKind::AddressConflict)
+            .then_some(error_guidance::Detail::AddressConflict);
         Self {
             code,
             message: error.to_string(),
+            detail,
         }
     }
 }
@@ -858,13 +863,18 @@ impl From<serde_json::Error> for CliFailure {
         Self {
             code: 1,
             message: error.to_string(),
+            detail: None,
         }
     }
 }
 
 impl From<String> for CliFailure {
     fn from(message: String) -> Self {
-        Self { code: 1, message }
+        Self {
+            code: 1,
+            message,
+            detail: None,
+        }
     }
 }
 impl From<&'static str> for CliFailure {
@@ -872,6 +882,7 @@ impl From<&'static str> for CliFailure {
         Self {
             code: 1,
             message: message.to_owned(),
+            detail: None,
         }
     }
 }
@@ -1137,7 +1148,12 @@ fn run(args: &[String]) -> i32 {
         Err(error) => {
             eprintln!(
                 "{}",
-                error_guidance::format_failure(error.code, &error.message, json_mode)
+                error_guidance::format_failure_with(
+                    error.code,
+                    error.detail,
+                    &error.message,
+                    json_mode
+                )
             );
             error.code
         }

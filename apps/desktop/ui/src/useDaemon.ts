@@ -44,6 +44,7 @@ const ERRORS: ReadonlySet<string> = new Set([
   "operational",
   "unexpected_response",
   "invalid_name",
+  "address_conflict",
 ]);
 
 export function normalizeError(error: unknown): DesktopError | "unknown" {

@@ -370,3 +370,14 @@ test("a remembered network this computer is not in shows only in settings, with 
   expect(screen.queryByRole("button", { name: "Leave this network" })).toBeNull();
   expect(screen.getByRole("list", { name: "Remembered networks" }).textContent).toContain("Lab");
 });
+
+test("an address conflict when creating explains the clash in plain words", async () => {
+  const createNetwork = vi.fn(() => Promise.reject("address_conflict"));
+  render(<App api={fakeApi({ createNetwork })} subscribe={fakeSubscribe().subscribe} />);
+  await screen.findByRole("heading", { name: "Your network" });
+  fireEvent.change(screen.getByLabelText("Network name"), { target: { value: "Workshop" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create a network" }));
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("already in use on this computer");
+  expect(alert.textContent).toContain("VPN");
+});

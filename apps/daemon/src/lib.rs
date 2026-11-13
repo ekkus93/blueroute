@@ -51,9 +51,9 @@ use blueroute_core::{
 };
 use blueroute_protocol::peer_pin::SpkiSha256;
 use blueroute_protocol::{
-    ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DaemonStatus, DiagnosticFailure,
-    DiagnosticSnapshot, Event, NodeSummary, ProtocolCodecError, Response, SystemDiagnosticMetadata,
-    decode_command, encode_event, encode_response,
+    ADDRESS_CONFLICT_ERROR, ApiVersion, Command, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH,
+    DaemonStatus, DiagnosticFailure, DiagnosticSnapshot, Event, NodeSummary, ProtocolCodecError,
+    Response, SystemDiagnosticMetadata, decode_command, encode_event, encode_response,
 };
 pub use client_leave::{
     ClientLeaveBackend, SystemClientLeave, leave_observed, remove_owned_network_state,
@@ -355,7 +355,41 @@ impl DaemonService {
     /// the shared status and health inputs, so it holds no reference back to the service.
     /// Run one already-authorized command. The D-Bus `request` method decodes, authorizes and
     /// logs; this is the dispatch, separate so it can be tested without a bus.
-    async fn execute(&self, command: Command) -> fdo::Result<String> {
+    async fn execute(&self, command: Command) -> Result<String, RequestError> {
+        match command {
+            Command::CreateNetwork { name } => {
+                let network = self
+                    .network_operations()?
+                    .create_network(name)
+                    .await
+                    .map_err(core_error_to_request)?;
+                self.update_current_network(Some(network))?;
+                Ok(Self::encode_response(&Response::Ack)?)
+            }
+            Command::JoinNetwork { network } => {
+                self.join_network_operations()?
+                    .join_network(network)
+                    .await
+                    .map_err(core_error_to_request)?;
+                self.update_current_network(Some(network))?;
+                // Watch the new session so a later link loss is reconnected (P6-010). The
+                // join already succeeded, so a failure here only loses that watch.
+                if let Some(reconnector) = &self.client_reconnector
+                    && let Err(error) = reconnector.joined(network)
+                {
+                    eprintln!("BlueRoute could not watch the joined network's link: {error}");
+                }
+                Ok(Self::encode_response(&Response::Ack)?)
+            }
+            other => self
+                .execute_standard(other)
+                .await
+                .map_err(RequestError::from),
+        }
+    }
+
+    /// Every command whose failures map to standard D-Bus errors.
+    async fn execute_standard(&self, command: Command) -> fdo::Result<String> {
         match command {
             Command::GetStatus => self.status(),
             Command::GetCapabilities => self.capabilities(),
@@ -384,30 +418,6 @@ impl DaemonService {
                     .into_iter()
                     .find(|entry| entry.id == node);
                 Self::encode_response(&Response::Node(matching))
-            }
-            Command::CreateNetwork { name } => {
-                let network = self
-                    .network_operations()?
-                    .create_network(name)
-                    .await
-                    .map_err(core_error_to_dbus)?;
-                self.update_current_network(Some(network))?;
-                Self::encode_response(&Response::Ack)
-            }
-            Command::JoinNetwork { network } => {
-                self.join_network_operations()?
-                    .join_network(network)
-                    .await
-                    .map_err(core_error_to_dbus)?;
-                self.update_current_network(Some(network))?;
-                // Watch the new session so a later link loss is reconnected (P6-010). The
-                // join already succeeded, so a failure here only loses that watch.
-                if let Some(reconnector) = &self.client_reconnector
-                    && let Err(error) = reconnector.joined(network)
-                {
-                    eprintln!("BlueRoute could not watch the joined network's link: {error}");
-                }
-                Self::encode_response(&Response::Ack)
             }
             Command::GetClientLink => Self::encode_response(&Response::ClientLink(
                 self.client_reconnector
@@ -734,14 +744,14 @@ impl DaemonService {
         })
     }
 
-    fn record_recent_failure(&self, operation: &str, error: &fdo::Error) {
+    fn record_recent_failure(&self, operation: &str, error: &RequestError) {
         let Ok(mut errors) = self.recent_errors.lock() else {
             return;
         };
         errors.push(DiagnosticFailure {
             timestamp_unix_ms: unix_time_ms(),
             operation: operation.to_owned(),
-            failure_class: fdo_error_class(error).to_owned(),
+            failure_class: error.class().to_owned(),
         });
         if errors.len() > 16 {
             errors.remove(0);
@@ -782,7 +792,7 @@ impl DaemonService {
         payload: &str,
         #[zbus(connection)] connection: &Connection,
         #[zbus(header)] header: Header<'_>,
-    ) -> fdo::Result<String> {
+    ) -> Result<String, RequestError> {
         let request_id = NEXT_API_REQUEST_ID.fetch_add(1, Ordering::Relaxed);
         let command = match decode_command(payload) {
             Ok(command) => command,
@@ -796,9 +806,9 @@ impl DaemonService {
                         Some("invalid_argument")
                     )
                 );
-                return Err(fdo::Error::InvalidArgs(
-                    "malformed BlueRoute command payload".into(),
-                ));
+                return Err(
+                    fdo::Error::InvalidArgs("malformed BlueRoute command payload".into()).into(),
+                );
             }
         };
         let operation = command_operation(&command);
@@ -824,7 +834,7 @@ impl DaemonService {
                 } else {
                     "failed"
                 },
-                result.as_ref().err().map(fdo_error_class)
+                result.as_ref().err().map(RequestError::class)
             )
         );
         if let Err(error) = &result {
@@ -835,6 +845,97 @@ impl DaemonService {
 
     #[zbus(signal)]
     async fn event(emitter: &SignalEmitter<'_>, payload: &str) -> zbus::Result<()>;
+}
+
+/// What a request can fail with on the bus. Standard errors keep their standard names; failures a
+/// client should handle specifically get a BlueRoute name. Implemented by hand rather than with
+/// zbus's derive: the derive sends a wrapped standard error as the generic
+/// `org.freedesktop.zbus.Error`, which would hide `AccessDenied` and `NotSupported` from clients.
+#[derive(Debug)]
+pub enum RequestError {
+    Standard(fdo::Error),
+    /// The network's private IPv4 range overlaps one already in use on this computer.
+    AddressConflict(String),
+}
+
+impl From<fdo::Error> for RequestError {
+    fn from(error: fdo::Error) -> Self {
+        Self::Standard(error)
+    }
+}
+
+impl From<zbus::Error> for RequestError {
+    fn from(error: zbus::Error) -> Self {
+        Self::Standard(error.into())
+    }
+}
+
+impl zbus::DBusError for RequestError {
+    fn name(&self) -> zbus::names::ErrorName<'_> {
+        match self {
+            Self::Standard(error) => error.name(),
+            Self::AddressConflict(_) => {
+                zbus::names::ErrorName::from_static_str_unchecked(ADDRESS_CONFLICT_ERROR)
+            }
+        }
+    }
+
+    fn description(&self) -> Option<&str> {
+        match self {
+            Self::Standard(error) => error.description(),
+            Self::AddressConflict(message) => Some(message),
+        }
+    }
+
+    fn create_reply(&self, call: &zbus::message::Header<'_>) -> zbus::Result<zbus::Message> {
+        match self {
+            Self::Standard(error) => error.create_reply(call),
+            Self::AddressConflict(message) => {
+                zbus::Message::error(call, self.name())?.build(&(message.as_str(),))
+            }
+        }
+    }
+}
+
+impl fmt::Display for RequestError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use zbus::DBusError;
+        write!(
+            formatter,
+            "{}: {}",
+            self.name(),
+            self.description().unwrap_or("no description")
+        )
+    }
+}
+
+impl std::error::Error for RequestError {}
+
+impl RequestError {
+    /// The coarse class for logs and recent-failure diagnostics; never the message.
+    fn class(&self) -> &'static str {
+        match self {
+            Self::AddressConflict(_) => "address_conflict",
+            Self::Standard(error) => fdo_error_class(error),
+        }
+    }
+
+    #[cfg(test)]
+    fn fdo(&self) -> Option<&fdo::Error> {
+        match self {
+            Self::Standard(error) => Some(error),
+            Self::AddressConflict(_) => None,
+        }
+    }
+}
+
+/// As `core_error_to_dbus`, but address conflicts get their own error name.
+fn core_error_to_request(error: CoreError) -> RequestError {
+    if error.kind() == ErrorKind::AddressConflict {
+        RequestError::AddressConflict(error.message().to_owned())
+    } else {
+        core_error_to_dbus(error).into()
+    }
 }
 
 fn fdo_error_class(error: &fdo::Error) -> &'static str {
@@ -1010,7 +1111,7 @@ mod local_node_tests {
                 })
                 .await
                 .unwrap_err();
-            assert!(matches!(refused, fdo::Error::NotSupported(_)));
+            assert!(matches!(refused.fdo(), Some(fdo::Error::NotSupported(_))));
             let _ = std::fs::remove_dir_all(dir);
         });
     }
@@ -1072,6 +1173,75 @@ mod local_node_tests {
         });
     }
 
+    /// Creating always fails with an address conflict; nothing else is used.
+    struct ConflictingNetworks;
+
+    impl NetworkOperations for ConflictingNetworks {
+        fn create_network(&self, _name: DisplayName) -> NetworkOperationFuture<'_, NetworkId> {
+            Box::pin(async {
+                Err(CoreError::new(
+                    ErrorKind::AddressConflict,
+                    "the network's address range is already in use on this computer",
+                ))
+            })
+        }
+        fn leave_network(&self) -> NetworkOperationFuture<'_, ()> {
+            Box::pin(async {
+                Err(CoreError::new(
+                    ErrorKind::AuthenticationFailed,
+                    "fake refusal for name checks",
+                ))
+            })
+        }
+        fn list_networks(
+            &self,
+        ) -> NetworkOperationFuture<'_, Vec<blueroute_protocol::NetworkSummary>> {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+        fn start_discovery(&self) -> NetworkOperationFuture<'_, ()> {
+            Box::pin(async { Ok(()) })
+        }
+        fn stop_discovery(&self) -> NetworkOperationFuture<'_, ()> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    #[test]
+    fn an_address_conflict_has_its_own_error_name_and_others_keep_theirs() {
+        use zbus::DBusError;
+        futures_lite::future::block_on(async {
+            let mut service = DaemonService::new(
+                NodeId::from_bytes([0x74; 16]),
+                HealthLevel::Healthy,
+                NodeCapabilities::default(),
+            );
+            service.network_operations = Some(Arc::new(ConflictingNetworks));
+            let conflict = service
+                .execute(Command::CreateNetwork {
+                    name: DisplayName::new("Lab").unwrap(),
+                })
+                .await
+                .unwrap_err();
+            assert_eq!(
+                conflict.name().as_str(),
+                blueroute_protocol::ADDRESS_CONFLICT_ERROR
+            );
+            assert_eq!(conflict.class(), "address_conflict");
+            assert!(
+                conflict
+                    .description()
+                    .is_some_and(|text| text.contains("already in use"))
+            );
+            // Standard failures keep their standard D-Bus names through the same type.
+            let denied = service.execute(Command::LeaveNetwork).await.unwrap_err();
+            assert_eq!(
+                denied.name().as_str(),
+                "org.freedesktop.DBus.Error.AccessDenied"
+            );
+            assert_eq!(denied.class(), "authorization_denied");
+        });
+    }
+
     #[test]
     fn client_link_dispatch_without_a_reconnector_reads_none_and_refuses_retry() {
         futures_lite::future::block_on(async {
@@ -1086,7 +1256,7 @@ mod local_node_tests {
                 .execute(Command::RetryClientReconnect)
                 .await
                 .unwrap_err();
-            assert!(matches!(retry, fdo::Error::NotSupported(_)));
+            assert!(matches!(retry.fdo(), Some(fdo::Error::NotSupported(_))));
         });
     }
 
@@ -1243,7 +1413,7 @@ mod local_node_tests {
         for _ in 0..20 {
             daemon.record_recent_failure(
                 "join_network",
-                &fdo::Error::Failed("credential-or-user-data sentinel".into()),
+                &fdo::Error::Failed("credential-or-user-data sentinel".into()).into(),
             );
         }
         let snapshot = daemon.diagnostics_snapshot().unwrap();

@@ -136,6 +136,18 @@ impl PeerTrustOperations for FakePeerTrustOperations {
     }
 }
 
+const ACCESS_DENIED: &str = "org.freedesktop.DBus.Error.AccessDenied";
+
+/// The D-Bus error name a client receives, however zbus surfaces it.
+fn error_name(error: &zbus::Error) -> String {
+    use zbus::DBusError;
+    match error {
+        zbus::Error::MethodError(name, _, _) => name.to_string(),
+        zbus::Error::FDO(error) => error.name().to_string(),
+        other => format!("unexpected non-D-Bus error: {other}"),
+    }
+}
+
 #[test]
 #[ignore = "requires an isolated D-Bus session; CI runs this under dbus-run-session"]
 fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<(), Box<dyn Error>>
@@ -213,7 +225,10 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
         );
 
         let malformed: zbus::Result<String> = proxy.call("Request", &("{",)).await;
-        assert!(malformed.is_err());
+        assert_eq!(
+            error_name(&malformed.expect_err("malformed requests must fail")),
+            "org.freedesktop.DBus.Error.InvalidArgs"
+        );
         assert_eq!(
             calls.load(Ordering::SeqCst),
             0,
@@ -225,7 +240,8 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
         })?;
         let denied: zbus::Result<String> = proxy.call("Request", &(create_network.clone(),)).await;
         let denied = denied.expect_err("unauthorized mutation must fail closed");
-        assert!(denied.to_string().contains("AccessDenied"));
+        // The exact error name, not text: clients classify failures only by name.
+        assert_eq!(error_name(&denied), ACCESS_DENIED);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert_eq!(create_calls.load(Ordering::SeqCst), 0);
         assert_eq!(
@@ -245,10 +261,7 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
             .call("Request", &(join_network_command.clone(),))
             .await;
         assert!(
-            denied
-                .expect_err("unauthorized join must fail closed")
-                .to_string()
-                .contains("AccessDenied")
+            error_name(&denied.expect_err("unauthorized join must fail closed")) == ACCESS_DENIED
         );
         assert_eq!(join_calls.load(Ordering::SeqCst), 0);
 
@@ -257,10 +270,7 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
             .call("Request", &(leave_network_command.clone(),))
             .await;
         assert!(
-            denied
-                .expect_err("unauthorized leave must fail closed")
-                .to_string()
-                .contains("AccessDenied")
+            error_name(&denied.expect_err("unauthorized leave must fail closed")) == ACCESS_DENIED
         );
         assert_eq!(leave_calls.load(Ordering::SeqCst), 0);
 
@@ -268,10 +278,8 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
         let trust_peer = encode_command(&Command::TrustPeer { node: peer })?;
         let denied: zbus::Result<String> = proxy.call("Request", &(trust_peer.clone(),)).await;
         assert!(
-            denied
-                .expect_err("unauthorized peer approval must fail closed")
-                .to_string()
-                .contains("AccessDenied")
+            error_name(&denied.expect_err("unauthorized peer approval must fail closed"))
+                == ACCESS_DENIED
         );
         assert_eq!(trust_calls.load(Ordering::SeqCst), 0);
 
@@ -334,10 +342,7 @@ fn authorization_is_read_only_by_default_and_polkit_gates_mutations() -> Result<
         let unavailable = encode_command(&Command::StartDiscovery)?;
         let error: zbus::Result<String> = proxy.call("Request", &(unavailable,)).await;
         assert!(
-            error
-                .expect_err("missing PolicyKit must fail closed")
-                .to_string()
-                .contains("AccessDenied")
+            error_name(&error.expect_err("missing PolicyKit must fail closed")) == ACCESS_DENIED
         );
         assert_eq!(
             start_discovery_calls.load(Ordering::SeqCst),

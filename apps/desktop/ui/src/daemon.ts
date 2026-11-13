@@ -23,7 +23,8 @@ export type DesktopError =
   | "unsupported"
   | "operational"
   | "unexpected_response"
-  | "invalid_name";
+  | "invalid_name"
+  | "address_conflict";
 
 export interface PlatformCheck {
   summary: string;

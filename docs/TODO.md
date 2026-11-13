@@ -2605,7 +2605,7 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 - [ ] daemon/backend unavailable.
 - [ ] permission denied.
 - [ ] peer unreachable.
-- [ ] address conflict.
+- [x] address conflict (2026-11-12: the daemon returns the typed `org.blueroute.Error.AddressConflict` for create/join and the desktop shows plain-language guidance; tested from daemon to UI).
 - [ ] stale/reconnecting state.
 - [ ] routed peer unavailable.
 - [ ] driver/firmware quirks.
@@ -3087,6 +3087,8 @@ Cover:
 - driver/firmware quirks.
 
 **Software partial (2026-10-15):** `docs/TROUBLESHOOTING.md` covers each listed failure class with current diagnostics and recovery boundaries. The CLI now links typed runtime error categories to this guidance, but TUI/desktop integration and authenticated routed-peer states remain unimplemented.
+
+**Typed address-conflict error (2026-11-12, API 1.6):** create and join now fail with `org.blueroute.Error.AddressConflict`. The client classifies it by exact name only, the CLI keeps exit 1 but reports `kind: address_conflict` with specific advice and a link here, and the desktop and TUI explain it in plain words. Along the way: zbus's `DBusError` derive would have sent every wrapped standard error as the generic `org.freedesktop.zbus.Error`, so the daemon's error type implements `DBusError` by hand. The authorization bus test, which only checked error *text* and could not have caught that, now asserts exact error names; a deliberate regression was confirmed to fail it.
 
 **Docs pass (2026-11-12):** `TROUBLESHOOTING.md` now explains the host's self-repair after BlueZ or NetworkManager restarts and the log events to check, what each joined-client link state means and what to do, and why a host refuses a joining computer (no enrolled key, or the client limit reached).
 

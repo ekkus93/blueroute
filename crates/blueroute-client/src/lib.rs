@@ -190,6 +190,9 @@ pub enum ClientErrorKind {
     Authorization,
     Unsupported,
     Operational,
+    /// The network's private IPv4 range overlaps one already in use on this computer
+    /// (`blueroute_protocol::ADDRESS_CONFLICT_ERROR`, API 1.6).
+    AddressConflict,
 }
 
 fn remote_error_kind(name: &str) -> ClientErrorKind {
@@ -200,6 +203,7 @@ fn remote_error_kind(name: &str) -> ClientErrorKind {
             ClientErrorKind::Authorization
         }
         "org.freedesktop.DBus.Error.NotSupported" => ClientErrorKind::Unsupported,
+        blueroute_protocol::ADDRESS_CONFLICT_ERROR => ClientErrorKind::AddressConflict,
         "org.freedesktop.DBus.Error.ServiceUnknown"
         | "org.freedesktop.DBus.Error.NameHasNoOwner"
         | "org.freedesktop.DBus.Error.NoReply"
@@ -312,11 +316,18 @@ mod error_class_tests {
             remote_error_kind("org.freedesktop.DBus.Error.ServiceUnknown"),
             ClientErrorKind::Unavailable
         );
+        assert_eq!(
+            remote_error_kind("org.blueroute.Error.AddressConflict"),
+            ClientErrorKind::AddressConflict
+        );
         for suspicious in [
             "AccessDenied",
             "org.freedesktop.DBus.Error.AccessDenied.extra",
             "Error: AccessDenied",
             "org.freedesktop.DBus.Error.Failed",
+            "AddressConflict",
+            "org.blueroute.Error.AddressConflict.extra",
+            "org.blueroute.Error.Other",
         ] {
             assert_eq!(remote_error_kind(suspicious), ClientErrorKind::Operational);
         }

@@ -3,33 +3,60 @@
 const GUIDE: &str = "https://github.com/ekkus93/blueroute/blob/master/docs/TROUBLESHOOTING.md";
 const ADMIN_GUIDE: &str = "https://github.com/ekkus93/blueroute/blob/master/docs/ADMINISTRATOR.md";
 
+/// A specific failure the daemon names with its own D-Bus error (never inferred from text).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Detail {
+    AddressConflict,
+}
+
 pub(crate) fn format_failure(code: i32, message: &str, json: bool) -> String {
-    let (kind, next_step, help) = match code {
-        2 => (
-            "usage",
-            "Run `blueroute --help` to see supported commands and options.",
-            ADMIN_GUIDE.to_owned(),
+    format_failure_with(code, None, message, json)
+}
+
+/// Like `format_failure`, with specific guidance when the daemon named the failure. The exit
+/// code (and its category's stable meaning) never changes; only `kind` and the advice do.
+pub(crate) fn format_failure_with(
+    code: i32,
+    detail: Option<Detail>,
+    message: &str,
+    json: bool,
+) -> String {
+    let (kind, next_step, help) = match (detail, code) {
+        (Some(Detail::AddressConflict), _) => (
+            "address_conflict",
+            "This network's private address range is already used on this computer, for example \
+             by a VPN, a container network or another network connection. Check `ip -4 route` and \
+             change or remove the conflicting network, or choose another BlueRoute address pool; \
+             BlueRoute never changes routes it does not own.",
+            format!("{GUIDE}#address-conflict"),
         ),
-        3 => (
-            "daemon_unavailable",
-            "Check `systemctl status blueroute.service` and the daemon journal.",
-            format!("{GUIDE}#the-daemon-is-unavailable-or-reports-unsupported-capability"),
-        ),
-        4 => (
-            "authorization",
-            "The operation needs PolicyKit authorization; do not bypass it with sudo.",
-            format!("{GUIDE}#permission-denied"),
-        ),
-        5 => (
-            "unsupported",
-            "Check `blueroute capability show`; authenticated network join is not yet enabled.",
-            format!("{GUIDE}#the-daemon-is-unavailable-or-reports-unsupported-capability"),
-        ),
-        _ => (
-            "operational",
-            "Check `blueroute diagnostics show` and the daemon journal.",
-            format!("{GUIDE}#common-failures"),
-        ),
+        (None, code) => match code {
+            2 => (
+                "usage",
+                "Run `blueroute --help` to see supported commands and options.",
+                ADMIN_GUIDE.to_owned(),
+            ),
+            3 => (
+                "daemon_unavailable",
+                "Check `systemctl status blueroute.service` and the daemon journal.",
+                format!("{GUIDE}#the-daemon-is-unavailable-or-reports-unsupported-capability"),
+            ),
+            4 => (
+                "authorization",
+                "The operation needs PolicyKit authorization; do not bypass it with sudo.",
+                format!("{GUIDE}#permission-denied"),
+            ),
+            5 => (
+                "unsupported",
+                "Check `blueroute capability show`; authenticated network join is not yet enabled.",
+                format!("{GUIDE}#the-daemon-is-unavailable-or-reports-unsupported-capability"),
+            ),
+            _ => (
+                "operational",
+                "Check `blueroute diagnostics show` and the daemon journal.",
+                format!("{GUIDE}#common-failures"),
+            ),
+        },
     };
     if json {
         // Errors use stderr; successful --json responses still use stdout.
@@ -87,5 +114,18 @@ mod tests {
         assert!(unsupported.contains("authenticated network join is not yet enabled"));
         assert!(!unsupported.contains("#permission-denied"));
         assert!(format_failure(2, "invalid option", false).contains("blueroute --help"));
+        // A named address conflict keeps exit category 1 but gets its own kind and advice.
+        let conflict = format_failure_with(1, Some(Detail::AddressConflict), "overlap", true);
+        let value: serde_json::Value = serde_json::from_str(&conflict).unwrap();
+        assert_eq!(value["error"]["code"], 1);
+        assert_eq!(value["error"]["kind"], "address_conflict");
+        assert!(
+            value["error"]["help"]
+                .as_str()
+                .unwrap()
+                .ends_with("#address-conflict")
+        );
+        let human = format_failure_with(1, Some(Detail::AddressConflict), "overlap", false);
+        assert!(human.contains("ip -4 route") && human.contains("never changes routes"));
     }
 }

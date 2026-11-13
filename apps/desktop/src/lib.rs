@@ -27,6 +27,8 @@ pub enum DesktopError {
     UnexpectedResponse,
     /// The requested name was rejected locally before contacting the daemon.
     InvalidName,
+    /// The network's address range is already used on this computer (typed daemon error).
+    AddressConflict,
 }
 
 impl From<ClientErrorKind> for DesktopError {
@@ -36,6 +38,7 @@ impl From<ClientErrorKind> for DesktopError {
             ClientErrorKind::Authorization => Self::PermissionDenied,
             ClientErrorKind::Unsupported => Self::Unsupported,
             ClientErrorKind::Operational => Self::Operational,
+            ClientErrorKind::AddressConflict => Self::AddressConflict,
         }
     }
 }
@@ -256,6 +259,14 @@ mod tests {
         assert_eq!(
             DesktopError::from(ClientErrorKind::Operational),
             DesktopError::Operational
+        );
+        assert_eq!(
+            DesktopError::from(ClientErrorKind::AddressConflict),
+            DesktopError::AddressConflict
+        );
+        assert_eq!(
+            serde_json::to_value(DesktopError::AddressConflict).unwrap(),
+            "address_conflict"
         );
     }
 

@@ -31,7 +31,7 @@ pub struct ApiVersion {
 }
 
 impl ApiVersion {
-    pub const CURRENT: Self = Self { major: 1, minor: 5 };
+    pub const CURRENT: Self = Self { major: 1, minor: 6 };
 
     pub const fn new(major: u16, minor: u16) -> Self {
         Self { major, minor }
@@ -71,6 +71,11 @@ pub enum ApiCompatibility {
 
 /// Well-known system D-Bus service name for the v1 daemon API.
 pub const DBUS_SERVICE_NAME: &str = "org.blueroute.Service1";
+
+/// D-Bus error name for a request refused because the network's private IPv4 range overlaps one
+/// already in use on this computer (API 1.6). Clients classify failures only by exact error names
+/// like this one, never by message text.
+pub const ADDRESS_CONFLICT_ERROR: &str = "org.blueroute.Error.AddressConflict";
 /// Well-known root object path for the v1 daemon API.
 pub const DBUS_OBJECT_PATH: &str = "/org/blueroute/Service1";
 /// Well-known D-Bus interface for the v1 daemon API.

@@ -58,7 +58,7 @@ Joining is not available in packaged builds yet, so these states only appear on 
 
 ### Address conflict
 
-BlueRoute refuses an IPv4 segment that overlaps an observed active local prefix. Inspect `ip -4 address` and `ip -4 route` before changing the configured pool. Preserve unrelated host routes and do not manually delete a route unless its ownership is established. A failed join remains fail-closed and should not be reported as membership.
+BlueRoute refuses an IPv4 segment that overlaps an observed active local prefix. The CLI then says so specifically (JSON `"kind": "address_conflict"`, exit status 1) and the desktop app explains it in plain words; both come from a typed daemon error, not from message text. Common causes are a VPN, a container or virtual-machine network, or another connection using the same private range. Inspect `ip -4 address` and `ip -4 route` before changing the configured pool. Preserve unrelated host routes and do not manually delete a route unless its ownership is established. A failed join remains fail-closed and should not be reported as membership.
 
 ### Routed peer is unavailable
 

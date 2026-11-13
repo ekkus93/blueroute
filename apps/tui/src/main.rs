@@ -172,6 +172,9 @@ fn offline_message(kind: ClientErrorKind) -> &'static str {
             "Read-only access denied by system policy. Check D-Bus permissions."
         }
         ClientErrorKind::Unsupported => "Daemon does not support this query.",
+        ClientErrorKind::AddressConflict => {
+            "This network's address range is already used on this computer (see `ip -4 route`)."
+        }
         ClientErrorKind::Operational => {
             "Daemon query failed. Use blueroute diagnostics show for details."
         }

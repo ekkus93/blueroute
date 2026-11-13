@@ -87,16 +87,70 @@ fn cli_exit_statuses_propagate_typed_broker_failures() -> Result<(), Box<dyn std
 
     struct FakeDaemon;
 
+    /// The fake's errors: standard ones by their standard names, plus BlueRoute's typed
+    /// address conflict, built by hand exactly as the daemon does.
+    #[derive(Debug)]
+    enum FakeError {
+        Standard(fdo::Error),
+        AddressConflict,
+    }
+
+    impl From<fdo::Error> for FakeError {
+        fn from(error: fdo::Error) -> Self {
+            Self::Standard(error)
+        }
+    }
+
+    impl From<zbus::Error> for FakeError {
+        fn from(error: zbus::Error) -> Self {
+            Self::Standard(error.into())
+        }
+    }
+
+    impl std::fmt::Display for FakeError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{self:?}")
+        }
+    }
+
+    impl std::error::Error for FakeError {}
+
+    impl zbus::DBusError for FakeError {
+        fn name(&self) -> zbus::names::ErrorName<'_> {
+            match self {
+                Self::Standard(error) => error.name(),
+                Self::AddressConflict => zbus::names::ErrorName::from_static_str_unchecked(
+                    blueroute_protocol::ADDRESS_CONFLICT_ERROR,
+                ),
+            }
+        }
+
+        fn description(&self) -> Option<&str> {
+            match self {
+                Self::Standard(error) => error.description(),
+                Self::AddressConflict => Some("mock address range already in use"),
+            }
+        }
+
+        fn create_reply(&self, call: &zbus::message::Header<'_>) -> zbus::Result<zbus::Message> {
+            match self {
+                Self::Standard(error) => error.create_reply(call),
+                Self::AddressConflict => zbus::Message::error(call, self.name())?
+                    .build(&("mock address range already in use",)),
+            }
+        }
+    }
+
     #[interface(name = "org.blueroute.Service1")]
     impl FakeDaemon {
         fn version(&self) -> (u16, u16) {
             (ApiVersion::CURRENT.major, ApiVersion::CURRENT.minor)
         }
 
-        fn request(&self, payload: &str) -> fdo::Result<String> {
+        fn request(&self, payload: &str) -> Result<String, FakeError> {
             let json: serde_json::Value = serde_json::from_str(payload)
                 .map_err(|_| fdo::Error::InvalidArgs("malformed fixture request".into()))?;
-            match json["type"].as_str() {
+            Ok(match json["type"].as_str() {
                 Some("get_diagnostics") => Err(fdo::Error::NotSupported(
                     "mock platform capability unavailable".into(),
                 )),
@@ -118,6 +172,9 @@ fn cli_exit_statuses_propagate_typed_broker_failures() -> Result<(), Box<dyn std
                     Err(fdo::Error::NotSupported("mock join unavailable".into()))
                 }
                 // Successful mutations and reads.
+                Some("create_network") if json["data"]["name"] == "Conflict" => {
+                    return Err(FakeError::AddressConflict);
+                }
                 Some("create_network") => Ok(r#"{"type":"ack"}"#.into()),
                 Some("get_client_link") => Ok(r#"{"type":"client_link","data":null}"#.into()),
                 // Typed refusals on the other mutations.
@@ -136,7 +193,7 @@ fn cli_exit_statuses_propagate_typed_broker_failures() -> Result<(), Box<dyn std
                 // A missing record is reported, not printed as an empty success.
                 Some("get_node") => Ok(r#"{"type":"node","data":null}"#.into()),
                 _ => Err(fdo::Error::InvalidArgs("unexpected fixture command".into())),
-            }
+            }?)
         }
     }
 
@@ -180,6 +237,15 @@ fn cli_exit_statuses_propagate_typed_broker_failures() -> Result<(), Box<dyn std
             );
             assert!(result.stdout.is_empty(), "args={arguments:?}");
         }
+
+        // A typed address conflict keeps exit 1 but is named, and its advice is specific.
+        let conflict = run(&["--json", "network", "create", "Conflict"])?;
+        assert_eq!(conflict.status.code(), Some(1));
+        let envelope: serde_json::Value = serde_json::from_slice(&conflict.stderr)?;
+        assert_eq!(envelope["error"]["kind"], "address_conflict");
+        assert_eq!(envelope["error"]["code"], 1);
+        let human = run(&["network", "create", "Conflict"])?;
+        assert!(String::from_utf8_lossy(&human.stderr).contains("ip -4 route"));
 
         // The JSON failure envelope carries the same typed category.
         let denied = run(&["--json", "network", "reconnect"])?;
