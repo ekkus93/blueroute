@@ -83,6 +83,9 @@ jobs:
       - name: Run client D-Bus integration test
         run: dbus-run-session -- cargo test -p blueroute-client --test dbus_client --locked client_queries_events_reconnects_and_fails_closed_on_incompatibility -- --ignored --exact
 
+      - name: Run client owner-binding tests (CR-F8)
+        run: dbus-run-session -- cargo test -p blueroute-client --test owner_race --locked -- --ignored
+
       - name: Validate CLI typed broker error exits
         run: dbus-run-session -- cargo test -p blueroute --test cli_exit_contract --locked cli_exit_statuses_propagate_typed_broker_failures -- --ignored --exact
 

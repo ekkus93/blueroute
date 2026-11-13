@@ -10,16 +10,31 @@ use blueroute_protocol::{
     Event, ProtocolCodecError, Response, decode_event, decode_response, encode_command,
 };
 use futures_lite::StreamExt;
+use zbus::fdo::DBusProxy;
+use zbus::names::{BusName, OwnedUniqueName};
 use zbus::proxy::SignalStream;
 use zbus::{Connection, Proxy};
 
 const RECONNECT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Reusable version-gated client for the local BlueRoute daemon.
+///
+/// Every operation resolves the daemon's well-known name to its unique bus name once, checks the
+/// version there, and talks only to that unique name (CR-F8, OWN-1..OWN-4). A replacement owner
+/// that takes the name mid-operation is never reached; an owner that disappears makes the
+/// operation fail as unavailable. Nothing is ever retried automatically.
 #[derive(Clone)]
 pub struct BlueRouteClient {
     connection: Connection,
+    /// The version of the owner most recently validated. Informational only: every operation
+    /// validates its own owner again.
     server_version: ApiVersion,
+}
+
+/// A daemon owner whose compatible version was checked at its unique bus name.
+struct ValidatedOwner {
+    name: OwnedUniqueName,
+    version: ApiVersion,
 }
 
 impl BlueRouteClient {
@@ -33,10 +48,10 @@ impl BlueRouteClient {
     ///
     /// This is useful for deterministic tests and callers that already own a zbus connection.
     pub async fn from_connection(connection: Connection) -> Result<Self, ClientError> {
-        let server_version = negotiate_version(&connection).await?;
+        let owner = validated_owner(&connection).await?;
         Ok(Self {
             connection,
-            server_version,
+            server_version: owner.version,
         })
     }
 
@@ -51,9 +66,9 @@ impl BlueRouteClient {
     pub async fn reconnect(&mut self, timeout: Duration) -> Result<(), ClientError> {
         let deadline = Instant::now() + timeout;
         loop {
-            match negotiate_version(&self.connection).await {
-                Ok(server_version) => {
-                    self.server_version = server_version;
+            match validated_owner(&self.connection).await {
+                Ok(owner) => {
+                    self.server_version = owner.version;
                     return Ok(());
                 }
                 Err(error @ ClientError::IncompatibleVersion { .. }) => return Err(error),
@@ -73,12 +88,13 @@ impl BlueRouteClient {
 
     /// Send one typed protocol command.
     ///
-    /// Version compatibility is checked immediately before every normal command. This makes a
-    /// daemon restart to an incompatible API fail closed before the command can be delivered.
+    /// The command goes to exactly the owner whose compatible version was checked immediately
+    /// before, addressed by its unique bus name. A daemon replaced in between never receives it,
+    /// and a reply lost in transit is reported, never answered by resending the command.
     pub async fn request(&self, command: &Command) -> Result<Response, ClientError> {
-        negotiate_version(&self.connection).await?;
+        let owner = validated_owner(&self.connection).await?;
         let payload = encode_command(command).map_err(ClientError::Protocol)?;
-        let proxy = service_proxy(&self.connection).await?;
+        let proxy = owner_proxy(&self.connection, &owner.name).await?;
         let response_payload: String = proxy
             .call("Request", &(payload.as_str(),))
             .await
@@ -106,16 +122,19 @@ impl BlueRouteClient {
         }
     }
 
-    /// Subscribe to typed daemon events after verifying the current daemon API version.
+    /// Subscribe to typed daemon events from the owner whose compatible version was just checked.
+    /// Signals are matched on that owner's unique bus name, so a replacement owner's events never
+    /// arrive on this subscription.
     pub async fn events(&self) -> Result<EventSubscription, ClientError> {
-        negotiate_version(&self.connection).await?;
-        let proxy = service_proxy(&self.connection).await?;
+        let owner = validated_owner(&self.connection).await?;
+        let proxy = owner_proxy(&self.connection, &owner.name).await?;
         let stream = proxy
             .receive_signal("Event")
             .await
             .map_err(ClientError::Bus)?;
         Ok(EventSubscription {
             connection: self.connection.clone(),
+            owner: owner.name,
             stream,
         })
     }
@@ -124,6 +143,8 @@ impl BlueRouteClient {
 /// Event stream that rechecks daemon compatibility before accepting every event payload.
 pub struct EventSubscription {
     connection: Connection,
+    /// The unique bus name the subscription is bound to.
+    owner: OwnedUniqueName,
     stream: SignalStream<'static>,
 }
 
@@ -134,9 +155,9 @@ impl EventSubscription {
             .next()
             .await
             .ok_or(ClientError::EventStreamClosed)?;
-        // Signal streams can follow a well-known D-Bus name across owner changes. Re-negotiate here
-        // so an event from a replacement daemon cannot bypass the same version gate as commands.
-        negotiate_version(&self.connection).await?;
+        // The stream only carries this owner's signals; recheck that same owner's version so an
+        // event is never accepted on the strength of a different owner's check.
+        negotiate_version_at(&self.connection, &self.owner).await?;
         let payload: String = message
             .body()
             .deserialize()
@@ -145,8 +166,29 @@ impl EventSubscription {
     }
 }
 
-async fn negotiate_version(connection: &Connection) -> Result<ApiVersion, ClientError> {
-    let proxy = service_proxy(connection).await?;
+/// Resolve the well-known name to its current unique owner and check that owner's version there.
+async fn validated_owner(connection: &Connection) -> Result<ValidatedOwner, ClientError> {
+    let name = current_owner(connection).await?;
+    let version = negotiate_version_at(connection, &name).await?;
+    Ok(ValidatedOwner { name, version })
+}
+
+/// The unique bus name currently owning the daemon's well-known name. No owner is
+/// `NameHasNoOwner`, which classifies as unavailable.
+async fn current_owner(connection: &Connection) -> Result<OwnedUniqueName, ClientError> {
+    let bus = DBusProxy::new(connection).await.map_err(ClientError::Bus)?;
+    let name = BusName::try_from(DBUS_SERVICE_NAME)
+        .map_err(|error| ClientError::Bus(zbus::Error::Names(error)))?;
+    bus.get_name_owner(name)
+        .await
+        .map_err(|error| ClientError::Bus(zbus::Error::FDO(Box::new(error))))
+}
+
+async fn negotiate_version_at(
+    connection: &Connection,
+    owner: &OwnedUniqueName,
+) -> Result<ApiVersion, ClientError> {
+    let proxy = owner_proxy(connection, owner).await?;
     let (major, minor): (u16, u16) = proxy.call("Version", &()).await.map_err(ClientError::Bus)?;
     let server = ApiVersion::new(major, minor);
     if !ApiVersion::CURRENT.is_compatible_with_server(server) {
@@ -158,10 +200,14 @@ async fn negotiate_version(connection: &Connection) -> Result<ApiVersion, Client
     Ok(server)
 }
 
-async fn service_proxy(connection: &Connection) -> Result<Proxy<'static>, ClientError> {
+/// A proxy addressed to one unique owner, never to the well-known name.
+async fn owner_proxy(
+    connection: &Connection,
+    owner: &OwnedUniqueName,
+) -> Result<Proxy<'static>, ClientError> {
     Proxy::new_owned(
         connection.clone(),
-        DBUS_SERVICE_NAME,
+        owner.to_string(),
         DBUS_OBJECT_PATH,
         DBUS_INTERFACE_NAME,
     )
