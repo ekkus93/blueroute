@@ -109,6 +109,29 @@ fn cli_exit_statuses_propagate_typed_broker_failures() -> Result<(), Box<dyn std
                         "AccessDenied string is not an auth error".into(),
                     ))
                 }
+                Some("get_status") => Err(fdo::Error::Failed("mock status failure".into())),
+                Some("get_capabilities") => Err(fdo::Error::NotSupported(
+                    "mock capability unavailable".into(),
+                )),
+                // Production join is refused as unsupported until authenticated transport exists.
+                Some("join_network") => {
+                    Err(fdo::Error::NotSupported("mock join unavailable".into()))
+                }
+                // Successful mutations and reads.
+                Some("create_network") => Ok(r#"{"type":"ack"}"#.into()),
+                Some("get_client_link") => Ok(r#"{"type":"client_link","data":null}"#.into()),
+                // Typed refusals on the other mutations.
+                Some("retry_client_reconnect") => Err(fdo::Error::AccessDenied(
+                    "mock PolicyKit authorization denied".into(),
+                )),
+                Some("leave_network") => {
+                    Err(fdo::Error::NotSupported("mock leave unsupported".into()))
+                }
+                Some("forget_peer") => Err(fdo::Error::Failed("mock operational failure".into())),
+                // A well-formed answer of the wrong kind is an operational failure, not success.
+                Some("start_discovery") => Ok(r#"{"type":"client_link","data":null}"#.into()),
+                // A missing record is reported, not printed as an empty success.
+                Some("get_node") => Ok(r#"{"type":"node","data":null}"#.into()),
                 _ => Err(fdo::Error::InvalidArgs("unexpected fixture command".into())),
             }
         }
@@ -122,22 +145,55 @@ fn cli_exit_statuses_propagate_typed_broker_failures() -> Result<(), Box<dyn std
             .await?;
         let broker_address = std::env::var("DBUS_SESSION_BUS_ADDRESS")?;
         let peer = blueroute_core::NodeId::from_bytes([7; 16]).to_string();
+        let network = blueroute_core::NetworkId::from_bytes([8; 16]).to_string();
+        let run = |arguments: &[&str]| {
+            Command::new(env!("CARGO_BIN_EXE_blueroute"))
+                .env("DBUS_SYSTEM_BUS_ADDRESS", &broker_address)
+                .args(arguments)
+                .output()
+        };
+        // Failures: the exit code follows the typed D-Bus error, and nothing goes to stdout.
         for (arguments, expected) in [
             (vec!["diagnostics", "show"], 5),
             (vec!["peer", "trust", peer.as_str()], 4),
             (vec!["network", "list"], 1),
+            (vec!["network", "reconnect"], 4),
+            (vec!["network", "leave"], 5),
+            (vec!["peer", "forget", peer.as_str()], 1),
+            (vec!["discover", "start"], 1),
+            (vec!["node", "show", peer.as_str()], 1),
+            (vec!["status"], 1),
+            (vec!["capability", "show"], 5),
+            (vec!["network", "join", network.as_str()], 5),
         ] {
-            let result = Command::new(env!("CARGO_BIN_EXE_blueroute"))
-                .env("DBUS_SYSTEM_BUS_ADDRESS", &broker_address)
-                .args(&arguments)
-                .output()?;
+            let result = run(&arguments)?;
             let stderr = String::from_utf8_lossy(&result.stderr);
             assert_eq!(
                 result.status.code(),
                 Some(expected),
                 "args={arguments:?}; stderr={stderr}"
             );
-            assert!(result.stdout.is_empty());
+            assert!(result.stdout.is_empty(), "args={arguments:?}");
+        }
+
+        // The JSON failure envelope carries the same typed category.
+        let denied = run(&["--json", "network", "reconnect"])?;
+        assert_eq!(denied.status.code(), Some(4));
+        let envelope: serde_json::Value = serde_json::from_slice(&denied.stderr)?;
+        assert_eq!(envelope["error"]["code"], 4);
+
+        // Successes exit 0 with their output on stdout only.
+        for (arguments, stdout) in [
+            (vec!["network", "create", "Lab"], "Network created"),
+            (vec!["--json", "network", "create", "Lab"], r#"{"ok":true}"#),
+            (vec!["network", "link"], "not a joined client"),
+            (vec!["--json", "network", "link"], "null"),
+        ] {
+            let result = run(&arguments)?;
+            let text = String::from_utf8_lossy(&result.stdout);
+            assert_eq!(result.status.code(), Some(0), "args={arguments:?}");
+            assert!(text.contains(stdout), "args={arguments:?}; stdout={text}");
+            assert!(result.stderr.is_empty(), "args={arguments:?}");
         }
         Ok(())
     })
