@@ -3019,6 +3019,8 @@ From clean supported Linux/Debian installs:
 
 - [x] install (current Debian development-package path and release limitations documented).
 - [ ] create/join/leave (host create/leave documented; production join and graphical workflow still unavailable).
+
+**Docs pass (2026-11-12):** `USER_GUIDE.md` now describes the full-screen read-only TUI, the desktop app (create, leave, reconnect, rename, diagnose), out-of-band key confirmation on both sides (`peer set-join-host`, `peer enroll`), `network link`/`reconnect`, `node set-name`, leave after a failed restore, and the host's self-repair after service restarts. The join part of this box stays open: joining is disabled in every packaged build.
 - [x] device status (available local-only CLI views and interpretation documented).
 - [x] common recovery (read-only checks and safe escalation documented).
 - [x] explain compatibility requirements without requiring PAN knowledge.
@@ -3034,6 +3036,8 @@ From clean supported Linux/Debian installs:
 - [x] commands/JSON (current CLI commands and stable JSON mode are documented in `docs/ADMINISTRATOR.md`).
 - [x] logs/diagnostics (systemd journal and available daemon/capability diagnostics are documented; detailed runtime state remains unavailable).
 - [ ] topology diagnostics (not exposed yet).
+
+**Docs pass (2026-11-12):** `ADMINISTRATOR.md` now lists every current command (including `peer enroll`, `peer set-join-host`, `network link`/`reconnect`, `node set-name`), the exit codes, the structured log events an administrator will look for, and how a join-capable test rig is built and recognized. Topology diagnostics are still not exposed.
 - [x] local capabilities and their evidence sources are documented; remote capability exchange is not integrated.
 
 **Software partial (2026-10-15):** `docs/ADMINISTRATOR.md` documents current commands, JSON, service logs, capability output, and implementation limits. The admin acceptance criterion remains open until live topology and detailed link diagnostics are available.
@@ -3050,6 +3054,8 @@ The acceptance criterion remains open until live topology and detailed link diag
 - [x] include current implementation and target architecture diagrams.
 - [x] add `docs/ADR-INDEX.md`.
 - [x] document daemon/API/backend boundaries and current integration limits.
+
+**Drift fix (2026-11-12):** SPEC's "current implementation" section and diagram had drifted materially. They still called the TUI and desktop placeholders and said there was no listener, session runtime, reconnect loop or enrollment interface. They now match the code: host listener with policy ceiling, the closed join path and the `experimental-join` rig build, client reconnection, typed enrollment on both sides, the running host check, and the actual front ends, with every remaining limit stated.
 
 **Acceptance**
 
@@ -3073,6 +3079,8 @@ Cover:
 - driver/firmware quirks.
 
 **Software partial (2026-10-15):** `docs/TROUBLESHOOTING.md` covers each listed failure class with current diagnostics and recovery boundaries. The CLI now links typed runtime error categories to this guidance, but TUI/desktop integration and authenticated routed-peer states remain unimplemented.
+
+**Docs pass (2026-11-12):** `TROUBLESHOOTING.md` now explains the host's self-repair after BlueZ or NetworkManager restarts and the log events to check, what each joined-client link state means and what to do, and why a host refuses a joining computer (no enrolled key, or the client limit reached).
 
 **CLI guidance acceptance slice (2026-11-03):** Human-readable CLI failures now provide category-appropriate next steps and links to troubleshooting or administrator guidance; JSON errors include a help URL and preserve typed exit status on stderr. Direct process tests confirm the no-daemon and invalid-usage JSON contract; typed category mapping and hostile quoted error messages have deterministic unit tests. Source `17484d423c98a56bc1b39c690b2ccd913c4f3e01`; [exact-head CI #41743681295](https://github.com/ekkus93/blueroute/actions/runs/41743681295) **passed**. **P17-004 remains OPEN** until TUI/desktop error navigation and end-to-end authenticated link diagnostics are implemented.
 
