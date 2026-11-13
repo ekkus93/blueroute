@@ -29,7 +29,7 @@
 | CR-F5 | Ownership-safe remove/purge cleanup | P2 | CR-BASE; lifecycle design | `[-]` |
 | CR-F6 | Effect-generation resource ownership | P3 | CR-BASE; watcher contract from CR-F2 | `[x]` |
 | CR-F7 | Current documentation and acceptance reconciliation | P3 | Baseline fixes can start immediately; final pass follows implementation | `[x]` |
-| CR-INTEGRATION | Real producer-to-consumer regression coverage | Acceptance | CR-F1/F2/F3/F4/F5/F6/F8 software work | `[ ]` |
+| CR-INTEGRATION | Real producer-to-consumer regression coverage | Acceptance | CR-F1/F2/F3/F4/F5/F6/F8 software work | `[x]` |
 | CR-VALIDATE | Full toolchain, package, and exact-revision CI checks | Acceptance | Implemented software; CR-INTEGRATION | `[ ]` |
 | CR-QUALIFY | Isolated installed-system and physical cleanup evidence | Acceptance | CR-F5 software; candidate packages | `[ ]` |
 | CR-CLOSEOUT | Reviewed finding closure and original-gate reconciliation | Release gate | All applicable work and evidence above | `[ ]` |
@@ -268,23 +268,26 @@ CR-CLOSEOUT repeats the source/document comparison at the final revision.
 
 ## CR-INTEGRATION — Exercise corrected component boundaries
 
-- [ ] **CR-INTEGRATION-01:** Run actual client and desktop/TUI watchers against a private broker
+- [x] **CR-INTEGRATION-01:** Run actual client and desktop/TUI watchers against a private broker
   with idle loss, compatible/incompatible replacement, queued events, and controlled owner races.
-- [ ] **CR-INTEGRATION-02:** Drive real DaemonService requests/worker publications from one
+- [x] **CR-INTEGRATION-02:** Drive real DaemonService requests/worker publications from one
   connection and verify a second observer refreshes without manually emitting the expected event.
-- [ ] **CR-INTEGRATION-03:** Test publication/subscription startup races, burst coalescing,
+- [x] **CR-INTEGRATION-03:** Test publication/subscription startup races, burst coalescing,
   notification failure after commit, and client-link changes with unchanged aggregate health.
-- [ ] **CR-INTEGRATION-04:** Combine fresh capabilities, a fake network runtime, service status,
+- [x] **CR-INTEGRATION-04:** Combine fresh capabilities, a fake network runtime, service status,
   and published readiness in one unavailable-at-startup recovery scenario.
-- [ ] **CR-INTEGRATION-05:** Check graph updates against routing/forwarding consumers and failed
+- [x] **CR-INTEGRATION-05:** Check graph updates against routing/forwarding consumers and failed
   operations against complete before/after snapshots.
-- [ ] **CR-INTEGRATION-06:** Exercise maintenance cleanup ordering with active owned/foreign
+- [x] **CR-INTEGRATION-06:** Exercise maintenance cleanup ordering with active owned/foreign
   resources and package lifecycle calls, including failure followed by retry.
-- [ ] **CR-INTEGRATION-07:** Add the regressions to CI explicitly. Document any ignored broker
+- [x] **CR-INTEGRATION-07:** Add the regressions to CI explicitly. Document any ignored broker
   tests' exact invocation, and verify no test requires an ordinary host network mutation.
 
 **Acceptance:** Tests fail when the original boundary defects are deliberately restored and
 pass with corrected behavior. Passing helper tests or mock notifications alone are insufficient.
+
+**Accepted (2026-11-13, `d1d86a5`):** met; every restored defect fails its tests. See
+[evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-integration--corrected-boundaries-end-to-end-2026-11-13).
 
 ## CR-VALIDATE — Qualify the exact software candidate
 
@@ -357,7 +360,7 @@ Fill entries as work is qualified. Link concrete records; do not replace evidenc
 | CR-F5 / F5 | `0b0beab` | 10 removal, 4 binary, lifecycle and real-dpkg tests green locally | Required: CR-QUALIFY (open) | Installed-system/physical qualification | SOFTWARE COMPLETE / QUALIFICATION DEFERRED |
 | CR-F6 / F6 | `25e6984` | 8 `useDaemon` tests (4 fail with the baseline hook); desktop checks green | Not required for effect ownership | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
 | CR-F7 / F7 | This commit (docs) | Facts rechecked against source and packages; 0 broken links | Preserve existing records (preserved) | Final comparison at CR-CLOSEOUT | COMPLETE |
-| CR-INTEGRATION | Pending | Pending | Isolated-system results where relevant | Boundary regressions included in CI | NOT STARTED |
+| CR-INTEGRATION | `d1d86a5` | Real watchers, producers and consumers on private buses; every restored defect fails | Isolated-system results where relevant (CR-QUALIFY) | Boundary regressions included in CI (done) | COMPLETE |
 | CR-VALIDATE | Pending | Pending | No physical claim from CI | Exact candidate software/package qualification | NOT STARTED |
 | CR-QUALIFY | Pending | Pending | Pending | All required installed-system and physical checks | NOT STARTED |
 | CR-CLOSEOUT | Pending | Pending | Pending where required | Full finding and original-gate review | NOT STARTED |

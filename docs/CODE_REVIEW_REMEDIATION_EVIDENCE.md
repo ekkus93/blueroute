@@ -369,3 +369,32 @@ Facts rechecked against source and the built packages (DOC-1): API **1.7** (`Api
 
 Note: CR-VALIDATE-06 names "Ralph Bridge" for CI inspection; this remediation inspects exact-head
 CI with the GitHub CLI and records run IDs.
+
+## CR-INTEGRATION — corrected boundaries end to end (2026-11-13)
+
+**Commit:** `d1d86a5` (plus the integration tests already added with each fix).
+
+| Subtask | Tests (all private bus or fakes) |
+| --- | --- |
+| 01 actual watchers | `blueroute-desktop` `watch_integration` runs the unchanged `watch_daemon` (re-running its test binary with `DBUS_SYSTEM_BUS_ADDRESS` = the private bus): change signal → `Changed`, idle loss → `Disconnected` within 2 s, API+1 daemon never connects, compatible return reconnects on the production backoff. TUI `tui_watcher_follows_changes_idle_loss_return_and_quit` drives the real watcher thread/channel (`spawn_with`, production `spawn` passes `BlueRouteClient::connect`) through change, idle loss, return and quit (its bus connection is released). Shared `watcher` suite: replacement, incompatible return, backoff schedule, consumer stop. `owner_race`: queued replacement events and the controlled owner races. |
+| 02 real producers, second observer | `state_events`: requests from one connection (create/leave, rename, refused create) and worker publications reach two independent observers, which reread; nothing emits by hand. `watcher::cr_f1_a_real_daemon_change_reaches_the_production_watcher`. |
+| 03 races, bursts, failure, link phase | subscription-setup race (`owner_race::cr_f2_an_owner_change_during_subscription_setup_is_not_missed`), reread-on-connect (desktop "rereads once the live subscription is up", TUI link test), 200-change burst, emission failure after commit, client-link phases with unchanged health (`client_link::every_link_phase_is_announced_even_when_health_does_not_change`). |
+| 04 capability recovery scenario | `cr_f4_recovered_hosting_capability_unblocks_create_without_restart`: production `SingleStarNetworkOperations` + fake runtime + `DaemonService` status, unavailable at startup; recovery published to observers (publisher marked) and creation reaches the runtime. |
+| 05 graph consumers | `cr_f3_refused_changes_leave_paths_deterministic` (routing), `forwarding_policy::cr_f3_graph_updates_reach_the_forwarding_decision_and_refused_ones_do_not`; whole-graph before/after equality on every refused change. |
+| 06 cleanup ordering and lifecycle | `removal.rs` (owned and foreign, PANU first, partial failure then retry), lifecycle test (`stop → cleanup`, failure → `abort-remove`), real dpkg remove failing then succeeding. |
+| 07 CI and isolation | Every new bus suite has a CI step (`owner_race`, `owner_watch`, `watcher`, `state_events`, `watch_integration`, `tui_watcher`); exact invocations in `CLAUDE.md`. No test mutates host networking: buses are `dbus-run-session` private buses, state is in temporary directories, the daemon binary tests are refused before any bus, and the dpkg test's `rm` guard rejects any path outside its isolated root. |
+
+**Defect restoration** (each fix reverted in the working tree, the tests run, the fix restored):
+
+| Restored defect | How | Result |
+| --- | --- | --- |
+| F1 | publisher never emits | `state_events` 6 of 7 fail (the silence test passes, as it should); daemon-to-watcher test fails |
+| F2 | owner change does not end a subscription | desktop `watch_integration`, TUI watcher, shared `watcher` (3 of 6) and `owner_watch` fail |
+| F3 | baseline overwrite in `add_segment`/`add_link` | 7 of 12 `cr_f3` tests fail, including the forwarding consumer |
+| F4 | operations ignore new observations | 4 of 5 `cr_f4` tests fail |
+| F5 | `prerm` cleanup with `|| true` | lifecycle test fails ("prerm remove must fail when cleanup fails") |
+| F6 | baseline `useDaemon` (CR-F6 record) | 4 of 8 hook tests fail |
+| F8 | baseline client (CR-F8 record) | 2 of 5 `owner_race` tests fail |
+
+Full local run at `d1d86a5`: fmt, check, clippy clean; 888 workspace tests pass (31 ignored are
+the bus suites, all run separately and passing); desktop 43 tests and build pass.
