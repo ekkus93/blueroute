@@ -2243,6 +2243,8 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 **Software completion (2026-10-15, commit `84f05a6`):** `apps/cli/src/main.rs` now uses Clap's parser and command tree while retaining BlueRoute-specific NodeId and display-name validation. Workspace checks passed after the change; no CI claim is made for this commit.
 
+**Architecture guard (2026-11-12):** `apps/cli/tests/front_end_boundary.rs` fails the build if any front end (CLI, TUI, desktop bridge, Tauri shell) depends on `blueroute-linux`, names the BlueZ or NetworkManager D-Bus services, or spawns a process, and checks that the CLI links zbus only for tests (moved to `[dev-dependencies]`). A planted `org.bluez` reference was confirmed to fail it.
+
 **Acceptance**
 
 - CLI contains no direct BlueZ/NetworkManager networking code.
