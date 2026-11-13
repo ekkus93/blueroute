@@ -2411,9 +2411,9 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 - [x] node/network (version-gated local daemon status).
 - [x] overall health (explicitly labeled local-only).
-- [ ] device count (authenticated/live remote count not yet available).
+- [x] device count (on a host, "Connected devices: N" counts authenticated control sessions from API 1.4 diagnostics; "not reported" otherwise, never a guessed zero; 2026-11-12).
 - [x] concise capability warnings (local adapter/host/client reported/unknown).
-- [ ] Internet placeholder hidden until implemented.
+- [x] Internet placeholder hidden until implemented (the overview no longer mentions Internet sharing at all; a test asserts it; 2026-11-12).
 
 **Acceptance**
 

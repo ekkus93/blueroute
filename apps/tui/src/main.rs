@@ -59,7 +59,8 @@ fn support_label(value: Option<bool>) -> &'static str {
     }
 }
 
-fn format_overview(status: &DaemonStatus) -> String {
+/// `peers` is the host's authenticated control peers from diagnostics: `None` when not reported.
+fn format_overview(status: &DaemonStatus, peers: Option<&[blueroute_core::NodeId]>) -> String {
     let adapter = status.capabilities.adapter_usable.as_ref().map(|v| v.value);
     let warning = match adapter {
         Some(true) => "Adapter: available (not proof of peer connectivity)",
@@ -67,7 +68,7 @@ fn format_overview(status: &DaemonStatus) -> String {
         None => "Warning: Bluetooth adapter availability unknown",
     };
     format!(
-        "Status: {}\nLocal node: {}\nCurrent network: {}\n{}\nCan host: {}\nCan join: {}\nRemote peer count: unavailable (not authenticated yet)\n\nNo Internet sharing or authenticated joining is enabled.",
+        "Status: {}\nLocal node: {}\nCurrent network: {}\n{}\nCan host: {}\nCan join: {}\nConnected devices: {}",
         health_label(status.health),
         status
             .local_node
@@ -78,6 +79,13 @@ fn format_overview(status: &DaemonStatus) -> String {
         warning,
         support_label(status.capabilities.can_host_pan()),
         support_label(status.capabilities.can_join_pan()),
+        match peers {
+            Some(peers) => format!(
+                "{} (authenticated control sessions on this host)",
+                peers.len()
+            ),
+            None => "not reported".to_owned(),
+        },
     )
 }
 
@@ -150,7 +158,14 @@ async fn fetch_view(screen: Screen) -> String {
     };
     match screen {
         Screen::Overview => match client.status().await {
-            Ok(status) => format_overview(&status),
+            Ok(status) => {
+                // The count is optional: a failed diagnostics read just leaves it unreported.
+                let peers = match client.request(&Command::GetDiagnostics).await {
+                    Ok(Response::Diagnostics(snapshot)) => snapshot.authenticated_control_peers,
+                    _ => None,
+                };
+                format_overview(&status, peers.as_deref())
+            }
             Err(error) => offline_message(error.kind()).to_owned(),
         },
         Screen::Networks => match client.request(&Command::ListNetworks).await {
@@ -259,11 +274,16 @@ mod tests {
 
     #[test]
     fn overview_distinguishes_local_health_from_authenticated_peer_state() {
-        let text = format_overview(&local_status());
+        let text = format_overview(&local_status(), None);
         assert!(text.contains("Healthy (local daemon only)"));
-        assert!(text.contains("Remote peer count: unavailable"));
+        assert!(text.contains("Connected devices: not reported"));
         assert!(text.contains("adapter availability unknown"));
-        assert!(text.contains("No Internet sharing or authenticated joining is enabled"));
+        // No Internet sharing exists, so the overview does not mention it at all.
+        assert!(!text.to_lowercase().contains("internet"));
+        let peers = [NodeId::from_bytes([4; 16]), NodeId::from_bytes([5; 16])];
+        let hosted = format_overview(&local_status(), Some(&peers));
+        assert!(hosted.contains("Connected devices: 2 (authenticated control sessions"));
+        assert!(format_overview(&local_status(), Some(&[])).contains("Connected devices: 0"));
     }
 
     #[test]

@@ -146,6 +146,12 @@ pub(super) fn format_diagnostics(snapshot: &DiagnosticSnapshot) -> String {
     );
     rows(
         &mut lines,
+        "Authenticated control peers on this host (sessions, not PANU links)",
+        snapshot.authenticated_control_peers.as_deref(),
+        ToString::to_string,
+    );
+    rows(
+        &mut lines,
         "Interfaces",
         snapshot.interfaces.as_deref(),
         |interface| {
@@ -286,6 +292,7 @@ mod tests {
             }],
         });
         snapshot.observed_peers = Some(Vec::new());
+        snapshot.authenticated_control_peers = Some(vec![NodeId::from_bytes([6; 16])]);
         snapshot.interfaces = Some(vec![DiagnosticInterface {
             name: "bnep0".into(),
             addresses: vec!["10.25.0.1/24".into()],
@@ -327,6 +334,8 @@ mod tests {
         assert!(text.contains("Recent API failures: 1 reported"));
         assert!(text.contains("operation=get_diagnostics class=unsupported"));
         assert!(text.contains("Observed peers (not authenticated membership): 0 reported"));
+        assert!(text.contains("Authenticated control peers on this host"));
+        assert!(text.contains(&NodeId::from_bytes([6; 16]).to_string()));
     }
 
     #[test]
