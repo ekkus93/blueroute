@@ -22,6 +22,8 @@ Check `blueroute capability show` for `adapter_usable`, then inspect `bluetoothc
 
 `nap` reports local NAP server support; `panu` reports local client prerequisites. A node may be able to join as a PANU client while being unable to host as NAP. Do not interpret a missing or unknown NAP capability as a general Bluetooth failure. Remote peer compatibility is only established by an actual connection attempt.
 
+The daemon reprobes capabilities every 15 seconds, and creating a network checks the latest result, so after you fix the adapter (power it on, reload the driver) creation works without restarting BlueRoute once status shows hosting as available. A probe that fails reports hosting as unknown, which refuses creation until a later probe succeeds.
+
 ### BlueZ or NetworkManager is unavailable
 
 Check `systemctl status bluetooth.service NetworkManager.service` and `journalctl -b -u bluetooth.service -u NetworkManager.service`. BlueRoute reports missing services as degraded or unsupported and does not silently substitute shell commands or another backend.

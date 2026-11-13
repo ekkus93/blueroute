@@ -348,3 +348,24 @@ chrootless runs), and the lifecycle test fails if any fixed path lacks it.
 **Not claimed:** that no active networking remains after uninstall on a real system; that a PANU
 link of a joined client ends with the daemon (BlueZ is expected to drop it with the caller, but
 cleanup does not rely on it). Both need CR-QUALIFY.
+
+## CR-F7 — documentation reconciliation (2026-11-13)
+
+Facts rechecked against source and the built packages (DOC-1): API **1.7** (`ApiVersion::CURRENT`;
+1.6 at the reviewed baseline, raised by CR-F1), membership schema **v3**
+(`CURRENT_FORMAT_VERSION = 3`), `blueroute_0.1.0_amd64.deb` ships `/usr/bin/blueroute`,
+`/usr/bin/blueroute-tui` and `/usr/libexec/blueroute/blueroute-daemon`, and
+`blueroute-desktop_0.1.0_amd64.deb` ships `/usr/bin/blueroute-desktop`.
+
+| Subtask | Change |
+| --- | --- |
+| 01 | `SPEC.md` current status: API 1.7, schema v3, package split (the "daemon and CLI only" line replaced), status date 2026-11-13. |
+| 02 | `ADR-INDEX.md`: P8-009 indexed; P7-001 status current; status words defined (accepted ADR / implemented / qualified); a separate table of accepted design records (P6-004, P6-009, P8-005, CR-F5). |
+| 03 | Superseded labels, history kept: `TODO.md` (block under the 2026-10-16 status date; P6-004, P7-003, P7-004, P15-003 rows), `P7-001-CONTROL-TRANSPORT.md`, `P6-004-JOIN-ORCHESTRATION.md` addendum status, `P14-001-THREAT-MODEL.md` release gate; `DEVELOPMENT.md` placeholder-crate sentence replaced. |
+| 04 | Guarantees documented where they are accepted: owner binding and owner-loss (`SPEC.md` client bullet), `StateChanged` publication (SPEC §11, `P5-PROTOCOL.md` API 1.7), capability freshness (SPEC §13, `TROUBLESHOOTING.md`), graph contract (SPEC `blueroute-core`), removal/upgrade/purge (SPEC §31, `ADMINISTRATOR.md`, `USER_GUIDE.md`, `CR-F5-REMOVAL-CLEANUP.md`). |
+| 05 | Preserved: historical evidence and task IDs, the read-only TUI, closed join, absent live routing, disabled sharing (every new text restates the gate rather than relaxing it). |
+| 06 | "Code review (2026-11-13)" notes on P2-001..P2-008, P5-005, P6-001, P6-004, P7-003, P7-004, P15-003, P15-005 rows and the P11-001, P12-002, P17-003, P17-006 sections; no checkbox changed. |
+| 07 | Relative-link check over `docs/*.md`, `README.md`, `CONTRIBUTING.md`, `CLAUDE.md`: 0 missing files or anchors. Durable records cite repository tests and commits, not temporary artifacts. CR-CLOSEOUT repeats the comparison at the final revision. |
+
+Note: CR-VALIDATE-06 names "Ralph Bridge" for CI inspection; this remediation inspects exact-head
+CI with the GitHub CLI and records run IDs.

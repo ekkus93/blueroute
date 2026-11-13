@@ -3,6 +3,8 @@
 **Date:** 2026-10-13
 **Status:** Accepted architecture decision; foundational TLS helpers are implemented in commit `84f05a6`, and the untrusted-certificate candidate/fingerprint-confirmation primitive is implemented in commit `f88e1f3`. Enrollment UX and live PAN/runtime integration remain open.
 
+**Current status (2026-11-13, CR-F7; the line above is historical):** the inbound pinned listener on a host, the joiner's supervised pinned session, and typed enrollment (`EnrollPeerKey`, `RecordJoinHost`) are implemented in software. The joiner path stays behind the closed join gate, and no join has run on hardware. See [ADR-INDEX.md](ADR-INDEX.md).
+
 ## Context
 
 BlueRoute uses Linux IP over Bluetooth PAN (BNEP). The system daemon also needs an authenticated control channel for peer capabilities, network membership, topology and routes. BlueZ pairing, advertised IDs, IP addresses, and Bluetooth names cannot authenticate a BlueRoute NodeId. The production JoinNetwork gate must remain closed until this is implemented.

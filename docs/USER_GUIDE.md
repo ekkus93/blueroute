@@ -36,7 +36,7 @@ The initial development and packaging baseline is **Debian 13** with BlueZ, Netw
    blueroute status
    ```
 
-Installation should not create a network automatically. The daemon owns system networking and continues running independently of the CLI. **Do not delete `/var/lib/blueroute`** to fix an error: it contains persistent identity, membership and TLS keys. Clean-install and package-removal behavior still require installed-system acceptance.
+Installation should not create a network automatically. The daemon owns system networking and continues running independently of the CLI. **Do not delete `/var/lib/blueroute`** to fix an error: it contains persistent identity, membership and TLS keys. Removing the package first removes the networking BlueRoute set up, and fails rather than leave it behind (see [ADMINISTRATOR.md](ADMINISTRATOR.md#removing-the-package)). Clean-install and package-removal behavior still require installed-system acceptance.
 
 ## Check capabilities and local status
 
@@ -54,7 +54,7 @@ blueroute diagnostics show --summary
 
 ### Terminal app
 
-On a text terminal, run `blueroute-tui` (or `cargo run -p blueroute-tui --locked` from a source checkout). It is a full-screen, **read-only** view of the local daemon: `1`–`4` (or Tab) switch between Overview, Networks, Devices and Diagnostics, arrow keys scroll, `r` refreshes, `h` shows help (Esc closes it) and `q` quits. It updates by itself when the daemon reports a change, and shows a banner while it has lost contact with the service.
+On a text terminal, run `blueroute-tui` (or `cargo run -p blueroute-tui --locked` from a source checkout). It is a full-screen, **read-only** view of the local daemon: `1`–`4` (or Tab) switch between Overview, Networks, Devices and Diagnostics, arrow keys scroll, `r` refreshes, `h` shows help (Esc closes it) and `q` quits. It updates by itself when the daemon reports any change, and while it has lost contact with the service it says that the view may be out of date, then reconnects by itself (retrying after 1 s, doubling up to 30 s).
 
 It never changes anything. Changes need your password, which a full-screen terminal cannot ask for, so each screen shows the exact `blueroute` command to run in a normal shell instead. A missing or incompatible daemon is reported as unavailable, never as a made-up healthy state.
 

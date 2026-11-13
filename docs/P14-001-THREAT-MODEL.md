@@ -63,6 +63,8 @@ Before the daemon may commit remote membership, accept a capability for planning
 
 **Current release gate (reviewed 2026-10-15):** Commit `84f05a6` adds owner-only persistent local TLS identity, exact-leaf-pinned mutual TLS 1.3, peer NodeId/SPKI verification, exporter-bound Hello/HelloAck and durable pin-gated session helpers. Commit `f88e1f3` adds an untrusted candidate-certificate display primitive that only becomes a trust input after matching independent fingerprint confirmation. These pieces are not yet wired to PAN listener/client lifecycle or an independently approved enrollment UI, and route/topology controls remain unimplemented. Steps 1–5 are therefore **not fully wired**. P6-004 production `JoinNetwork` must remain unavailable.
 
+**Superseded (2026-11-13, CR-F7; the paragraph above is historical):** the pinned mutual-TLS listener (host), the supervised pinned session (joiner) and typed key enrollment are now wired in software; production `JoinNetwork` is still unavailable outside the default-off `experimental-join` build, and nothing is hardware-qualified. Route/topology controls remain unimplemented. Local API hardening since then: every client operation is bound to one validated daemon owner, so a replacement daemon cannot receive a command validated against another (CR-F8); the package-removal cleanup is a root-only, fixed-argument maintenance mode with no D-Bus surface (CR-F5).
+
 ## 5. Verification plan and release gates
 
 - **Unit and negative tests:** missing key pin, wrong network, revoked/stale pin, self-identity claim, wrong TLS key, unsupported protocol/version, duplicate/replayed/out-of-order frames, bogus length fields, malicious UTF-8 and capability/neighbor bounds.

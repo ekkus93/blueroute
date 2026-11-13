@@ -106,6 +106,8 @@ The remaining implementation dependency is the minimum P7 control-plane work req
 
 **Status: proposal. The four open questions below were answered by the maintainer on 2026-11-07 (see "Maintainer answers"), but a code review of the trust layer found a conflict in D1/D3 (see "Review finding R1") that must be resolved before implementation. Nothing here is implemented.** It records the decisions needed before the three production stubs (`preflight`, `establish_panu`, `start_control_session`/`stop_control_session`) can be wired. Production `JoinNetwork` stays fail-closed throughout. Where this text names an existing primitive, its contract is the one documented in P6-003, P7-001, P7-003 and P7-004; verify against the code before implementing.
 
+**Superseded status (2026-11-13, CR-F7):** "proposal … Nothing here is implemented" above is historical. R1 was resolved and this design was then implemented in software behind the closed join gate (see "Step 2 implemented" and "Implemented so far" below). No join has run on hardware.
+
 ### D1. Who the host is: operator-confirmed identity, not the advertisement
 
 `JoinNetwork { network }` keeps its wire shape. The runtime resolves the intended host **only** from durable local state that a human established:

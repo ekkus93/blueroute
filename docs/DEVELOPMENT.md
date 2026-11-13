@@ -132,4 +132,4 @@ Real PAN/BNEP behavior, controller connection limits, throughput, range, suspend
 - `apps/desktop`: desktop/Tauri application boundary.
 - `docs/`: product, architecture, development, and test evidence.
 
-The placeholder crates intentionally contain almost no behavior. Later TODO phases add functionality behind these boundaries.
+Every crate is implemented; [SPEC.md](SPEC.md) ("Current implementation status and boundaries") says what each one does and what is still incomplete. New functionality goes behind these boundaries.

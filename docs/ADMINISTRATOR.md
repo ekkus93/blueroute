@@ -84,6 +84,12 @@ Useful structured events (one JSON object per line, field `event`):
 
 Request records never include payloads, peer-supplied labels, addresses or key material.
 
+## Removing the package
+
+`apt remove blueroute` stops the service, then runs `blueroute-daemon --remove-owned-networking` (root only, no other arguments). It removes the NetworkManager addresses and profiles, and a live PANU link it can prove is BlueRoute's, owned by the networks this computer knows, then checks that none are left. NetworkManager state of networks this computer does not know is left alone and counted as unresolved. Identity and membership in `/var/lib/blueroute` are kept; `apt purge` deletes them.
+
+If cleanup cannot finish (NetworkManager unreachable, a profile that cannot be deleted, a 60-second timeout), the removal fails and the package stays installed with the service restarted. The journal line `"component":"removal_cleanup"` gives counts and a failure class. Fix the cause and run the removal again. Forcing the removal skips this guarantee. While a removal is pending the daemon refuses to start; reinstalling the package clears that. Upgrades do not tear networking down. This is tested with fakes and an isolated dpkg database; it has not yet been qualified on an installed system.
+
 ## Join on a test rig
 
 Packaged and CI builds keep join closed. Two-machine acceptance uses a daemon built with the default-off `experimental-join` feature; its diagnostics version ends in `+experimental-join`. Instructions and checklists are in [HARDWARE_ACCEPTANCE_BACKLOG.md](HARDWARE_ACCEPTANCE_BACKLOG.md). Never install such a build outside the test rig.

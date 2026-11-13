@@ -28,7 +28,7 @@
 | CR-F4 | Fresh operational capabilities after recovery | P2 | CR-BASE; CR-F1 for observer acceptance | `[x]` |
 | CR-F5 | Ownership-safe remove/purge cleanup | P2 | CR-BASE; lifecycle design | `[-]` |
 | CR-F6 | Effect-generation resource ownership | P3 | CR-BASE; watcher contract from CR-F2 | `[x]` |
-| CR-F7 | Current documentation and acceptance reconciliation | P3 | Baseline fixes can start immediately; final pass follows implementation | `[ ]` |
+| CR-F7 | Current documentation and acceptance reconciliation | P3 | Baseline fixes can start immediately; final pass follows implementation | `[x]` |
 | CR-INTEGRATION | Real producer-to-consumer regression coverage | Acceptance | CR-F1/F2/F3/F4/F5/F6/F8 software work | `[ ]` |
 | CR-VALIDATE | Full toolchain, package, and exact-revision CI checks | Acceptance | Implemented software; CR-INTEGRATION | `[ ]` |
 | CR-QUALIFY | Isolated installed-system and physical cleanup evidence | Acceptance | CR-F5 software; candidate packages | `[ ]` |
@@ -245,23 +245,26 @@ cannot interfere with current view/link/loading behavior.
 
 **Requirements:** DOC-1–DOC-4. **Original task:** P17-003; acceptance references across P0–P19.
 
-- [ ] **CR-F7-01:** Correct current API/schema/package summaries against source and built
+- [x] **CR-F7-01:** Correct current API/schema/package summaries against source and built
   artifacts: reviewed baseline API 1.6, schema v3, core package with TUI, separate desktop package.
-- [ ] **CR-F7-02:** Index P8-009 and audit other accepted decisions; distinguish accepted ADRs,
+- [x] **CR-F7-02:** Index P8-009 and audit other accepted decisions; distinguish accepted ADRs,
   design proposals, implemented software, and qualified product behavior.
-- [ ] **CR-F7-03:** Reconcile stale TLS/enrollment/daemon/frontend summaries in SPEC, the
+- [x] **CR-F7-03:** Reconcile stale TLS/enrollment/daemon/frontend summaries in SPEC, the
   original TODO, threat model, hardware/support tracker, and relevant operational guides.
-- [ ] **CR-F7-04:** Describe owner/version/event guarantees, capability freshness, graph update
+- [x] **CR-F7-04:** Describe owner/version/event guarantees, capability freshness, graph update
   semantics, and remove/upgrade/purge behavior after their implementations are accepted.
-- [ ] **CR-F7-05:** Preserve historical evidence, stable original task IDs, the read-only TUI
+- [x] **CR-F7-05:** Preserve historical evidence, stable original task IDs, the read-only TUI
   decision, closed Join, absent live routing, and disabled sharing boundaries.
-- [ ] **CR-F7-06:** Link original affected tasks to remediation evidence without closing their
+- [x] **CR-F7-06:** Link original affected tasks to remediation evidence without closing their
   unrelated product/hardware criteria; mark superseded summaries clearly.
-- [ ] **CR-F7-07:** Complete a final source/document comparison at the candidate revision;
+- [x] **CR-F7-07:** Complete a final source/document comparison at the candidate revision;
   remove dependence on temporary review artifacts and validate internal links.
 
 **Acceptance:** No known current-state contradiction remains for these findings. Documentation
 states which software, installed-system, physical, and product gates have actually passed.
+
+**Accepted (2026-11-13):** met; see [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-f7--documentation-reconciliation-2026-11-13).
+CR-CLOSEOUT repeats the source/document comparison at the final revision.
 
 ## CR-INTEGRATION — Exercise corrected component boundaries
 
@@ -353,7 +356,7 @@ Fill entries as work is qualified. Link concrete records; do not replace evidenc
 | CR-F4 / F4 | `6025bbf` | 5 `cr_f4` tests (1 failed on baseline); workspace green | Adapter behavior if claimed (not claimed) | Exact-head CI recorded under CR-VALIDATE | SOFTWARE COMPLETE |
 | CR-F5 / F5 | `0b0beab` | 10 removal, 4 binary, lifecycle and real-dpkg tests green locally | Required: CR-QUALIFY (open) | Installed-system/physical qualification | SOFTWARE COMPLETE / QUALIFICATION DEFERRED |
 | CR-F6 / F6 | `25e6984` | 8 `useDaemon` tests (4 fail with the baseline hook); desktop checks green | Not required for effect ownership | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
-| CR-F7 / F7 | Pending | Pending | Preserve existing records | Current summaries and final acceptance accuracy | NOT STARTED |
+| CR-F7 / F7 | This commit (docs) | Facts rechecked against source and packages; 0 broken links | Preserve existing records (preserved) | Final comparison at CR-CLOSEOUT | COMPLETE |
 | CR-INTEGRATION | Pending | Pending | Isolated-system results where relevant | Boundary regressions included in CI | NOT STARTED |
 | CR-VALIDATE | Pending | Pending | No physical claim from CI | Exact candidate software/package qualification | NOT STARTED |
 | CR-QUALIFY | Pending | Pending | Pending | All required installed-system and physical checks | NOT STARTED |
