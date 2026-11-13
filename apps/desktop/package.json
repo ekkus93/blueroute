@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "lint": "oxlint --deny-warnings ui/src vite.config.ts",
     "test": "vitest run",
     "tauri": "tauri"
   },
@@ -31,6 +32,7 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.2.1",
     "jsdom": "31.0.0",
+    "oxlint": "1.90.0",
     "prettier": "3.9.10",
     "typescript": "7.0.2",
     "vite": "8.3.6",

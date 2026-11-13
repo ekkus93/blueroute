@@ -207,7 +207,7 @@ The initial software/packaging baseline is Debian 13 with BlueZ, NetworkManager,
 
 - [x] Configure rustfmt.
 - [x] Configure clippy policy.
-- [ ] Add frontend formatting/linting when frontend exists. *(Deferred until frontend work begins.)*
+- [x] Add frontend formatting/linting when frontend exists. *(Prettier formats; since 2026-11-12 oxlint lints (`npm run lint`, warnings fail, CI step in the frontend job) with the React hooks rules as errors. oxlint was the maintainer's choice because typescript-eslint does not support TypeScript 7. Disabled rules and reasons are in `docs/DEVELOPMENT.md`; a planted conditional hook and missing effect dependency were confirmed to fail it.)*
 
 **Acceptance**
 

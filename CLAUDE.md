@@ -25,7 +25,7 @@ dbus-run-session -- cargo test -p <pkg> --test <file> --locked -- --ignored --ex
 - `-p blueroute --test cli_exit_contract cli_exit_statuses_propagate_typed_broker_failures`
 - `-p blueroute-desktop --test bridge_end_to_end desktop_bridge_end_to_end_over_a_private_bus`
 
-Desktop frontend checks (run in `apps/desktop`, also in CI): `npm run format:check`, `npm run typecheck`, `npm test`, `npm run build`.
+Desktop frontend checks (run in `apps/desktop`, also in CI): `npm run format:check`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`.
 
 Max line width is 100. The workspace forbids `unsafe_code`, and `dbg!` is denied. Warnings fail CI.
 

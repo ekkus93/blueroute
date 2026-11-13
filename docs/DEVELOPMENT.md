@@ -79,11 +79,22 @@ The desktop frontend (React + TypeScript, built with Vite) lives in `apps/deskto
 ```bash
 npm ci
 npm run format:check   # prettier (npm run format to fix)
+npm run lint           # oxlint; warnings fail the run
 npm run typecheck
 npm test               # vitest
 npm run build          # type-check + vite build into ui/dist
 npx tauri build --debug --no-bundle   # build the desktop binary without packaging
 ```
+
+The linter is [oxlint](https://oxc.rs) (pinned in `package.json`, configured in `.oxlintrc.json`), chosen because typescript-eslint does not support TypeScript 7, which has no JavaScript compiler API. Correctness rules are errors, suspicious ones warnings, and the React hooks rules (`rules-of-hooks`, `exhaustive-deps`) are errors. Rules turned off, and why:
+
+- `react/react-in-jsx-scope`: obsolete with the automatic JSX runtime (`"jsx": "react-jsx"`).
+- `react/preserve-manual-memoization`: a React Compiler rule; the project does not use the React Compiler.
+- `jsx-a11y/prefer-tag-over-role`: would replace `role="status"` with `<output>` (meant for calculation results) and `role="group"` with `<fieldset>`; the ARIA roles are valid and the tests rely on them.
+- `vitest/require-mock-type-parameters`: strict TypeScript already types every mock.
+- `unicorn/consistent-function-scoping`, in test files only: flags small per-test fixtures.
+
+`import/no-unassigned-import` stays on, allowing only stylesheet imports.
 
 To run the app against the daemon on this machine, use `npm run tauri dev` from `apps/desktop` (it starts the Vite dev server and opens the window).
 
