@@ -86,6 +86,9 @@ jobs:
       - name: Validate CLI typed broker error exits
         run: dbus-run-session -- cargo test -p blueroute --test cli_exit_contract --locked cli_exit_statuses_propagate_typed_broker_failures -- --ignored --exact
 
+      - name: Run desktop bridge end-to-end test
+        run: dbus-run-session -- cargo test -p blueroute-desktop --test bridge_end_to_end --locked desktop_bridge_end_to_end_over_a_private_bus -- --ignored --exact
+
       - name: Validate systemd service
         run: |
           sudo install -Dm0755 /bin/true /usr/libexec/blueroute/blueroute-daemon

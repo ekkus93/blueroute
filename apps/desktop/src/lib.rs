@@ -90,6 +90,12 @@ impl DesktopBridge {
         Ok(Self { client })
     }
 
+    /// Use an already version-checked client, for example one on a private test bus. This is
+    /// Rust-only: the web content still reaches the bridge only through the fixed Tauri commands.
+    pub fn with_client(client: BlueRouteClient) -> Self {
+        Self { client }
+    }
+
     /// First-run readiness uses only local, version-gated daemon observations.
     /// This never authorizes a network mutation or trusts a discovered peer.
     pub async fn platform_check(&self) -> Result<PlatformCheck, DesktopError> {

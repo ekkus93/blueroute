@@ -23,6 +23,7 @@ dbus-run-session -- cargo test -p <pkg> --test <file> --locked -- --ignored --ex
 - `-p blueroute-daemon --test authorization authorization_is_read_only_by_default_and_polkit_gates_mutations`
 - `-p blueroute-client --test dbus_client client_queries_events_reconnects_and_fails_closed_on_incompatibility`
 - `-p blueroute --test cli_exit_contract cli_exit_statuses_propagate_typed_broker_failures`
+- `-p blueroute-desktop --test bridge_end_to_end desktop_bridge_end_to_end_over_a_private_bus`
 
 Desktop frontend checks (run in `apps/desktop`, also in CI): `npm run format:check`, `npm run typecheck`, `npm test`, `npm run build`.
 

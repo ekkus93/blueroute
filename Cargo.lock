@@ -449,8 +449,10 @@ dependencies = [
  "blueroute-client",
  "blueroute-core",
  "blueroute-protocol",
+ "futures-lite",
  "serde",
  "serde_json",
+ "zbus",
 ]
 
 [[package]]

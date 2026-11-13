@@ -2626,10 +2626,12 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 ## P12-012 — Desktop end-to-end tests
 
-- [ ] fake/test daemon.
-- [ ] create/join.
-- [ ] capability-limited states.
-- [ ] reconnect/error states.
+- [x] fake/test daemon (2026-11-12: `apps/desktop/tests/bridge_end_to_end.rs` runs the real `DesktopBridge` and `BlueRouteClient` against a scripted fake daemon on a private D-Bus; CI runs it under `dbus-run-session`).
+- [ ] create/join (create covered end to end: the trimmed name reaches the daemon and invalid names never leave the bridge; join waits on the join gate).
+- [x] capability-limited states (adapter off: the adapter issue is reported, create is blocked, join and Internet Sharing stay off, no remote peer count is invented).
+- [x] reconnect/error states (typed PolicyKit denial, unsupported and operational refusals map to their desktop errors, a wrong-kind reply is never shown as data, and a vanished daemon reads as unavailable; the UI's own reconnect banner and refresh are covered by the jsdom tests).
+
+The test also checks the bridge only ever sends its fixed commands. The UI and bridge are still tested separately: no test drives the real Tauri window.
 
 **Acceptance**
 
