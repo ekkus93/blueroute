@@ -2579,11 +2579,13 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 ## P12-009 — Implement settings UI
 
-- [ ] device name.
-- [ ] remembered networks.
-- [ ] discovery/preferences.
+- [x] device name (2026-11-12: the daemon implements `SetDeviceName` with an owner-only `device-name-v1` store, loaded at startup and shown for the local node; Settings has a rename form, the CLI has `blueroute node set-name`; the NodeId never changes).
+- [x] remembered networks (Settings lists every remembered network, read-only; "Your network" now shows only the one this computer is in).
+- [ ] discovery/preferences (deferred: starting discovery has no visible effect until the app can list nearby networks, which waits on join).
 - [ ] advanced policy area.
-- [ ] future Internet Sharing section hidden/disabled.
+- [x] future Internet Sharing section hidden/disabled (absent: no Internet Sharing UI exists, and a test asserts Settings never mentions it).
+
+**Software partial (2026-11-12):** `set_device_name` is a fourth individually granted Tauri mutation (CLAUDE.md updated); the daemon still enforces PolicyKit. The daemon's command dispatch moved into a bus-free `execute` method so commands can be unit-tested; new tests cover a rename persisting and changing only the label (same NodeId), a daemon without a name store refusing, and the client-link dispatch. UI tests cover rename, unchanged or empty names being blocked, a refused rename and remembered-network scoping. **Acceptance** (display-name change does not alter identity) is shown in software; not checked in a real window or against a live daemon.
 
 **Acceptance**
 

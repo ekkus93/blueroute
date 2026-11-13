@@ -20,6 +20,7 @@ export interface DaemonApi {
   createNetwork: (name: string) => Promise<void>;
   leaveNetwork: () => Promise<void>;
   retryClientReconnect: () => Promise<void>;
+  setDeviceName: (name: string) => Promise<void>;
 }
 
 export interface Snapshot {

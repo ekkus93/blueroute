@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App";
 import type { DaemonSignal, SubscribeToSignals } from "./signals";
@@ -39,8 +39,14 @@ function fakeApi(overrides: Partial<DaemonApi> = {}): DaemonApi {
     createNetwork: () => Promise.resolve(),
     leaveNetwork: () => Promise.resolve(),
     retryClientReconnect: () => Promise.resolve(),
+    setDeviceName: () => Promise.resolve(),
     ...overrides,
   };
+}
+
+/** Queries scoped to the "Your network" card (network names also appear in Settings). */
+function yourNetwork() {
+  return within(screen.getByRole("region", { name: "Your network" }));
 }
 
 function fakeSubscribe() {
@@ -55,7 +61,7 @@ function fakeSubscribe() {
 test("shows plain-language state, never offers Internet sharing, and disables the unwired join action", async () => {
   render(<App api={fakeApi()} subscribe={fakeSubscribe().subscribe} />);
   expect(await screen.findByRole("heading", { name: "Your network" })).toBeTruthy();
-  expect(screen.getByText("Lab")).toBeTruthy();
+  expect(yourNetwork().getByText("Lab")).toBeTruthy();
   expect(screen.getByText(/Connected through another device/)).toBeTruthy();
   expect(screen.getByText(/Not reachable right now/)).toBeTruthy();
   expect(screen.getByText("Working well")).toBeTruthy();
@@ -93,12 +99,13 @@ test("refreshes on daemon signals and shows a reconnecting banner when the link 
   });
   const bus = fakeSubscribe();
   render(<App api={api} subscribe={bus.subscribe} />);
-  await screen.findByText("Lab");
+  await screen.findByRole("region", { name: "Your network" });
+  await yourNetwork().findByText("Lab");
   act(() => bus.send("changed"));
-  await waitFor(() => expect(screen.getByText("Lab 2")).toBeTruthy());
+  await waitFor(() => expect(yourNetwork().getByText("Lab 2")).toBeTruthy());
   act(() => bus.send("disconnected"));
   expect(screen.getByText(/Trying to reconnect/)).toBeTruthy();
-  expect(screen.getByText("Lab 2")).toBeTruthy();
+  expect(yourNetwork().getByText("Lab 2")).toBeTruthy();
 });
 
 test("a failing signal subscription does not break the page", async () => {
@@ -220,7 +227,7 @@ test("a refused leave shows the reason and keeps the network", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "Leave this network" }));
   fireEvent.click(screen.getByRole("button", { name: "Yes, leave" }));
   expect(await screen.findByText(/do not have permission/)).toBeTruthy();
-  expect(screen.getByText("Lab")).toBeTruthy();
+  expect(yourNetwork().getByText("Lab")).toBeTruthy();
 });
 
 test("there is no leave button when not in a network", async () => {
@@ -307,4 +314,59 @@ test("explains BlueRoute plainly and shows health as a labelled badge", async ()
   expect(await screen.findByText(/share a small private network over Bluetooth/)).toBeTruthy();
   const badge = screen.getByText("Working, with problems");
   expect(badge.className).toContain("badge-warning");
+});
+
+test("settings rename this computer, say identity is unchanged, and list remembered networks", async () => {
+  const setDeviceName = vi.fn(() => Promise.resolve());
+  const devices = vi.fn(() =>
+    Promise.resolve([{ id: "node-1", name: "BlueRoute Device", reachability: "local" as const }]),
+  );
+  render(<App api={fakeApi({ setDeviceName, devices })} subscribe={fakeSubscribe().subscribe} />);
+  const settings = await screen.findByRole("region", { name: "Settings" });
+  expect(settings.textContent).toContain("This computer is called BlueRoute Device");
+  expect(settings.textContent).toContain("identity stays the same");
+  expect(screen.getByRole("list", { name: "Remembered networks" }).textContent).toContain("Lab");
+  const rename = screen.getByRole("button", { name: "Rename" }) as HTMLButtonElement;
+  // Empty or unchanged names cannot be submitted.
+  expect(rename.disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText("New name"), { target: { value: " BlueRoute Device " } });
+  expect(rename.disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText("New name"), { target: { value: "  Kitchen laptop " } });
+  fireEvent.click(rename);
+  expect(await screen.findByText(/now “Kitchen laptop”/)).toBeTruthy();
+  expect(setDeviceName).toHaveBeenCalledExactlyOnceWith("Kitchen laptop");
+  await waitFor(() => expect(devices.mock.calls.length).toBeGreaterThan(1));
+  // No Internet Sharing anywhere in settings.
+  expect(settings.textContent?.toLowerCase()).not.toContain("internet");
+});
+
+test("a refused rename explains why and keeps the old name", async () => {
+  const setDeviceName = vi.fn(() => Promise.reject("permission_denied"));
+  const devices = () =>
+    Promise.resolve([{ id: "node-1", name: "Old name", reachability: "local" as const }]);
+  render(<App api={fakeApi({ setDeviceName, devices })} subscribe={fakeSubscribe().subscribe} />);
+  await screen.findByRole("region", { name: "Settings" });
+  fireEvent.change(screen.getByLabelText("New name"), { target: { value: "New" } });
+  fireEvent.submit(screen.getByRole("form", { name: "Rename this computer" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("do not have permission");
+  expect(screen.getByText(/This computer is called/).textContent).toContain("Old name");
+});
+
+test("a remembered network this computer is not in shows only in settings, with no leave", async () => {
+  const overview = () =>
+    Promise.resolve({
+      local_node: "node-1",
+      network: null,
+      health: "healthy" as const,
+      adapter_available: true,
+      can_host: true,
+      can_join: null,
+      authenticated_remote_peers: null,
+      internet_sharing_available: false,
+    });
+  render(<App api={fakeApi({ overview })} subscribe={fakeSubscribe().subscribe} />);
+  await screen.findByRole("region", { name: "Your network" });
+  expect(yourNetwork().getByText("You are not part of a network yet.")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Leave this network" })).toBeNull();
+  expect(screen.getByRole("list", { name: "Remembered networks" }).textContent).toContain("Lab");
 });

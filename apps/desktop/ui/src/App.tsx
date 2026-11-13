@@ -1,4 +1,4 @@
-// Desktop UI over typed daemon snapshots (P12-002/004/005/007/008, partial), built from the
+// Desktop UI over typed daemon snapshots (P12-002/004/005/007/008/009, partial), built from the
 // shared components in ./components (P12-003). The only mutations
 // are creating and leaving a network and asking a joined client to reconnect to its host. Join
 // stays disabled and says so. There is deliberately no Internet-sharing UI (v1 keeps it off).
@@ -72,6 +72,8 @@ function Ready({
   onChanged: () => void;
 }) {
   const { platform, overview, networks, devices, clientLink } = snapshot;
+  // "Your network" is only the one this computer is in; Settings lists every remembered one.
+  const current = networks.filter((network) => network.id === overview.network);
   return (
     <>
       <Card id="start-heading" heading="Get started">
@@ -105,11 +107,11 @@ function Ready({
       </Card>
 
       <Card id="network-heading" heading="Your network">
-        {networks.length === 0 ? (
+        {current.length === 0 ? (
           <EmptyState>You are not part of a network yet.</EmptyState>
         ) : (
           <ul className="plain">
-            {networks.map((network) => (
+            {current.map((network) => (
               <li key={network.id}>
                 <strong>{network.name}</strong>
                 <span className="muted"> · {deviceCount(network.member_count)}</span>
@@ -124,7 +126,7 @@ function Ready({
           </StatusBadge>
         </p>
         {clientLink !== null && <ClientLink link={clientLink} api={api} onRetried={onChanged} />}
-        {networks.length > 0 && <LeaveNetwork api={api} onLeft={onChanged} />}
+        {current.length > 0 && <LeaveNetwork api={api} onLeft={onChanged} />}
       </Card>
 
       <Card id="devices-heading" heading="Devices">
@@ -137,6 +139,24 @@ function Ready({
                 <strong>{device.name}</strong>
                 <span className="muted"> · {REACHABILITY_TEXT[device.reachability]}</span>
               </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <Card id="settings-heading" heading="Settings">
+        <DeviceName
+          current={devices.find((device) => device.reachability === "local")?.name ?? null}
+          api={api}
+          onRenamed={onChanged}
+        />
+        <h3>Remembered networks</h3>
+        {networks.length === 0 ? (
+          <EmptyState>No networks are remembered on this computer.</EmptyState>
+        ) : (
+          <ul className="plain" aria-label="Remembered networks">
+            {networks.map((network) => (
+              <li key={network.id}>{network.name}</li>
             ))}
           </ul>
         )}
@@ -278,6 +298,77 @@ function CreateNetwork({
           : `Starting a network: ${availability}.`}
       </p>
       {state.phase === "done" && <Notice tone="ok">The network “{state.name}” was created.</Notice>}
+      {state.phase === "failed" && <Failure error={state.error} />}
+    </form>
+  );
+}
+
+type RenameState =
+  | { phase: "idle" }
+  | { phase: "busy" }
+  | { phase: "done"; name: string }
+  | { phase: "failed"; error: DesktopError | "unknown" };
+
+/** Renames this computer. The name is only what people see; the identity never changes. */
+function DeviceName({
+  current,
+  api,
+  onRenamed,
+}: {
+  current: string | null;
+  api: DaemonApi;
+  onRenamed: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [state, setState] = useState<RenameState>({ phase: "idle" });
+  const busy = state.phase === "busy";
+  const trimmed = name.trim();
+
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (busy || trimmed === "" || trimmed === current) return;
+    setState({ phase: "busy" });
+    api.setDeviceName(trimmed).then(
+      () => {
+        setState({ phase: "done", name: trimmed });
+        setName("");
+        onRenamed();
+      },
+      (error: unknown) => setState({ phase: "failed", error: normalizeError(error) }),
+    );
+  };
+
+  return (
+    <form onSubmit={submit} aria-label="Rename this computer">
+      <p>
+        This computer is called <strong>{current ?? "(not reported yet)"}</strong>.
+      </p>
+      <p>
+        <label htmlFor="device-name">New name</label>
+      </p>
+      <div className="actions">
+        <input
+          id="device-name"
+          type="text"
+          maxLength={64}
+          value={name}
+          disabled={busy}
+          onChange={(event) => setName(event.target.value)}
+          aria-describedby="rename-note"
+        />
+        <Button
+          type="submit"
+          variant="primary"
+          disabled={busy || trimmed === "" || trimmed === current}
+        >
+          {busy ? "Renaming…" : "Rename"}
+        </Button>
+      </div>
+      <p id="rename-note" className="muted">
+        This only changes the name people see. This computer's identity stays the same, so networks
+        and trusted devices are not affected. You may be asked for your password.
+      </p>
+      {state.phase === "done" && <Notice tone="ok">This computer is now “{state.name}”.</Notice>}
       {state.phase === "failed" && <Failure error={state.error} />}
     </form>
   );

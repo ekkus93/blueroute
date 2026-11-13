@@ -1,7 +1,8 @@
 //! Tauri 2 shell for the BlueRoute desktop UI.
 //!
-//! The frontend can call only the eight commands below: five read-only snapshots plus
-//! `create_network`, `leave_network` and `retry_client_reconnect`. Each connects through
+//! The frontend can call only the nine commands below: five read-only snapshots plus
+//! `create_network`, `leave_network`, `retry_client_reconnect` and `set_device_name`. Each
+//! connects through
 //! the shared version-gated `blueroute-client` (via `blueroute-desktop`), so the web
 //! content never gets D-Bus, shell, filesystem or arbitrary daemon-command access, and
 //! every failure reaches it as a coarse, typed `DesktopError`. Daemon changes reach it only
@@ -49,6 +50,13 @@ async fn retry_client_reconnect() -> Result<(), DesktopError> {
         .await
 }
 
+/// A mutating command: rename this computer (a label, never its identity). The daemon
+/// authorizes it through PolicyKit.
+#[tauri::command]
+async fn set_device_name(name: String) -> Result<(), DesktopError> {
+    DesktopBridge::connect().await?.set_device_name(&name).await
+}
+
 #[tauri::command]
 async fn client_link() -> Result<Option<ClientLinkState>, DesktopError> {
     DesktopBridge::connect().await?.client_link().await
@@ -69,7 +77,8 @@ fn main() {
             client_link,
             create_network,
             leave_network,
-            retry_client_reconnect
+            retry_client_reconnect,
+            set_device_name
         ])
         .setup(|app| {
             // Payload-free signals only; the UI re-reads typed snapshots on each one.

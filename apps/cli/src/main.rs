@@ -78,7 +78,13 @@ enum NetworkCommand {
 #[derive(Debug, Subcommand)]
 enum NodeCommand {
     List,
-    Show { node: String },
+    Show {
+        node: String,
+    },
+    /// Change this computer's display name. It is a label only; the NodeId never changes.
+    SetName {
+        name: String,
+    },
 }
 #[derive(Debug, Subcommand)]
 enum PeerCommand {
@@ -150,6 +156,10 @@ enum Operation {
     },
     NodeShow {
         node: NodeId,
+        json: bool,
+    },
+    SetDeviceName {
+        name: DisplayName,
         json: bool,
     },
     TrustPeer {
@@ -277,6 +287,17 @@ fn parse(args: &[String]) -> Result<Operation, String> {
             node: parse_node_id(&node).map_err(str::to_owned)?,
             json,
         },
+        Some(CliCommand::Node {
+            command: NodeCommand::SetName { name },
+        }) => {
+            if name.chars().any(char::is_control) {
+                return Err("device name cannot contain control characters".into());
+            }
+            Operation::SetDeviceName {
+                name: DisplayName::new(name.trim()).map_err(|_| "invalid device name")?,
+                json,
+            }
+        }
         Some(CliCommand::Peer {
             command: PeerCommand::LocalKey,
         }) => Operation::LocalKey { json },
@@ -989,6 +1010,14 @@ fn run(args: &[String]) -> i32 {
                     _ => Err("daemon returned an unexpected node-detail response".into()),
                 })
         }
+        Operation::SetDeviceName { name, json } => {
+            futures_lite::future::block_on(client.request(&Command::SetDeviceName { name }))
+                .map_err(CliFailure::from)
+                .and_then(|response| match response {
+                    Response::Ack => Ok(mutation_ack(json, "Device name changed")),
+                    _ => Err("daemon returned an unexpected rename response".into()),
+                })
+        }
         Operation::TrustPeer { node, json } => {
             futures_lite::future::block_on(client.request(&Command::TrustPeer { node }))
                 .map_err(CliFailure::from)
@@ -1232,6 +1261,15 @@ mod tests {
             Ok(Operation::RetryClientReconnect { json: true })
         );
         assert!(parse(&args(&["network", "reconnect", "extra"])).is_err());
+        assert_eq!(
+            parse(&args(&["node", "set-name", "  Kitchen laptop "])),
+            Ok(Operation::SetDeviceName {
+                name: DisplayName::new("Kitchen laptop").unwrap(),
+                json: false,
+            })
+        );
+        assert!(parse(&args(&["node", "set-name", "bad\u{1b}name"])).is_err());
+        assert!(parse(&args(&["node", "set-name", "   "])).is_err());
         assert_eq!(
             parse(&args(&["diagnostics", "show", "--json"])),
             Ok(Operation::Diagnostics {

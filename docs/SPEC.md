@@ -396,7 +396,7 @@ Representative semantic operations:
 - `LeaveNetwork`
 - `ListNodes`
 - `GetNode`
-- `SetDeviceName`
+- `SetDeviceName` (a display label kept owner-only in the state directory; never part of identity, keys, membership or authorization)
 - `StartDiscovery`
 - `StopDiscovery`
 - `TrustPeer`

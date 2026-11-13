@@ -25,6 +25,12 @@ test("each call maps to exactly one fixed Tauri command", async () => {
   ]);
 });
 
+test("renaming passes only the name to one fixed command", async () => {
+  invoke.mockResolvedValue(undefined);
+  await daemon.setDeviceName("Kitchen laptop");
+  expect(invoke.mock.calls).toEqual([["set_device_name", { name: "Kitchen laptop" }]]);
+});
+
 test("retrying the client link takes no arguments and maps to one fixed command", async () => {
   invoke.mockResolvedValue(undefined);
   await daemon.retryClientReconnect();

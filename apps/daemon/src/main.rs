@@ -5,9 +5,9 @@ use std::sync::{Arc, Mutex};
 use blueroute_core::{DaemonConfig, HealthLevel, MembershipRole};
 use blueroute_daemon::{
     AuthenticatedControlPeers, ClientReconnector, ClientRecordStore, ControlTlsIdentityStore,
-    DaemonService, DurablePeerTrustOperations, EXPERIMENTAL_JOIN, JoinControlConfig,
-    NetworkOperations, PeerPinStore, PendingHostCommitAuthorization, PendingJoinOperations,
-    PendingJoinStore, ReconnectPolicy, SingleStarNetworkOperations,
+    DaemonService, DeviceNameStore, DurablePeerTrustOperations, EXPERIMENTAL_JOIN,
+    JoinControlConfig, NetworkOperations, PeerPinStore, PendingHostCommitAuthorization,
+    PendingJoinOperations, PendingJoinStore, ReconnectPolicy, SingleStarNetworkOperations,
     TransactionalJoinNetworkOperations, current_network, spawn_daemon_capability_health_worker,
     spawn_daemon_control_worker_with_peers, system_diagnostics_from_report,
 };
@@ -171,13 +171,35 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let worker_network_operations: Arc<dyn NetworkOperations> = network_operations.clone();
     let worker_peer_trust = peer_trust_operations.clone();
     let control_peers = AuthenticatedControlPeers::default();
+    // A stored name wins; an unreadable file is reported and left untouched (not overwritten
+    // until the user renames), and the default name is shown meanwhile.
+    let device_names = Arc::new(DeviceNameStore::new(device_name_directory(
+        &state_directory,
+    )));
+    let device_name = match device_names.load() {
+        Ok(Some(name)) => name,
+        Ok(None) => config.display_name.clone(),
+        Err(error) => {
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "component": "daemon_runtime",
+                    "event": "device_name_load",
+                    "outcome": "failed",
+                    "failure_class": format!("{:?}", error.kind()),
+                })
+            );
+            config.display_name.clone()
+        }
+    };
     let mut service =
         DaemonService::with_operations(status, network_operations, peer_trust_operations)
             .with_join_network_operations(join_network_operations)
             .with_pending_join_operations(pending_join_operations)
             .with_system_diagnostics(system_diagnostics)
             .with_local_control_tls_fingerprint(local_control_tls_identity.fingerprint())
-            .with_control_peers(control_peers.clone());
+            .with_control_peers(control_peers.clone())
+            .with_device_name_store(device_names, device_name);
     if let Some(reconnector) = client_reconnector {
         service = service.with_client_reconnector(reconnector.clone());
         // After the observer is installed, so health reflects the first attempt.
@@ -240,6 +262,10 @@ fn client_record_directory(state_directory: &Path) -> PathBuf {
     state_directory.join("client-record")
 }
 
+fn device_name_directory(state_directory: &Path) -> PathBuf {
+    state_directory.join("device-name")
+}
+
 fn pending_join_directory(state_directory: &Path) -> PathBuf {
     state_directory.join("pending-join")
 }
@@ -270,6 +296,10 @@ mod tests {
         assert_eq!(
             control_tls_identity_path(state_directory),
             PathBuf::from("/tmp/blueroute-state/control-tls")
+        );
+        assert_eq!(
+            device_name_directory(state_directory),
+            PathBuf::from("/tmp/blueroute-state/device-name")
         );
     }
 }

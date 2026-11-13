@@ -16,6 +16,7 @@ mod control_listener;
 mod control_supervisor;
 mod control_tls;
 mod control_worker;
+mod device_name;
 mod enrollment_transport;
 mod join_authorization;
 mod join_control;
@@ -82,6 +83,7 @@ pub use control_worker::{
     AuthenticatedControlPeers, DaemonControlWorker, spawn_daemon_control_worker,
     spawn_daemon_control_worker_with_peers,
 };
+pub use device_name::DeviceNameStore;
 pub use enrollment_transport::enroll_confirmed_control_candidate;
 pub use join_authorization::{
     JoinCommitAuthorization, JoinCommitReceipt, PendingHostCommitAuthorization,
@@ -150,6 +152,9 @@ pub struct DaemonService {
     pending_join_operations: Option<Arc<PendingJoinOperations>>,
     client_reconnector: Option<Arc<ClientReconnector>>,
     control_peers: Option<AuthenticatedControlPeers>,
+    /// The current display name and where it is kept (P12-009). A label only, never identity.
+    device_name: Arc<Mutex<Option<DisplayName>>>,
+    device_name_store: Option<Arc<DeviceNameStore>>,
     health_inputs: Arc<Mutex<HealthInputs>>,
     mutation_in_progress: Arc<AtomicBool>,
     system_diagnostics: Arc<Mutex<Option<SystemDiagnosticMetadata>>>,
@@ -178,6 +183,8 @@ impl DaemonService {
             pending_join_operations: None,
             client_reconnector: None,
             control_peers: None,
+            device_name: Arc::new(Mutex::new(None)),
+            device_name_store: None,
             health_inputs: Arc::new(Mutex::new(HealthInputs::new(health_now))),
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
             system_diagnostics: Arc::new(Mutex::new(None)),
@@ -199,6 +206,8 @@ impl DaemonService {
             pending_join_operations: None,
             client_reconnector: None,
             control_peers: None,
+            device_name: Arc::new(Mutex::new(None)),
+            device_name_store: None,
             health_inputs: Arc::new(Mutex::new(HealthInputs::new(health_now))),
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
             system_diagnostics: Arc::new(Mutex::new(None)),
@@ -221,6 +230,8 @@ impl DaemonService {
             pending_join_operations: None,
             client_reconnector: None,
             control_peers: None,
+            device_name: Arc::new(Mutex::new(None)),
+            device_name_store: None,
             health_inputs: Arc::new(Mutex::new(HealthInputs::new(health_now))),
             mutation_in_progress: Arc::new(AtomicBool::new(false)),
             system_diagnostics: Arc::new(Mutex::new(None)),
@@ -341,6 +352,198 @@ impl DaemonService {
 
     /// Let a joined client's reconnection state feed daemon health. The observer touches only
     /// the shared status and health inputs, so it holds no reference back to the service.
+    /// Run one already-authorized command. The D-Bus `request` method decodes, authorizes and
+    /// logs; this is the dispatch, separate so it can be tested without a bus.
+    async fn execute(&self, command: Command) -> fdo::Result<String> {
+        match command {
+            Command::GetStatus => self.status(),
+            Command::GetCapabilities => self.capabilities(),
+            Command::ListNetworks => {
+                let networks = self
+                    .network_operations()?
+                    .list_networks()
+                    .await
+                    .map_err(core_error_to_dbus)?;
+                Self::encode_response(&Response::Networks(networks))
+            }
+            Command::GetDiagnostics => {
+                let mut snapshot = self.diagnostics_snapshot().map_err(core_error_to_dbus)?;
+                if let Some(network) = &self.network_operations {
+                    snapshot.interfaces = network
+                        .diagnostic_interfaces()
+                        .await
+                        .map_err(core_error_to_dbus)?;
+                }
+                Self::encode_response(&Response::Diagnostics(Box::new(snapshot)))
+            }
+            Command::ListNodes => {
+                let nodes: Vec<_> = self.local_node_summary()?.into_iter().collect();
+                Self::encode_response(&Response::Nodes(nodes))
+            }
+            Command::GetNode { node } => {
+                let local = self.local_node_summary()?;
+                let matching = local.filter(|entry| entry.id == node);
+                Self::encode_response(&Response::Node(matching))
+            }
+            Command::CreateNetwork { name } => {
+                let network = self
+                    .network_operations()?
+                    .create_network(name)
+                    .await
+                    .map_err(core_error_to_dbus)?;
+                self.update_current_network(Some(network))?;
+                Self::encode_response(&Response::Ack)
+            }
+            Command::JoinNetwork { network } => {
+                self.join_network_operations()?
+                    .join_network(network)
+                    .await
+                    .map_err(core_error_to_dbus)?;
+                self.update_current_network(Some(network))?;
+                // Watch the new session so a later link loss is reconnected (P6-010). The
+                // join already succeeded, so a failure here only loses that watch.
+                if let Some(reconnector) = &self.client_reconnector
+                    && let Err(error) = reconnector.joined(network)
+                {
+                    eprintln!("BlueRoute could not watch the joined network's link: {error}");
+                }
+                Self::encode_response(&Response::Ack)
+            }
+            Command::GetClientLink => Self::encode_response(&Response::ClientLink(
+                self.client_reconnector
+                    .as_ref()
+                    .and_then(|reconnector| reconnector.state()),
+            )),
+            Command::RetryClientReconnect => {
+                let reconnector = self.client_reconnector.as_ref().ok_or_else(|| {
+                    fdo::Error::NotSupported(
+                        "client reconnection is unavailable in this daemon instance".into(),
+                    )
+                })?;
+                reconnector.retry().map_err(core_error_to_dbus)?;
+                Self::encode_response(&Response::Ack)
+            }
+            Command::LeaveNetwork => {
+                // Stop reconnecting first so a run cannot bring a session back while the
+                // leave tears it down.
+                if let Some(reconnector) = &self.client_reconnector {
+                    reconnector.cancel();
+                }
+                // A node that joined someone else's network must reverse its join; only
+                // otherwise is this a host leave.
+                let left_as_client = match &self.join_network_operations {
+                    Some(join) => join.leave_joined().await.map_err(core_error_to_dbus)?,
+                    None => false,
+                };
+                if !left_as_client {
+                    self.network_operations()?
+                        .leave_network()
+                        .await
+                        .map_err(core_error_to_dbus)?;
+                }
+                self.update_current_network(None)?;
+                if let Some(reconnector) = &self.client_reconnector {
+                    reconnector.cleared();
+                }
+                Self::encode_response(&Response::Ack)
+            }
+            Command::TrustPeer { node } => {
+                self.ensure_not_local_node(node)?;
+                self.peer_trust_operations()?
+                    .trust_peer(node)
+                    .await
+                    .map_err(core_error_to_dbus)?;
+                Self::encode_response(&Response::Ack)
+            }
+            Command::EnrollPeerKey { node, fingerprint } => {
+                self.ensure_not_local_node(node)?;
+                let fingerprint = SpkiSha256::parse_canonical_hex(&fingerprint).map_err(|_| {
+                    fdo::Error::InvalidArgs(
+                        "peer key fingerprint must be canonical lowercase SHA-256 hex".into(),
+                    )
+                })?;
+                self.peer_trust_operations()?
+                    .enroll_peer_key(node, fingerprint)
+                    .await
+                    .map_err(core_error_to_dbus)?;
+                Self::encode_response(&Response::Ack)
+            }
+            Command::RecordJoinHost {
+                network,
+                node,
+                fingerprint,
+            } => {
+                self.ensure_not_local_node(node)?;
+                let fingerprint = SpkiSha256::parse_canonical_hex(&fingerprint).map_err(|_| {
+                    fdo::Error::InvalidArgs(
+                        "join host fingerprint must be canonical lowercase SHA-256 hex".into(),
+                    )
+                })?;
+                let host =
+                    PendingJoinHost::new(network, node, fingerprint).map_err(core_error_to_dbus)?;
+                self.pending_join_operations()?
+                    .record_host(host)
+                    .map_err(core_error_to_dbus)?;
+                Self::encode_response(&Response::Ack)
+            }
+            Command::ClearJoinHost => {
+                self.pending_join_operations()?
+                    .clear()
+                    .map_err(core_error_to_dbus)?;
+                Self::encode_response(&Response::Ack)
+            }
+            Command::ForgetPeer { node } => {
+                self.ensure_not_local_node(node)?;
+                self.peer_trust_operations()?
+                    .forget_peer(node)
+                    .await
+                    .map_err(core_error_to_dbus)?;
+                Self::encode_response(&Response::Ack)
+            }
+            Command::SetDeviceName { name } => {
+                let store = self.device_name_store.as_ref().ok_or_else(|| {
+                    fdo::Error::NotSupported(
+                        "renaming is unavailable in this daemon instance".into(),
+                    )
+                })?;
+                // Durable first, so a failed write never shows a name that a restart loses.
+                store.save(&name).map_err(core_error_to_dbus)?;
+                if let Ok(mut current) = self.device_name.lock() {
+                    *current = Some(name);
+                }
+                Self::encode_response(&Response::Ack)
+            }
+            Command::StartDiscovery => {
+                self.network_operations()?
+                    .start_discovery()
+                    .await
+                    .map_err(core_error_to_dbus)?;
+                Self::encode_response(&Response::Ack)
+            }
+            Command::StopDiscovery => {
+                self.network_operations()?
+                    .stop_discovery()
+                    .await
+                    .map_err(core_error_to_dbus)?;
+                Self::encode_response(&Response::Ack)
+            }
+            _ => Err(fdo::Error::NotSupported(
+                "command is not implemented by the current daemon".into(),
+            )),
+        }
+    }
+
+    /// Keep this computer's display name in `store`, starting from `current` (P12-009).
+    pub fn with_device_name_store(
+        mut self,
+        store: Arc<DeviceNameStore>,
+        current: DisplayName,
+    ) -> Self {
+        self.device_name = Arc::new(Mutex::new(Some(current)));
+        self.device_name_store = Some(store);
+        self
+    }
+
     /// Report the host control worker's authenticated peers in diagnostics (P6-007).
     pub fn with_control_peers(mut self, peers: AuthenticatedControlPeers) -> Self {
         self.control_peers = Some(peers);
@@ -432,7 +635,10 @@ impl DaemonService {
         };
         Ok(Some(NodeSummary {
             id: node,
-            name: DisplayName::new("Local node").map_err(core_error_to_dbus)?,
+            name: match self.device_name.lock().ok().and_then(|name| name.clone()) {
+                Some(name) => name,
+                None => DisplayName::new("Local node").map_err(core_error_to_dbus)?,
+            },
             reachability: Reachability::Local,
         }))
     }
@@ -570,173 +776,7 @@ impl DaemonService {
             .then(|| MutationGuard::claim(&self.mutation_in_progress))
             .transpose()?;
 
-            match command {
-                Command::GetStatus => self.status(),
-                Command::GetCapabilities => self.capabilities(),
-                Command::ListNetworks => {
-                    let networks = self
-                        .network_operations()?
-                        .list_networks()
-                        .await
-                        .map_err(core_error_to_dbus)?;
-                    Self::encode_response(&Response::Networks(networks))
-                }
-                Command::GetDiagnostics => {
-                    let mut snapshot = self.diagnostics_snapshot().map_err(core_error_to_dbus)?;
-                    if let Some(network) = &self.network_operations {
-                        snapshot.interfaces = network
-                            .diagnostic_interfaces()
-                            .await
-                            .map_err(core_error_to_dbus)?;
-                    }
-                    Self::encode_response(&Response::Diagnostics(Box::new(snapshot)))
-                }
-                Command::ListNodes => {
-                    let nodes: Vec<_> = self.local_node_summary()?.into_iter().collect();
-                    Self::encode_response(&Response::Nodes(nodes))
-                }
-                Command::GetNode { node } => {
-                    let local = self.local_node_summary()?;
-                    let matching = local.filter(|entry| entry.id == node);
-                    Self::encode_response(&Response::Node(matching))
-                }
-                Command::CreateNetwork { name } => {
-                    let network = self
-                        .network_operations()?
-                        .create_network(name)
-                        .await
-                        .map_err(core_error_to_dbus)?;
-                    self.update_current_network(Some(network))?;
-                    Self::encode_response(&Response::Ack)
-                }
-                Command::JoinNetwork { network } => {
-                    self.join_network_operations()?
-                        .join_network(network)
-                        .await
-                        .map_err(core_error_to_dbus)?;
-                    self.update_current_network(Some(network))?;
-                    // Watch the new session so a later link loss is reconnected (P6-010). The
-                    // join already succeeded, so a failure here only loses that watch.
-                    if let Some(reconnector) = &self.client_reconnector
-                        && let Err(error) = reconnector.joined(network)
-                    {
-                        eprintln!("BlueRoute could not watch the joined network's link: {error}");
-                    }
-                    Self::encode_response(&Response::Ack)
-                }
-                Command::GetClientLink => Self::encode_response(&Response::ClientLink(
-                    self.client_reconnector
-                        .as_ref()
-                        .and_then(|reconnector| reconnector.state()),
-                )),
-                Command::RetryClientReconnect => {
-                    let reconnector = self.client_reconnector.as_ref().ok_or_else(|| {
-                        fdo::Error::NotSupported(
-                            "client reconnection is unavailable in this daemon instance".into(),
-                        )
-                    })?;
-                    reconnector.retry().map_err(core_error_to_dbus)?;
-                    Self::encode_response(&Response::Ack)
-                }
-                Command::LeaveNetwork => {
-                    // Stop reconnecting first so a run cannot bring a session back while the
-                    // leave tears it down.
-                    if let Some(reconnector) = &self.client_reconnector {
-                        reconnector.cancel();
-                    }
-                    // A node that joined someone else's network must reverse its join; only
-                    // otherwise is this a host leave.
-                    let left_as_client = match &self.join_network_operations {
-                        Some(join) => join.leave_joined().await.map_err(core_error_to_dbus)?,
-                        None => false,
-                    };
-                    if !left_as_client {
-                        self.network_operations()?
-                            .leave_network()
-                            .await
-                            .map_err(core_error_to_dbus)?;
-                    }
-                    self.update_current_network(None)?;
-                    if let Some(reconnector) = &self.client_reconnector {
-                        reconnector.cleared();
-                    }
-                    Self::encode_response(&Response::Ack)
-                }
-                Command::TrustPeer { node } => {
-                    self.ensure_not_local_node(node)?;
-                    self.peer_trust_operations()?
-                        .trust_peer(node)
-                        .await
-                        .map_err(core_error_to_dbus)?;
-                    Self::encode_response(&Response::Ack)
-                }
-                Command::EnrollPeerKey { node, fingerprint } => {
-                    self.ensure_not_local_node(node)?;
-                    let fingerprint =
-                        SpkiSha256::parse_canonical_hex(&fingerprint).map_err(|_| {
-                            fdo::Error::InvalidArgs(
-                                "peer key fingerprint must be canonical lowercase SHA-256 hex"
-                                    .into(),
-                            )
-                        })?;
-                    self.peer_trust_operations()?
-                        .enroll_peer_key(node, fingerprint)
-                        .await
-                        .map_err(core_error_to_dbus)?;
-                    Self::encode_response(&Response::Ack)
-                }
-                Command::RecordJoinHost {
-                    network,
-                    node,
-                    fingerprint,
-                } => {
-                    self.ensure_not_local_node(node)?;
-                    let fingerprint =
-                        SpkiSha256::parse_canonical_hex(&fingerprint).map_err(|_| {
-                            fdo::Error::InvalidArgs(
-                                "join host fingerprint must be canonical lowercase SHA-256 hex"
-                                    .into(),
-                            )
-                        })?;
-                    let host = PendingJoinHost::new(network, node, fingerprint)
-                        .map_err(core_error_to_dbus)?;
-                    self.pending_join_operations()?
-                        .record_host(host)
-                        .map_err(core_error_to_dbus)?;
-                    Self::encode_response(&Response::Ack)
-                }
-                Command::ClearJoinHost => {
-                    self.pending_join_operations()?
-                        .clear()
-                        .map_err(core_error_to_dbus)?;
-                    Self::encode_response(&Response::Ack)
-                }
-                Command::ForgetPeer { node } => {
-                    self.ensure_not_local_node(node)?;
-                    self.peer_trust_operations()?
-                        .forget_peer(node)
-                        .await
-                        .map_err(core_error_to_dbus)?;
-                    Self::encode_response(&Response::Ack)
-                }
-                Command::StartDiscovery => {
-                    self.network_operations()?
-                        .start_discovery()
-                        .await
-                        .map_err(core_error_to_dbus)?;
-                    Self::encode_response(&Response::Ack)
-                }
-                Command::StopDiscovery => {
-                    self.network_operations()?
-                        .stop_discovery()
-                        .await
-                        .map_err(core_error_to_dbus)?;
-                    Self::encode_response(&Response::Ack)
-                }
-                _ => Err(fdo::Error::NotSupported(
-                    "command is not implemented by the current daemon".into(),
-                )),
-            }
+            self.execute(command).await
         }
         .await;
         eprintln!(
@@ -882,6 +922,74 @@ pub fn dbus_interface_name() -> &'static str {
 #[cfg(test)]
 mod local_node_tests {
     use super::*;
+
+    fn decode(json: &str) -> Response {
+        blueroute_protocol::decode_response(json).unwrap()
+    }
+
+    #[test]
+    fn renaming_persists_changes_only_the_label_and_survives_a_new_service() {
+        futures_lite::future::block_on(async {
+            let dir = std::env::temp_dir().join(format!(
+                "blueroute-rename-{}-{}",
+                std::process::id(),
+                line!()
+            ));
+            let local = NodeId::from_bytes([0x71; 16]);
+            let service =
+                || DaemonService::new(local, HealthLevel::Healthy, NodeCapabilities::default());
+            let store = Arc::new(DeviceNameStore::new(&dir));
+            let named = service().with_device_name_store(
+                store.clone(),
+                DisplayName::new("BlueRoute Device").unwrap(),
+            );
+            let name = DisplayName::new("Kitchen laptop").unwrap();
+            let ack = named
+                .execute(Command::SetDeviceName { name: name.clone() })
+                .await
+                .unwrap();
+            assert_eq!(decode(&ack), Response::Ack);
+            let Response::Nodes(nodes) = decode(&named.execute(Command::ListNodes).await.unwrap())
+            else {
+                panic!("expected nodes");
+            };
+            assert_eq!(nodes.len(), 1);
+            assert_eq!(nodes[0].name, name);
+            // Identity is untouched: same NodeId as before the rename.
+            assert_eq!(nodes[0].id, local);
+            assert_eq!(named.status_snapshot().unwrap().local_node, Some(local));
+            // Durable: what a restarted daemon would load.
+            assert_eq!(store.load().unwrap(), Some(name));
+
+            // A daemon without a name store refuses rather than pretending.
+            let refused = service()
+                .execute(Command::SetDeviceName {
+                    name: DisplayName::new("x").unwrap(),
+                })
+                .await
+                .unwrap_err();
+            assert!(matches!(refused, fdo::Error::NotSupported(_)));
+            let _ = std::fs::remove_dir_all(dir);
+        });
+    }
+
+    #[test]
+    fn client_link_dispatch_without_a_reconnector_reads_none_and_refuses_retry() {
+        futures_lite::future::block_on(async {
+            let service = DaemonService::new(
+                NodeId::from_bytes([0x72; 16]),
+                HealthLevel::Healthy,
+                NodeCapabilities::default(),
+            );
+            let link = service.execute(Command::GetClientLink).await.unwrap();
+            assert_eq!(decode(&link), Response::ClientLink(None));
+            let retry = service
+                .execute(Command::RetryClientReconnect)
+                .await
+                .unwrap_err();
+            assert!(matches!(retry, fdo::Error::NotSupported(_)));
+        });
+    }
 
     #[test]
     fn local_inventory_is_conservative_and_never_invents_remote_peers() {

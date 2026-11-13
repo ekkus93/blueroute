@@ -77,4 +77,6 @@ export const daemon = {
   leaveNetwork: () => invoke<void>("leave_network"),
   /** Mutation with no arguments. The daemon authorizes it through PolicyKit. */
   retryClientReconnect: () => invoke<void>("retry_client_reconnect"),
+  /** Mutation. Renames this computer (a label only). The daemon authorizes it through PolicyKit. */
+  setDeviceName: (name: string) => invoke<void>("set_device_name", { name }),
 } as const;

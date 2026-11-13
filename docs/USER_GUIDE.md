@@ -106,6 +106,14 @@ blueroute status
 
 Leave also works after a daemon restart in which the network could not be restarted: it removes only what carries this network's BlueRoute ownership. If cleanup fails, you stay in the network and can run leave again. A refused leave is not a successful teardown.
 
+## Name this computer
+
+```sh
+blueroute node set-name "Kitchen laptop"
+```
+
+The name is only what people see. This computer's identity (its NodeId and keys) never changes, so networks and trusted devices are unaffected. The desktop app has the same option under Settings.
+
 ## Read device status
 
 ```sh

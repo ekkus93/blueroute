@@ -2,8 +2,8 @@
 //!
 //! The Tauri command layer exposes these narrow operations without granting web content raw
 //! D-Bus access or arbitrary daemon command dispatch. Everything is a read-only snapshot except
-//! `create_network`, `leave_network` and `retry_client_reconnect`, the only mutations, which the
-//! daemon still authorizes through PolicyKit.
+//! `create_network`, `leave_network`, `retry_client_reconnect` and `set_device_name`, the only
+//! mutations, which the daemon still authorizes through PolicyKit.
 mod platform_check;
 mod watch;
 
@@ -69,14 +69,14 @@ impl From<DaemonStatus> for DesktopOverview {
     }
 }
 
-/// Validate a user-typed network name exactly as the shared domain type does.
-fn network_name(raw: &str) -> Result<DisplayName, DesktopError> {
+/// Validate a user-typed network or device name exactly as the shared domain type does.
+fn display_name(raw: &str) -> Result<DisplayName, DesktopError> {
     DisplayName::new(raw.trim()).map_err(|_| DesktopError::InvalidName)
 }
 
 /// No caller-provided command is accepted: each method builds its own fixed daemon command.
-/// Snapshots are read-only; `create_network`, `leave_network` and `retry_client_reconnect` are
-/// the only mutations.
+/// Snapshots are read-only; `create_network`, `leave_network`, `retry_client_reconnect` and
+/// `set_device_name` are the only mutations.
 pub struct DesktopBridge {
     client: BlueRouteClient,
 }
@@ -103,7 +103,7 @@ impl DesktopBridge {
     /// Create a network hosted by this computer. The daemon enforces PolicyKit authorization,
     /// idempotency and capability checks; this method adds no extra privilege.
     pub async fn create_network(&self, name: &str) -> Result<(), DesktopError> {
-        let name = network_name(name)?;
+        let name = display_name(name)?;
         match self
             .client
             .request(&Command::CreateNetwork { name })
@@ -136,6 +136,22 @@ impl DesktopBridge {
         match self
             .client
             .request(&Command::RetryClientReconnect)
+            .await
+            .map_err(|error| DesktopError::from(error.kind()))?
+        {
+            Response::Ack => Ok(()),
+            _ => Err(DesktopError::UnexpectedResponse),
+        }
+    }
+
+    /// Rename this computer. The name is a label only; the daemon never changes the NodeId. It
+    /// is validated locally like a network name before the daemon is contacted, and the daemon
+    /// enforces PolicyKit.
+    pub async fn set_device_name(&self, name: &str) -> Result<(), DesktopError> {
+        let name = display_name(name)?;
+        match self
+            .client
+            .request(&Command::SetDeviceName { name })
             .await
             .map_err(|error| DesktopError::from(error.kind()))?
         {
@@ -238,10 +254,10 @@ mod tests {
     }
 
     #[test]
-    fn network_names_are_trimmed_and_validated_before_any_daemon_call() {
-        assert_eq!(network_name("  Workshop ").unwrap().as_str(), "Workshop");
+    fn display_names_are_trimmed_and_validated_before_any_daemon_call() {
+        assert_eq!(display_name("  Workshop ").unwrap().as_str(), "Workshop");
         for bad in ["", "   ", "bad\nname", &"x".repeat(65)] {
-            assert_eq!(network_name(bad), Err(DesktopError::InvalidName), "{bad:?}");
+            assert_eq!(display_name(bad), Err(DesktopError::InvalidName), "{bad:?}");
         }
     }
 
