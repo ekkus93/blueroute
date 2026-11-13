@@ -1883,7 +1883,10 @@ mod tests {
                 }
                 _ => unreachable!(),
             }
-            hostile.flush().unwrap();
+            // The worker may already have rejected the frame and closed the session, so the
+            // hostile side's flush can fail with a broken pipe. What is under test is that the
+            // bad generation is retired and the same peer can recover, checked below.
+            let _ = hostile.flush();
 
             // Keep the hostile TLS socket open. Same-peer recovery requires
             // the daemon to reject and retire the bad session generation.
