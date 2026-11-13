@@ -250,3 +250,39 @@ remains on in `main.tsx`; no lint rule is disabled (`oxlint --deny-warnings` cle
 The baseline column was produced by restoring the committed hook, running the file (4 failed,
 4 passed) and restoring the fix. Desktop checks at the fix: format, lint, typecheck, 43 tests,
 build.
+
+## CR-F3 — graph consistency (2026-11-13)
+
+**Fix:** `4583c6ee23da604ac01ec1a21e50fb6872a8c9b4` (`crates/blueroute-core/src/topology.rs`;
+contract in its doc comments and `docs/SPEC.md` under `blueroute-core`).
+
+CR-F3-01 caller audit: every `add_segment`/`add_link`/`remove_link` caller is a test
+(`topology.rs`, `forwarding_policy.rs`, `route_planner.rs`, `route_recovery.rs`, `neighbor.rs`,
+`blueroute-linux` `forwarding.rs` and `forwarding_reconciliation.rs`); no production path builds the
+graph yet, so the conservative rejection policy (GRAPH-2) breaks no caller. Semantics:
+
+| Operation | Result |
+| --- | --- |
+| `add_segment`, new SegmentId | inserted, `Ok(true)` |
+| `add_segment`, same SegmentId and NAP | kept with all members; new explicit members merged; `Ok(false)` |
+| `add_segment`, same SegmentId, other NAP | `Err`, graph unchanged |
+| `add_segment`, unknown NAP or explicit member | `Err`, graph unchanged |
+| `add_link`, new LinkId | inserted, PANU becomes a member, `Ok(true)` |
+| `add_link`, same LinkId, segment and endpoints | state/health/cost updated, `Ok(false)` |
+| `add_link`, same LinkId, other segment/NAP/PANU | `Err` (no rebinding), graph unchanged |
+| `add_link`, unknown endpoint/segment, NAP ≠ segment NAP, NAP = PANU | `Err`, graph unchanged |
+| `remove_link` | PANU stays a member while another link in the segment needs it or it is explicit |
+| `remove_node` | its links, segments it is NAP of, and its memberships (explicit too) go |
+
+Explicit members (`PanSegment::add_member` before insertion) are supported, must be graph nodes,
+and are tracked separately from link membership.
+
+**Regressions** (`cargo test -p blueroute-core --lib cr_f3`, 11 tests, all pass): the four
+baseline tests (identical reinsertion, NAP change, LinkId rebinding, whole-graph consistency),
+now enabled; plus property update (and its routing effect: a failed link drops out of
+`shortest_path`, recovers in place), refused moves to another segment or swapped roles with
+other invalid changes (whole-graph equality), a member with two links, removal after an update,
+explicit members (unknown refused atomically; survive link removal; go with the node), return
+values, and an unchanged deterministic routed path across refused changes. A shared
+`assert_consistent` checks GRAPH-3 after each. Existing single-star, routed, redundant-path,
+partition, forwarding and neighbor tests are unchanged and pass (workspace tests green).

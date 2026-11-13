@@ -24,7 +24,7 @@
 | CR-F8 | Owner-bound compatibility and command delivery | P2 | CR-BASE | `[x]` |
 | CR-F2 | Idle owner-loss detection and watcher recovery | P2 | CR-BASE; owner contract from CR-F8 | `[x]` |
 | CR-F1 | Committed state publication and observer refresh | P2 | CR-BASE; CR-F2 for integrated acceptance | `[x]` |
-| CR-F3 | Consistent graph insertion/update semantics | P2 | CR-BASE | `[ ]` |
+| CR-F3 | Consistent graph insertion/update semantics | P2 | CR-BASE | `[x]` |
 | CR-F4 | Fresh operational capabilities after recovery | P2 | CR-BASE; CR-F1 for observer acceptance | `[ ]` |
 | CR-F5 | Ownership-safe remove/purge cleanup | P2 | CR-BASE; lifecycle design | `[ ]` |
 | CR-F6 | Effect-generation resource ownership | P3 | CR-BASE; watcher contract from CR-F2 | `[x]` |
@@ -138,21 +138,23 @@ see [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-f1--publish-actual-daemon-
 
 **Requirements:** GRAPH-1–GRAPH-4. **Original task:** P2-005; downstream P8/P9 prerequisites.
 
-- [ ] **CR-F3-01:** Audit graph callers; document identical insertion, property update,
+- [x] **CR-F3-01:** Audit graph callers; document identical insertion, property update,
   incompatible rebinding, explicit membership, and boolean return semantics.
-- [ ] **CR-F3-02:** Preserve attached membership on identical SegmentId reinsertion. Reject a
+- [x] **CR-F3-02:** Preserve attached membership on identical SegmentId reinsertion. Reject a
   changed NAP by default or implement a fully validated atomic replacement contract.
-- [ ] **CR-F3-03:** Prevent stale membership on LinkId rebinding; preserve legitimate members
+- [x] **CR-F3-03:** Prevent stale membership on LinkId rebinding; preserve legitimate members
   still required by other links and any explicitly supported non-link membership.
-- [ ] **CR-F3-04:** Validate endpoints, segment references, and NAP agreement before mutating
+- [x] **CR-F3-04:** Validate endpoints, segment references, and NAP agreement before mutating
   any index. Failed operations must preserve a complete before/after graph snapshot.
-- [ ] **CR-F3-05:** Test same-ID duplicate insertion, changed endpoints/segment/NAP, property-only
+- [x] **CR-F3-05:** Test same-ID duplicate insertion, changed endpoints/segment/NAP, property-only
   updates, invalid changes, multiple links to a member, and removal after updates.
-- [ ] **CR-F3-06:** Add downstream deterministic route/forwarding checks over the resulting
+- [x] **CR-F3-06:** Add downstream deterministic route/forwarding checks over the resulting
   graph; retain existing single-star, routed, redundant-path, and partition tests.
 
 **Acceptance:** All graph representations agree after every supported mutation; invalid
 replacement is atomic and deterministic; the original two replacement probes no longer fail.
+
+**Accepted (2026-11-13, `4583c6e`):** met; see [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-f3--graph-consistency-2026-11-13).
 
 ## CR-F4 — Refresh operational hosting capabilities
 
@@ -336,7 +338,7 @@ Fill entries as work is qualified. Link concrete records; do not replace evidenc
 | CR-F8 / F8 | `b3ba0bd` | 5 `owner_race` tests pass (2 fail with the baseline client); all checks and bus suites green | Not required for the owner-race defect | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
 | CR-F2 / F2 | `e283b4e` | `owner_watch` (3), `watcher` (5), setup race in `owner_race`; UI stale-label tests; all checks green | Private broker sufficient for the reported defect | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
 | CR-F1 / F1 | `4de29b1` | `state_events` (7), daemon-to-watcher, link-phase and peer-snapshot tests; all checks green | Radio claims remain separate | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
-| CR-F3 / F3 | Pending | Pending | Not required for pure graph consistency | Atomic mutation and consumer invariants | NOT STARTED |
+| CR-F3 / F3 | `4583c6e` | 11 `cr_f3` tests (4 failed on baseline); workspace green | Not required for pure graph consistency | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
 | CR-F4 / F4 | Pending | Pending | Adapter behavior if claimed | Same-instance software recovery; preserve hardware gates | NOT STARTED |
 | CR-F5 / F5 | Pending | Pending | Required: CR-QUALIFY | Owned cleanup, foreign preservation, failure/retry | NOT STARTED |
 | CR-F6 / F6 | `25e6984` | 8 `useDaemon` tests (4 fail with the baseline hook); desktop checks green | Not required for effect ownership | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
