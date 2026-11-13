@@ -2666,4 +2666,70 @@ mod tests {
             fs::remove_dir_all(root).unwrap();
         });
     }
+
+    // CR-F4 regression (docs/CODE_REVIEW_REMEDIATION_TODO.md): states the corrected contract and
+    // fails on baseline 4ca5042, where creation reads the startup capability copy; CR-F4 removes
+    // the `ignore`.
+    #[test]
+    #[ignore = "CR-F4 regression: fails on baseline 4ca5042 until CR-F4 is fixed"]
+    fn cr_f4_recovered_hosting_capability_unblocks_create_without_restart() {
+        futures_lite::future::block_on(async {
+            let (root, store) = temp_store("cr-f4-recovery");
+            let runtime = FakeRuntime::default();
+            let network = NetworkId::from_bytes([0xf4; 16]);
+            let operations = Arc::new(SingleStarNetworkOperations::with_runtime_and_generator(
+                store,
+                DaemonConfig::default(),
+                // Startup observed no hosting capability.
+                nap_capabilities(Some(false)),
+                runtime.clone(),
+                SequenceGenerator::new([network]),
+            ));
+            let service = crate::DaemonService::with_operations(
+                blueroute_protocol::DaemonStatus {
+                    api_version: blueroute_protocol::ApiVersion::CURRENT,
+                    local_node: Some(blueroute_core::NodeId::from_bytes([0xf5; 16])),
+                    current_network: None,
+                    health: blueroute_core::HealthLevel::Healthy,
+                    capabilities: nap_capabilities(Some(false)),
+                },
+                operations,
+                Arc::new(crate::DurablePeerTrustOperations::new(
+                    NetworkMembershipStore::new(root.join("trust-memberships")),
+                )),
+            );
+            let create = || {
+                service.execute(blueroute_protocol::Command::CreateNetwork {
+                    name: DisplayName::new("Recovered").unwrap(),
+                })
+            };
+            // Still incapable: refused, nothing reaches the runtime.
+            assert!(create().await.is_err());
+            assert_eq!(runtime.starts(), 0);
+
+            // The same daemon later observes usable hosting (no restart).
+            service
+                .update_runtime_observation(
+                    blueroute_core::HealthLevel::Healthy,
+                    nap_capabilities(Some(true)),
+                    None,
+                )
+                .unwrap();
+            assert_eq!(
+                service
+                    .status_snapshot()
+                    .unwrap()
+                    .capabilities
+                    .can_host_pan(),
+                Some(true),
+                "published readiness says hosting is available"
+            );
+            create()
+                .await
+                .expect("eligible creation proceeds on fresh capabilities");
+            assert_eq!(runtime.starts(), 1);
+
+            fs::remove_dir_all(root).unwrap();
+        });
+    }
 }

@@ -408,4 +408,89 @@ mod tests {
         graph.remove_node(node(2));
         assert_eq!(graph.links().count(), 0);
     }
+
+    // CR-F3 regressions (docs/CODE_REVIEW_REMEDIATION_TODO.md). They state the corrected
+    // contract and fail on baseline 4ca5042; CR-F3 removes the `ignore`.
+
+    fn members_of(graph: &TopologyGraph, id: u8) -> Vec<NodeId> {
+        graph
+            .segments()
+            .find(|(segment_id, _)| **segment_id == segment(id))
+            .map(|(_, segment)| segment.members().copied().collect())
+            .unwrap_or_default()
+    }
+
+    fn star_with_one_client() -> TopologyGraph {
+        let mut graph = TopologyGraph::default();
+        add_node(&mut graph, 1, true);
+        add_node(&mut graph, 2, false);
+        add_node(&mut graph, 3, false);
+        add_node(&mut graph, 4, true);
+        graph
+            .add_segment(PanSegment::new(segment(1), node(1)))
+            .unwrap();
+        graph.add_link(active_link(1, 1, 1, 2)).unwrap();
+        graph
+    }
+
+    #[test]
+    #[ignore = "CR-F3 regression: fails on baseline 4ca5042 until CR-F3 is fixed"]
+    fn cr_f3_identical_segment_reinsertion_keeps_attached_members() {
+        let mut graph = star_with_one_client();
+        graph
+            .add_segment(PanSegment::new(segment(1), node(1)))
+            .unwrap();
+        assert_eq!(members_of(&graph, 1), vec![node(1), node(2)]);
+    }
+
+    #[test]
+    #[ignore = "CR-F3 regression: fails on baseline 4ca5042 until CR-F3 is fixed"]
+    fn cr_f3_segment_nap_change_under_existing_links_is_rejected_atomically() {
+        let mut graph = star_with_one_client();
+        let before = graph.clone();
+        assert!(
+            graph
+                .add_segment(PanSegment::new(segment(1), node(4)))
+                .is_err()
+        );
+        assert_eq!(graph, before);
+    }
+
+    #[test]
+    #[ignore = "CR-F3 regression: fails on baseline 4ca5042 until CR-F3 is fixed"]
+    fn cr_f3_link_identity_rebinding_is_rejected_without_stale_membership() {
+        let mut graph = star_with_one_client();
+        let before = graph.clone();
+        // Same LinkId, different PANU: must not silently rebind and leave node 2 a member.
+        assert!(graph.add_link(active_link(1, 1, 1, 3)).is_err());
+        assert_eq!(graph, before);
+    }
+
+    #[test]
+    #[ignore = "CR-F3 regression: fails on baseline 4ca5042 until CR-F3 is fixed"]
+    fn cr_f3_every_link_matches_its_segment_after_mutations() {
+        let mut graph = star_with_one_client();
+        // Whatever these return, the graph must stay internally consistent.
+        let _ = graph.add_segment(PanSegment::new(segment(1), node(4)));
+        let _ = graph.add_link(active_link(1, 1, 1, 3));
+        for (_, link) in graph.links() {
+            let (_, segment) = graph
+                .segments()
+                .find(|(id, _)| **id == link.segment_id)
+                .expect("every link references an existing segment");
+            assert_eq!(segment.nap, link.nap, "link NAP must match its segment NAP");
+            assert!(segment.members().any(|member| *member == link.panu));
+        }
+        for (_, segment) in graph.segments() {
+            for member in segment.members() {
+                assert!(
+                    *member == segment.nap
+                        || graph
+                            .links()
+                            .any(|(_, link)| link.segment_id == segment.id && link.panu == *member),
+                    "no stale member without a link"
+                );
+            }
+        }
+    }
 }
