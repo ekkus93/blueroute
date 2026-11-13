@@ -268,7 +268,7 @@ fn cr_f8_a_subscription_never_delivers_a_replacement_owners_events() -> Result<(
         a_conn.release_name(DBUS_SERVICE_NAME).await?;
         b_conn.request_name(DBUS_SERVICE_NAME).await?;
         emit(&b_conn, &Event::HealthChanged(HealthLevel::Error)).await?;
-        // A, the owner the subscription was validated against, emits its own event.
+        // A, the owner the subscription was validated against, emits too.
         emit(&a_conn, &Event::HealthChanged(HealthLevel::Degraded)).await?;
 
         let first = future::or(async { Some(events.next_event().await) }, async {
@@ -276,13 +276,46 @@ fn cr_f8_a_subscription_never_delivers_a_replacement_owners_events() -> Result<(
             None
         })
         .await;
+        // The name moved away from A, so the subscription ends (CR-F2, WATCH-1); B's event is
+        // never delivered on it, and nothing arrives under A's earlier version check.
         match first {
-            Some(Ok(Event::HealthChanged(level))) => assert_eq!(
-                level,
-                HealthLevel::Degraded,
-                "the replacement owner's event was delivered"
+            Some(Err(error)) => assert!(
+                matches!(error, blueroute_client::ClientError::OwnerLost),
+                "{error}"
             ),
-            other => panic!("expected A's event, got {other:?}"),
+            other => panic!("expected the subscription to end with OwnerLost, got {other:?}"),
+        }
+        drop((a_conn, b_conn));
+        Ok(())
+    })
+}
+
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn cr_f2_an_owner_change_during_subscription_setup_is_not_missed() -> Result<(), Box<dyn Error>> {
+    let _bus = BUS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    future::block_on(async {
+        // Call 1 is the connect-time check; call 2 is the check inside events(), after the
+        // owner was resolved and before the subscription is returned. A hands over right there.
+        let a = Fake::new(COMPATIBLE, Act::HandOverOnVersion(2));
+        let successor = a.successor.clone();
+        let (b_conn, _, _) = serve(Fake::new(COMPATIBLE, Act::Nothing), false).await?;
+        let _ = successor.set(b_conn.clone());
+        let (a_conn, _, _) = serve(a, true).await?;
+        let client = BlueRouteClient::from_connection(Connection::session().await?).await?;
+        let mut events = client.events().await?;
+
+        // No event is ever emitted: the change observed during setup alone ends it.
+        let first = future::or(async { Some(events.next_event().await) }, async {
+            Timer::after(Duration::from_secs(2)).await;
+            None
+        })
+        .await;
+        match first {
+            Some(Err(blueroute_client::ClientError::OwnerLost)) => {}
+            other => panic!("the handover during setup was missed: {other:?}"),
         }
         drop((a_conn, b_conn));
         Ok(())

@@ -39,7 +39,9 @@ export function App({ api, subscribe }: AppProps) {
         <Notice
           tone="warning"
           title="Lost contact with the BlueRoute service. Trying to reconnect…"
-        />
+        >
+          <p>What is shown below may be out of date until the service is back.</p>
+        </Notice>
       )}
 
       {view.phase === "loading" && <Loading />}

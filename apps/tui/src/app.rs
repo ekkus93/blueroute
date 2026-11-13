@@ -177,7 +177,8 @@ fn link_line(link: Link) -> Line<'static> {
     match link {
         Link::Unknown => Line::from("Connecting to the BlueRoute service…"),
         Link::Connected => Line::from("Live: views update when the daemon reports a change."),
-        Link::Disconnected => Line::from("Lost contact with the BlueRoute service; retrying…")
+        // Fits the 40-column minimum: the retained view is not presented as current (WATCH-3).
+        Link::Disconnected => Line::from("Lost contact; view may be out of date…")
             .style(Style::default().add_modifier(Modifier::BOLD | Modifier::REVERSED)),
     }
 }
@@ -389,7 +390,11 @@ mod tests {
 
         assert_eq!(app.on_signal(Signal::Disconnected), vec![Screen::Overview]);
         let text = render(&app, 80, 20);
-        assert!(text.contains("Lost contact with the BlueRoute service"));
+        assert!(text.contains("Lost contact; view may be out of date"));
+        // Still whole at the narrowest supported width.
+        assert!(
+            render(&app, MIN_WIDTH, MIN_HEIGHT).contains("Lost contact; view may be out of date…")
+        );
         // The last view stays visible until the reload explains what happened.
         assert!(text.contains("second"));
         app.on_loaded(loaded(

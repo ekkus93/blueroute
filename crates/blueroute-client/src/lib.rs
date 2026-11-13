@@ -1,5 +1,8 @@
 #![doc = "Reusable client for the BlueRoute daemon API."]
 
+mod watch;
+pub use watch::{WatchSignal, reconnect_delay, watch};
+
 use std::fmt;
 use std::time::{Duration, Instant};
 
@@ -10,7 +13,7 @@ use blueroute_protocol::{
     Event, ProtocolCodecError, Response, decode_event, decode_response, encode_command,
 };
 use futures_lite::StreamExt;
-use zbus::fdo::DBusProxy;
+use zbus::fdo::{DBusProxy, NameOwnerChangedStream};
 use zbus::names::{BusName, OwnedUniqueName};
 use zbus::proxy::SignalStream;
 use zbus::{Connection, Proxy};
@@ -124,8 +127,18 @@ impl BlueRouteClient {
 
     /// Subscribe to typed daemon events from the owner whose compatible version was just checked.
     /// Signals are matched on that owner's unique bus name, so a replacement owner's events never
-    /// arrive on this subscription.
+    /// arrive on this subscription. The subscription also watches the name itself and ends with
+    /// [`ClientError::OwnerLost`] when that owner gives it up or disappears, even if the daemon
+    /// never emits another event (CR-F2, WATCH-1).
     pub async fn events(&self) -> Result<EventSubscription, ClientError> {
+        // Watch the name before resolving its owner, so no ownership change can fall between
+        // the two steps unobserved.
+        let owner_changes = DBusProxy::new(&self.connection)
+            .await
+            .map_err(ClientError::Bus)?
+            .receive_name_owner_changed_with_args(&[(0, DBUS_SERVICE_NAME)])
+            .await
+            .map_err(ClientError::Bus)?;
         let owner = validated_owner(&self.connection).await?;
         let proxy = owner_proxy(&self.connection, &owner.name).await?;
         let stream = proxy
@@ -136,6 +149,7 @@ impl BlueRouteClient {
             connection: self.connection.clone(),
             owner: owner.name,
             stream,
+            owner_changes,
         })
     }
 }
@@ -146,15 +160,44 @@ pub struct EventSubscription {
     /// The unique bus name the subscription is bound to.
     owner: OwnedUniqueName,
     stream: SignalStream<'static>,
+    /// Ownership changes of the daemon's well-known name only.
+    owner_changes: NameOwnerChangedStream,
+}
+
+/// What the next thing to happen on a subscription was.
+enum Next {
+    Event(Option<zbus::Message>),
+    OwnerChanged(bool),
 }
 
 impl EventSubscription {
     pub async fn next_event(&mut self) -> Result<Event, ClientError> {
-        let message = self
-            .stream
-            .next()
-            .await
-            .ok_or(ClientError::EventStreamClosed)?;
+        let message = loop {
+            let owner = &self.owner;
+            let next =
+                futures_lite::future::or(async { Next::Event(self.stream.next().await) }, async {
+                    match self.owner_changes.next().await {
+                        // A change that leaves the name with this owner is not a loss: it is
+                        // the queued notice of this owner taking the name.
+                        Some(change) => {
+                            Next::OwnerChanged(
+                                change.args().ok().and_then(|args| {
+                                    args.new_owner().as_ref().map(|new| new == owner)
+                                }) != Some(true),
+                            )
+                        }
+                        // The bus connection itself is gone.
+                        None => Next::OwnerChanged(true),
+                    }
+                })
+                .await;
+            match next {
+                Next::Event(Some(message)) => break message,
+                Next::Event(None) => return Err(ClientError::EventStreamClosed),
+                Next::OwnerChanged(true) => return Err(ClientError::OwnerLost),
+                Next::OwnerChanged(false) => {}
+            }
+        };
         // The stream only carries this owner's signals; recheck that same owner's version so an
         // event is never accepted on the strength of a different owner's check.
         negotiate_version_at(&self.connection, &self.owner).await?;
@@ -272,6 +315,8 @@ pub enum ClientError {
     },
     InvalidTransportPayload(String),
     EventStreamClosed,
+    /// The daemon owner this subscription was bound to gave up its name or disappeared.
+    OwnerLost,
     ReconnectTimeout {
         timeout: Duration,
         last_error: String,
@@ -283,7 +328,7 @@ impl ClientError {
     /// peer-controlled textual diagnostics as authorization decisions.
     pub fn kind(&self) -> ClientErrorKind {
         match self {
-            Self::IncompatibleVersion { .. } | Self::ReconnectTimeout { .. } => {
+            Self::IncompatibleVersion { .. } | Self::ReconnectTimeout { .. } | Self::OwnerLost => {
                 ClientErrorKind::Unavailable
             }
             Self::Bus(zbus::Error::MethodError(name, _, _)) => remote_error_kind(name.as_str()),
@@ -328,6 +373,7 @@ impl fmt::Display for ClientError {
                 )
             }
             Self::EventStreamClosed => formatter.write_str("daemon event stream closed"),
+            Self::OwnerLost => formatter.write_str("the daemon went away or was replaced"),
             Self::ReconnectTimeout {
                 timeout,
                 last_error,

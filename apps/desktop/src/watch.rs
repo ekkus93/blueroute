@@ -2,16 +2,15 @@
 //!
 //! Daemon event payloads are never forwarded to web content. The UI only learns that the
 //! daemon link came up, went away, or that *something* changed, and then re-reads the typed,
-//! read-only snapshots. A closed stream, version mismatch or bus error is treated as a lost
-//! link and retried with bounded exponential backoff.
+//! read-only snapshots. The loop itself is [`blueroute_client::watch`], shared with the TUI: an
+//! idle daemon that goes away or is replaced ends the subscription without any Event, and the
+//! link is retried with bounded exponential backoff.
+use std::ops::ControlFlow;
 use std::time::Duration;
 
 use async_io::Timer;
-use blueroute_client::BlueRouteClient;
+use blueroute_client::{BlueRouteClient, WatchSignal};
 use serde::Serialize;
-
-const INITIAL_DELAY: Duration = Duration::from_secs(1);
-const MAX_DELAY: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -24,30 +23,34 @@ pub enum DaemonSignal {
     Disconnected,
 }
 
+impl From<WatchSignal> for DaemonSignal {
+    fn from(signal: WatchSignal) -> Self {
+        match signal {
+            WatchSignal::Connected => Self::Connected,
+            WatchSignal::Changed => Self::Changed,
+            WatchSignal::Disconnected => Self::Disconnected,
+        }
+    }
+}
+
 /// Delay before reconnect attempt number `attempt` (0-based): 1s, 2s, 4s ... capped at 30s.
 pub fn reconnect_delay(attempt: u32) -> Duration {
-    INITIAL_DELAY
-        .saturating_mul(2u32.saturating_pow(attempt.min(16)))
-        .min(MAX_DELAY)
+    blueroute_client::reconnect_delay(attempt)
 }
 
 /// Watch the daemon forever, reporting coarse signals. Intended to run for the app lifetime.
 pub async fn watch_daemon(mut notify: impl FnMut(DaemonSignal)) {
-    let mut attempt: u32 = 0;
-    loop {
-        if let Ok(client) = BlueRouteClient::connect().await
-            && let Ok(mut events) = client.events().await
-        {
-            attempt = 0;
-            notify(DaemonSignal::Connected);
-            while events.next_event().await.is_ok() {
-                notify(DaemonSignal::Changed);
-            }
-        }
-        notify(DaemonSignal::Disconnected);
-        Timer::after(reconnect_delay(attempt)).await;
-        attempt = attempt.saturating_add(1);
-    }
+    blueroute_client::watch(
+        BlueRouteClient::connect,
+        |delay| async move {
+            Timer::after(delay).await;
+        },
+        |signal| {
+            notify(signal.into());
+            ControlFlow::Continue(())
+        },
+    )
+    .await;
 }
 
 #[cfg(test)]

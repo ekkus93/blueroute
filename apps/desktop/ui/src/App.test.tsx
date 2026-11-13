@@ -147,7 +147,13 @@ test("refreshes on daemon signals and shows a reconnecting banner when the link 
   await waitFor(() => expect(yourNetwork().getByText("Lab 2")).toBeTruthy());
   act(() => bus.send("disconnected"));
   expect(screen.getByText(/Trying to reconnect/)).toBeTruthy();
+  // Retained data stays visible but is labelled as possibly stale (WATCH-3).
+  expect(screen.getByText(/What is shown below may be out of date/)).toBeTruthy();
   expect(yourNetwork().getByText("Lab 2")).toBeTruthy();
+  act(() => bus.send("connected"));
+  await waitFor(() =>
+    expect(screen.queryByText(/What is shown below may be out of date/)).toBeNull(),
+  );
 });
 
 test("a failing signal subscription does not break the page", async () => {
