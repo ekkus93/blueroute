@@ -59,7 +59,13 @@ For every scenario, also check: durable `Member` with role `client` survives; no
 - [ ] **Leave while connecting:** with the host powered off, restart the client daemon and run `blueroute network leave` during `connecting` or `waiting`. Expected: leave succeeds; the run stops; afterwards no control session, owned address, owned profile or PANU link for this network remains, and `network link` reports not a joined client.
 - [ ] **Leave after restart with nothing retained:** restart the client daemon with the host up and leave immediately. Expected: the PANU link to the recorded host is disconnected only when proven ours, owned state is removed, and a PANU link to any other device is left alone.
 
-**Not covered by P6-009 (recorded so it is not mistaken for a pass):** loss of the link while the daemon keeps running (range loss, adapter unplug, `bluetoothd` or NetworkManager restart without a daemon restart) is P6-010/P13 work. Until then `network link` can keep reporting `established` after such a loss. `blueroute network reconnect` starts a fresh attempt, but nothing detects the loss automatically.
+**Link loss while the daemon keeps running (P6-010, software written, not run):** the reconnector watches the supervised control session and reconnects when it ends by itself. Check on the same rig:
+
+- [ ] **Range loss and return:** walk the client out of range and back. Expected: within a few seconds (the supervisor checks the PANU link every second), `network link` shows `connecting`/`waiting` and health `Reconnecting`; back in range it returns to `established` and Healthy without any command.
+- [ ] **Host gone too long:** power the host off for longer than the reconnect budget. Expected: `gave_up`, health Degraded, membership kept; after powering the host on, `blueroute network reconnect` restores the link.
+- [ ] **Adapter unplug/replug, `bluetoothd` restart, NetworkManager restart without a daemon restart:** expected as for range loss; record any case where the session does not end and loss goes undetected (that is P13-002..P13-004 work).
+- [ ] **Host daemon stopped, radio up:** stop `blueroute.service` on the host only. Record how long until the client notices; the client has no inbound idle deadline, so this relies on a failed heartbeat write.
+- [ ] **Leave during a link-loss reconnect:** expected as for leave while connecting.
 
 ## Software-only control-session evidence (through 2026-10-21)
 

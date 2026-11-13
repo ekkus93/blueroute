@@ -1,9 +1,15 @@
-//! Restart reconnection of a joined client as a daemon service (P6-009 S5b).
+//! Restart and link-loss reconnection of a joined client as a daemon service (P6-009 S5b,
+//! P6-010).
 //!
 //! At startup, a persisted `Client` is reconnected in the **background** so a slow radio can
-//! never block daemon start or D-Bus. The run is bounded (see `ReconnectPolicy`): it ends in
-//! `Established`, `NeedsAttention` or `GaveUp`, never retries forever, and never touches durable
-//! membership. The user can start a fresh run with `retry`. Leave cancels the run first.
+//! never block daemon start or D-Bus. Each reconnect is bounded (see `ReconnectPolicy`): it ends
+//! in `Established`, `NeedsAttention` or `GaveUp`, never retries forever, and never touches
+//! durable membership. The user can start a fresh run with `retry`. Leave cancels the run first.
+//!
+//! Once `Established` (after a reconnect, or after a fresh join via `joined`), the same run keeps
+//! **watching** the supervised control session. When the session ends by itself (PANU or TLS
+//! lost, idle timeout) it collects the worker and starts a fresh bounded reconnect (P6-010), so
+//! a lost host is reported as `Reconnecting` and health returns once it is back.
 //!
 //! Health is derived from the published state, so the UI can show `Reconnecting` while trying
 //! and `Degraded` when it needs the user, without a separate channel.
@@ -23,8 +29,20 @@ use blueroute_protocol::ClientLinkState;
 use crate::{
     ClientHost, ClientRecordStore, ClientRuntime, ControlSupervisors, JoinIpLease, JoinPanLink,
     ObservedClient, PeerPinStore, ReconnectEnd, ReconnectPolicy, ReconnectProgress,
-    current_network, run_reconnect, single_approved_host,
+    SupervisedState, current_network, run_reconnect, single_approved_host,
 };
+
+/// How often an established run checks whether its control session is still alive.
+const WATCH_INTERVAL: Duration = Duration::from_secs(1);
+
+/// What a run does first.
+#[derive(Clone, Copy)]
+enum Phase {
+    /// Reconnect (startup, user retry, or after a loss).
+    Reconnect,
+    /// The session for this network is already up (a fresh join): only watch it.
+    Watch(NetworkId),
+}
 
 /// The health a published client-link state implies. `None` (not a client) adds nothing.
 pub fn health_for_client_link(state: Option<&ClientLinkState>) -> HealthLevel {
@@ -65,6 +83,7 @@ pub struct ClientReconnector {
     pool: Ipv4AddressPool,
     policy: ReconnectPolicy,
     sleeper: Sleeper,
+    watch_interval: Duration,
     observer: Mutex<Option<Observer>>,
     inner: Mutex<Inner>,
 }
@@ -95,6 +114,7 @@ impl ClientReconnector {
             pool,
             policy,
             Arc::new(thread::sleep),
+            WATCH_INTERVAL,
         )
     }
 
@@ -108,6 +128,7 @@ impl ClientReconnector {
         pool: Ipv4AddressPool,
         policy: ReconnectPolicy,
         sleeper: Sleeper,
+        watch_interval: Duration,
     ) -> Arc<Self> {
         Arc::new(Self {
             memberships,
@@ -118,6 +139,7 @@ impl ClientReconnector {
             pool,
             policy,
             sleeper,
+            watch_interval,
             observer: Mutex::new(None),
             inner: Mutex::new(Inner::default()),
         })
@@ -137,7 +159,7 @@ impl ClientReconnector {
     /// Startup: reconnect in the background if durable membership says this node is a client.
     /// `Ok(false)` means it is not (a host, or in no network); nothing was started.
     pub fn start(self: &Arc<Self>) -> Result<bool, CoreError> {
-        match self.begin() {
+        match self.begin(Phase::Reconnect) {
             Ok(()) => Ok(true),
             Err(error) if error.kind() == ErrorKind::InvalidState && !self.is_client()? => {
                 Ok(false)
@@ -148,7 +170,13 @@ impl ClientReconnector {
 
     /// The user asked to try again. Refused unless this is a joined client with no run active.
     pub fn retry(self: &Arc<Self>) -> Result<(), CoreError> {
-        self.begin()
+        self.begin(Phase::Reconnect)
+    }
+
+    /// A join for `network` just succeeded with its session supervised: report `Established`
+    /// and watch the session so a later link loss is reconnected (P6-010).
+    pub fn joined(self: &Arc<Self>, network: NetworkId) -> Result<(), CoreError> {
+        self.begin(Phase::Watch(network))
     }
 
     /// Stop the run for a leave. A late result from it is ignored, and `start_supervisor` is
@@ -225,7 +253,13 @@ impl ClientReconnector {
         self.publish(Some(&state));
     }
 
-    fn begin(self: &Arc<Self>) -> Result<(), CoreError> {
+    fn is_current(&self, generation: u64) -> bool {
+        self.inner
+            .lock()
+            .is_ok_and(|inner| inner.generation == generation)
+    }
+
+    fn begin(self: &Arc<Self>, phase: Phase) -> Result<(), CoreError> {
         if !self.is_client()? {
             return Err(CoreError::new(
                 ErrorKind::InvalidState,
@@ -239,10 +273,12 @@ impl ClientReconnector {
                 .as_ref()
                 .is_some_and(|run| !run.done.load(Ordering::SeqCst))
             {
-                return Err(CoreError::new(
-                    ErrorKind::InvalidState,
-                    "BlueRoute is already trying to reconnect",
-                ));
+                let message = if inner.state == Some(ClientLinkState::Established) {
+                    "already connected to the host"
+                } else {
+                    "BlueRoute is already trying to reconnect"
+                };
+                return Err(CoreError::new(ErrorKind::InvalidState, message));
             }
             inner.generation += 1;
             let stop = Arc::new(AtomicBool::new(false));
@@ -252,7 +288,10 @@ impl ClientReconnector {
                 done: done.clone(),
                 thread: None,
             });
-            inner.state = Some(ClientLinkState::Connecting { attempt: 1 });
+            inner.state = Some(match phase {
+                Phase::Reconnect => ClientLinkState::Connecting { attempt: 1 },
+                Phase::Watch(_) => ClientLinkState::Established,
+            });
             (inner.generation, stop, done)
         };
         self.publish_current();
@@ -262,7 +301,7 @@ impl ClientReconnector {
         let spawned = thread::Builder::new()
             .name("blueroute-client-reconnect".to_owned())
             .spawn(move || {
-                worker.run(generation, &worker_stop);
+                worker.run(generation, &worker_stop, phase);
                 worker_done.store(true, Ordering::SeqCst);
             });
         match spawned {
@@ -288,14 +327,62 @@ impl ClientReconnector {
         }
     }
 
-    fn run(&self, generation: u64, stop: &Arc<AtomicBool>) {
+    fn run(&self, generation: u64, stop: &Arc<AtomicBool>, mut phase: Phase) {
+        loop {
+            let network = match phase {
+                Phase::Reconnect => match self.reconnect(generation, stop) {
+                    Some(network) => network,
+                    None => return,
+                },
+                Phase::Watch(network) => network,
+            };
+            match self.watch(generation, stop, network) {
+                Some(reason) => {
+                    eprintln!(
+                        "BlueRoute lost the control session to its host ({reason}); reconnecting"
+                    );
+                    phase = Phase::Reconnect;
+                }
+                None => return,
+            }
+        }
+    }
+
+    /// Wait while the session for `network` runs. `Some(reason)` when it ended by itself (the
+    /// worker is collected first); `None` when this run was cancelled or superseded, or nothing
+    /// is supervised for the network any more (a leave stopped it), so there is nothing to do.
+    fn watch(&self, generation: u64, stop: &AtomicBool, network: NetworkId) -> Option<String> {
+        loop {
+            if stop.load(Ordering::SeqCst) || !self.is_current(generation) {
+                return None;
+            }
+            match self.supervisors.state(network) {
+                None => return None,
+                Some(SupervisedState::Ended(reason)) => {
+                    let _ = self.supervisors.stop(network);
+                    if stop.load(Ordering::SeqCst) || !self.is_current(generation) {
+                        return None;
+                    }
+                    return Some(reason.unwrap_or_else(|| "the session ended".to_owned()));
+                }
+                Some(SupervisedState::Establishing | SupervisedState::Running) => {}
+            }
+            thread::sleep(self.watch_interval);
+        }
+    }
+
+    /// One bounded reconnect. `Some(network)` when the session is established.
+    fn reconnect(&self, generation: u64, stop: &Arc<AtomicBool>) -> Option<NetworkId> {
         let attention = |reason: String| {
             self.set_state(generation, ClientLinkState::NeedsAttention { reason });
         };
         let prepared = self.prepare();
         let (network, host, hint, expected_lease) = match prepared {
             Ok(prepared) => prepared,
-            Err(error) => return attention(error.message().to_owned()),
+            Err(error) => {
+                attention(error.message().to_owned());
+                return None;
+            }
         };
         let runtime = CancellableRuntime {
             inner: self.runtime.clone(),
@@ -330,7 +417,8 @@ impl ClientReconnector {
         ));
         match end {
             ReconnectEnd::Started { .. } => {
-                self.set_state(generation, ClientLinkState::Established)
+                self.set_state(generation, ClientLinkState::Established);
+                return Some(network);
             }
             ReconnectEnd::Degraded(error) => attention(error.message().to_owned()),
             ReconnectEnd::GaveUp { attempts, .. } => {
@@ -339,6 +427,7 @@ impl ClientReconnector {
             // Cancelled: `cancel` already published the state.
             ReconnectEnd::Stopped => {}
         }
+        None
     }
 
     #[allow(clippy::type_complexity)]
@@ -376,13 +465,16 @@ impl ClientReconnector {
     }
 
     #[cfg(test)]
-    fn wait_for_run(&self) {
-        let handle = self
-            .inner
+    fn take_run_thread(&self) -> Option<JoinHandle<()>> {
+        self.inner
             .lock()
             .ok()
-            .and_then(|mut inner| inner.run.as_mut().and_then(|run| run.thread.take()));
-        if let Some(handle) = handle {
+            .and_then(|mut inner| inner.run.as_mut().and_then(|run| run.thread.take()))
+    }
+
+    #[cfg(test)]
+    fn wait_for_run(&self) {
+        if let Some(handle) = self.take_run_thread() {
             handle.join().unwrap();
         }
     }
@@ -482,19 +574,53 @@ mod tests {
 
     /// Each `observe` pops the next scripted result; a link that is up with its owned lease
     /// present leads straight to the supervisor, so the script alone drives the outcome.
+    /// With `live` set, `start_supervisor` registers a real supervised worker that runs until it
+    /// is stopped or `lose` is raised, which ends it by itself like a lost PANU link.
     struct Scripted {
         script: Mutex<VecDeque<Result<(), CoreError>>>,
         supervisor_starts: AtomicUsize,
         pool: Ipv4AddressPool,
+        live: Option<Arc<ControlSupervisors>>,
+        lose: Arc<AtomicBool>,
     }
 
     impl Scripted {
-        fn new(script: Vec<Result<(), CoreError>>) -> Arc<Self> {
+        fn new(
+            script: Vec<Result<(), CoreError>>,
+            live: Option<Arc<ControlSupervisors>>,
+        ) -> Arc<Self> {
             Arc::new(Self {
                 script: Mutex::new(script.into()),
                 supervisor_starts: AtomicUsize::new(0),
                 pool: Ipv4AddressPool::default(),
+                live,
+                lose: Arc::new(AtomicBool::new(false)),
             })
+        }
+    }
+
+    fn supervise_until_lost(supervisors: &ControlSupervisors, lose: Arc<AtomicBool>) {
+        futures_lite::future::block_on(supervisors.start(net(), move |stop, established| {
+            established.report(Ok(()));
+            while !stop.load(Ordering::Acquire) {
+                if lose.swap(false, Ordering::SeqCst) {
+                    return Err(CoreError::new(ErrorKind::PanFailure, "PANU link lost"));
+                }
+                thread::sleep(Duration::from_millis(2));
+            }
+            Ok(())
+        }))
+        .unwrap();
+    }
+
+    fn until(mut condition: impl FnMut() -> bool) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !condition() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "condition not reached in time"
+            );
+            thread::sleep(Duration::from_millis(2));
         }
     }
 
@@ -554,6 +680,9 @@ mod tests {
         ) -> BackendFuture<'_, ()> {
             Box::pin(async move {
                 self.supervisor_starts.fetch_add(1, Ordering::SeqCst);
+                if let Some(supervisors) = &self.live {
+                    supervise_until_lost(supervisors, self.lose.clone());
+                }
                 Ok(())
             })
         }
@@ -563,6 +692,7 @@ mod tests {
         root: PathBuf,
         reconnector: Arc<ClientReconnector>,
         runtime: Arc<Scripted>,
+        supervisors: Arc<ControlSupervisors>,
         seen: Arc<Mutex<Vec<Option<ClientLinkState>>>>,
     }
 
@@ -577,6 +707,27 @@ mod tests {
         pinned: bool,
         script: Vec<Result<(), CoreError>>,
         max_attempts: u32,
+    ) -> Fixture {
+        fixture_with(role, pinned, script, max_attempts, false)
+    }
+
+    /// A joined client whose supervised sessions are real workers that a test can end.
+    fn live_fixture(script: Vec<Result<(), CoreError>>, max_attempts: u32) -> Fixture {
+        fixture_with(
+            Some(MembershipRole::Client),
+            true,
+            script,
+            max_attempts,
+            true,
+        )
+    }
+
+    fn fixture_with(
+        role: Option<MembershipRole>,
+        pinned: bool,
+        script: Vec<Result<(), CoreError>>,
+        max_attempts: u32,
+        live: bool,
     ) -> Fixture {
         let root = std::env::temp_dir().join(format!(
             "blueroute-client-link-{}-{}",
@@ -600,13 +751,14 @@ mod tests {
             pins.enroll_verified(net(), host_node(), key).unwrap();
             pin_store.save(&pins).unwrap();
         }
-        let runtime = Scripted::new(script);
+        let supervisors = Arc::new(ControlSupervisors::new());
+        let runtime = Scripted::new(script, live.then(|| supervisors.clone()));
         let reconnector = ClientReconnector::with_sleeper(
             memberships,
             pin_store,
             Arc::new(ClientRecordStore::new(root.join("client"))),
             runtime.clone(),
-            Arc::new(ControlSupervisors::new()),
+            supervisors.clone(),
             Ipv4AddressPool::default(),
             ReconnectPolicy {
                 max_attempts,
@@ -614,6 +766,7 @@ mod tests {
                 max_delay: Duration::from_secs(1),
             },
             Arc::new(|_| {}),
+            Duration::from_millis(2),
         );
         let seen = Arc::new(Mutex::new(Vec::new()));
         let sink = seen.clone();
@@ -624,6 +777,7 @@ mod tests {
             root,
             reconnector,
             runtime,
+            supervisors,
             seen,
         }
     }
@@ -858,5 +1012,98 @@ mod tests {
         fx.reconnector.cleared();
         service.update_runtime_health(HealthLevel::Healthy).unwrap();
         assert_eq!(health(), HealthLevel::Healthy);
+    }
+
+    fn established_after(fx: &Fixture, supervisor_starts: usize) {
+        until(|| {
+            fx.runtime.supervisor_starts.load(Ordering::SeqCst) == supervisor_starts
+                && fx.reconnector.state() == Some(ClientLinkState::Established)
+                && fx.supervisors.state(net()) == Some(SupervisedState::Running)
+        });
+    }
+
+    #[test]
+    fn a_lost_session_is_reconnected_and_health_returns_when_the_host_is_back() {
+        // Established, then the link is lost; the first reconnect attempt fails, the next works.
+        let fx = live_fixture(vec![Ok(()), transient(), Ok(())], 5);
+        fx.reconnector.start().unwrap();
+        established_after(&fx, 1);
+        let established_at = fx.seen.lock().unwrap().len();
+
+        fx.runtime.lose.store(true, Ordering::SeqCst);
+        established_after(&fx, 2);
+        let seen = fx.seen.lock().unwrap()[established_at..].to_vec();
+        assert_eq!(
+            seen.first(),
+            Some(&Some(ClientLinkState::Connecting { attempt: 1 }))
+        );
+        assert!(seen.contains(&Some(ClientLinkState::Waiting {
+            attempt: 1,
+            retry_in_seconds: 1
+        })));
+        assert_eq!(seen.last(), Some(&Some(ClientLinkState::Established)));
+
+        // A leave: the watcher ends and nothing is reconnected afterwards.
+        let thread = fx.reconnector.take_run_thread().unwrap();
+        fx.reconnector.cancel();
+        thread.join().unwrap();
+        fx.supervisors.stop(net()).unwrap();
+        assert_eq!(fx.runtime.supervisor_starts.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_loss_that_keeps_failing_gives_up_and_waits_for_the_user() {
+        let fx = live_fixture(vec![Ok(()), transient(), transient(), Ok(())], 2);
+        fx.reconnector.start().unwrap();
+        established_after(&fx, 1);
+        fx.runtime.lose.store(true, Ordering::SeqCst);
+        // The run ends after its budget; the lost worker was collected, not left registered.
+        fx.reconnector.wait_for_run();
+        assert_eq!(
+            fx.reconnector.state(),
+            Some(ClientLinkState::GaveUp { attempts: 2 })
+        );
+        assert_eq!(fx.supervisors.state(net()), None);
+        assert_eq!(fx.runtime.supervisor_starts.load(Ordering::SeqCst), 1);
+        // The user retries once the host is back.
+        fx.reconnector.retry().unwrap();
+        established_after(&fx, 2);
+        let thread = fx.reconnector.take_run_thread().unwrap();
+        fx.reconnector.cleared();
+        thread.join().unwrap();
+        fx.supervisors.stop(net()).unwrap();
+    }
+
+    #[test]
+    fn a_fresh_join_is_watched_without_dialing_again() {
+        let fx = live_fixture(vec![Ok(())], 3);
+        // The join supervised its session itself.
+        supervise_until_lost(&fx.supervisors, fx.runtime.lose.clone());
+        fx.reconnector.joined(net()).unwrap();
+        assert_eq!(fx.reconnector.state(), Some(ClientLinkState::Established));
+        assert_eq!(fx.runtime.supervisor_starts.load(Ordering::SeqCst), 0);
+        // Retrying a working link is refused rather than starting a second session.
+        let refused = fx.reconnector.retry().unwrap_err();
+        assert_eq!(refused.kind(), ErrorKind::InvalidState);
+        assert!(refused.message().contains("already connected"));
+
+        fx.runtime.lose.store(true, Ordering::SeqCst);
+        established_after(&fx, 1);
+        let thread = fx.reconnector.take_run_thread().unwrap();
+        fx.reconnector.cleared();
+        thread.join().unwrap();
+        fx.supervisors.stop(net()).unwrap();
+    }
+
+    #[test]
+    fn a_session_stopped_by_a_leave_is_not_treated_as_a_loss() {
+        let fx = live_fixture(vec![Ok(())], 3);
+        fx.reconnector.start().unwrap();
+        established_after(&fx, 1);
+        // The leave's teardown stops the supervisor; the watcher sees nothing supervised and ends.
+        fx.supervisors.stop(net()).unwrap();
+        fx.reconnector.wait_for_run();
+        assert_eq!(fx.runtime.supervisor_starts.load(Ordering::SeqCst), 1);
+        assert_eq!(fx.reconnector.state(), Some(ClientLinkState::Established));
     }
 }

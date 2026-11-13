@@ -596,6 +596,13 @@ impl DaemonService {
                         .await
                         .map_err(core_error_to_dbus)?;
                     self.update_current_network(Some(network))?;
+                    // Watch the new session so a later link loss is reconnected (P6-010). The
+                    // join already succeeded, so a failure here only loses that watch.
+                    if let Some(reconnector) = &self.client_reconnector
+                        && let Err(error) = reconnector.joined(network)
+                    {
+                        eprintln!("BlueRoute could not watch the joined network's link: {error}");
+                    }
                     Self::encode_response(&Response::Ack)
                 }
                 Command::GetClientLink => Self::encode_response(&Response::ClientLink(
