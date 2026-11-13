@@ -1,17 +1,27 @@
 #!/bin/sh
 set -e
 
-if [ "$1" = configure ]; then
-    deb-systemd-helper enable blueroute.service >/dev/null || true
-    # dpkg passes the previously configured version as $2 on upgrade.
-    # Restart so the active daemon runs the newly installed binary rather
-    # than continuing to serve requests from the old executable.
-    if [ -n "${2:-}" ]; then
-        deb-systemd-invoke restart blueroute.service >/dev/null || true
-    else
+case "$1" in
+    configure)
+        # A reinstall after a remove: the daemon may start again (CR-F5).
+        rm -f "${DPKG_ROOT:-}/var/lib/blueroute/removal-pending"
+        deb-systemd-helper enable blueroute.service >/dev/null || true
+        # dpkg passes the previously configured version as $2 on upgrade.
+        # Restart so the active daemon runs the newly installed binary rather
+        # than continuing to serve requests from the old executable.
+        if [ -n "${2:-}" ]; then
+            deb-systemd-invoke restart blueroute.service >/dev/null || true
+        else
+            deb-systemd-invoke start blueroute.service >/dev/null || true
+        fi
+        ;;
+    abort-remove|abort-deconfigure)
+        # The removal failed (for example, cleanup could not finish): back to installed and
+        # running. Cleanup already removed what it could; the daemon restores its network.
+        rm -f "${DPKG_ROOT:-}/var/lib/blueroute/removal-pending"
         deb-systemd-invoke start blueroute.service >/dev/null || true
-    fi
-fi
+        ;;
+esac
 
 #DEBHELPER#
 

@@ -32,18 +32,17 @@ cat > "$tmp/bin/deb-systemd-invoke" <<'MOCK'
 #!/bin/sh
 printf 'invoke %s\n' "$*" >> "$BLUEROUTE_MAINTAINER_LOG"
 MOCK
-# The packaged postrm uses an absolute purge path. Intercept only that exact
-# operation so a chrootless dpkg purge cannot touch the runner's host data.
+# The maintainer scripts prefix every fixed path with $DPKG_ROOT, which dpkg sets to the
+# isolated root here. This guard is on for every dpkg operation: any rm outside that root (an
+# unprefixed path) fails the test instead of touching the runner's host data.
 cat > "$tmp/guard-bin/rm" <<'MOCK'
 #!/bin/sh
 if [ -z "${BLUEROUTE_TEST_ROOT:-}" ] || [ ! -d "$BLUEROUTE_TEST_ROOT/var/lib/dpkg" ]; then
-    echo "Missing isolated dpkg root for purge" >&2
+    echo "Missing isolated dpkg root" >&2
     exit 1
 fi
-if [ "$#" -eq 2 ] && [ "$1" = -rf ] && [ "$2" = /var/lib/blueroute ]; then
-    /bin/rm -rf -- "$BLUEROUTE_TEST_ROOT/var/lib/blueroute"
+if [ "$#" -eq 2 ] && [ "$1" = -rf ] && [ "$2" = "$BLUEROUTE_TEST_ROOT/var/lib/blueroute" ]; then
     printf 'purge state\n' >> "$BLUEROUTE_MAINTAINER_LOG"
-    exit 0
 fi
 # dpkg removes its own scratch files during purge. Allow only the isolated
 # root, and reject unexpected host paths without invoking the real rm.
@@ -55,7 +54,7 @@ for arg in "$@"; do
     case "$arg" in
         -*) ;;
         "$BLUEROUTE_TEST_ROOT"/*) ;;
-        *) echo "Unexpected purge cleanup outside isolated root: $arg" >&2; exit 1 ;;
+        *) echo "Unexpected rm outside the isolated root: $arg" >&2; exit 1 ;;
     esac
 done
 exec /bin/rm "$@"
@@ -63,8 +62,7 @@ MOCK
 chmod +x "$tmp/bin/"* "$tmp/guard-bin/rm"
 export BLUEROUTE_MAINTAINER_LOG="$tmp/service.log"
 export BLUEROUTE_TEST_ROOT="$tmp/root"
-export PATH="$tmp/bin:$PATH"
-# The deletion guard is NOT enabled during installation and upgrade.
+export PATH="$tmp/guard-bin:$tmp/bin:$PATH"
 # The --root and --script-chrootless flags keep package writes inside tmp,
 # while maintainer scripts use the mocked systemd helpers above.
 install_pkg() {
@@ -112,16 +110,45 @@ test "$("$state_check" "$state")" = "$expected"
 cmp "$tmp/migrated" "$state/memberships-v1"
 test -x "$tmp/root/usr/bin/blueroute"
 test -x "$tmp/root/usr/libexec/blueroute/blueroute-daemon"
-# Verify the actual dpkg removal transition, including the packaged prerm/postrm.
-# Purge is tested below with a guarded rm wrapper to prevent host deletion.
+# The packaged prerm runs the packaged daemon's removal cleanup (CR-F5). Its real behavior needs
+# root and system buses and is tested elsewhere; here the installed executable, verified above,
+# is swapped for a mock so dpkg's own removal and recovery transitions can be checked.
+cat > "$tmp/root/usr/libexec/blueroute/blueroute-daemon" <<'MOCK'
+#!/bin/sh
+printf 'daemon %s state=%s\n' "$*" "$BLUEROUTE_STATE_DIR" >> "$BLUEROUTE_MAINTAINER_LOG"
+exit "$(cat "$BLUEROUTE_TEST_ROOT/cleanup-exit")"
+MOCK
+chmod 0755 "$tmp/root/usr/libexec/blueroute/blueroute-daemon"
+remove_pkg() {
+    dpkg --root="$tmp/root" --force-not-root --force-script-chrootless \
+        --force-depends --remove blueroute > "$tmp/dpkg.log" 2>&1
+}
+cleanup_line="daemon --remove-owned-networking state=$tmp/root/var/lib/blueroute"
+# A failed cleanup fails the removal: dpkg keeps the package installed, runs
+# `postinst abort-remove` (which starts the service again) and the state stays.
+echo 1 > "$tmp/root/cleanup-exit"
 : > "$tmp/service.log"
-dpkg --root="$tmp/root" --force-not-root --force-script-chrootless \
-    --force-depends --remove blueroute > "$tmp/dpkg.log" 2>&1 || {
+if remove_pkg; then
+    echo "Removal succeeded although cleanup failed" >&2
+    exit 1
+fi
+test "$(cat "$tmp/service.log")" = "invoke stop blueroute.service
+$cleanup_line
+invoke start blueroute.service"
+dpkg-query --admindir="$tmp/root/var/lib/dpkg" -W -f='${Status}' blueroute | grep -Fq 'installed'
+test -x "$tmp/root/usr/libexec/blueroute/blueroute-daemon"
+test ! -e "$state/removal-pending"
+test "$("$state_check" "$state")" = "$expected"
+# Retried after the cause is fixed, the removal goes through: stop, cleanup, disable.
+echo 0 > "$tmp/root/cleanup-exit"
+: > "$tmp/service.log"
+remove_pkg || {
     cat "$tmp/dpkg.log" >&2
     exit 1
 }
-grep -Fxq 'invoke stop blueroute.service' "$tmp/service.log"
-grep -Fxq 'helper disable blueroute.service' "$tmp/service.log"
+test "$(cat "$tmp/service.log")" = "invoke stop blueroute.service
+$cleanup_line
+helper disable blueroute.service"
 if test -e "$tmp/root/usr/bin/blueroute" ||
    test -e "$tmp/root/usr/libexec/blueroute/blueroute-daemon" ||
    test -e "$tmp/root/usr/lib/systemd/system/blueroute.service" ||
@@ -133,10 +160,9 @@ fi
 # Removal keeps the state, and it still loads.
 test "$("$state_check" "$state")" = "$expected"
 # Purge is a separate explicit action: unlike remove, it must delete the
-# persisted identity and membership. The guarded rm wrapper redirects the
-# packaged absolute deletion into the isolated dpkg root.
+# persisted identity and membership, inside the isolated root only.
 : > "$tmp/service.log"
-PATH="$tmp/guard-bin:$PATH" dpkg --root="$tmp/root" --force-not-root --force-script-chrootless \
+dpkg --root="$tmp/root" --force-not-root --force-script-chrootless \
     --force-depends --purge blueroute > "$tmp/dpkg.log" 2>&1 || {
     cat "$tmp/dpkg.log" >&2
     exit 1
@@ -147,4 +173,4 @@ if dpkg-query --admindir="$tmp/root/var/lib/dpkg" -W -f='${Status}' blueroute 2>
     echo "Purged package still marked installed" >&2
     exit 1
 fi
-echo "Isolated dpkg upgrade $arch 0.0.1 -> $version kept identity, migrated v2 membership to v3 roles and restarted the service; removal retained state; purge deleted state."
+echo "Isolated dpkg upgrade $arch 0.0.1 -> $version kept identity, migrated v2 membership to v3 roles and restarted the service; a failed removal cleanup aborted the removal and restarted the service; removal ran cleanup and retained state; purge deleted state."

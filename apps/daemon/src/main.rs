@@ -4,12 +4,14 @@ use std::sync::{Arc, Mutex};
 
 use blueroute_core::{DaemonConfig, HealthLevel, MembershipRole};
 use blueroute_daemon::{
-    AuthenticatedControlPeers, ClientReconnector, ClientRecordStore, ControlTlsIdentityStore,
-    DaemonService, DeviceNameStore, DurablePeerTrustOperations, EXPERIMENTAL_JOIN,
-    JoinControlConfig, NetworkOperations, PeerPinStore, PendingHostCommitAuthorization,
-    PendingJoinOperations, PendingJoinStore, ReconnectPolicy, SingleStarNetworkOperations,
-    TransactionalJoinNetworkOperations, current_network, spawn_daemon_control_worker_with_peers,
-    spawn_daemon_runtime_worker, spawn_state_publisher, system_diagnostics_from_report,
+    AuthenticatedControlPeers, CLEANUP_BOUND, ClientReconnector, ClientRecordStore,
+    ControlTlsIdentityStore, DaemonService, DeviceNameStore, DurablePeerTrustOperations,
+    EXPERIMENTAL_JOIN, JoinControlConfig, NetworkOperations, PeerPinStore,
+    PendingHostCommitAuthorization, PendingJoinOperations, PendingJoinStore, ReconnectPolicy,
+    RemovalPaths, SingleStarNetworkOperations, SystemClientLeave,
+    TransactionalJoinNetworkOperations, acquire_instance_lock, current_network, removal_pending,
+    run_removal_cleanup, spawn_daemon_control_worker_with_peers, spawn_daemon_runtime_worker,
+    spawn_state_publisher, system_diagnostics_from_report,
 };
 use blueroute_linux::{
     NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
@@ -43,17 +45,99 @@ fn configure_join_gate(
     Ok(opened)
 }
 
+/// The only argument the daemon accepts: the package-removal maintenance mode (CR-F5).
+const REMOVE_OWNED_NETWORKING: &str = "--remove-owned-networking";
+
 fn main() {
-    if let Err(error) = future::block_on(run()) {
-        eprintln!("BlueRoute daemon failed: {error}");
-        std::process::exit(1);
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    match arguments.as_slice() {
+        [] => {
+            if let Err(error) = future::block_on(run()) {
+                eprintln!("BlueRoute daemon failed: {error}");
+                std::process::exit(1);
+            }
+        }
+        [mode] if mode == REMOVE_OWNED_NETWORKING => {
+            std::process::exit(remove_owned_networking());
+        }
+        _ => {
+            eprintln!("usage: blueroute-daemon [{REMOVE_OWNED_NETWORKING}]");
+            std::process::exit(2);
+        }
     }
 }
 
-async fn run() -> Result<(), Box<dyn Error>> {
-    let state_directory = std::env::var_os(STATE_DIRECTORY_ENV)
+fn state_directory() -> PathBuf {
+    std::env::var_os(STATE_DIRECTORY_ENV)
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_STATE_DIRECTORY));
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_STATE_DIRECTORY))
+}
+
+/// Package-removal cleanup (docs/CR-F5-REMOVAL-CLEANUP.md). Exit 0 on success, 1 on failure,
+/// 2 when refused. Logs categories and counts only.
+fn remove_owned_networking() -> i32 {
+    use std::os::unix::fs::MetadataExt;
+    // `/proc/self` is owned by the effective user; no `unsafe` call is needed to check for root.
+    if !std::fs::metadata("/proc/self").is_ok_and(|meta| meta.uid() == 0) {
+        eprintln!("blueroute-daemon {REMOVE_OWNED_NETWORKING} must run as root");
+        return 2;
+    }
+    let state = state_directory();
+    let paths = RemovalPaths {
+        memberships: network_membership_path(&state),
+        client_record: client_record_directory(&state),
+        state_directory: state,
+    };
+    let outcome = future::block_on(run_removal_cleanup(
+        &paths,
+        || async {
+            // Bluetooth is optional: NetworkManager cleanup must work while bluetoothd is down.
+            match SystemClientLeave::connect().await {
+                Ok(backend) => Ok((backend, true)),
+                Err(_) => Ok((SystemClientLeave::connect_network_manager().await?, false)),
+            }
+        },
+        CLEANUP_BOUND,
+    ));
+    let (code, line) = match outcome {
+        Ok(report) => (
+            i32::from(!report.succeeded()),
+            serde_json::json!({
+                "component": "removal_cleanup",
+                "outcome": if report.succeeded() { "succeeded" } else { "failed" },
+                "networks": report.networks,
+                "failed_networks": report.failed_networks,
+                "remaining_owned_resources": report.remaining,
+                "unresolved_foreign_resources": report.unresolved,
+                "bluetooth_available": report.bluetooth,
+            }),
+        ),
+        Err(error) => (
+            1,
+            serde_json::json!({
+                "component": "removal_cleanup",
+                "outcome": "failed",
+                "failure_class": format!("{:?}", error.kind()),
+            }),
+        ),
+    };
+    eprintln!("{line}");
+    if code != 0 {
+        eprintln!(
+            "BlueRoute could not remove all of its networking state; the package stays installed. \
+             Fix the cause (see the line above) and run the removal again."
+        );
+    }
+    code
+}
+
+async fn run() -> Result<(), Box<dyn Error>> {
+    let state_directory = state_directory();
+    // One daemon per state directory, and none while a package removal is pending (CR-F5).
+    let _instance = acquire_instance_lock(&state_directory)?;
+    if removal_pending(&state_directory) {
+        return Err("BlueRoute is being removed; reinstall the package to start the daemon".into());
+    }
     let identity_store = NodeIdentityStore::new(node_identity_path(&state_directory));
     let local_node = identity_store.load_or_create()?;
     let local_control_tls_identity =

@@ -7,8 +7,11 @@ fi
 
 # Durable identity and membership under /var/lib/blueroute are deliberately
 # retained on remove. Debian's purge operation is the explicit data deletion.
+# Purge always follows a successful `prerm remove` (directly, or on a package
+# already removed), so the networking cleanup has succeeded before this
+# evidence is deleted (CR-F5).
 if [ "$1" = purge ]; then
-    rm -rf /var/lib/blueroute
+    rm -rf "${DPKG_ROOT:-}/var/lib/blueroute"
 fi
 
 #DEBHELPER#

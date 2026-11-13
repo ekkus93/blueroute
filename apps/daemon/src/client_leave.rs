@@ -129,6 +129,29 @@ impl SystemClientLeave {
     }
 }
 
+impl crate::OwnedInventory for SystemClientLeave {
+    fn owned_resources(&self) -> BackendFuture<'_, Vec<(NetworkId, crate::OwnedKind)>> {
+        Box::pin(async move {
+            let mut owned: Vec<(NetworkId, crate::OwnedKind)> = self
+                .network_manager
+                .addresses()
+                .await?
+                .into_iter()
+                .map(|address| (address.owner, crate::OwnedKind::Address))
+                .collect();
+            owned.extend(
+                self.network_manager
+                    .network_connections()
+                    .await?
+                    .into_iter()
+                    .filter_map(|connection| connection.owner)
+                    .map(|owner| (owner, crate::OwnedKind::Profile)),
+            );
+            Ok(owned)
+        })
+    }
+}
+
 impl ClientLeaveBackend for SystemClientLeave {
     fn owned_addresses(&self, network: NetworkId) -> BackendFuture<'_, Vec<InterfaceAddress>> {
         Box::pin(async move {

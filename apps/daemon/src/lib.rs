@@ -28,6 +28,7 @@ mod peer_trust;
 mod pending_join;
 mod pinned_ingress;
 mod registered_transport;
+mod removal;
 mod runtime_health;
 mod single_star;
 mod state_publisher;
@@ -108,6 +109,11 @@ pub use pinned_ingress::{PinnedIngressError, PinnedSessionIngress, VerifiedTlsId
 pub use registered_transport::{
     AuthenticatedNapTicket, RegisteredControlSession, RegisteredNapControlOwner,
     SessionAdmissionError,
+};
+pub use removal::{
+    CLEANUP_BOUND, DAEMON_LOCK_FILE, InstanceLock, OwnedInventory, OwnedKind, REMOVAL_PENDING_FILE,
+    RemovalPaths, RemovalReport, acquire_instance_lock, removal_pending, removal_scope,
+    remove_known_networks, run_removal_cleanup,
 };
 pub use runtime_health::{
     DaemonHealthWorker, spawn_daemon_capability_health_worker, spawn_daemon_runtime_worker,

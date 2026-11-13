@@ -1,9 +1,22 @@
 #!/bin/sh
 set -e
 
-if [ "$1" = remove ] || [ "$1" = deconfigure ]; then
-    deb-systemd-invoke stop blueroute.service >/dev/null || true
-fi
+# CR-F5 (docs/CR-F5-REMOVAL-CLEANUP.md). On removal, stop the daemon, then remove the networking
+# state this installation owns. A cleanup failure fails this script on purpose: dpkg then keeps
+# the package installed and runs `postinst abort-remove`, which starts the service again. An
+# upgrade tears nothing down; `postinst configure` restarts the daemon on the new binary.
+# DPKG_ROOT is empty in normal operation; dpkg sets it for chrootless installs (and our isolated
+# package tests), so every fixed path below is relative to it.
+case "$1" in
+    remove|deconfigure)
+        # A stop failure is not hidden: cleanup refuses while a daemon still holds its lock.
+        deb-systemd-invoke stop blueroute.service >/dev/null || true
+        BLUEROUTE_STATE_DIR="${DPKG_ROOT:-}/var/lib/blueroute" \
+            "${DPKG_ROOT:-}/usr/libexec/blueroute/blueroute-daemon" --remove-owned-networking
+        ;;
+    upgrade|failed-upgrade)
+        ;;
+esac
 
 #DEBHELPER#
 

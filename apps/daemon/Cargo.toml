@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+async-io = "2.6.0"
 blueroute-core = { path = "../../crates/blueroute-core" }
 blueroute-linux = { path = "../../crates/blueroute-linux" }
 blueroute-protocol = { path = "../../crates/blueroute-protocol" }
