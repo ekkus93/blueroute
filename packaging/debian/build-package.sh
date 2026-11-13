@@ -152,7 +152,8 @@ for asset in apps/desktop/ui/dist/assets/*; do
   }
 done
 for built in "$package_path" "$desktop_package"; do
-  root_mode="$(dpkg-deb --contents "$built" | awk '$NF == "./" {print $1; exit}')"
+  # Read the whole listing: stopping early closes the pipe and fails dpkg-deb under pipefail.
+  root_mode="$(dpkg-deb --contents "$built" | awk '$NF == "./" && !mode {mode = $1} END {print mode}')"
   [[ "$root_mode" == drwxr-xr-x ]] || {
     printf '%s has root directory mode %s, expected drwxr-xr-x\n' "$built" "$root_mode" >&2
     exit 1
