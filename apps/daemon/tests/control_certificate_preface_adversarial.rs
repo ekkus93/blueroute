@@ -41,8 +41,11 @@ fn reject_candidate(payload: &[u8], expected: ControlTlsError) {
     });
 
     let mut attacker = TcpStream::connect(address).unwrap();
-    attacker.write_all(payload).unwrap();
-    attacker.shutdown(Shutdown::Write).unwrap();
+    // The server may reject and close as soon as it has read enough (for example a bad magic),
+    // so the attacker's own write or shutdown can fail with a reset or NotConnected. Only the
+    // server's verdict is under test.
+    let _ = attacker.write_all(payload);
+    let _ = attacker.shutdown(Shutdown::Write);
     assert_eq!(server_thread.join().unwrap().unwrap_err(), expected);
 }
 
