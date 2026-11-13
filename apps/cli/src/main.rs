@@ -6,8 +6,8 @@ use blueroute_client::{BlueRouteClient, ClientError, ClientErrorKind};
 use blueroute_core::{DisplayName, NetworkId, NodeCapabilities, NodeId};
 use blueroute_protocol::peer_pin::SpkiSha256;
 use blueroute_protocol::{
-    Command, DaemonStatus, DiagnosticSnapshot, NetworkSummary, NodeSummary, Response,
-    SystemDiagnosticMetadata,
+    ClientLinkState, Command, DaemonStatus, DiagnosticSnapshot, NetworkSummary, NodeSummary,
+    Response, SystemDiagnosticMetadata,
 };
 use clap::{CommandFactory, Parser, Subcommand};
 
@@ -63,9 +63,17 @@ enum DiagnosticsCommand {
 #[derive(Debug, Subcommand)]
 enum NetworkCommand {
     List,
-    Create { name: String },
-    Join { network: String },
+    Create {
+        name: String,
+    },
+    Join {
+        network: String,
+    },
     Leave,
+    /// Show the joined client's link to its host (read-only).
+    Link,
+    /// Try again to reconnect a joined client to its host after it gave up or needed attention.
+    Reconnect,
 }
 #[derive(Debug, Subcommand)]
 enum NodeCommand {
@@ -166,6 +174,12 @@ enum Operation {
     LeaveNetwork {
         json: bool,
     },
+    ClientLink {
+        json: bool,
+    },
+    RetryClientReconnect {
+        json: bool,
+    },
     StartDiscovery {
         json: bool,
     },
@@ -237,6 +251,12 @@ fn parse(args: &[String]) -> Result<Operation, String> {
         Some(CliCommand::Network {
             command: NetworkCommand::Leave,
         }) => Operation::LeaveNetwork { json },
+        Some(CliCommand::Network {
+            command: NetworkCommand::Link,
+        }) => Operation::ClientLink { json },
+        Some(CliCommand::Network {
+            command: NetworkCommand::Reconnect,
+        }) => Operation::RetryClientReconnect { json },
         Some(CliCommand::Node {
             command: NodeCommand::List,
         }) => Operation::NodeList { json },
@@ -695,6 +715,36 @@ fn format_node(node: &NodeSummary, json: bool) -> Result<String, serde_json::Err
     }
 }
 
+/// Renders the joined-client link. The daemon's reason text is escaped like any other
+/// diagnostic field so it cannot inject terminal controls.
+fn format_client_link(
+    link: Option<&ClientLinkState>,
+    json: bool,
+) -> Result<String, serde_json::Error> {
+    if json {
+        return serde_json::to_string_pretty(&link);
+    }
+    Ok(match link {
+        None => "This computer is not a joined client of a BlueRoute network.".to_owned(),
+        Some(ClientLinkState::Connecting { attempt }) => {
+            format!("Link: connecting to the host (attempt {attempt})")
+        }
+        Some(ClientLinkState::Waiting {
+            attempt,
+            retry_in_seconds,
+        }) => format!("Link: attempt {attempt} failed; trying again in {retry_in_seconds} s"),
+        Some(ClientLinkState::Established) => "Link: connected to the host".to_owned(),
+        Some(ClientLinkState::NeedsAttention { reason }) => format!(
+            "Link: needs attention: {}\nFix the cause, then run `blueroute network reconnect`.",
+            safe_diagnostic_field(reason)
+        ),
+        Some(ClientLinkState::GaveUp { attempts }) => format!(
+            "Link: stopped after {attempts} attempts; membership is kept.\n\
+             Run `blueroute network reconnect` to try again."
+        ),
+    })
+}
+
 /// Trust operations are PolicyKit-gated by the daemon; CLI success is not
 /// equivalent to TLS key enrollment or admission as a network member.
 fn mutation_ack(json: bool, success: &'static str) -> String {
@@ -948,6 +998,24 @@ fn run(args: &[String]) -> i32 {
                     _ => Err("daemon returned an unexpected network-leave response".into()),
                 })
         }
+        Operation::ClientLink { json } => {
+            futures_lite::future::block_on(client.request(&Command::GetClientLink))
+                .map_err(CliFailure::from)
+                .and_then(|response| match response {
+                    Response::ClientLink(link) => {
+                        format_client_link(link.as_ref(), json).map_err(CliFailure::from)
+                    }
+                    _ => Err("daemon returned an unexpected client-link response".into()),
+                })
+        }
+        Operation::RetryClientReconnect { json } => {
+            futures_lite::future::block_on(client.request(&Command::RetryClientReconnect))
+                .map_err(CliFailure::from)
+                .and_then(|response| match response {
+                    Response::Ack => Ok(mutation_ack(json, "Reconnecting to the host")),
+                    _ => Err("daemon returned an unexpected reconnect response".into()),
+                })
+        }
         Operation::StartDiscovery { json } => {
             futures_lite::future::block_on(client.request(&Command::StartDiscovery))
                 .map_err(CliFailure::from)
@@ -1042,6 +1110,33 @@ mod tests {
     }
 
     #[test]
+    fn client_link_renders_each_state_and_escapes_the_reason() {
+        let text =
+            |link: Option<ClientLinkState>| format_client_link(link.as_ref(), false).unwrap();
+        assert!(text(None).contains("not a joined client"));
+        assert!(text(Some(ClientLinkState::Connecting { attempt: 2 })).contains("attempt 2"));
+        assert!(
+            text(Some(ClientLinkState::Waiting {
+                attempt: 3,
+                retry_in_seconds: 8,
+            }))
+            .contains("in 8 s")
+        );
+        assert!(text(Some(ClientLinkState::Established)).contains("connected"));
+        let gave_up = text(Some(ClientLinkState::GaveUp { attempts: 8 }));
+        assert!(gave_up.contains("8 attempts") && gave_up.contains("network reconnect"));
+        let attention = text(Some(ClientLinkState::NeedsAttention {
+            reason: "host key missing\u{1b}[31m".into(),
+        }));
+        assert!(attention.contains("host key missing"));
+        assert!(attention.contains("network reconnect"));
+        assert!(!attention.contains('\u{1b}'));
+        assert_eq!(format_client_link(None, true).unwrap(), "null");
+        let encoded = format_client_link(Some(&ClientLinkState::GaveUp { attempts: 1 }), true);
+        assert!(encoded.unwrap().contains("gave_up"));
+    }
+
+    #[test]
     fn parses_safe_read_only_commands_and_reports_bad_arguments() {
         assert_eq!(parse(&[]), Ok(Operation::Help));
         assert_eq!(parse(&args(&["--version"])), Ok(Operation::Version));
@@ -1062,6 +1157,15 @@ mod tests {
             parse(&args(&["--json", "network", "leave"])),
             Ok(Operation::LeaveNetwork { json: true })
         );
+        assert_eq!(
+            parse(&args(&["network", "link"])),
+            Ok(Operation::ClientLink { json: false })
+        );
+        assert_eq!(
+            parse(&args(&["--json", "network", "reconnect"])),
+            Ok(Operation::RetryClientReconnect { json: true })
+        );
+        assert!(parse(&args(&["network", "reconnect", "extra"])).is_err());
         assert_eq!(
             parse(&args(&["diagnostics", "show", "--json"])),
             Ok(Operation::Diagnostics {

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-client-link"
+description = "Enables the client_link command without any pre-configured scope."
+commands.allow = ["client_link"]
+
+[[permission]]
+identifier = "deny-client-link"
+description = "Denies the client_link command without any pre-configured scope."
+commands.deny = ["client_link"]

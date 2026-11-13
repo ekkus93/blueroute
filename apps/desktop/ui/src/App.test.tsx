@@ -35,8 +35,10 @@ function fakeApi(overrides: Partial<DaemonApi> = {}): DaemonApi {
         { id: "node-2", name: "Bob's laptop", reachability: "routed" as const },
         { id: "node-3", name: "Old PC", reachability: "unreachable" as const },
       ]),
+    clientLink: () => Promise.resolve(null),
     createNetwork: () => Promise.resolve(),
     leaveNetwork: () => Promise.resolve(),
+    retryClientReconnect: () => Promise.resolve(),
     ...overrides,
   };
 }
@@ -230,4 +232,59 @@ test("there is no leave button when not in a network", async () => {
   );
   await screen.findByRole("heading", { name: "Your network" });
   expect(screen.queryByRole("button", { name: "Leave this network" })).toBeNull();
+});
+
+test("a host or non-member shows no client link and no reconnect action", async () => {
+  render(<App api={fakeApi()} subscribe={fakeSubscribe().subscribe} />);
+  await screen.findByRole("heading", { name: "Your network" });
+  expect(screen.queryByText(/computer that runs this network/)).toBeNull();
+  expect(screen.queryByRole("button", { name: "Try connecting again" })).toBeNull();
+});
+
+test("a connecting or connected client link has no retry button", async () => {
+  const clientLink = () => Promise.resolve({ type: "connecting" as const, data: { attempt: 1 } });
+  render(<App api={fakeApi({ clientLink })} subscribe={fakeSubscribe().subscribe} />);
+  expect(await screen.findByText(/Connecting to the computer/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Try connecting again" })).toBeNull();
+  cleanup();
+
+  const connected = () => Promise.resolve({ type: "established" as const });
+  render(<App api={fakeApi({ clientLink: connected })} subscribe={fakeSubscribe().subscribe} />);
+  expect(await screen.findByText(/^Connected to the computer/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Try connecting again" })).toBeNull();
+});
+
+test("a client that gave up offers a retry that calls the daemon once and refreshes", async () => {
+  const retryClientReconnect = vi.fn(() => Promise.resolve());
+  const clientLink = vi.fn(() =>
+    Promise.resolve({ type: "gave_up" as const, data: { attempts: 8 } }),
+  );
+  render(
+    <App
+      api={fakeApi({ clientLink, retryClientReconnect })}
+      subscribe={fakeSubscribe().subscribe}
+    />,
+  );
+  expect(await screen.findByText(/stopped trying/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Try connecting again" }));
+  await waitFor(() => expect(retryClientReconnect).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(clientLink.mock.calls.length).toBeGreaterThan(1));
+});
+
+test("a client needing attention shows the daemon's reason and a refused retry explains why", async () => {
+  const clientLink = () =>
+    Promise.resolve({
+      type: "needs_attention" as const,
+      data: { reason: "the host's key is missing" },
+    });
+  const retryClientReconnect = vi.fn(() => Promise.reject("permission_denied"));
+  render(
+    <App
+      api={fakeApi({ clientLink, retryClientReconnect })}
+      subscribe={fakeSubscribe().subscribe}
+    />,
+  );
+  expect(await screen.findByText(/the host's key is missing/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Try connecting again" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("do not have permission");
 });

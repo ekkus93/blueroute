@@ -15,7 +15,20 @@ test("each call maps to exactly one fixed Tauri command", async () => {
   await daemon.overview();
   await daemon.networks();
   await daemon.devices();
-  expect(invoke.mock.calls).toEqual([["platform_check"], ["overview"], ["networks"], ["devices"]]);
+  await daemon.clientLink();
+  expect(invoke.mock.calls).toEqual([
+    ["platform_check"],
+    ["overview"],
+    ["networks"],
+    ["devices"],
+    ["client_link"],
+  ]);
+});
+
+test("retrying the client link takes no arguments and maps to one fixed command", async () => {
+  invoke.mockResolvedValue(undefined);
+  await daemon.retryClientReconnect();
+  expect(invoke.mock.calls).toEqual([["retry_client_reconnect"]]);
 });
 
 test("leaving takes no arguments and maps to one fixed command", async () => {

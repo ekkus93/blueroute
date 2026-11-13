@@ -42,7 +42,7 @@ Max line width is 100. The workspace forbids `unsafe_code`, and `dbg!` is denied
 - Production JoinNetwork stays blocked until authenticated P7 transport exists.
 - Advertisements, MAC/IP claims, display names and trust-only approvals are NOT authenticated membership.
 - Authorization binds to NetworkId, NodeId, an independently confirmed SPKI SHA-256, a TLS 1.3 peer-key proof, an exporter-bound Hello, and current durable approval.
-- The desktop bridge is read-only except `create_network` and `leave_network` (the only Tauri mutations; the daemon still enforces PolicyKit): unknown stays unknown, the platform check treats "unknown" as unsupported, Join is disabled, and internet sharing is hidden.
+- The desktop bridge is read-only except `create_network`, `leave_network` and `retry_client_reconnect` (the only Tauri mutations; the daemon still enforces PolicyKit): unknown stays unknown, the platform check treats "unknown" as unsupported, Join is disabled, and internet sharing is hidden.
 
 ## Testing
 

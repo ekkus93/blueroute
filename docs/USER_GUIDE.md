@@ -81,6 +81,13 @@ Discovery metadata is **not** authenticated identity or permission to join.
 
 `blueroute peer trust NODE_ID` records legacy peer trust; it does **not** enroll a verified TLS key, authenticate a control session or grant membership. `blueroute peer local-key` and `blueroute peer verify-local-key` are read-only identity inspection/comparison aids; they do not enroll keys. Never accept an advertised fingerprint merely because it appeared in discovery.
 
+```sh
+blueroute network link       # read-only: a joined client's link to its host
+blueroute network reconnect  # try again after the link stopped retrying or needs attention
+```
+
+These two commands only matter for a joined client, which cannot exist yet because join is not available. Today `network link` reports that this computer is not a joined client.
+
 ### Leave a locally hosted network
 
 ```sh

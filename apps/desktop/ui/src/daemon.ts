@@ -51,6 +51,14 @@ export interface NetworkSummary {
   member_count: number;
 }
 
+/** A joined client's link to its host; `null` when this computer is not a joined client. */
+export type ClientLinkState =
+  | { type: "connecting"; data: { attempt: number } }
+  | { type: "waiting"; data: { attempt: number; retry_in_seconds: number } }
+  | { type: "established" }
+  | { type: "needs_attention"; data: { reason: string } }
+  | { type: "gave_up"; data: { attempts: number } };
+
 export interface NodeSummary {
   id: string;
   name: string;
@@ -62,8 +70,11 @@ export const daemon = {
   overview: () => invoke<DesktopOverview>("overview"),
   networks: () => invoke<NetworkSummary[]>("networks"),
   devices: () => invoke<NodeSummary[]>("devices"),
+  clientLink: () => invoke<ClientLinkState | null>("client_link"),
   /** Mutation. The daemon authorizes it through PolicyKit. */
   createNetwork: (name: string) => invoke<void>("create_network", { name }),
   /** Mutation with no arguments. The daemon authorizes it through PolicyKit. */
   leaveNetwork: () => invoke<void>("leave_network"),
+  /** Mutation with no arguments. The daemon authorizes it through PolicyKit. */
+  retryClientReconnect: () => invoke<void>("retry_client_reconnect"),
 } as const;

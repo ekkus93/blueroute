@@ -2,6 +2,7 @@
 // default view; they appear only under "Technical details".
 import type {
   ActionAvailability,
+  ClientLinkState,
   DesktopError,
   HealthLevel,
   PlatformIssue,
@@ -63,6 +64,22 @@ export const HEALTH_TEXT: Record<HealthLevel, string> = {
   reconnecting: "Reconnecting…",
   error: "Not working",
 };
+
+/** Plain wording for a joined client's link to its host. */
+export function clientLinkText(link: ClientLinkState): string {
+  switch (link.type) {
+    case "connecting":
+      return "Connecting to the computer that runs this network…";
+    case "waiting":
+      return `Could not reach the computer that runs this network. Trying again in ${link.data.retry_in_seconds} seconds.`;
+    case "established":
+      return "Connected to the computer that runs this network.";
+    case "needs_attention":
+      return `Not connected: ${link.data.reason}`;
+    case "gave_up":
+      return "Could not reach the computer that runs this network, so BlueRoute stopped trying. You are still part of the network.";
+  }
+}
 
 export const REACHABILITY_TEXT: Record<Reachability, string> = {
   local: "This computer",

@@ -2,7 +2,8 @@
 //!
 //! The Tauri command layer exposes these narrow operations without granting web content raw
 //! D-Bus access or arbitrary daemon command dispatch. Everything is a read-only snapshot except
-//! `create_network`, the single mutation, which the daemon still authorizes through PolicyKit.
+//! `create_network`, `leave_network` and `retry_client_reconnect`, the only mutations, which the
+//! daemon still authorizes through PolicyKit.
 mod platform_check;
 mod watch;
 
@@ -11,7 +12,9 @@ pub use watch::{DaemonSignal, reconnect_delay, watch_daemon};
 
 use blueroute_client::{BlueRouteClient, ClientErrorKind};
 use blueroute_core::{DisplayName, HealthLevel, NetworkId, NodeId};
-use blueroute_protocol::{Command, DaemonStatus, NetworkSummary, NodeSummary, Response};
+use blueroute_protocol::{
+    ClientLinkState, Command, DaemonStatus, NetworkSummary, NodeSummary, Response,
+};
 use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -72,7 +75,8 @@ fn network_name(raw: &str) -> Result<DisplayName, DesktopError> {
 }
 
 /// No caller-provided command is accepted: each method builds its own fixed daemon command.
-/// Snapshots are read-only; `create_network` and `leave_network` are the only mutations.
+/// Snapshots are read-only; `create_network`, `leave_network` and `retry_client_reconnect` are
+/// the only mutations.
 pub struct DesktopBridge {
     client: BlueRouteClient,
 }
@@ -121,6 +125,35 @@ impl DesktopBridge {
             .map_err(|error| DesktopError::from(error.kind()))?
         {
             Response::Ack => Ok(()),
+            _ => Err(DesktopError::UnexpectedResponse),
+        }
+    }
+
+    /// Ask a joined client to try reconnecting to its host after it gave up or needed attention.
+    /// The daemon enforces PolicyKit authorization and refuses it when this computer is not a
+    /// joined client or an attempt is already running; this method adds no extra privilege.
+    pub async fn retry_client_reconnect(&self) -> Result<(), DesktopError> {
+        match self
+            .client
+            .request(&Command::RetryClientReconnect)
+            .await
+            .map_err(|error| DesktopError::from(error.kind()))?
+        {
+            Response::Ack => Ok(()),
+            _ => Err(DesktopError::UnexpectedResponse),
+        }
+    }
+
+    /// Read-only: the joined client's link to its host, or `None` when this computer is not a
+    /// joined client.
+    pub async fn client_link(&self) -> Result<Option<ClientLinkState>, DesktopError> {
+        match self
+            .client
+            .request(&Command::GetClientLink)
+            .await
+            .map_err(|error| DesktopError::from(error.kind()))?
+        {
+            Response::ClientLink(link) => Ok(link),
             _ => Err(DesktopError::UnexpectedResponse),
         }
     }
@@ -228,6 +261,36 @@ mod tests {
         assert_eq!(
             serde_json::to_value(DesktopError::DaemonUnavailable).unwrap(),
             "daemon_unavailable"
+        );
+    }
+
+    /// The UI (`ui/src/daemon.ts`) depends on these exact client-link shapes.
+    #[test]
+    fn client_link_wire_shapes_match_the_frontend_types() {
+        let wire = |link: Option<ClientLinkState>| serde_json::to_value(link).unwrap();
+        assert_eq!(wire(None), serde_json::Value::Null);
+        assert_eq!(
+            wire(Some(ClientLinkState::Established)),
+            serde_json::json!({"type": "established"})
+        );
+        assert_eq!(
+            wire(Some(ClientLinkState::Connecting { attempt: 1 })),
+            serde_json::json!({"type": "connecting", "data": {"attempt": 1}})
+        );
+        assert_eq!(
+            wire(Some(ClientLinkState::Waiting {
+                attempt: 2,
+                retry_in_seconds: 4,
+            })),
+            serde_json::json!({"type": "waiting", "data": {"attempt": 2, "retry_in_seconds": 4}})
+        );
+        assert_eq!(
+            wire(Some(ClientLinkState::NeedsAttention { reason: "r".into() })),
+            serde_json::json!({"type": "needs_attention", "data": {"reason": "r"}})
+        );
+        assert_eq!(
+            wire(Some(ClientLinkState::GaveUp { attempts: 8 })),
+            serde_json::json!({"type": "gave_up", "data": {"attempts": 8}})
         );
     }
 }

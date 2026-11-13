@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { daemon as realDaemon } from "./daemon";
 import type {
+  ClientLinkState,
   DesktopError,
   DesktopOverview,
   NetworkSummary,
@@ -15,8 +16,10 @@ export interface DaemonApi {
   overview: () => Promise<DesktopOverview>;
   networks: () => Promise<NetworkSummary[]>;
   devices: () => Promise<NodeSummary[]>;
+  clientLink: () => Promise<ClientLinkState | null>;
   createNetwork: (name: string) => Promise<void>;
   leaveNetwork: () => Promise<void>;
+  retryClientReconnect: () => Promise<void>;
 }
 
 export interface Snapshot {
@@ -24,6 +27,7 @@ export interface Snapshot {
   overview: DesktopOverview;
   networks: NetworkSummary[];
   devices: NodeSummary[];
+  clientLink: ClientLinkState | null;
 }
 
 export type LinkState = "unknown" | "connected" | "disconnected";
@@ -63,14 +67,18 @@ export function useDaemon(
     }
     inFlight.current = true;
     try {
-      const [platform, overview, networks, devices] = await Promise.all([
+      const [platform, overview, networks, devices, clientLink] = await Promise.all([
         api.platformCheck(),
         api.overview(),
         api.networks(),
         api.devices(),
+        api.clientLink(),
       ]);
       if (alive.current) {
-        setView({ phase: "ready", snapshot: { platform, overview, networks, devices } });
+        setView({
+          phase: "ready",
+          snapshot: { platform, overview, networks, devices, clientLink },
+        });
       }
     } catch (error) {
       if (alive.current) {

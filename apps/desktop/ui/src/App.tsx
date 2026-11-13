@@ -1,11 +1,18 @@
-// Desktop UI over typed daemon snapshots (P12-002/004/005/007/008, partial). Creating a network
-// is the only mutation. Joining and leaving are not wired yet: join stays disabled and says so.
-// There is deliberately no Internet-sharing UI (v1 keeps it off).
+// Desktop UI over typed daemon snapshots (P12-002/004/005/007/008, partial). The only mutations
+// are creating and leaving a network and asking a joined client to reconnect to its host. Join
+// stays disabled and says so. There is deliberately no Internet-sharing UI (v1 keeps it off).
 import { useState } from "react";
 import "./App.css";
 import { daemon as realDaemon } from "./daemon";
-import type { DesktopError } from "./daemon";
-import { AVAILABILITY_TEXT, ERROR_TEXT, HEALTH_TEXT, ISSUE_TEXT, REACHABILITY_TEXT } from "./text";
+import type { ClientLinkState, DesktopError } from "./daemon";
+import {
+  AVAILABILITY_TEXT,
+  clientLinkText,
+  ERROR_TEXT,
+  HEALTH_TEXT,
+  ISSUE_TEXT,
+  REACHABILITY_TEXT,
+} from "./text";
 import { diagnose, GENERAL_TIPS } from "./diagnose";
 import { normalizeError, useDaemon } from "./useDaemon";
 import type { DaemonApi, LinkState, Snapshot, View } from "./useDaemon";
@@ -61,7 +68,7 @@ function Ready({
   api: DaemonApi;
   onChanged: () => void;
 }) {
-  const { platform, overview, networks, devices } = snapshot;
+  const { platform, overview, networks, devices, clientLink } = snapshot;
   return (
     <>
       <section aria-labelledby="start-heading">
@@ -108,6 +115,7 @@ function Ready({
         <p>
           Status: <strong>{HEALTH_TEXT[overview.health]}</strong>
         </p>
+        {clientLink !== null && <ClientLink link={clientLink} api={api} onRetried={onChanged} />}
         {networks.length > 0 && <LeaveNetwork api={api} onLeft={onChanged} />}
       </section>
 
@@ -262,6 +270,57 @@ function CreateNetwork({
         </p>
       )}
     </form>
+  );
+}
+
+type RetryState =
+  { phase: "idle" } | { phase: "busy" } | { phase: "failed"; error: DesktopError | "unknown" };
+
+/** Shows a joined client's link to its host, and a retry only when the daemon stopped trying. */
+function ClientLink({
+  link,
+  api,
+  onRetried,
+}: {
+  link: ClientLinkState;
+  api: DaemonApi;
+  onRetried: () => void;
+}) {
+  const [state, setState] = useState<RetryState>({ phase: "idle" });
+  const busy = state.phase === "busy";
+  const canRetry = link.type === "gave_up" || link.type === "needs_attention";
+
+  const retry = () => {
+    setState({ phase: "busy" });
+    api.retryClientReconnect().then(
+      () => {
+        setState({ phase: "idle" });
+        onRetried();
+      },
+      (error: unknown) => setState({ phase: "failed", error: normalizeError(error) }),
+    );
+  };
+
+  return (
+    <div>
+      <p role="status">{clientLinkText(link)}</p>
+      {canRetry && (
+        <p>
+          <button type="button" onClick={retry} disabled={busy} aria-describedby="retry-note">
+            {busy ? "Connecting…" : "Try connecting again"}
+          </button>
+          <br />
+          <span id="retry-note" className="muted">
+            You may be asked for your password.
+          </span>
+        </p>
+      )}
+      {state.phase === "failed" && (
+        <p role="alert">
+          <strong>{ERROR_TEXT[state.error].title}.</strong> {ERROR_TEXT[state.error].help}
+        </p>
+      )}
+    </div>
   );
 }
 
