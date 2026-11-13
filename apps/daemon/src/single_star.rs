@@ -70,6 +70,11 @@ pub trait NetworkOperations: Send + Sync {
     }
     fn start_discovery(&self) -> NetworkOperationFuture<'_, ()>;
     fn stop_discovery(&self) -> NetworkOperationFuture<'_, ()>;
+    /// Take the daemon's latest capability observation for operation-time checks (CR-F4). The
+    /// daemon calls this with every observation it publishes, so the gate an operation checks
+    /// is never older than what status reports. Recording an observation must not touch
+    /// networking.
+    fn observe_capabilities(&self, _capabilities: &NodeCapabilities) {}
 }
 
 pub trait NetworkIdGenerator: Send + Sync {
@@ -630,7 +635,8 @@ struct ActiveNetworkDiscovery {
 pub struct SingleStarNetworkOperations<R = LinuxStarHostRuntime, G = SystemNetworkIdGenerator> {
     store: NetworkMembershipStore,
     config: DaemonConfig,
-    capabilities: NodeCapabilities,
+    /// The latest capability observation: the startup probe, then every later one (CR-F4).
+    capabilities: Mutex<NodeCapabilities>,
     runtime: R,
     generator: G,
     creating: AtomicBool,
@@ -669,7 +675,7 @@ where
         Self {
             store,
             config,
-            capabilities,
+            capabilities: Mutex::new(capabilities),
             runtime,
             generator,
             creating: AtomicBool::new(false),
@@ -678,10 +684,18 @@ where
         }
     }
 
+    /// The capability observation an operation checks right now. A poisoned slot refuses.
+    fn current_capabilities(&self) -> Result<NodeCapabilities, CoreError> {
+        self.capabilities
+            .lock()
+            .map(|capabilities| capabilities.clone())
+            .map_err(lock_error)
+    }
+
     fn create_network_inner(&self, name: DisplayName) -> NetworkOperationFuture<'_, NetworkId> {
         Box::pin(async move {
             let _creating = TransitionGuard::claim(&self.creating)?;
-            ensure_nap_capability(&self.capabilities)?;
+            ensure_nap_capability(&self.current_capabilities()?)?;
 
             let mut registry = self.store.load()?;
             if current_network(&registry)?.is_some() {
@@ -758,6 +772,13 @@ where
     R: StarHostRuntime,
     G: NetworkIdGenerator,
 {
+    fn observe_capabilities(&self, capabilities: &NodeCapabilities) {
+        // A poisoned slot keeps refusing in `current_capabilities`; never fail open here.
+        if let Ok(mut slot) = self.capabilities.lock() {
+            *slot = capabilities.clone();
+        }
+    }
+
     fn bind_guarded_control_listener(
         &self,
     ) -> NetworkOperationFuture<'_, Option<crate::ObservedControlListener>> {
@@ -952,7 +973,7 @@ where
                 .network(&network)
                 .and_then(|membership| membership.role);
             require_host_role(role, "restore")?;
-            ensure_nap_capability(&self.capabilities)?;
+            ensure_nap_capability(&self.current_capabilities()?)?;
             self.runtime
                 .start_host(
                     network,
@@ -2667,11 +2688,9 @@ mod tests {
         });
     }
 
-    // CR-F4 regression (docs/CODE_REVIEW_REMEDIATION_TODO.md): states the corrected contract and
-    // fails on baseline 4ca5042, where creation reads the startup capability copy; CR-F4 removes
-    // the `ignore`.
+    // CR-F4 (docs/CODE_REVIEW_REMEDIATION_TODO.md, CAP-1..CAP-4). The first test failed on baseline
+    // 4ca5042, where creation read the startup capability copy.
     #[test]
-    #[ignore = "CR-F4 regression: fails on baseline 4ca5042 until CR-F4 is fixed"]
     fn cr_f4_recovered_hosting_capability_unblocks_create_without_restart() {
         futures_lite::future::block_on(async {
             let (root, store) = temp_store("cr-f4-recovery");
@@ -2730,6 +2749,169 @@ mod tests {
             assert_eq!(runtime.starts(), 1);
 
             fs::remove_dir_all(root).unwrap();
+        });
+    }
+
+    /// One daemon service over one operations instance with a fake runtime, starting from
+    /// `startup` hosting capability on both.
+    struct CapabilityFixture {
+        root: std::path::PathBuf,
+        runtime: FakeRuntime,
+        service: crate::DaemonService,
+    }
+
+    impl Drop for CapabilityFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    impl CapabilityFixture {
+        fn new(label: &str, startup: Option<bool>) -> Self {
+            let (root, store) = temp_store(label);
+            let runtime = FakeRuntime::default();
+            let operations = Arc::new(SingleStarNetworkOperations::with_runtime_and_generator(
+                store,
+                DaemonConfig::default(),
+                nap_capabilities(startup),
+                runtime.clone(),
+                SequenceGenerator::new([
+                    NetworkId::from_bytes([0xf6; 16]),
+                    NetworkId::from_bytes([0xf7; 16]),
+                ]),
+            ));
+            let service = crate::DaemonService::with_operations(
+                blueroute_protocol::DaemonStatus {
+                    api_version: blueroute_protocol::ApiVersion::CURRENT,
+                    local_node: Some(blueroute_core::NodeId::from_bytes([0xf8; 16])),
+                    current_network: None,
+                    health: blueroute_core::HealthLevel::Healthy,
+                    capabilities: nap_capabilities(startup),
+                },
+                operations,
+                Arc::new(crate::DurablePeerTrustOperations::new(
+                    NetworkMembershipStore::new(root.join("trust-memberships")),
+                )),
+            );
+            Self {
+                root,
+                runtime,
+                service,
+            }
+        }
+
+        fn observe(&self, capabilities: NodeCapabilities) {
+            self.service
+                .update_runtime_observation(
+                    blueroute_core::HealthLevel::Healthy,
+                    capabilities,
+                    None,
+                )
+                .unwrap();
+        }
+
+        fn published(&self) -> Option<bool> {
+            self.service
+                .status_snapshot()
+                .unwrap()
+                .capabilities
+                .can_host_pan()
+        }
+
+        async fn create(&self) -> Result<String, crate::RequestError> {
+            self.service
+                .execute(blueroute_protocol::Command::CreateNetwork {
+                    name: DisplayName::new("Live").unwrap(),
+                })
+                .await
+        }
+    }
+
+    #[test]
+    fn cr_f4_unknown_to_true_recovery_unblocks_create() {
+        futures_lite::future::block_on(async {
+            let fx = CapabilityFixture::new("cr-f4-unknown", None);
+            assert!(fx.create().await.is_err());
+            assert_eq!(fx.runtime.starts(), 0);
+            fx.observe(nap_capabilities(Some(true)));
+            fx.create()
+                .await
+                .expect("creation proceeds once hosting is observed");
+            assert_eq!(fx.runtime.starts(), 1);
+        });
+    }
+
+    #[test]
+    fn cr_f4_lost_or_failed_observations_close_the_gate_again() {
+        futures_lite::future::block_on(async {
+            for (label, observation) in [
+                ("cr-f4-lost", nap_capabilities(Some(false))),
+                // What the runtime worker publishes when its probe fails.
+                ("cr-f4-probe-failed", NodeCapabilities::default()),
+            ] {
+                let fx = CapabilityFixture::new(label, Some(true));
+                fx.observe(observation);
+                assert_ne!(fx.published(), Some(true));
+                let refused = fx
+                    .create()
+                    .await
+                    .expect_err("an unusable observation refuses");
+                assert!(
+                    matches!(refused.fdo(), Some(zbus::fdo::Error::NotSupported(_))),
+                    "{label}: {refused:?}"
+                );
+                assert_eq!(fx.runtime.starts(), 0, "{label}: the runtime was reached");
+                assert_eq!(fx.service.status_snapshot().unwrap().current_network, None);
+            }
+        });
+    }
+
+    #[test]
+    fn cr_f4_reading_or_refreshing_capabilities_creates_nothing() {
+        futures_lite::future::block_on(async {
+            let fx = CapabilityFixture::new("cr-f4-read-only", Some(false));
+            fx.observe(nap_capabilities(Some(true)));
+            for command in [
+                blueroute_protocol::Command::GetCapabilities,
+                blueroute_protocol::Command::GetStatus,
+                blueroute_protocol::Command::ListNetworks,
+            ] {
+                fx.service.execute(command).await.unwrap();
+            }
+            assert_eq!(fx.runtime.starts(), 0);
+            assert_eq!(fx.service.status_snapshot().unwrap().current_network, None);
+        });
+    }
+
+    #[test]
+    fn cr_f4_concurrent_observations_leave_status_and_gate_in_agreement() {
+        futures_lite::future::block_on(async {
+            let fx = CapabilityFixture::new("cr-f4-concurrent", Some(false));
+            let writers: Vec<_> = (0..8)
+                .map(|writer| {
+                    let service = fx.service.clone();
+                    std::thread::spawn(move || {
+                        for round in 0..200 {
+                            let usable = (writer + round) % 2 == 0;
+                            service
+                                .update_runtime_observation(
+                                    blueroute_core::HealthLevel::Healthy,
+                                    nap_capabilities(Some(usable)),
+                                    None,
+                                )
+                                .unwrap();
+                        }
+                    })
+                })
+                .collect();
+            for writer in writers {
+                writer.join().unwrap();
+            }
+            // Whatever order the writers finished in, the gate agrees with what status shows.
+            let published = fx.published();
+            let created = fx.create().await.is_ok();
+            assert_eq!(created, published == Some(true), "published {published:?}");
+            assert_eq!(fx.runtime.starts(), usize::from(created));
         });
     }
 }

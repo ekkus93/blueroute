@@ -326,6 +326,11 @@ impl DaemonService {
         status.health = observed_health;
         status.capabilities = observed_capabilities;
         *system = observed_system;
+        // Hand the same observation to the operation-time gate while the status lock is still
+        // held, so concurrent observations reach status and the gate in one order (CR-F4).
+        if let Some(operations) = &self.network_operations {
+            operations.observe_capabilities(&status.capabilities);
+        }
         drop(system);
         drop(status);
         if changed {

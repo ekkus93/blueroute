@@ -511,6 +511,8 @@ A node capability snapshot may include:
 
 Capabilities may be **discovered**, **measured**, **configured**, or **conservatively defaulted**. Diagnostics should distinguish these sources where useful.
 
+Capability freshness (CR-F4): the daemon probes capabilities at startup and again every 15 seconds. Each observation is published in status and, under the same lock, handed to the operation-time hosting gate, so `CreateNetwork` and host restoration check the latest observation, never a startup copy: recovery is usable without a restart, and a lost or failed observation (a failed probe publishes unknown) closes the gate again. Readiness only describes the last observation; creation still requires authorization, no current membership, a free address range and backend success, and a prerequisite lost after the check fails the backend step with the normal rollback. Recording an observation never touches networking. Two copies are latched at startup on purpose: the control worker's and join control's `connection_policy_ceiling`, which is configured policy rather than a live measurement, and the capabilities they describe themselves with in `Hello`, which no current receiver uses for any decision.
+
 A capability failure on one node should not unnecessarily make the entire network unsupported. For example, a node that can act only as a client may still participate as PANU.
 
 ## 14. Network topology
