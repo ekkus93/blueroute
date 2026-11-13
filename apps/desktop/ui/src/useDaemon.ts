@@ -51,22 +51,30 @@ export function normalizeError(error: unknown): DesktopError | "unknown" {
   return typeof error === "string" && ERRORS.has(error) ? (error as DesktopError) : "unknown";
 }
 
-/** Reads daemon snapshots and refreshes them (coalesced) on payload-free daemon signals. */
+/**
+ * Reads daemon snapshots and refreshes them (coalesced) on payload-free daemon signals.
+ *
+ * Every effect run is one generation that owns its subscription, callbacks, loads and coalescing
+ * state (CR-F6). Nothing it owns is shared with another generation, so after StrictMode's
+ * setup-cleanup-setup replay or an `api`/`subscribe` change, a late result of a disposed
+ * generation can only release itself: its subscription is stopped exactly once, and its signals
+ * and reads change nothing.
+ */
 export function useDaemon(
   api: DaemonApi = realDaemon,
   subscribe: SubscribeToSignals = realSubscribe,
 ): { view: View; link: LinkState; refresh: () => void } {
   const [view, setView] = useState<View>({ phase: "loading" });
   const [link, setLink] = useState<LinkState>("unknown");
-  const inFlight = useRef(false);
-  const pending = useRef(false);
-  const alive = useRef(true);
 
-  // The current loader, for the Refresh button. Set by the effect below; a no-op before it runs.
+  // The current generation's loader, for the Refresh button; a no-op while none is mounted.
   const reload = useRef<() => void>(() => {});
 
   useEffect(() => {
-    alive.current = true;
+    let disposed = false;
+    let inFlight = false;
+    let pending = false;
+    let unsubscribe: (() => void) | undefined;
     // Read the API's functions here, synchronously, so the effect visibly depends on `api`.
     // Every DaemonApi is a plain object of functions (no `this`), so detached calls are safe.
     const { platformCheck, overview, networks, devices, clientLink } = api;
@@ -80,7 +88,7 @@ export function useDaemon(
           devices(),
           clientLink(),
         ]);
-        if (alive.current) {
+        if (!disposed) {
           const [platform, overviewNow, networksNow, devicesNow, clientLinkNow] = results;
           setView({
             phase: "ready",
@@ -94,51 +102,61 @@ export function useDaemon(
           });
         }
       } catch (error) {
-        if (alive.current) {
+        if (!disposed) {
           setView({ phase: "error", error: normalizeError(error) });
         }
       }
     };
     const load = async () => {
-      // Coalesce: while a load runs, further requests only mark one more pass as needed.
-      if (inFlight.current) {
-        pending.current = true;
+      // Coalesce within this generation: while a load runs, further requests only mark one
+      // more pass as needed. A disposed generation starts nothing.
+      if (disposed) {
         return;
       }
-      inFlight.current = true;
+      if (inFlight) {
+        pending = true;
+        return;
+      }
+      inFlight = true;
       let more = true;
       while (more) {
-        pending.current = false;
+        pending = false;
         await loadOnce();
-        more = pending.current && alive.current;
+        more = pending && !disposed;
       }
       // Reached on every path, because loadOnce never throws.
-      inFlight.current = false;
+      inFlight = false;
     };
-    reload.current = () => void load();
+    const mine = () => void load();
+    reload.current = mine;
     void load();
-    let unsubscribe: (() => void) | undefined;
     void subscribe((signal) => {
-      if (signal === "disconnected") {
-        setLink("disconnected");
-      } else {
-        setLink("connected");
+      if (disposed) {
+        return;
       }
+      setLink(signal === "disconnected" ? "disconnected" : "connected");
       void load();
     })
       .then((stop) => {
-        if (alive.current) {
-          unsubscribe = stop;
-        } else {
+        if (disposed) {
+          // This generation is gone: release what arrived late, once, and keep nothing.
           stop();
+        } else {
+          unsubscribe = stop;
         }
       })
       .catch(() => {
         // Without live signals the page still works; the user can refresh manually.
       });
     return () => {
-      alive.current = false;
-      unsubscribe?.();
+      disposed = true;
+      const stop = unsubscribe;
+      unsubscribe = undefined;
+      stop?.();
+      // Only clear the refresh handler if a newer generation has not already replaced it.
+      if (reload.current === mine) {
+        reload.current = () => {};
+      }
     };
   }, [api, subscribe]);
 
