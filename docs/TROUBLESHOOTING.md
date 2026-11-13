@@ -24,11 +24,17 @@ Check `blueroute capability show` for `adapter_usable`, then inspect `bluetoothc
 
 ### BlueZ or NetworkManager is unavailable
 
-Check `systemctl status bluetooth.service NetworkManager.service` and `journalctl -b -u bluetooth.service -u NetworkManager.service`. BlueRoute reports missing services as unsupported/degraded capability state and does not silently substitute shell commands or another backend.
+Check `systemctl status bluetooth.service NetworkManager.service` and `journalctl -b -u bluetooth.service -u NetworkManager.service`. BlueRoute reports missing services as degraded or unsupported and does not silently substitute shell commands or another backend.
+
+On a computer hosting a network, BlueRoute checks itself every 15 seconds. After BlueZ or NetworkManager restarts, it sets the network up again by itself (the log shows `host_runtime_repaired`) and health returns to normal; no BlueRoute restart is needed. If health stays degraded and the log shows `host_runtime_check` with `outcome: failed`, the services are still down or the repair failed; its `failure_class` says which.
 
 ### Pairing fails
 
 Confirm both devices are discoverable as required by their local policy, then inspect the BlueZ and BlueRoute daemon logs. Pairing/trust approval is separate from cryptographic control-channel key enrollment and network membership. Repeatedly approving a peer does not resolve an unsupported adapter role or an authenticated-session failure.
+
+### A host refuses a joining computer
+
+The host admits only computers whose key was enrolled with `blueroute peer enroll`, up to its configured client limit (`connection_policy_ceiling`, shown in diagnostics with its source). A computer over the limit gets a session refusal while its Bluetooth link may stay up. Check that the enrolled fingerprint matches the joining computer's own `blueroute peer local-key`, and how many authenticated peers diagnostics already shows.
 
 ### Permission denied
 
@@ -40,7 +46,15 @@ Use `systemctl status blueroute.service`, inspect `journalctl -b -u blueroute.se
 
 ### Peer is unreachable or the link is stale
 
-Check that discovery sees the expected BlueRoute network and that both nodes have powered adapters. Discovery metadata is not authentication, and the current daemon does not yet expose a live authenticated remote-peer/reconnect inventory. Do not assume that a listed candidate is a member or that it has a valid control session. Capture daemon, BlueZ, and NetworkManager logs plus capability-probe output for investigation.
+Check that discovery sees the expected BlueRoute network and that both nodes have powered adapters. Discovery metadata is not authentication: a listed network is not a member and has no control session by being listed.
+
+On a host, `blueroute diagnostics show` lists the computers holding an authenticated control session. On a joined client, `blueroute network link` shows the link to the host:
+
+- `connecting` / `waiting`: BlueRoute is retrying with growing delays; nothing to do yet.
+- `needs_attention`: the reason says what to fix (for example a missing host key); fix it, then run `blueroute network reconnect`.
+- `gave_up`: the host was unreachable for every attempt; membership is kept. When the host is back, run `blueroute network reconnect`.
+
+Joining is not available in packaged builds yet, so these states only appear on a test rig. Capture daemon, BlueZ and NetworkManager logs plus capability-probe output for investigation.
 
 ### Address conflict
 

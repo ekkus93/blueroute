@@ -1,6 +1,6 @@
 # BlueRoute user guide (development build)
 
-**Status: not a finished consumer release.** BlueRoute currently has a Linux background service and command-line client. The terminal app has preliminary read-only daemon-backed views but is not yet a full Ratatui UI or included in the Debian package; the graphical app remains a placeholder. Hosting and inspecting a local network are implemented; **joining through the production daemon is intentionally disabled** until independent key enrollment and authenticated peer sessions are integrated. This is not yet a complete two-computer networking solution.
+**Status: not a finished consumer release.** BlueRoute has a Linux background service and a command-line client, both in the Debian package. A read-only terminal app and a desktop app exist but are run from a source checkout for now. Hosting and inspecting a local network work. **Joining is disabled in every packaged build** until it has passed a two-computer test on real hardware, so this is not yet a complete two-computer networking solution.
 
 ## What BlueRoute does
 
@@ -45,13 +45,17 @@ blueroute diagnostics show --summary
 
 `status` shows the local node, current network and health. `capability show` reports whether the local computer can host a network (NAP) or connect as a client (PANU), with evidence sources. **Unknown does not mean supported.** The reported connection-policy ceiling is not a measured Bluetooth client limit.
 
-`diagnostics show --summary` is a short overview; `blueroute diagnostics show` gives more detail. Some fields say **unavailable** because live authenticated remote-peer inventory, topology and route observations are incomplete. A healthy local daemon does not prove a peer connection or working traffic. Current `blueroute node list` reports the local node only.
+`diagnostics show --summary` is a short overview; `blueroute diagnostics show` gives more detail. On a computer hosting a network, "Authenticated control peers" counts the computers that hold a verified connection to it, against the configured limit (a setting, not a measured Bluetooth limit). Fields that say **unavailable** are not reported yet; routes and the network layout are among them. A healthy local daemon does not prove a peer connection or working traffic. `blueroute node list` reports the local node only.
 
-### Terminal status views (source-build only)
+### Terminal app (source checkout)
 
-On a text-terminal Linux development system, run `cargo run -p blueroute-tui --locked` from the source checkout. The initial keyboard-driven shell reads **only** the version-checked local daemon API: `1` Overview, `2` Networks, `3` Devices, `4` Diagnostics, `r` Refresh/reconnect, `h` Help and `q` Quit. It is not packaged yet, uses line-oriented input rather than Ratatui's full-screen event loop, and automatically rechecks the selected read-only daemon view every five seconds, repainting only when its contents change. You can still press `r` for an immediate refresh. It does not yet subscribe to daemon events. The Diagnostics view can display detailed capability provenance, adapters, interfaces, routes, topology, and bounded recent errors when those observations are actually present in the daemon snapshot. Missing live peer/interface/route/topology data remain explicitly **unavailable**, and link transitions are not exposed. Details are escaped and capped for safe terminal rendering. The daemon remains in charge when the view exits.
+On a text terminal, run `cargo run -p blueroute-tui --locked` from the source checkout. It is a full-screen, **read-only** view of the local daemon: `1`–`4` (or Tab) switch between Overview, Networks, Devices and Diagnostics, arrow keys scroll, `r` refreshes, `h` shows help (Esc closes it) and `q` quits. It updates by itself when the daemon reports a change, and shows a banner while it has lost contact with the service.
 
-A missing/incompatible daemon is reported as unavailable rather than a blank or fabricated healthy state. The screen's reported nodes are not a verified remote-member inventory; a locally healthy status is not proof of Bluetooth connectivity. Interactive create, trust, join and leave remain CLI-only; production authenticated joining remains deliberately disabled.
+It never changes anything. Changes need your password, which a full-screen terminal cannot ask for, so each screen shows the exact `blueroute` command to run in a normal shell instead. A missing or incompatible daemon is reported as unavailable, never as a made-up healthy state.
+
+### Desktop app (source checkout)
+
+The desktop app shows the same status in plain language. It can create and leave a network, ask a joined computer to reconnect to its host, rename this computer, and help diagnose problems. Every change may ask for your password. Joining is shown but disabled until it is available. Build instructions are in [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Create a local network (host-only development flow)
 
@@ -77,7 +81,7 @@ Discovery metadata is **not** authenticated identity or permission to join.
 
 ### Joining and peer trust: not yet available end-to-end
 
-`blueroute network join NETWORK_ID` exists in the CLI, but the production daemon deliberately rejects it until authenticated join is implemented. There is no safe end-user join procedure today.
+`blueroute network join NETWORK_ID` exists in the CLI. The authenticated join behind it is built, but every packaged build refuses it until it has passed a two-computer test on real hardware. There is no end-user join procedure today.
 
 `blueroute peer trust NODE_ID` records legacy peer trust; it does **not** enroll a verified TLS key, authenticate a control session or grant membership. `blueroute peer local-key` and `blueroute peer verify-local-key` are read-only identity inspection/comparison aids; they do not enroll keys. Never accept an advertised fingerprint merely because it appeared in discovery.
 
@@ -131,6 +135,7 @@ Node listings currently represent the **local node only**, not verified remote r
 | Bluetooth off or missing | `blueroute capability show`, then `rfkill list` and system Bluetooth settings. |
 | Cannot host | Inspect NAP capability; a PANU-only computer may eventually join but cannot necessarily host. |
 | Daemon unavailable | `systemctl status blueroute.service` and `sudo journalctl -b -u blueroute.service`. |
+| Status "Working, with problems" after Bluetooth or NetworkManager restarted | Wait about 15 seconds: a hosting computer checks itself and sets its network up again. If it stays degraded, check that both services are running. |
 | Permission denied | Use the CLI's normal PolicyKit path; do not substitute `sudo blueroute`. |
 | Visible network but join fails | Production join is disabled; discovery does not authenticate. |
 | Address conflict | Inspect `blueroute diagnostics show` and `ip -4 route`; preserve unrelated routes. |

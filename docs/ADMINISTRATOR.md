@@ -10,15 +10,21 @@ Run `blueroute --help` for the installed version's command list and `blueroute -
 | --- | --- |
 | `blueroute status` | Show API version, local node, current network, health, and local capabilities. |
 | `blueroute capability show` | Show the daemon's local capability facts and their evidence source. |
-| `blueroute diagnostics show` | Show the current diagnostic snapshot. Node counts are local-only until authenticated peer runtime is integrated. |
+| `blueroute diagnostics show` (`--summary` for a short form) | Show the current diagnostic snapshot: health, capabilities, platform versions, adapters, owned interface addresses on a host, the host's authenticated control peers against the policy ceiling, and recent API failures. |
 | `blueroute network list` | List known networks. |
-| `blueroute network create NAME` | Request creation of a BlueRoute star. This is a privileged operation. |
-| `blueroute network join NETWORK_ID` | Request a network join. The current daemon intentionally rejects this as unsupported until authenticated peer transport and production join runtime are integrated. |
-| `blueroute network leave` | Stop a locally hosted network whose runtime is still owned by this daemon. This is privileged and idempotent after leave succeeds. |
-| `blueroute discover start` / `stop` | Start or stop BlueRoute network discovery. |
-| `blueroute node list` / `node show NODE_ID` | Inspect node records currently exposed by the daemon. Current runtime reports the local node only. |
-| `blueroute peer trust NODE_ID` | Record explicit legacy peer trust. This is not TLS-key enrollment or network membership. |
-| `blueroute peer forget NODE_ID` | Revoke peer trust and any configured key pin. |
+| `blueroute network create NAME` | Create and host a BlueRoute star. Privileged. |
+| `blueroute network join NETWORK_ID` | Join a network. Refused as unsupported by every packaged build until two-machine hardware acceptance; see "Join on a test rig" below. |
+| `blueroute network leave` | Leave the current network: tear down a hosted star, or a joined client's link, address and session. Privileged; retryable. |
+| `blueroute network link` | Read-only: a joined client's link to its host (`connecting`, `waiting`, `established`, `needs_attention`, `gave_up`, or not a client). |
+| `blueroute network reconnect` | Ask a joined client to try reaching its host again after it gave up or needed attention. Privileged. |
+| `blueroute discover start` / `stop` | Start or stop BlueRoute network discovery. Privileged. |
+| `blueroute node list` / `node show NODE_ID` | Inspect node records exposed by the daemon. Currently the local node only. |
+| `blueroute node set-name NAME` | Rename this computer. A label only; the NodeId and keys never change. Privileged. |
+| `blueroute peer local-key` / `peer verify-local-key NODE_ID FINGERPRINT` | Read-only: show, or compare against, this computer's NodeId, network and control-key fingerprint, for out-of-band confirmation. |
+| `blueroute peer set-join-host NETWORK_ID NODE_ID FINGERPRINT` / `peer clear-join-host` | On a joining computer: record (or clear) the one host it will trust, confirmed out of band. Not membership. Privileged. |
+| `blueroute peer enroll NODE_ID FINGERPRINT` | On a host: trust a joining computer and pin its control key, confirmed out of band. A different existing key is refused. Privileged. |
+| `blueroute peer trust NODE_ID` | Record trust without a key. Grants no TLS access by itself. Privileged. |
+| `blueroute peer forget NODE_ID` | Revoke trust and any key pin. Privileged. |
 
 Examples:
 
@@ -30,7 +36,7 @@ blueroute network list --json
 blueroute node show 0123456789abcdef0123456789abcdef
 ```
 
-The daemon enforces authorization for mutations. An authorization failure is reported separately from an unavailable daemon or unsupported capability. Production `network join` remains fail-closed until authenticated peer transport is integrated. `network leave` tears down a hosted network. If the daemon restarted and could not restore the host, leave removes only the NetworkManager addresses and profiles that carry this network's BlueRoute ownership, then clears membership; nothing without that ownership is touched. A failed cleanup keeps membership, so leave can be retried. Joined-client leave and restart reconnection exist in the daemon but cannot be used until join is available.
+The daemon enforces authorization (PolicyKit `org.blueroute.modify`) for every privileged command. Exit codes: `0` success, `1` operational failure, `2` usage, `3` daemon unavailable or incompatible, `4` permission denied, `5` unsupported; `--json` failures carry the same code. `network leave` tears down a hosted network. If the daemon restarted and could not restore the host, leave removes only the NetworkManager addresses and profiles that carry this network's BlueRoute ownership, then clears membership; nothing without that ownership is touched. A failed cleanup keeps membership, so leave can be retried. Joined-client leave and restart reconnection exist in the daemon but cannot be used until join is available.
 
 ## Capability and network diagnosis
 
@@ -65,6 +71,23 @@ sudo journalctl -f -u blueroute.service
 
 The daemon runs as a system service, independent of a logged-in desktop session. Use `systemctl` to inspect or restart it. Do not delete files under `/var/lib/blueroute` as a troubleshooting step: they include stable identity, membership, and TLS key material.
 
+Useful structured events (one JSON object per line, field `event`):
+
+| Event | Meaning |
+| --- | --- |
+| `runtime_observation_updated` | Health or observed capabilities changed. |
+| `host_runtime_repaired` | A hosted network was set up again after BlueZ or NetworkManager restarted, or its owned address was missing. |
+| `host_runtime_check` (`outcome: failed`) | The hosted network is down and could not be repaired yet; logged once, not every 15 seconds. |
+| `host_runtime_recovered` | The hosted network is up again after a failed check. |
+| `startup_reconciliation`, `client_reconnect_start`, `device_name_load` | Startup steps that failed, with a coarse `failure_class`. |
+| `experimental_join_enabled` | This is a hardware-test build with join open; never expected on a normal install. |
+
+Request records never include payloads, peer-supplied labels, addresses or key material.
+
+## Join on a test rig
+
+Packaged and CI builds keep join closed. Two-machine acceptance uses a daemon built with the default-off `experimental-join` feature; its diagnostics version ends in `+experimental-join`. Instructions and checklists are in [HARDWARE_ACCEPTANCE_BACKLOG.md](HARDWARE_ACCEPTANCE_BACKLOG.md). Never install such a build outside the test rig.
+
 ## Current observability limits
 
-The daemon does not yet expose a live authenticated remote-peer inventory, routed topology, interface/address/route snapshot, or active TLS session state. A local capability report is not proof of a working Bluetooth data path. Use the physical acceptance procedures and evidence documents when validating radio and PAN behavior.
+The daemon does not report observed PANU links per peer, routes or a topology graph. On a host, authenticated control peers are counted, but a control session is not proof of a working data path. A local capability report is not proof of a working Bluetooth link. Use the physical acceptance procedures and evidence documents when validating radio and PAN behavior.

@@ -85,6 +85,8 @@ npm run build          # type-check + vite build into ui/dist
 npx tauri build --debug --no-bundle   # build the desktop binary without packaging
 ```
 
+To run the app against the daemon on this machine, use `npm run tauri dev` from `apps/desktop` (it starts the Vite dev server and opens the window).
+
 Debian packaging of the desktop application is deliberately not part of this task (P15 gates it on P12 completion).
 
 ## Test classes

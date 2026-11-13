@@ -238,34 +238,43 @@ This specification describes the product target. The following status records wh
 
 #### Implemented software boundaries
 
-- `blueroute-core` contains hardware-independent identifiers, configuration, membership, health, capability, address allocation, topology and route-planning models.
-- `blueroute-protocol` contains the versioned local D-Bus command/response/event types, bounded control-frame codecs, replay/session models, and strict peer claims.
-- `blueroute-linux` contains direct system-D-Bus adapters for BlueZ and NetworkManager, PAN lifecycle operations, address/route/forwarding ownership helpers, durable state stores, and the read-only system capability probe.
-- `blueroute-client` provides the version-gated system-D-Bus client used by the CLI.
-- `blueroute-daemon` exposes status, capability, diagnostics, network discovery/create and peer-trust operations through the local API. Create-network and discovery use the Linux adapters; mutations are subject to daemon authorization.
-- `blueroute` provides the implemented daemon-backed CLI commands, including JSON output and typed process exit classes. The TUI and desktop crates are placeholders, not usable front ends.
+Status reviewed 2026-11-12. "Implemented" means implemented and tested in software; physical Bluetooth acceptance is tracked separately and is still outstanding for everything joining involves.
+
+- `blueroute-core` contains hardware-independent identifiers, configuration, membership (schema v3 with a persisted host/client role), health, capability, address allocation, NAP admission policy, topology and route-planning models.
+- `blueroute-protocol` contains the versioned local D-Bus command/response/event types (API 1.5), bounded control-frame codecs, replay/session models and strict peer claims.
+- `blueroute-linux` contains direct system-D-Bus adapters for BlueZ and NetworkManager, PAN lifecycle operations, address/route/forwarding ownership helpers, durable state stores, service-owner observation and the read-only system capability probe.
+- `blueroute-client` provides the version-gated system-D-Bus client used by every front end.
+- `blueroute-daemon`:
+  - hosts networks (create, startup restore, a 15-second running check that repairs the host after BlueZ or NetworkManager restarts, and leave, including after a failed restore);
+  - runs the inbound control listener, which admits only peers whose keys are pinned, over mutual TLS 1.3 with an exporter-bound Hello, up to the configured NAP policy ceiling;
+  - holds the full join path (confirmed-host record, PANU, owned lease, supervised pinned control session, commit-time host authorization), restart reconciliation and link-loss reconnection for a joined client, and observation-based client leave;
+  - accepts typed key enrollment on both sides (`RecordJoinHost` on the joiner, `EnrollPeerKey` on the host);
+  - reports health, capabilities, diagnostics (including the host's authenticated control peers) and the client link.
+- `blueroute` (CLI) covers every daemon command with JSON output and typed exit codes. `blueroute-tui` is a full-screen, read-only Ratatui interface that shows the CLI command for each action. The desktop app (Tauri, React) shows status, creates and leaves networks, retries a joined client's link, renames the computer and diagnoses problems. Its only mutations are `create_network`, `leave_network`, `retry_client_reconnect` and `set_device_name`, each individually granted; the daemon still enforces PolicyKit.
 
 #### Incomplete end-to-end behavior
 
-- Production JoinNetwork remains fail-closed. Its transaction coordinator and rollback policy exist, but the Linux join runtime does not yet establish a PANU link, configure the full production join, authenticate the peer, and commit membership as one live operation.
-- Commits `84f05a6` and `f88e1f3` add persistent local TLS identity, pinned TLS 1.3 connection helpers, exporter-bound Hello/HelloAck, pin-gated active-session helpers, and an untrusted candidate-certificate exchange that requires independent fingerprint confirmation before constructing a trust input. The daemon loads the local identity, but there is no PAN-bound listener/client runtime, session manager, reconnect loop, or independent user key-enrollment interface wired to those helpers.
-- Existing P6-006 host/client traffic probes and a standard socket test script are acceptance tooling. They do not make production JoinNetwork available; physical two-node application-traffic acceptance remains separately tracked.
-- Core route planning, segment allocation, and forwarding policy are software models. Live inter-segment topology ingestion, route distribution/application, multi-hop recovery, and the TUI/desktop remain incomplete.
-- The current diagnostics API exposes daemon health, current network, local capability facts, and a local-only node count. It does not expose a live remote-peer inventory, topology graph, active control-session state, or complete interface/address/route observations.
+- **Production join is closed.** Every packaged and CI build refuses `JoinNetwork` and every client-runtime mutation. Only a build with the default-off `experimental-join` Cargo feature, meant for two-machine test rigs, can open the gate, and only with every join dependency wired. No join has run on hardware yet, so joining, restart reconnection, link-loss recovery and client leave are unproven on a radio.
+- The desktop Join workflow (P12-006) stays disabled until join passes hardware acceptance.
+- **Topology distribution is designed, not built.** The control wire carries no route, topology or membership messages. Origin-signed link-state is accepted as direction (P8-005) and deferred until the first two-node join passes. Route planning, segment allocation, failover and forwarding remain software models with no live multi-segment topology to act on.
+- **Diagnostics are partial.** The daemon reports local health and capabilities, owned interface addresses on a host, and the host's authenticated control peers. It does not report observed PANU links per peer, routes or a topology graph.
+- **Adapter changes and suspend are not handled while running.** An adapter power cycle, re-plug or suspend/resume (P13-004/005) depends on BlueZ and controller behavior that has not been observed.
+- **The package ships the daemon and CLI only.** The TUI and desktop app are excluded from the Debian package for now.
 - Internet sharing is not implemented and remains disabled by default.
 
 ```mermaid
 flowchart LR
     cli[CLI] --> client[blueroute-client]
-    client -->|versioned system D-Bus| daemon[blueroute-daemon]
+    tui[TUI, read-only] --> client
+    desktop[Desktop app] --> bridge[Tauri bridge: fixed commands] --> client
+    client -->|versioned system D-Bus, PolicyKit for mutations| daemon[blueroute-daemon]
     daemon --> core[core and protocol models]
     daemon --> linux[Linux adapters]
     linux --> bluez[BlueZ]
     linux --> nm[NetworkManager]
-    daemon -.->|loads identity at startup| tls[Control TLS helpers]
-    tls -.->|no live listener or session runtime| pan[Future authenticated peer runtime]
-    tui[TUI placeholder]
-    desktop[Desktop placeholder]
+    daemon --> listener[Inbound control listener: pinned mutual TLS]
+    daemon -.->|closed unless experimental-join build| join[Join, client reconnect and leave]
+    join -.-> panu[PANU link and pinned control session]
 ```
 
 The implementation backlog and acceptance status are maintained in [TODO.md](TODO.md); physical evidence and deferred hardware requirements are tracked in [HARDWARE_ACCEPTANCE_BACKLOG.md](HARDWARE_ACCEPTANCE_BACKLOG.md).
