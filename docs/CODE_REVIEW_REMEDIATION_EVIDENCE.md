@@ -286,3 +286,38 @@ explicit members (unknown refused atomically; survive link removal; go with the 
 values, and an unchanged deterministic routed path across refused changes. A shared
 `assert_consistent` checks GRAPH-3 after each. Existing single-star, routed, redundant-path,
 partition, forwarding and neighbor tests are unchanged and pass (workspace tests green).
+
+## CR-F4 — fresh hosting capability (2026-11-13)
+
+**Fix:** `6025bbfcce6f4ff22948743545b252a6011994f3`.
+
+- `NetworkOperations::observe_capabilities` (default no-op). `SingleStarNetworkOperations` keeps
+  the observation in a `Mutex` slot seeded with the startup probe; `create_network` and
+  `reconcile_on_startup` check `current_capabilities()` at the operation boundary (a poisoned
+  slot refuses).
+- `DaemonService::update_runtime_observation` passes each observation to the operations while
+  still holding the status lock, then marks the CR-F1 publisher after releasing it, so observers
+  reread a status that agrees with the gate (CR-F4-06).
+- Freshness and failure: the runtime worker reprobes every 15 s; a failed probe publishes
+  `NodeCapabilities::default()` (unknown), which refuses creation. Backend checks at operation
+  time and rollback on backend failure are unchanged; recording an observation does nothing else.
+- CR-F4-02 latched-copy review: `spawn_daemon_control_worker_with_peers` and `JoinControlConfig`
+  keep the startup capabilities for (a) `connection_policy_ceiling`, configured policy (sourced
+  from `DaemonConfig`), and (b) the `Hello` self-description, which no current receiver uses for
+  a decision (`topology_plan`/`topology_policy` consumers are not wired into the daemon). Both are
+  documented as deliberately latched in `docs/SPEC.md` §13. Membership, pins, ceilings,
+  authorization and the closed join gate are untouched by observations.
+
+**Regressions** (`cargo test -p blueroute-daemon --lib cr_f4`, 5 tests, all pass; one service
+instance, fake runtime, no restart):
+
+| Test | Covers |
+| --- | --- |
+| `cr_f4_recovered_hosting_capability_unblocks_create_without_restart` | false → true; create reaches the runtime (baseline **fail**: `NotSupported` while status said `Some(true)`) |
+| `cr_f4_unknown_to_true_recovery_unblocks_create` | unknown → true |
+| `cr_f4_lost_or_failed_observations_close_the_gate_again` | true → false and true → probe failure: `NotSupported`, runtime never reached, no network |
+| `cr_f4_reading_or_refreshing_capabilities_creates_nothing` | observation plus `GetCapabilities`/`GetStatus`/`ListNetworks` start nothing |
+| `cr_f4_concurrent_observations_leave_status_and_gate_in_agreement` | 8 threads × 200 alternating observations; create succeeds iff status shows hosting |
+
+Checks at the fix: fmt, clippy, workspace tests, `state_events`, `authorization` bus suites.
+Hardware adapter-reset acceptance remains separate (CR-QUALIFY).

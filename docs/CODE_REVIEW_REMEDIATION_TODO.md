@@ -25,7 +25,7 @@
 | CR-F2 | Idle owner-loss detection and watcher recovery | P2 | CR-BASE; owner contract from CR-F8 | `[x]` |
 | CR-F1 | Committed state publication and observer refresh | P2 | CR-BASE; CR-F2 for integrated acceptance | `[x]` |
 | CR-F3 | Consistent graph insertion/update semantics | P2 | CR-BASE | `[x]` |
-| CR-F4 | Fresh operational capabilities after recovery | P2 | CR-BASE; CR-F1 for observer acceptance | `[ ]` |
+| CR-F4 | Fresh operational capabilities after recovery | P2 | CR-BASE; CR-F1 for observer acceptance | `[x]` |
 | CR-F5 | Ownership-safe remove/purge cleanup | P2 | CR-BASE; lifecycle design | `[ ]` |
 | CR-F6 | Effect-generation resource ownership | P3 | CR-BASE; watcher contract from CR-F2 | `[x]` |
 | CR-F7 | Current documentation and acceptance reconciliation | P3 | Baseline fixes can start immediately; final pass follows implementation | `[ ]` |
@@ -160,21 +160,25 @@ replacement is atomic and deterministic; the original two replacement probes no 
 
 **Requirements:** CAP-1–CAP-4. **Original tasks:** P6-001; P12-004/005; P13-004.
 
-- [ ] **CR-F4-01:** Replace the immutable startup precondition with a fresh observation or a
+- [x] **CR-F4-01:** Replace the immutable startup precondition with a fresh observation or a
   coherently refreshed, synchronized capability generation shared with operational decisions.
-- [ ] **CR-F4-02:** Define freshness/failure behavior and review other latched copies, including
+- [x] **CR-F4-02:** Define freshness/failure behavior and review other latched copies, including
   control admission; distinguish stable configured policy from live runtime capability.
-- [ ] **CR-F4-03:** Preserve fail-closed unknown/unsupported/error behavior and operation-time
+- [x] **CR-F4-03:** Preserve fail-closed unknown/unsupported/error behavior and operation-time
   backend checks; do not mutate networking merely by refreshing capabilities.
-- [ ] **CR-F4-04:** Test false/unknown-to-true recovery on the same daemon/operations instance;
+- [x] **CR-F4-04:** Test false/unknown-to-true recovery on the same daemon/operations instance;
   verify creation reaches the fake runtime without restarting the daemon.
-- [ ] **CR-F4-05:** Test true-to-false, probe failure, and concurrent observation changes;
+- [x] **CR-F4-05:** Test true-to-false, probe failure, and concurrent observation changes;
   unsafe creation must not reach the runtime and failure must preserve rollback guarantees.
-- [ ] **CR-F4-06:** Verify readiness and observer notifications use compatible observations;
+- [x] **CR-F4-06:** Verify readiness and observer notifications use compatible observations;
   preserve membership, key pins, ceilings, authorization, and production join restrictions.
 
 **Acceptance:** Observed recovery unblocks eligible creation without restart; stale or failed
 observations cannot grant unsafe capability. Hardware adapter-reset acceptance remains separate.
+
+**Accepted (2026-11-13, `6025bbf`):** software acceptance met; see
+[evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-f4--fresh-hosting-capability-2026-11-13).
+Hardware adapter-reset acceptance stays with CR-QUALIFY.
 
 ## CR-F5 — Clean up installation-owned runtime networking
 
@@ -339,7 +343,7 @@ Fill entries as work is qualified. Link concrete records; do not replace evidenc
 | CR-F2 / F2 | `e283b4e` | `owner_watch` (3), `watcher` (5), setup race in `owner_race`; UI stale-label tests; all checks green | Private broker sufficient for the reported defect | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
 | CR-F1 / F1 | `4de29b1` | `state_events` (7), daemon-to-watcher, link-phase and peer-snapshot tests; all checks green | Radio claims remain separate | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
 | CR-F3 / F3 | `4583c6e` | 11 `cr_f3` tests (4 failed on baseline); workspace green | Not required for pure graph consistency | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
-| CR-F4 / F4 | Pending | Pending | Adapter behavior if claimed | Same-instance software recovery; preserve hardware gates | NOT STARTED |
+| CR-F4 / F4 | `6025bbf` | 5 `cr_f4` tests (1 failed on baseline); workspace green | Adapter behavior if claimed (not claimed) | Exact-head CI recorded under CR-VALIDATE | SOFTWARE COMPLETE |
 | CR-F5 / F5 | Pending | Pending | Required: CR-QUALIFY | Owned cleanup, foreign preservation, failure/retry | NOT STARTED |
 | CR-F6 / F6 | `25e6984` | 8 `useDaemon` tests (4 fail with the baseline hook); desktop checks green | Not required for effect ownership | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
 | CR-F7 / F7 | Pending | Pending | Preserve existing records | Current summaries and final acceptance accuracy | NOT STARTED |
