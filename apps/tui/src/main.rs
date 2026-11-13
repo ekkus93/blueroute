@@ -1,18 +1,23 @@
-//! Read-only terminal views backed by the version-checked daemon client.
-//! A full Ratatui event loop and event subscription remain separate P11 work.
-use std::io::{self, BufRead, IsTerminal, Write};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+//! Full-screen, read-only terminal UI over the version-checked daemon client (P11).
+//!
+//! Three threads: the main thread owns the terminal and handles keys; a loader thread fetches
+//! views so a slow daemon never freezes input; a watcher thread holds a daemon event
+//! subscription (with bounded reconnect backoff) and only reports that something changed. The
+//! UI then re-reads the typed snapshot. No mutation is ever sent.
+use std::io::{self, IsTerminal};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
+mod app;
 mod diagnostics;
+mod watch;
 
 use blueroute_client::{BlueRouteClient, ClientErrorKind};
 use blueroute_core::HealthLevel;
 use blueroute_protocol::{Command, DaemonStatus, NetworkSummary, NodeSummary, Response};
-use futures_lite::future;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Screen {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Screen {
     Overview,
     Networks,
     Devices,
@@ -20,7 +25,14 @@ enum Screen {
 }
 
 impl Screen {
-    fn title(self) -> &'static str {
+    pub(crate) const ALL: [Self; 4] = [
+        Self::Overview,
+        Self::Networks,
+        Self::Devices,
+        Self::Diagnostics,
+    ];
+
+    pub(crate) fn title(self) -> &'static str {
         match self {
             Self::Overview => "Overview",
             Self::Networks => "Networks",
@@ -28,35 +40,6 @@ impl Screen {
             Self::Diagnostics => "Diagnostics",
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Action {
-    Show(Screen),
-    Refresh,
-    Help,
-    Quit,
-    Invalid,
-}
-
-fn parse_action(input: &str) -> Action {
-    match input.trim().to_ascii_lowercase().as_str() {
-        "1" | "o" => Action::Show(Screen::Overview),
-        "2" | "n" => Action::Show(Screen::Networks),
-        "3" | "d" => Action::Show(Screen::Devices),
-        "4" | "i" => Action::Show(Screen::Diagnostics),
-        "r" | "refresh" => Action::Refresh,
-        "h" | "?" => Action::Help,
-        "q" | "quit" | "exit" => Action::Quit,
-        _ => Action::Invalid,
-    }
-}
-
-fn render(screen: Screen, body: &str) -> String {
-    format!(
-        "BlueRoute | {}\n\n{body}\n\n1 Overview   2 Networks   3 Devices   4 Diagnostics\nr Refresh    h Help       q Quit\n",
-        screen.title()
-    )
 }
 
 fn health_label(health: HealthLevel) -> &'static str {
@@ -188,77 +171,58 @@ async fn fetch_view(screen: Screen) -> String {
     }
 }
 
-#[cfg(test)]
-fn run_with_source<R: BufRead, W: Write>(
-    input: &mut R,
-    output: &mut W,
-    mut load: impl FnMut(Screen) -> String,
-) -> io::Result<()> {
-    let mut screen = Screen::Overview;
-    writeln!(output, "{}", render(screen, &load(screen)))?;
-    loop {
-        write!(output, "> ")?;
-        output.flush()?;
-        let mut line = String::new();
-        if input.read_line(&mut line)? == 0 {
-            break;
-        }
-        match parse_action(&line) {
-            Action::Quit => break,
-            Action::Show(next) => {
-                screen = next;
-                writeln!(output, "{}", render(screen, &load(screen)))?;
+/// Fetch each requested view on its own thread and send the rendered text back.
+fn spawn_loader(results: Sender<app::Loaded>) -> io::Result<Sender<Screen>> {
+    let (requests, incoming) = mpsc::channel::<Screen>();
+    std::thread::Builder::new()
+        .name("blueroute-tui-loader".to_owned())
+        .spawn(move || {
+            while let Ok(screen) = incoming.recv() {
+                let body = futures_lite::future::block_on(fetch_view(screen));
+                if results.send(app::Loaded { screen, body }).is_err() {
+                    break;
+                }
             }
-            Action::Refresh => writeln!(output, "{}", render(screen, &load(screen)))?,
-            Action::Help => writeln!(output, "Select 1-4 for a view, r to refresh, q to quit.")?,
-            Action::Invalid => writeln!(output, "Unknown command. Press h for help.")?,
+        })?;
+    Ok(requests)
+}
+
+fn run(
+    terminal: &mut ratatui::DefaultTerminal,
+    loaded: &Receiver<app::Loaded>,
+    signals: &Receiver<watch::Signal>,
+    requests: &Sender<Screen>,
+) -> io::Result<()> {
+    use ratatui::crossterm::event::{self, Event, KeyEventKind};
+
+    let mut state = app::App::default();
+    for request in state.start() {
+        let _ = requests.send(request);
+    }
+    while !state.should_quit() {
+        terminal.draw(|frame| app::draw(frame, &state))?;
+        if event::poll(Duration::from_millis(200))? {
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    for request in state.on_key(key) {
+                        let _ = requests.send(request);
+                    }
+                }
+                // Ratatui redraws at the new size on the next loop.
+                Event::Resize(_, _) => {}
+                _ => {}
+            }
+        }
+        while let Ok(signal) = signals.try_recv() {
+            for request in state.on_signal(signal) {
+                let _ = requests.send(request);
+            }
+        }
+        while let Ok(result) = loaded.try_recv() {
+            state.on_loaded(result);
         }
     }
     Ok(())
-}
-
-// A background reader keeps the terminal responsive to periodic daemon checks
-// even when the operator has not entered a command. No privileged operation is
-// ever issued by this loop.
-fn run_live<W: Write>(
-    output: &mut W,
-    input: &Receiver<String>,
-    interval: Duration,
-    mut load: impl FnMut(Screen) -> String,
-) -> io::Result<()> {
-    let mut screen = Screen::Overview;
-    let mut body = load(screen);
-    writeln!(output, "{}", render(screen, &body))?;
-    output.flush()?;
-    loop {
-        match input.recv_timeout(interval) {
-            Ok(line) => match parse_action(&line) {
-                Action::Quit => return Ok(()),
-                Action::Show(next) => {
-                    screen = next;
-                    body = load(screen);
-                    writeln!(output, "{}", render(screen, &body))?;
-                }
-                Action::Refresh => {
-                    body = load(screen);
-                    writeln!(output, "{}", render(screen, &body))?;
-                }
-                Action::Help => {
-                    writeln!(output, "Select 1-4 for a view, r to refresh, q to quit.")?
-                }
-                Action::Invalid => writeln!(output, "Unknown command. Press h for help.")?,
-            },
-            Err(RecvTimeoutError::Timeout) => {
-                let refreshed = load(screen);
-                if refreshed != body {
-                    body = refreshed;
-                    writeln!(output, "{}", render(screen, &body))?;
-                }
-            }
-            Err(RecvTimeoutError::Disconnected) => return Ok(()),
-        }
-        output.flush()?;
-    }
 }
 
 fn main() -> io::Result<()> {
@@ -266,26 +230,15 @@ fn main() -> io::Result<()> {
         eprintln!("BlueRoute TUI requires an interactive text terminal.");
         std::process::exit(2);
     }
-    let (sender, receiver) = mpsc::channel();
-    std::thread::spawn(move || {
-        let stdin = io::stdin();
-        for line in stdin.lock().lines() {
-            match line {
-                Ok(line) => {
-                    if sender.send(line).is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-    });
-    run_live(
-        &mut io::stdout().lock(),
-        &receiver,
-        Duration::from_secs(5),
-        |screen| future::block_on(fetch_view(screen)),
-    )
+    let (results, loaded) = mpsc::channel();
+    let requests = spawn_loader(results)?;
+    let signals = watch::spawn()?;
+    // `init` enters raw mode and the alternate screen and installs a panic hook that restores
+    // the terminal; `restore` undoes it on every exit path below.
+    let mut terminal = ratatui::init();
+    let outcome = run(&mut terminal, &loaded, &signals, &requests);
+    ratatui::restore();
+    outcome
 }
 
 #[cfg(test)]
@@ -302,80 +255,6 @@ mod tests {
             health: HealthLevel::Healthy,
             capabilities: NodeCapabilities::default(),
         }
-    }
-
-    #[test]
-    fn navigation_is_case_insensitive_refreshable_and_read_only() {
-        assert_eq!(parse_action(" N\n"), Action::Show(Screen::Networks));
-        assert_eq!(parse_action("4"), Action::Show(Screen::Diagnostics));
-        assert_eq!(parse_action("R"), Action::Refresh);
-        assert_eq!(parse_action("quit"), Action::Quit);
-        assert_eq!(parse_action("network create"), Action::Invalid);
-    }
-
-    #[test]
-    fn daemon_refresh_replaces_offline_view_without_restarting_shell() {
-        let mut output = Vec::new();
-        let mut attempts = 0;
-        run_with_source(&mut &b"r\n2\n3\nh\nq\n"[..], &mut output, |_| {
-            attempts += 1;
-            if attempts == 1 {
-                "Daemon unavailable".into()
-            } else {
-                "Daemon restored".into()
-            }
-        })
-        .unwrap();
-        let text = String::from_utf8(output).unwrap();
-        assert_eq!(attempts, 4);
-        assert!(text.contains("Daemon unavailable"));
-        assert!(text.contains("BlueRoute | Networks"));
-        assert!(text.contains("BlueRoute | Devices"));
-        assert!(text.contains("Daemon restored"));
-        assert!(text.contains("r to refresh"));
-        assert!(!text.contains("BlueRoute | Diagnostics"));
-    }
-
-    #[test]
-    fn live_shell_reloads_after_timeout_and_reconnects_without_mutations() {
-        let (tx, rx) = mpsc::channel();
-        let mut output = Vec::new();
-        let mut calls = 0;
-        run_live(&mut output, &rx, Duration::from_millis(1), |_| {
-            calls += 1;
-            if calls == 1 {
-                "Daemon unavailable".to_owned()
-            } else {
-                tx.send("q".to_owned()).unwrap();
-                "Daemon restored".to_owned()
-            }
-        })
-        .unwrap();
-        let text = String::from_utf8(output).unwrap();
-        assert_eq!(calls, 2);
-        assert!(text.contains("Daemon unavailable"));
-        assert!(text.contains("Daemon restored"));
-    }
-
-    #[test]
-    fn live_shell_navigation_and_eof_are_bounded() {
-        let (tx, rx) = mpsc::channel();
-        tx.send("2".to_owned()).unwrap();
-        tx.send("q".to_owned()).unwrap();
-        let mut output = Vec::new();
-        run_live(&mut output, &rx, Duration::from_secs(1), |screen| {
-            screen.title().to_owned()
-        })
-        .unwrap();
-        let text = String::from_utf8(output).unwrap();
-        assert!(text.contains("BlueRoute | Networks"));
-        assert!(!text.contains("BlueRoute | Devices"));
-        drop(tx);
-        let mut eof_output = Vec::new();
-        run_live(&mut eof_output, &rx, Duration::from_secs(1), |_| {
-            "offline".into()
-        })
-        .unwrap();
     }
 
     #[test]

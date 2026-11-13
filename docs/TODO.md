@@ -2394,10 +2394,12 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 ## P11-001 — Create Ratatui application shell
 
-- [ ] event loop.
-- [ ] daemon subscription.
-- [ ] resize.
-- [ ] daemon disconnect/reconnect.
+- [x] event loop.
+- [x] daemon subscription.
+- [x] resize.
+- [x] daemon disconnect/reconnect.
+
+**Ratatui shell (software, 2026-11-12):** `apps/tui` is now a full-screen Ratatui 0.29 application (alternate screen and raw mode, restored on exit and on panic). The main thread handles keys and redraws; a loader thread fetches views so a slow daemon never freezes input; a watcher thread holds a version-checked daemon event subscription and reconnects with 1 s doubling to 30 s backoff, reporting only connected/changed/disconnected, after which the visible view is re-read. A lost daemon shows a banner while the last view stays visible, then its reload explains the failure; a returning daemon refreshes it. Rendering is resize-aware and shows a notice below 40×10. State and drawing are I/O-free and tested with `TestBackend` (startup load, navigation and wraparound, no duplicate in-flight loads, help overlay, quit keys, signal banner and reload, resize and the too-small notice, scrolling). Smoke-run in a 100×30 pseudo-terminal with no daemon: tabs, footer and the lost-contact banner render. **Acceptance still open:** a run in a real text-only Linux console against a live daemon.
 
 **Acceptance**
 
@@ -2452,7 +2454,7 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 ## P11-006 — TUI usability review
 
 - [x] on-screen key hints (1–4, r, h, q in current line-oriented shell).
-- [ ] predictable back/quit (full-screen navigation still needed).
+- [x] predictable back/quit (full-screen shell: Esc always closes the help overlay and never quits; q or Ctrl-C always quits, including from help; Tab/Shift-Tab and 1–4 move between views).
 - [x] no mouse requirement (line-oriented keyboard navigation).
 
 **Acceptance**
