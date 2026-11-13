@@ -1,10 +1,11 @@
-// Desktop UI over typed daemon snapshots (P12-002/004/005/007/008, partial). The only mutations
+// Desktop UI over typed daemon snapshots (P12-002/004/005/007/008, partial), built from the
+// shared components in ./components (P12-003). The only mutations
 // are creating and leaving a network and asking a joined client to reconnect to its host. Join
 // stays disabled and says so. There is deliberately no Internet-sharing UI (v1 keeps it off).
 import { useState } from "react";
 import "./App.css";
 import { daemon as realDaemon } from "./daemon";
-import type { ClientLinkState, DesktopError } from "./daemon";
+import type { ClientLinkState, DesktopError, HealthLevel } from "./daemon";
 import {
   AVAILABILITY_TEXT,
   clientLinkText,
@@ -14,6 +15,8 @@ import {
   REACHABILITY_TEXT,
 } from "./text";
 import { diagnose, GENERAL_TIPS } from "./diagnose";
+import { Button, Card, EmptyState, Loading, Notice, StatusBadge } from "./components";
+import type { Tone } from "./components";
 import { normalizeError, useDaemon } from "./useDaemon";
 import type { DaemonApi, LinkState, Snapshot, View } from "./useDaemon";
 import type { SubscribeToSignals } from "./signals";
@@ -30,24 +33,24 @@ export function App({ api, subscribe }: AppProps) {
   return (
     <main>
       <h1>BlueRoute</h1>
-      <p>Connect nearby Linux computers over Bluetooth.</p>
+      <p className="lead">Connect nearby Linux computers over Bluetooth.</p>
 
       {link === "disconnected" && (
-        <p role="status" className="banner">
-          Lost contact with the BlueRoute service. Trying to reconnect…
-        </p>
+        <Notice
+          tone="warning"
+          title="Lost contact with the BlueRoute service. Trying to reconnect…"
+        />
       )}
 
-      {view.phase === "loading" && <p role="status">Loading…</p>}
+      {view.phase === "loading" && <Loading />}
 
       {view.phase === "error" && (
-        <section aria-labelledby="problem-heading" role="alert">
-          <h2 id="problem-heading">{ERROR_TEXT[view.error].title}</h2>
+        <Notice tone="error" title={ERROR_TEXT[view.error].title}>
           <p>{ERROR_TEXT[view.error].help}</p>
-          <button type="button" onClick={refresh}>
+          <Button variant="primary" onClick={refresh}>
             Try again
-          </button>
-        </section>
+          </Button>
+        </Notice>
       )}
 
       {view.phase === "ready" && (
@@ -71,8 +74,11 @@ function Ready({
   const { platform, overview, networks, devices, clientLink } = snapshot;
   return (
     <>
-      <section aria-labelledby="start-heading">
-        <h2 id="start-heading">Get started</h2>
+      <Card id="start-heading" heading="Get started">
+        <p>
+          BlueRoute lets nearby Linux computers share a small private network over Bluetooth, with
+          no Wi-Fi or router needed. One computer starts a network and the others join it.
+        </p>
         <p>{platform.summary}</p>
         {platform.issues.length > 0 && (
           <ul className="plain" aria-label="Things to fix">
@@ -87,21 +93,20 @@ function Ready({
           api={api}
           onCreated={onChanged}
         />
-        <p>
-          <button type="button" disabled aria-describedby="join-note">
+        <div className="actions">
+          <Button disabled aria-describedby="join-note">
             Join a nearby network
-          </button>
-        </p>
+          </Button>
+        </div>
         <p id="join-note" className="muted">
           Joining ({AVAILABILITY_TEXT[platform.join]}) from this app is coming soon. For now, use
           the <code>blueroute</code> command.
         </p>
-      </section>
+      </Card>
 
-      <section aria-labelledby="network-heading">
-        <h2 id="network-heading">Your network</h2>
+      <Card id="network-heading" heading="Your network">
         {networks.length === 0 ? (
-          <p>You are not part of a network yet.</p>
+          <EmptyState>You are not part of a network yet.</EmptyState>
         ) : (
           <ul className="plain">
             {networks.map((network) => (
@@ -113,16 +118,18 @@ function Ready({
           </ul>
         )}
         <p>
-          Status: <strong>{HEALTH_TEXT[overview.health]}</strong>
+          Status:{" "}
+          <StatusBadge tone={HEALTH_TONE[overview.health]}>
+            {HEALTH_TEXT[overview.health]}
+          </StatusBadge>
         </p>
         {clientLink !== null && <ClientLink link={clientLink} api={api} onRetried={onChanged} />}
         {networks.length > 0 && <LeaveNetwork api={api} onLeft={onChanged} />}
-      </section>
+      </Card>
 
-      <section aria-labelledby="devices-heading">
-        <h2 id="devices-heading">Devices</h2>
+      <Card id="devices-heading" heading="Devices">
         {devices.length === 0 ? (
-          <p>No other devices are shown yet.</p>
+          <EmptyState>No other devices are shown yet.</EmptyState>
         ) : (
           <ul className="plain">
             {devices.map((device) => (
@@ -133,9 +140,9 @@ function Ready({
             ))}
           </ul>
         )}
-      </section>
+      </Card>
 
-      <details>
+      <details className="card">
         <summary>Technical details</summary>
         <dl>
           <dt>This computer's ID</dt>
@@ -166,12 +173,11 @@ function Ready({
 function Diagnose({ view, link }: { view: View; link: LinkState }) {
   const findings = diagnose(view, link);
   return (
-    <section aria-labelledby="diagnose-heading">
-      <h2 id="diagnose-heading">Diagnose a problem</h2>
+    <Card id="diagnose-heading" heading="Diagnose a problem">
       {view.phase === "loading" ? (
-        <p>Checking…</p>
+        <Loading>Checking…</Loading>
       ) : findings.length === 0 ? (
-        <p>BlueRoute has not reported any problems.</p>
+        <EmptyState>BlueRoute has not reported any problems.</EmptyState>
       ) : (
         <ul className="plain" aria-label="Problems found">
           {findings.map((finding) => (
@@ -191,9 +197,16 @@ function Diagnose({ view, link }: { view: View; link: LinkState }) {
           ))}
         </ul>
       </details>
-    </section>
+    </Card>
   );
 }
+
+const HEALTH_TONE: Record<HealthLevel, Tone> = {
+  healthy: "ok",
+  degraded: "warning",
+  reconnecting: "progress",
+  error: "error",
+};
 
 function deviceCount(count: number): string {
   return count === 1 ? "1 device" : `${count} devices`;
@@ -244,7 +257,8 @@ function CreateNetwork({
     <form onSubmit={submit} aria-label="Create a network">
       <p>
         <label htmlFor="network-name">Network name</label>
-        <br />
+      </p>
+      <div className="actions">
         <input
           id="network-name"
           type="text"
@@ -253,22 +267,18 @@ function CreateNetwork({
           disabled={!available || busy}
           onChange={(event) => setName(event.target.value)}
           aria-describedby="create-note"
-        />{" "}
-        <button type="submit" disabled={!available || busy || name.trim() === ""}>
+        />
+        <Button type="submit" variant="primary" disabled={!available || busy || name.trim() === ""}>
           {busy ? "Creating…" : "Create a network"}
-        </button>
-      </p>
+        </Button>
+      </div>
       <p id="create-note" className="muted">
         {available
           ? "You may be asked for your password to allow this."
           : `Starting a network: ${availability}.`}
       </p>
-      {state.phase === "done" && <p role="status">The network “{state.name}” was created.</p>}
-      {state.phase === "failed" && (
-        <p role="alert">
-          <strong>{ERROR_TEXT[state.error].title}.</strong> {ERROR_TEXT[state.error].help}
-        </p>
-      )}
+      {state.phase === "done" && <Notice tone="ok">The network “{state.name}” was created.</Notice>}
+      {state.phase === "failed" && <Failure error={state.error} />}
     </form>
   );
 }
@@ -303,24 +313,39 @@ function ClientLink({
 
   return (
     <div>
-      <p role="status">{clientLinkText(link)}</p>
+      <p role="status">
+        <StatusBadge tone={LINK_BADGE[link.type].tone}>{LINK_BADGE[link.type].label}</StatusBadge>{" "}
+        <span>{clientLinkText(link)}</span>
+      </p>
       {canRetry && (
-        <p>
-          <button type="button" onClick={retry} disabled={busy} aria-describedby="retry-note">
+        <div className="actions">
+          <Button variant="primary" onClick={retry} disabled={busy} aria-describedby="retry-note">
             {busy ? "Connecting…" : "Try connecting again"}
-          </button>
-          <br />
+          </Button>
           <span id="retry-note" className="muted">
             You may be asked for your password.
           </span>
-        </p>
+        </div>
       )}
-      {state.phase === "failed" && (
-        <p role="alert">
-          <strong>{ERROR_TEXT[state.error].title}.</strong> {ERROR_TEXT[state.error].help}
-        </p>
-      )}
+      {state.phase === "failed" && <Failure error={state.error} />}
     </div>
+  );
+}
+
+const LINK_BADGE: Record<ClientLinkState["type"], { tone: Tone; label: string }> = {
+  connecting: { tone: "progress", label: "Connecting" },
+  waiting: { tone: "progress", label: "Retrying" },
+  established: { tone: "ok", label: "Connected" },
+  needs_attention: { tone: "warning", label: "Needs attention" },
+  gave_up: { tone: "error", label: "Stopped trying" },
+};
+
+/** A failed action: plain title and help, announced as an alert. */
+function Failure({ error }: { error: DesktopError | "unknown" }) {
+  return (
+    <Notice tone="error" title={`${ERROR_TEXT[error].title}.`}>
+      {ERROR_TEXT[error].help}
+    </Notice>
   );
 }
 
@@ -348,28 +373,26 @@ function LeaveNetwork({ api, onLeft }: { api: DaemonApi; onLeft: () => void }) {
   return (
     <div>
       {state.phase === "idle" || state.phase === "failed" ? (
-        <button type="button" onClick={() => setState({ phase: "confirm" })}>
-          Leave this network
-        </button>
+        <div className="actions">
+          <Button onClick={() => setState({ phase: "confirm" })}>Leave this network</Button>
+        </div>
       ) : (
-        <div role="group" aria-label="Confirm leaving">
+        <div className="confirm" role="group" aria-label="Confirm leaving">
           <p>
             Leave this network? Other devices lose their connection through this computer. You may
             be asked for your password.
           </p>
-          <button type="button" onClick={leave} disabled={busy}>
-            {busy ? "Leaving…" : "Yes, leave"}
-          </button>{" "}
-          <button type="button" onClick={() => setState({ phase: "idle" })} disabled={busy}>
-            Stay
-          </button>
+          <div className="actions">
+            <Button variant="danger" onClick={leave} disabled={busy}>
+              {busy ? "Leaving…" : "Yes, leave"}
+            </Button>
+            <Button onClick={() => setState({ phase: "idle" })} disabled={busy}>
+              Stay
+            </Button>
+          </div>
         </div>
       )}
-      {state.phase === "failed" && (
-        <p role="alert">
-          <strong>{ERROR_TEXT[state.error].title}.</strong> {ERROR_TEXT[state.error].help}
-        </p>
-      )}
+      {state.phase === "failed" && <Failure error={state.error} />}
     </div>
   );
 }

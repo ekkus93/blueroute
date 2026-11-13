@@ -2504,11 +2504,13 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 ## P12-003 — Design visual/component system
 
-- [ ] typography/layout.
-- [ ] status indicators.
-- [ ] controls/dialogs.
-- [ ] error/empty/loading states.
-- [ ] accessibility basics.
+- [x] typography/layout (CSS tokens for type scale, spacing, radius; one card per workflow section).
+- [x] status indicators (`StatusBadge`: icon plus text for health and the client link; tone never carried by color alone).
+- [x] controls/dialogs (`Button` primary/secondary/danger, default `type="button"`; a bordered confirmation panel for leave).
+- [x] error/empty/loading states (`Notice` with `alert` for errors and `status` otherwise, `EmptyState`, `Loading` with `aria-busy`).
+- [x] accessibility basics (decorative icons hidden from screen readers, labelled regions, visible focus, light and dark tokens).
+
+**Software complete (2026-11-12):** `apps/desktop/ui/src/components.tsx` and `App.css` define the system and every current workflow uses it (get started, create, network and client link, leave, devices, diagnose). Every text/background token pair meets WCAG AA in both themes (computed minimum 5.26:1 light, 7.89:1 dark). Component tests cover the badge icon and text, notice roles, button defaults and variants, labelled cards, and empty versus loading; the 22 existing workflow tests pass unchanged. **Not done:** a look at the real Tauri window; the system is unit-tested, not visually reviewed.
 
 **Acceptance**
 
@@ -2516,10 +2518,10 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 ## P12-004 — Implement first-run/platform-check screen
 
-- [ ] explain BlueRoute plainly.
-- [ ] detect missing/disabled Bluetooth.
-- [ ] detect unsupported required capabilities/runtime.
-- [ ] offer appropriate create/join actions only when available.
+- [x] explain BlueRoute plainly ("Get started" now says what BlueRoute does in one plain paragraph; tested, 2026-11-12).
+- [x] detect missing/disabled Bluetooth (`adapter_missing_or_disabled` versus `adapter_unverified`, with actionable wording; tested since 2026-11-04/07).
+- [x] detect unsupported required capabilities/runtime (PANU/NAP roles, network backend, daemon health; unknown treated as unsupported; tested).
+- [x] offer appropriate create/join actions only when available (create is enabled only when hosting prerequisites were observed and is a real daemon mutation; join is shown disabled with the reason until the join gate opens).
 
 **Acceptance**
 

@@ -288,3 +288,23 @@ test("a client needing attention shows the daemon's reason and a refused retry e
   fireEvent.click(screen.getByRole("button", { name: "Try connecting again" }));
   expect((await screen.findByRole("alert")).textContent).toContain("do not have permission");
 });
+
+test("explains BlueRoute plainly and shows health as a labelled badge", async () => {
+  const degraded = fakeApi({
+    overview: () =>
+      Promise.resolve({
+        local_node: "node-1",
+        network: "net-1",
+        health: "degraded" as const,
+        adapter_available: true,
+        can_host: true,
+        can_join: null,
+        authenticated_remote_peers: null,
+        internet_sharing_available: false,
+      }),
+  });
+  render(<App api={degraded} subscribe={fakeSubscribe().subscribe} />);
+  expect(await screen.findByText(/share a small private network over Bluetooth/)).toBeTruthy();
+  const badge = screen.getByText("Working, with problems");
+  expect(badge.className).toContain("badge-warning");
+});

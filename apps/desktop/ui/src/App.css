@@ -1,38 +1,286 @@
+/* BlueRoute desktop visual system (P12-003): tokens first, then components. Colors come in
+   light and dark sets; every status pairs color with an icon and text. */
 :root {
   color-scheme: light dark;
-  font-family: system-ui, sans-serif;
+  --font: system-ui, -apple-system, "Segoe UI", Cantarell, Ubuntu, sans-serif;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.75rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --radius: 0.5rem;
+
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --text: #1b1f24;
+  --text-muted: #4a525c;
+  --border: #c9ced6;
+  --accent: #1f5fbf;
+  --accent-text: #ffffff;
+  --danger: #b3261e;
+  --danger-text: #ffffff;
+  --ok: #1e6b35;
+  --ok-bg: #e5f4ea;
+  --info: #1f5fbf;
+  --info-bg: #e7effb;
+  --warning: #7a4d00;
+  --warning-bg: #fdf1dc;
+  --error: #b3261e;
+  --error-bg: #fbe7e6;
+  --focus: #1f5fbf;
+
+  font-family: var(--font);
+  font-size: var(--text-md);
   line-height: 1.5;
 }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171b;
+    --surface: #1d2126;
+    --text: #e8eaed;
+    --text-muted: #b4bac2;
+    --border: #3a4049;
+    --accent: #7fb0ff;
+    --accent-text: #0b1a33;
+    --danger: #ff8a80;
+    --danger-text: #2b0906;
+    --ok: #8fd6a2;
+    --ok-bg: #16301f;
+    --info: #9cc1ff;
+    --info-bg: #17263d;
+    --warning: #f5c26b;
+    --warning-bg: #33270f;
+    --error: #ff9b93;
+    --error-bg: #3a1714;
+    --focus: #9cc1ff;
+  }
+}
+
 body {
   margin: 0;
+  background: var(--bg);
+  color: var(--text);
 }
+
 main {
-  max-width: 44rem;
+  max-width: 46rem;
   margin: 0 auto;
-  padding: 1rem 1.25rem 3rem;
+  padding: var(--space-4) var(--space-4) 3rem;
 }
-section {
-  margin-top: 1.5rem;
+
+h1 {
+  font-size: var(--text-xl);
+  line-height: 1.2;
+  margin: var(--space-4) 0 var(--space-1);
 }
-h1,
+
 h2 {
+  font-size: var(--text-lg);
   line-height: 1.25;
+  margin: 0 0 var(--space-3);
 }
-button {
-  font: inherit;
-  padding: 0.4rem 0.9rem;
+
+p {
+  margin: var(--space-2) 0;
 }
+
+code {
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
 :focus-visible {
-  outline: 3px solid Highlight;
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
-.banner {
-  border: 1px solid currentColor;
-  padding: 0.5rem 0.75rem;
+
+.lead {
+  color: var(--text-muted);
+  margin-top: 0;
 }
+
 .muted {
-  opacity: 0.85;
+  color: var(--text-muted);
 }
+
+/* Cards: one per workflow section. */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  margin-top: var(--space-4);
+}
+
+/* Buttons. */
+.btn {
+  font: inherit;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  padding: var(--space-2) var(--space-4);
+  min-height: 2.5rem;
+  cursor: pointer;
+  background: var(--surface);
+  color: var(--text);
+}
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.btn-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--danger-text);
+}
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  margin: var(--space-3) 0;
+}
+
+/* Form fields. */
+label {
+  font-weight: 600;
+}
+input[type="text"] {
+  font: inherit;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  min-width: min(18rem, 100%);
+}
+
+/* Status badges: icon + text, never color alone. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-weight: 600;
+  font-size: var(--text-sm);
+}
+.badge-icon {
+  font-weight: 700;
+}
+.badge-ok {
+  color: var(--ok);
+  background: var(--ok-bg);
+}
+.badge-info,
+.badge-progress {
+  color: var(--info);
+  background: var(--info-bg);
+}
+.badge-warning {
+  color: var(--warning);
+  background: var(--warning-bg);
+}
+.badge-error {
+  color: var(--error);
+  background: var(--error-bg);
+}
+
+/* Notices: messages, warnings and errors. */
+.notice {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+  background: var(--surface);
+}
+.notice-icon {
+  font-weight: 700;
+  min-width: 1rem;
+  text-align: center;
+}
+.notice-title {
+  display: block;
+}
+.notice-info {
+  border-left-color: var(--info);
+  background: var(--info-bg);
+}
+.notice-ok {
+  border-left-color: var(--ok);
+  background: var(--ok-bg);
+}
+.notice-warning {
+  border-left-color: var(--warning);
+  background: var(--warning-bg);
+}
+.notice-error {
+  border-left-color: var(--error);
+  background: var(--error-bg);
+}
+
+/* Confirmation panel for destructive actions. */
+.confirm {
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+}
+
+/* Empty and loading states. */
+.empty,
+.loading {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+ul.plain {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-2) 0;
+}
+ul.plain li {
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+}
+ul.plain li:last-child {
+  border-bottom: none;
+}
+
+details {
+  margin-top: var(--space-3);
+}
+summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-4);
+}
+dt {
+  color: var(--text-muted);
+}
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -41,15 +289,4 @@ button {
     transition: none !important;
     scroll-behavior: auto !important;
   }
-}
-ul.plain {
-  list-style: none;
-  padding: 0;
-}
-ul.plain li {
-  padding: 0.4rem 0;
-  border-bottom: 1px solid rgb(128 128 128 / 0.35);
-}
-details {
-  margin-top: 0.5rem;
 }
