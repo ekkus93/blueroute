@@ -2556,10 +2556,12 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 ## P12-007 — Implement connected-network dashboard
 
-- [ ] friendly health.
-- [ ] device list/count.
-- [ ] “connected through another device” wording.
-- [ ] leave.
+- [x] friendly health (plain-language status, now a labelled badge).
+- [x] device list/count (devices card; per-network device count).
+- [x] “connected through another device” wording (routed reachability text).
+- [x] leave (confirmed, PolicyKit-gated `leave_network`; refusal keeps the network shown).
+
+**Reconciled 2026-11-12:** all four were implemented and tested by 2026-11-07 (see below) but never ticked. **Acceptance stays OPEN:** tracking real topology changes needs live multi-node data.
 
 **Acceptance**
 
@@ -2612,11 +2614,13 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 ## P12-011 — Desktop accessibility pass
 
-- [ ] keyboard navigation.
-- [ ] focus states.
-- [ ] semantic labels.
-- [ ] contrast.
-- [ ] reduced motion where relevant.
+- [x] keyboard navigation (only native buttons, inputs and forms in document order; no custom widgets or pointer-only actions; create and rename submit from the keyboard, tested).
+- [x] focus states (`:focus-visible` outline on a dedicated focus token in both themes).
+- [x] semantic labels (labelled card regions, labelled forms and lists, alerts versus polite status, decorative icons hidden).
+- [x] contrast (2026-11-12: every text/background token pair computed at WCAG AA or better in light and dark; minimum 5.26:1).
+- [x] reduced motion where relevant (no animation; `prefers-reduced-motion` disables any).
+
+**Acceptance stays OPEN:** join is not available, and keyboard operation has not been checked in the real Tauri window with a screen reader.
 
 **Acceptance**
 
