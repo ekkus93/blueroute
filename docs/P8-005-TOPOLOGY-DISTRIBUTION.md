@@ -1,7 +1,7 @@
 # P8-005 — Authenticated topology distribution (design, PROPOSED)
 
-**Status:** PROPOSED, 2026-11-12. Docs only: no code, wire format or invariant changes until the
-maintainer answers the open questions below. Production `JoinNetwork` stays closed throughout.
+**Status:** ACCEPTED as direction, implementation DEFERRED (maintainer, 2026-11-12). Docs only: no
+code, wire format or invariant changes yet. Production `JoinNetwork` stays closed throughout.
 
 ## Why this is needed
 
@@ -122,6 +122,20 @@ attachments (schema v4 with migration from v3). Restart reconciliation (P6-009) 
    lie together?
 5. **Timing:** build S0 to S3 now (software-only, behind the closed join gate), or wait until the
    first two-node join milestone exists on hardware?
+
+## Maintainer answers (2026-11-12)
+
+1. **Key distribution:** option (a). The host passes on its clients' pins over its authenticated
+   sessions; trust chains through hosts. A per-network signing key (c) stays a possible later
+   upgrade.
+2. **Transit:** an explicit, PolicyKit-gated per-peer router approval is required; a routing claim
+   alone never makes a node a transit hop.
+3. **Roles:** allow one node to host a segment and be a client of another in the same network
+   (schema v4), but only after the single-star role model has passed hardware acceptance.
+4. **Bilateral confirmation:** accepted as the v1 bar.
+5. **Timing:** do not build S0 to S5 yet. Wait until the first two-node single-star join has
+   passed on hardware. Priority moves to the P7-003 enrollment flow and a deliberate, default-off
+   way to enable join on a test rig, which unblock that milestone.
 
 ## Out of scope
 Internet gateway and default routes (P18), IPv6 (P19), Babel or other routing daemons (P8-009),

@@ -2052,7 +2052,7 @@ DEFERRED.
 
 ## P8-005 — Implement route distribution/application
 
-**Design PROPOSED (2026-11-12, docs only):** [P8-005-TOPOLOGY-DISTRIBUTION.md](P8-005-TOPOLOGY-DISTRIBUTION.md) proposes origin-signed, bilaterally confirmed link-state with routes computed locally and never distributed, plus five open questions for the maintainer (key distribution to non-adjacent members, transit authorization, a per-network role set, the bilateral-confirmation bar and timing). It requires SPEC and threat-model changes before any code, because today's wire deliberately carries no topology (P14-003). No subtask is ticked; all remaining P8 runtime work depends on it.
+**Design ACCEPTED as direction, implementation DEFERRED (maintainer, 2026-11-12)** until the first two-node single-star join passes on hardware; answers are in the doc. [P8-005-TOPOLOGY-DISTRIBUTION.md](P8-005-TOPOLOGY-DISTRIBUTION.md) proposes origin-signed, bilaterally confirmed link-state with routes computed locally and never distributed, plus five open questions for the maintainer (key distribution to non-adjacent members, transit authorization, a per-network role set, the bilateral-confirmation bar and timing). It requires SPEC and threat-model changes before any code, because today's wire deliberately carries no topology (P14-003). No subtask is ticked; all remaining P8 runtime work depends on it.
 
 - [ ] distribute desired routes.
 - [ ] apply through Linux backend.
