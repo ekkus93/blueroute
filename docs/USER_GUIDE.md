@@ -95,7 +95,7 @@ blueroute network leave
 blueroute status
 ```
 
-Leave currently works only when the daemon can confirm ownership of its **local hosted** runtime. It refuses to clear membership when ownership is uncertain, including some restart scenarios. Joined-client leave, rejoin and restart recovery are incomplete. A refused leave is not a successful teardown.
+Leave also works after a daemon restart in which the network could not be restarted: it removes only what carries this network's BlueRoute ownership. If cleanup fails, you stay in the network and can run leave again. A refused leave is not a successful teardown.
 
 ## Read device status
 

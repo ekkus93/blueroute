@@ -416,12 +416,10 @@ impl StarHostRuntime for LinuxStarHostRuntime {
             let active = {
                 let slot = self.active.lock().map_err(lock_error)?;
                 match slot.as_ref() {
-                    None => {
-                        return Err(CoreError::new(
-                            ErrorKind::InvalidState,
-                            "cannot confirm ownership of the persisted BlueRoute host runtime",
-                        ));
-                    }
+                    // Nothing retained: the daemon restarted and restoring the host failed, so
+                    // the NAP and advertisement went away with the old D-Bus connection. Remove
+                    // only what still carries this network's ownership (P6-008).
+                    None => None,
                     Some(active) if active.network != network => {
                         return Err(CoreError::new(
                             ErrorKind::InvalidState,
@@ -434,8 +432,12 @@ impl StarHostRuntime for LinuxStarHostRuntime {
                             "refusing to stop a BlueRoute star with mismatched owned runtime state",
                         ));
                     }
-                    Some(active) => active.clone(),
+                    Some(active) => Some(active.clone()),
                 }
+            };
+            let Some(active) = active else {
+                let backend = crate::SystemClientLeave::connect_network_manager().await?;
+                return crate::remove_owned_network_state(&backend, network).await;
             };
 
             cleanup_active_host(&active).await?;

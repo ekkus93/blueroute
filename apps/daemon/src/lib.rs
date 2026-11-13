@@ -54,7 +54,9 @@ use blueroute_protocol::{
     DiagnosticSnapshot, Event, NodeSummary, ProtocolCodecError, Response, SystemDiagnosticMetadata,
     decode_command, encode_event, encode_response,
 };
-pub use client_leave::{ClientLeaveBackend, SystemClientLeave, leave_observed};
+pub use client_leave::{
+    ClientLeaveBackend, SystemClientLeave, leave_observed, remove_owned_network_state,
+};
 pub use client_link::{ClientReconnector, health_for_client_link};
 pub use client_reconcile::{
     ClientHost, ClientReconcileOutcome, ClientRuntime, ObservedClient, reconcile_client_once,

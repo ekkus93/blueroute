@@ -15,7 +15,7 @@
 
 use std::collections::BTreeSet;
 
-use blueroute_core::{CoreError, NetworkId};
+use blueroute_core::{CoreError, ErrorKind, NetworkId};
 use blueroute_linux::{
     BackendFuture, BluezBackend, InterfaceAddress, IpNetworkBackend, NetworkInterfaceHandle,
     NetworkManagerBackend, NetworkStateBackend, PanAttachment, PanRole, PeerHandle,
@@ -85,17 +85,46 @@ pub async fn leave_observed(
     Ok(())
 }
 
-/// The production backend: NetworkManager ownership metadata and BlueZ.
+/// Remove every NetworkManager address and profile that carries this network's ownership, and
+/// nothing else. No Bluetooth link is looked at. Host leave uses this after a daemon restart, when
+/// no runtime handles exist (P6-008): BlueZ drops NAP registrations and advertisements together
+/// with the D-Bus connection that made them, so only owned NetworkManager state can remain.
+pub async fn remove_owned_network_state(
+    backend: &dyn ClientLeaveBackend,
+    network: NetworkId,
+) -> Result<(), CoreError> {
+    leave_observed(backend, network, None, None).await
+}
+
+/// The production backend: NetworkManager ownership metadata and, for client leave, BlueZ.
 pub struct SystemClientLeave {
     network_manager: NetworkManagerBackend,
-    bluez: BluezBackend,
+    bluez: Option<BluezBackend>,
 }
 
 impl SystemClientLeave {
     pub async fn connect() -> Result<Self, CoreError> {
         Ok(Self {
             network_manager: NetworkManagerBackend::connect_system().await?,
-            bluez: BluezBackend::connect_system().await?,
+            bluez: Some(BluezBackend::connect_system().await?),
+        })
+    }
+
+    /// NetworkManager only, for `remove_owned_network_state`, so it works while `bluetoothd` is
+    /// down. Any PANU request on it is refused.
+    pub async fn connect_network_manager() -> Result<Self, CoreError> {
+        Ok(Self {
+            network_manager: NetworkManagerBackend::connect_system().await?,
+            bluez: None,
+        })
+    }
+
+    fn bluez(&self) -> Result<&BluezBackend, CoreError> {
+        self.bluez.as_ref().ok_or_else(|| {
+            CoreError::new(
+                ErrorKind::Internal,
+                "this cleanup backend was opened without Bluetooth access",
+            )
         })
     }
 }
@@ -143,11 +172,11 @@ impl ClientLeaveBackend for SystemClientLeave {
     }
 
     fn observe_panu(&self, peer: PeerHandle) -> BackendFuture<'_, Option<PanAttachment>> {
-        Box::pin(async move { self.bluez.observe_panu(&peer).await })
+        Box::pin(async move { self.bluez()?.observe_panu(&peer).await })
     }
 
     fn disconnect_panu(&self, expected: PanAttachment) -> BackendFuture<'_, ()> {
-        Box::pin(async move { self.bluez.disconnect_matching_panu(&expected).await })
+        Box::pin(async move { self.bluez()?.disconnect_matching_panu(&expected).await })
     }
 }
 
@@ -415,5 +444,28 @@ mod tests {
         run(&fake, None, Some(&host())).unwrap();
         let state = fake.0.lock().unwrap();
         assert!(state.addresses.is_empty() && state.profiles.is_empty() && state.panu.is_none());
+    }
+
+    #[test]
+    fn host_cleanup_after_a_restart_removes_only_owned_state_and_never_touches_bluetooth() {
+        let fake = Fake::with(|state| {
+            state.addresses = vec![address(net(), "brbr0"), address(other(), "brother")];
+            state.profiles = vec![(net(), iface("brbr0")), (other(), iface("brother"))];
+            // A live PANU link exists, but host cleanup never looks at Bluetooth.
+            state.panu = Some(attachment("bnep0", PanRole::Panu, Some(host())));
+        });
+        futures_lite::future::block_on(remove_owned_network_state(&fake, net())).unwrap();
+        assert_eq!(
+            fake.calls(),
+            ["remove_address brbr0", "remove_profile brbr0"]
+        );
+        let state = fake.0.lock().unwrap();
+        assert_eq!(state.addresses, vec![address(other(), "brother")]);
+        assert_eq!(state.profiles, vec![(other(), iface("brother"))]);
+        assert!(state.panu.is_some());
+        drop(state);
+        // Idempotent: a second run (a retried leave) finds nothing of ours.
+        futures_lite::future::block_on(remove_owned_network_state(&fake, net())).unwrap();
+        assert_eq!(fake.calls().len(), 2);
     }
 }

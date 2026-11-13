@@ -30,7 +30,7 @@ blueroute network list --json
 blueroute node show 0123456789abcdef0123456789abcdef
 ```
 
-The daemon enforces authorization for mutations. An authorization failure is reported separately from an unavailable daemon or unsupported capability. Production `network join` remains fail-closed until authenticated peer transport is integrated. `network leave` currently supports the local host runtime only; it refuses to clear persisted membership if this daemon cannot confirm ownership of an active host runtime, including after a daemon restart. Client-side leave and restart reconciliation remain unimplemented.
+The daemon enforces authorization for mutations. An authorization failure is reported separately from an unavailable daemon or unsupported capability. Production `network join` remains fail-closed until authenticated peer transport is integrated. `network leave` tears down a hosted network. If the daemon restarted and could not restore the host, leave removes only the NetworkManager addresses and profiles that carry this network's BlueRoute ownership, then clears membership; nothing without that ownership is touched. A failed cleanup keeps membership, so leave can be retried. Joined-client leave and restart reconnection exist in the daemon but cannot be used until join is available.
 
 ## Capability and network diagnosis
 
