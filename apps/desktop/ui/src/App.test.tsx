@@ -272,7 +272,8 @@ test("a client that gave up offers a retry that calls the daemon once and refres
       subscribe={fakeSubscribe().subscribe}
     />,
   );
-  expect(await screen.findByText(/stopped trying/)).toBeTruthy();
+  await screen.findByRole("region", { name: "Your network" });
+  expect(await yourNetwork().findByText(/stopped trying/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Try connecting again" }));
   await waitFor(() => expect(retryClientReconnect).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(clientLink.mock.calls.length).toBeGreaterThan(1));
@@ -291,7 +292,8 @@ test("a client needing attention shows the daemon's reason and a refused retry e
       subscribe={fakeSubscribe().subscribe}
     />,
   );
-  expect(await screen.findByText(/the host's key is missing/)).toBeTruthy();
+  await screen.findByRole("region", { name: "Your network" });
+  expect(await yourNetwork().findByText(/the host's key is missing/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Try connecting again" }));
   expect((await screen.findByRole("alert")).textContent).toContain("do not have permission");
 });
@@ -380,4 +382,22 @@ test("an address conflict when creating explains the clash in plain words", asyn
   const alert = await screen.findByRole("alert");
   expect(alert.textContent).toContain("already in use on this computer");
   expect(alert.textContent).toContain("VPN");
+});
+
+test("Diagnose a problem reports a client link that gave up or needs attention", async () => {
+  const gaveUp = () => Promise.resolve({ type: "gave_up" as const, data: { attempts: 8 } });
+  render(<App api={fakeApi({ clientLink: gaveUp })} subscribe={fakeSubscribe().subscribe} />);
+  const list = await screen.findByRole("list", { name: "Problems found" });
+  expect(list.textContent).toContain("stopped trying");
+  expect(list.textContent).toContain("still part of the network");
+  cleanup();
+
+  const attention = () =>
+    Promise.resolve({
+      type: "needs_attention" as const,
+      data: { reason: "the host key is missing" },
+    });
+  render(<App api={fakeApi({ clientLink: attention })} subscribe={fakeSubscribe().subscribe} />);
+  const found = await screen.findByRole("list", { name: "Problems found" });
+  expect(found.textContent).toContain("the host key is missing");
 });

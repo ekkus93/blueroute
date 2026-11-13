@@ -217,7 +217,7 @@ The initial software/packaging baseline is Debian 13 with BlueZ, NetworkManager,
 ## P0-004 — Establish CI baseline
 
 - [x] Add GitHub Actions for formatting, clippy, tests, and build.
-- [ ] Add frontend checks when introduced. *(Deferred until frontend work begins.)*
+- [x] Add frontend checks when introduced. *(2026-11-12: the `desktop-frontend` CI job pins Node and npm, runs `npm ci`, Prettier, `tsc`, vitest and the Vite build on every push; the Rust job also builds the frontend into the desktop package.)*
 - [x] Cache dependencies without masking lockfile errors.
 
 **Acceptance**
@@ -2307,7 +2307,7 @@ A/B clients -> hub 1 -> hub 2 -> C/D clients
 
 - [x] concise and detailed output (`blueroute diagnostics show --summary` gives a short summary and plain `diagnostics show` the bounded detailed view; both keep unknown distinct from empty and are unit-tested. What is still missing is daemon-side data, live routes, PAN and topology, tracked by the acceptance below.)
 - [x] JSON (versioned daemon `DiagnosticSnapshot`, through `blueroute diagnostics show --json`).
-- [ ] redact secrets (current snapshot contains no secrets; expand explicit redaction when introducing additional diagnostic fields).
+- [x] redact secrets (2026-11-12 review: the snapshot holds no secrets; the only key material is the public control-key fingerprint. `crates/blueroute-protocol/tests/diagnostics_redaction_contract.rs` proves unknown secret-like producer fields are dropped, and the fields added since (owned interface addresses, authenticated peer NodeIds) are not secret. Re-review whenever a field is added.)
 - [x] show platform/capabilities/backend (typed daemon/kernel/BlueZ/NetworkManager versions, adapter details and BlueRoute-owned local interface addresses; route observation separately pending; [CI 39095752322](https://github.com/ekkus93/blueroute/actions/runs/39095752322)).
 
 **Software partial (2026-10-14):** `apps/daemon/src/lib.rs` now serves `GetDiagnostics` read-only over system D-Bus using the existing typed `DiagnosticSnapshot` contract. The CLI displays the daemon's actual health, network and capabilities in human or JSON form, and labels node counts local-only until P7 authenticated peers exist. An empty local identity yields zero reported nodes; remote discovery/trust is never treated as authenticated reachability. Unit and D-Bus broker integration tests passed [exact-head CI 38692903150](https://github.com/ekkus93/blueroute/actions/runs/38692903150) at `9ac40ea6b3c7212d1842854bcde41a7b268fae71`. **No TLS peer authentication, PAN network path, physical controller diagnostics or hardware acceptance is implied.**
@@ -2599,16 +2599,18 @@ Keep P10-005 and dependent production/hardware acceptance OPEN.
 
 ## P12-010 — Implement friendly diagnostics UI
 
-- [ ] “Diagnose a Problem”.
-- [ ] Bluetooth off/missing.
-- [ ] required PAN capability unavailable.
-- [ ] daemon/backend unavailable.
-- [ ] permission denied.
-- [ ] peer unreachable.
+- [x] “Diagnose a Problem” (the desktop section; findings only for conditions the daemon reported).
+- [x] Bluetooth off/missing (`adapter_missing_or_disabled`).
+- [x] required PAN capability unavailable (PANU or NAP unsupported).
+- [x] daemon/backend unavailable (service unavailable, version mismatch and an unsupported network manager).
+- [x] permission denied (PolicyKit denial).
+- [x] peer unreachable (devices reported unreachable are named).
 - [x] address conflict (2026-11-12: the daemon returns the typed `org.blueroute.Error.AddressConflict` for create/join and the desktop shows plain-language guidance; tested from daemon to UI).
-- [ ] stale/reconnecting state.
+- [x] stale/reconnecting state (reconnecting health and a lost service link; since 2026-11-12 also a joined client's link that gave up or needs attention).
 - [ ] routed peer unavailable.
 - [ ] driver/firmware quirks.
+
+**Reconciled 2026-11-12:** the ticked items were implemented and tested on 2026-11-07 (see below) but never ticked. Routed-peer loss and driver/firmware quirks stay open: the app cannot observe them, so they appear only as general tips. The address-clash tip now describes the overlap the daemon actually detects.
 
 **Acceptance**
 

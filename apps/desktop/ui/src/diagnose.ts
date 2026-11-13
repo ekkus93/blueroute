@@ -1,6 +1,7 @@
 // "Diagnose a Problem" (P12-010): turns what the app already knows into guidance. Only
 // conditions the daemon actually reported produce findings; nothing is guessed. Causes the app
-// cannot observe (address conflicts, driver quirks) appear as general tips, never as findings.
+// cannot observe from status (address clashes outside a create, routed loss, driver quirks)
+// appear as general tips, never as findings.
 import type { DesktopError } from "./daemon";
 import type { LinkState, View } from "./useDaemon";
 
@@ -13,8 +14,8 @@ export interface Finding {
 export const GENERAL_TIPS: readonly Finding[] = [
   {
     id: "address_conflict",
-    title: "Two devices seem to use the same address",
-    help: "If devices on a network cannot reach each other although they are all shown as connected, leave and re-create the network so BlueRoute picks fresh addresses. BlueRoute never changes addresses it did not create.",
+    title: "Network addresses clash with another connection",
+    help: "If starting a network says its addresses are already in use, another connection on this computer (such as a VPN or a virtual machine network) uses the same private range. Disconnect or change that connection and try again. BlueRoute never changes connections it does not own.",
   },
   {
     id: "routed_peer",
@@ -69,7 +70,7 @@ export function diagnose(view: View, link: LinkState): Finding[] {
   }
   if (view.phase !== "ready") return findings;
 
-  const { platform, overview, devices } = view.snapshot;
+  const { platform, overview, devices, clientLink } = view.snapshot;
   const issues = new Set(platform.issues);
   if (issues.has("adapter_missing_or_disabled")) {
     findings.push({
@@ -113,6 +114,19 @@ export function diagnose(view: View, link: LinkState): Finding[] {
       id: "service_degraded",
       title: "The BlueRoute service reports a problem",
       help: "Check the BlueRoute service logs. Starting or joining a network may be unavailable until it recovers.",
+    });
+  }
+  if (clientLink?.type === "gave_up") {
+    findings.push({
+      id: "client_gave_up",
+      title: "This computer stopped trying to reach the computer that runs the network",
+      help: 'Make sure that computer is on and in range, then choose "Try connecting again" under Your network. You are still part of the network.',
+    });
+  } else if (clientLink?.type === "needs_attention") {
+    findings.push({
+      id: "client_needs_attention",
+      title: "The connection to the computer that runs the network needs attention",
+      help: `${clientLink.data.reason}. Fix that, then choose "Try connecting again" under Your network.`,
     });
   }
   const unreachable = devices.filter((device) => device.reachability === "unreachable");
