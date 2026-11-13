@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { daemon as realDaemon } from "./daemon";
 import type {
   ClientLinkState,
@@ -62,41 +62,60 @@ export function useDaemon(
   const pending = useRef(false);
   const alive = useRef(true);
 
-  const load = useCallback(async () => {
-    if (inFlight.current) {
-      pending.current = true;
-      return;
-    }
-    inFlight.current = true;
-    try {
-      const [platform, overview, networks, devices, clientLink] = await Promise.all([
-        api.platformCheck(),
-        api.overview(),
-        api.networks(),
-        api.devices(),
-        api.clientLink(),
-      ]);
-      if (alive.current) {
-        setView({
-          phase: "ready",
-          snapshot: { platform, overview, networks, devices, clientLink },
-        });
-      }
-    } catch (error) {
-      if (alive.current) {
-        setView({ phase: "error", error: normalizeError(error) });
-      }
-    } finally {
-      inFlight.current = false;
-      if (pending.current && alive.current) {
-        pending.current = false;
-        void load();
-      }
-    }
-  }, [api]);
+  // The current loader, for the Refresh button. Set by the effect below; a no-op before it runs.
+  const reload = useRef<() => void>(() => {});
 
   useEffect(() => {
     alive.current = true;
+    // Read the API's functions here, synchronously, so the effect visibly depends on `api`.
+    // Every DaemonApi is a plain object of functions (no `this`), so detached calls are safe.
+    const { platformCheck, overview, networks, devices, clientLink } = api;
+    // One read of every snapshot. Never throws: a failure becomes the error view.
+    const loadOnce = async () => {
+      try {
+        const results = await Promise.all([
+          platformCheck(),
+          overview(),
+          networks(),
+          devices(),
+          clientLink(),
+        ]);
+        if (alive.current) {
+          const [platform, overviewNow, networksNow, devicesNow, clientLinkNow] = results;
+          setView({
+            phase: "ready",
+            snapshot: {
+              platform,
+              overview: overviewNow,
+              networks: networksNow,
+              devices: devicesNow,
+              clientLink: clientLinkNow,
+            },
+          });
+        }
+      } catch (error) {
+        if (alive.current) {
+          setView({ phase: "error", error: normalizeError(error) });
+        }
+      }
+    };
+    const load = async () => {
+      // Coalesce: while a load runs, further requests only mark one more pass as needed.
+      if (inFlight.current) {
+        pending.current = true;
+        return;
+      }
+      inFlight.current = true;
+      let more = true;
+      while (more) {
+        pending.current = false;
+        await loadOnce();
+        more = pending.current && alive.current;
+      }
+      // Reached on every path, because loadOnce never throws.
+      inFlight.current = false;
+    };
+    reload.current = () => void load();
     void load();
     let unsubscribe: (() => void) | undefined;
     void subscribe((signal) => {
@@ -121,7 +140,7 @@ export function useDaemon(
       alive.current = false;
       unsubscribe?.();
     };
-  }, [load, subscribe]);
+  }, [api, subscribe]);
 
-  return { view, link, refresh: () => void load() };
+  return { view, link, refresh: () => reload.current() };
 }

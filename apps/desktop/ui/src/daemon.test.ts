@@ -1,6 +1,6 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
-const invoke = vi.fn();
+const invoke = vi.fn<typeof import("@tauri-apps/api/core").invoke>();
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
 const { daemon } = await import("./daemon");

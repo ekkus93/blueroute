@@ -2,8 +2,7 @@
 // shared components in ./components (P12-003). The only mutations
 // are creating and leaving a network and asking a joined client to reconnect to its host. Join
 // stays disabled and says so. There is deliberately no Internet-sharing UI (v1 keeps it off).
-import { useState } from "react";
-import "./App.css";
+import React, { useState } from "react";
 import { daemon as realDaemon } from "./daemon";
 import type { ClientLinkState, DesktopError, HealthLevel } from "./daemon";
 import {
@@ -420,9 +419,11 @@ function ClientLink({
 
   return (
     <div>
-      <p role="status">
-        <StatusBadge tone={LINK_BADGE[link.type].tone}>{LINK_BADGE[link.type].label}</StatusBadge>{" "}
-        <span>{clientLinkText(link)}</span>
+      <p>
+        <output>
+          <StatusBadge tone={LINK_BADGE[link.type].tone}>{LINK_BADGE[link.type].label}</StatusBadge>{" "}
+          <span>{clientLinkText(link)}</span>
+        </output>
       </p>
       {canRetry && (
         <div className="actions">
@@ -484,7 +485,7 @@ function LeaveNetwork({ api, onLeft }: { api: DaemonApi; onLeft: () => void }) {
           <Button onClick={() => setState({ phase: "confirm" })}>Leave this network</Button>
         </div>
       ) : (
-        <div className="confirm" role="group" aria-label="Confirm leaving">
+        <fieldset className="confirm" aria-label="Confirm leaving">
           <p>
             Leave this network? Other devices lose their connection through this computer. You may
             be asked for your password.
@@ -497,7 +498,7 @@ function LeaveNetwork({ api, onLeft }: { api: DaemonApi; onLeft: () => void }) {
               Stay
             </Button>
           </div>
-        </div>
+        </fieldset>
       )}
       {state.phase === "failed" && <Failure error={state.error} />}
     </div>

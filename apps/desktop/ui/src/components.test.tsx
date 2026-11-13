@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import React from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { Button, Card, EmptyState, Loading, Notice, StatusBadge } from "./components";
@@ -53,5 +54,7 @@ test("cards are labelled regions; empty and loading states are distinct", () => 
   );
   expect(screen.getByRole("region", { name: "Devices" })).toBeTruthy();
   expect(screen.getByText("No devices yet.").className).toBe("empty");
-  expect(screen.getByRole("status").getAttribute("aria-busy")).toBe("true");
+  const loading = screen.getByRole("status");
+  expect(loading.tagName).toBe("OUTPUT");
+  expect(loading.getAttribute("aria-busy")).toBe("true");
 });

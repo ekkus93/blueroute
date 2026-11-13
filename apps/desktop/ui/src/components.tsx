@@ -1,6 +1,7 @@
 // Shared visual components (P12-003). Every workflow uses these, so states look and read the
 // same everywhere. Meaning never relies on color alone: badges and notices carry an icon and
 // text, and the icon is hidden from screen readers because the text already says it.
+import React from "react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 export type Tone = "ok" | "info" | "warning" | "error" | "progress";
@@ -91,8 +92,9 @@ export function EmptyState({ children }: { children: ReactNode }) {
 
 export function Loading({ children = "Loading…" }: { children?: ReactNode }) {
   return (
-    <p className="loading" role="status" aria-busy="true">
-      {children}
+    // <output> is a live status region by default (implicit role="status").
+    <p className="loading">
+      <output aria-busy="true">{children}</output>
     </p>
   );
 }

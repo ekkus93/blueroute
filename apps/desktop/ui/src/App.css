@@ -235,6 +235,8 @@ input[type="text"] {
 
 /* Confirmation panel for destructive actions. */
 .confirm {
+  /* A <fieldset>: reset the browser's default fieldset box before styling it. */
+  min-width: 0;
   border: 1px solid var(--danger);
   border-radius: var(--radius);
   padding: var(--space-3);

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import React from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App";
@@ -6,6 +7,46 @@ import type { DaemonSignal, SubscribeToSignals } from "./signals";
 import type { DaemonApi } from "./useDaemon";
 
 afterEach(cleanup);
+
+/** Fixtures shared by the tests below; each stands in for one daemon call. */
+const ignoreSignal: (signal: DaemonSignal) => void = () => {};
+
+const blockedPlatform: DaemonApi["platformCheck"] = () =>
+  Promise.resolve({
+    summary: "Bluetooth is off.",
+    issues: ["adapter_missing_or_disabled"],
+    create: "blocked",
+    join: "blocked",
+    join_enabled: false,
+    internet_sharing_enabled: false,
+  });
+
+const connectingLink: DaemonApi["clientLink"] = () =>
+  Promise.resolve({ type: "connecting", data: { attempt: 1 } });
+
+const establishedLink: DaemonApi["clientLink"] = () => Promise.resolve({ type: "established" });
+
+const gaveUpLink: DaemonApi["clientLink"] = () =>
+  Promise.resolve({ type: "gave_up", data: { attempts: 8 } });
+
+const hostKeyMissingLink: DaemonApi["clientLink"] = () =>
+  Promise.resolve({ type: "needs_attention", data: { reason: "the host's key is missing" } });
+
+const oldNameDevices: DaemonApi["devices"] = () =>
+  Promise.resolve([{ id: "node-1", name: "Old name", reachability: "local" }]);
+
+const notInNetworkOverview: DaemonApi["overview"] = () =>
+  Promise.resolve({
+    local_node: "node-1",
+    network: null,
+    health: "healthy",
+    adapter_available: true,
+    can_host: true,
+    can_join: null,
+    authenticated_remote_peers: null,
+    internet_sharing_available: false,
+    client_limit: null,
+  });
 
 function fakeApi(overrides: Partial<DaemonApi> = {}): DaemonApi {
   return {
@@ -51,7 +92,7 @@ function yourNetwork() {
 }
 
 function fakeSubscribe() {
-  let emit: (signal: DaemonSignal) => void = () => {};
+  let emit: (signal: DaemonSignal) => void = ignoreSignal;
   const subscribe: SubscribeToSignals = (onSignal) => {
     emit = onSignal;
     return Promise.resolve(() => {});
@@ -120,8 +161,10 @@ function typeName(value: string) {
 }
 
 test("creates a network with the trimmed name, confirms it and refreshes", async () => {
-  const createNetwork = vi.fn(() => Promise.resolve());
-  const networks = vi.fn(() => Promise.resolve([{ id: "net-1", name: "Lab", member_count: 1 }]));
+  const createNetwork = vi.fn<DaemonApi["createNetwork"]>(() => Promise.resolve());
+  const networks = vi.fn<DaemonApi["networks"]>(() =>
+    Promise.resolve([{ id: "net-1", name: "Lab", member_count: 1 }]),
+  );
   render(<App api={fakeApi({ createNetwork, networks })} subscribe={fakeSubscribe().subscribe} />);
   await screen.findByRole("heading", { name: "Your network" });
   const button = screen.getByRole("button", { name: "Create a network" }) as HTMLButtonElement;
@@ -151,16 +194,9 @@ test("shows plain guidance when creating fails and lets the user retry", async (
 });
 
 test("does not offer creation when the computer cannot start a network", async () => {
-  const platformCheck = () =>
-    Promise.resolve({
-      summary: "Bluetooth is off.",
-      issues: ["adapter_missing_or_disabled" as const],
-      create: "blocked" as const,
-      join: "blocked" as const,
-      join_enabled: false,
-      internet_sharing_enabled: false,
-    });
-  render(<App api={fakeApi({ platformCheck })} subscribe={fakeSubscribe().subscribe} />);
+  render(
+    <App api={fakeApi({ platformCheck: blockedPlatform })} subscribe={fakeSubscribe().subscribe} />,
+  );
   await screen.findByRole("heading", { name: "Your network" });
   expect((screen.getByLabelText("Network name") as HTMLInputElement).disabled).toBe(true);
   expect(
@@ -202,7 +238,7 @@ test("Diagnose a problem explains an unavailable service and a missing adapter",
 });
 
 test("the create workflow is a labelled form that submits from the keyboard", async () => {
-  const createNetwork = vi.fn(() => Promise.resolve());
+  const createNetwork = vi.fn<DaemonApi["createNetwork"]>(() => Promise.resolve());
   render(<App api={fakeApi({ createNetwork })} subscribe={fakeSubscribe().subscribe} />);
   const input = (await screen.findByLabelText("Network name")) as HTMLInputElement;
   fireEvent.change(input, { target: { value: "Lab 2" } });
@@ -211,7 +247,7 @@ test("the create workflow is a labelled form that submits from the keyboard", as
 });
 
 test("leaving needs a confirmation, then calls the daemon once and refreshes", async () => {
-  const leaveNetwork = vi.fn(() => Promise.resolve());
+  const leaveNetwork = vi.fn<DaemonApi["leaveNetwork"]>(() => Promise.resolve());
   render(<App api={fakeApi({ leaveNetwork })} subscribe={fakeSubscribe().subscribe} />);
   fireEvent.click(await screen.findByRole("button", { name: "Leave this network" }));
   expect(leaveNetwork).not.toHaveBeenCalled();
@@ -223,7 +259,7 @@ test("leaving needs a confirmation, then calls the daemon once and refreshes", a
 });
 
 test("a refused leave shows the reason and keeps the network", async () => {
-  const leaveNetwork = vi.fn(() => Promise.reject("permission_denied"));
+  const leaveNetwork = vi.fn<DaemonApi["leaveNetwork"]>(() => Promise.reject("permission_denied"));
   render(<App api={fakeApi({ leaveNetwork })} subscribe={fakeSubscribe().subscribe} />);
   fireEvent.click(await screen.findByRole("button", { name: "Leave this network" }));
   fireEvent.click(screen.getByRole("button", { name: "Yes, leave" }));
@@ -250,21 +286,23 @@ test("a host or non-member shows no client link and no reconnect action", async 
 });
 
 test("a connecting or connected client link has no retry button", async () => {
-  const clientLink = () => Promise.resolve({ type: "connecting" as const, data: { attempt: 1 } });
-  render(<App api={fakeApi({ clientLink })} subscribe={fakeSubscribe().subscribe} />);
+  render(
+    <App api={fakeApi({ clientLink: connectingLink })} subscribe={fakeSubscribe().subscribe} />,
+  );
   expect(await screen.findByText(/Connecting to the computer/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Try connecting again" })).toBeNull();
   cleanup();
 
-  const connected = () => Promise.resolve({ type: "established" as const });
-  render(<App api={fakeApi({ clientLink: connected })} subscribe={fakeSubscribe().subscribe} />);
+  render(
+    <App api={fakeApi({ clientLink: establishedLink })} subscribe={fakeSubscribe().subscribe} />,
+  );
   expect(await screen.findByText(/^Connected to the computer/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Try connecting again" })).toBeNull();
 });
 
 test("a client that gave up offers a retry that calls the daemon once and refreshes", async () => {
-  const retryClientReconnect = vi.fn(() => Promise.resolve());
-  const clientLink = vi.fn(() =>
+  const retryClientReconnect = vi.fn<DaemonApi["retryClientReconnect"]>(() => Promise.resolve());
+  const clientLink = vi.fn<DaemonApi["clientLink"]>(() =>
     Promise.resolve({ type: "gave_up" as const, data: { attempts: 8 } }),
   );
   render(
@@ -281,15 +319,12 @@ test("a client that gave up offers a retry that calls the daemon once and refres
 });
 
 test("a client needing attention shows the daemon's reason and a refused retry explains why", async () => {
-  const clientLink = () =>
-    Promise.resolve({
-      type: "needs_attention" as const,
-      data: { reason: "the host's key is missing" },
-    });
-  const retryClientReconnect = vi.fn(() => Promise.reject("permission_denied"));
+  const retryClientReconnect = vi.fn<DaemonApi["retryClientReconnect"]>(() =>
+    Promise.reject("permission_denied"),
+  );
   render(
     <App
-      api={fakeApi({ clientLink, retryClientReconnect })}
+      api={fakeApi({ clientLink: hostKeyMissingLink, retryClientReconnect })}
       subscribe={fakeSubscribe().subscribe}
     />,
   );
@@ -321,8 +356,8 @@ test("explains BlueRoute plainly and shows health as a labelled badge", async ()
 });
 
 test("settings rename this computer, say identity is unchanged, and list remembered networks", async () => {
-  const setDeviceName = vi.fn(() => Promise.resolve());
-  const devices = vi.fn(() =>
+  const setDeviceName = vi.fn<DaemonApi["setDeviceName"]>(() => Promise.resolve());
+  const devices = vi.fn<DaemonApi["devices"]>(() =>
     Promise.resolve([{ id: "node-1", name: "BlueRoute Device", reachability: "local" as const }]),
   );
   render(<App api={fakeApi({ setDeviceName, devices })} subscribe={fakeSubscribe().subscribe} />);
@@ -345,10 +380,16 @@ test("settings rename this computer, say identity is unchanged, and list remembe
 });
 
 test("a refused rename explains why and keeps the old name", async () => {
-  const setDeviceName = vi.fn(() => Promise.reject("permission_denied"));
-  const devices = () =>
-    Promise.resolve([{ id: "node-1", name: "Old name", reachability: "local" as const }]);
-  render(<App api={fakeApi({ setDeviceName, devices })} subscribe={fakeSubscribe().subscribe} />);
+  const setDeviceName = vi.fn<DaemonApi["setDeviceName"]>(() =>
+    Promise.reject("permission_denied"),
+  );
+  Promise.resolve([{ id: "node-1", name: "Old name", reachability: "local" as const }]);
+  render(
+    <App
+      api={fakeApi({ setDeviceName, devices: oldNameDevices })}
+      subscribe={fakeSubscribe().subscribe}
+    />,
+  );
   await screen.findByRole("region", { name: "Settings" });
   fireEvent.change(screen.getByLabelText("New name"), { target: { value: "New" } });
   fireEvent.submit(screen.getByRole("form", { name: "Rename this computer" }));
@@ -357,19 +398,9 @@ test("a refused rename explains why and keeps the old name", async () => {
 });
 
 test("a remembered network this computer is not in shows only in settings, with no leave", async () => {
-  const overview = () =>
-    Promise.resolve({
-      local_node: "node-1",
-      network: null,
-      health: "healthy" as const,
-      adapter_available: true,
-      can_host: true,
-      can_join: null,
-      authenticated_remote_peers: null,
-      internet_sharing_available: false,
-      client_limit: null,
-    });
-  render(<App api={fakeApi({ overview })} subscribe={fakeSubscribe().subscribe} />);
+  render(
+    <App api={fakeApi({ overview: notInNetworkOverview })} subscribe={fakeSubscribe().subscribe} />,
+  );
   await screen.findByRole("region", { name: "Your network" });
   expect(yourNetwork().getByText("You are not part of a network yet.")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Leave this network" })).toBeNull();
@@ -379,7 +410,7 @@ test("a remembered network this computer is not in shows only in settings, with 
 });
 
 test("an address conflict when creating explains the clash in plain words", async () => {
-  const createNetwork = vi.fn(() => Promise.reject("address_conflict"));
+  const createNetwork = vi.fn<DaemonApi["createNetwork"]>(() => Promise.reject("address_conflict"));
   render(<App api={fakeApi({ createNetwork })} subscribe={fakeSubscribe().subscribe} />);
   await screen.findByRole("heading", { name: "Your network" });
   fireEvent.change(screen.getByLabelText("Network name"), { target: { value: "Workshop" } });
@@ -390,21 +421,17 @@ test("an address conflict when creating explains the clash in plain words", asyn
 });
 
 test("Diagnose a problem reports a client link that gave up or needs attention", async () => {
-  const gaveUp = () => Promise.resolve({ type: "gave_up" as const, data: { attempts: 8 } });
-  render(<App api={fakeApi({ clientLink: gaveUp })} subscribe={fakeSubscribe().subscribe} />);
+  render(<App api={fakeApi({ clientLink: gaveUpLink })} subscribe={fakeSubscribe().subscribe} />);
   const list = await screen.findByRole("list", { name: "Problems found" });
   expect(list.textContent).toContain("stopped trying");
   expect(list.textContent).toContain("still part of the network");
   cleanup();
 
-  const attention = () =>
-    Promise.resolve({
-      type: "needs_attention" as const,
-      data: { reason: "the host key is missing" },
-    });
-  render(<App api={fakeApi({ clientLink: attention })} subscribe={fakeSubscribe().subscribe} />);
+  render(
+    <App api={fakeApi({ clientLink: hostKeyMissingLink })} subscribe={fakeSubscribe().subscribe} />,
+  );
   const found = await screen.findByRole("list", { name: "Problems found" });
-  expect(found.textContent).toContain("the host key is missing");
+  expect(found.textContent).toContain("the host's key is missing");
 });
 
 test("settings show the client limit as a labelled setting, not a measured limit", async () => {

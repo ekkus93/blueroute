@@ -7,25 +7,7 @@
   },
   "rules": {
     "react/rules-of-hooks": "error",
-    "react/exhaustive-deps": "error",
-    "react/react-in-jsx-scope": "off",
-    "react/preserve-manual-memoization": "off",
-    "jsx-a11y/prefer-tag-over-role": "off",
-    "vitest/require-mock-type-parameters": "off",
-    "import/no-unassigned-import": [
-      "warn",
-      {
-        "allow": ["**/*.css"]
-      }
-    ]
+    "react/exhaustive-deps": "error"
   },
-  "overrides": [
-    {
-      "files": ["**/*.test.ts", "**/*.test.tsx"],
-      "rules": {
-        "unicorn/consistent-function-scoping": "off"
-      }
-    }
-  ],
   "ignorePatterns": ["ui/dist", "node_modules", "src-tauri/target", "src-tauri/gen"]
 }
