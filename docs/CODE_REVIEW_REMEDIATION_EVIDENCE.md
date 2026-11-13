@@ -112,3 +112,54 @@ so every command is owner-bound. The desktop (`apps/desktop/src/watch.rs`) and T
 (`apps/tui/src/watch.rs`) watchers loop on `events()`: with owner binding a replacement's events
 no longer arrive on an old subscription, but the stream still does not end when its owner goes
 away. That is F2 (CR-F2), not an F8 assumption. The daemon does not use the client.
+
+## CR-F2 — owner-loss detection and watcher recovery (2026-11-13)
+
+**Fix:** `e283b4ed8bba988e50b3cb7fdb966e2ac780cbb5`.
+
+- `EventSubscription` (`crates/blueroute-client/src/lib.rs`) also holds a `NameOwnerChanged`
+  stream filtered to `org.blueroute.Service1` (arg0 match rule, so unrelated names never reach
+  it). It is installed *before* the owner is resolved; a change queued during setup that leaves
+  the name with another owner ends the subscription. `next_event()` races that stream against
+  the Event stream and returns the new `ClientError::OwnerLost` (kind `Unavailable`) when the
+  bound owner gives the name up or vanishes; a closed connection ends both streams. A
+  notice that merely records the bound owner taking the name is ignored. If an earlier,
+  superseded transition is still queued at setup the result is a spurious `OwnerLost`, which the
+  watcher answers with an ordinary reconnect: fail-safe, never a missed loss.
+- `blueroute_client::watch` (`crates/blueroute-client/src/watch.rs`) is the one loop both front
+  ends run (`apps/desktop/src/watch.rs`, `apps/tui/src/watch.rs` are thin adapters). `connect`
+  and `sleep` are injected; production passes `BlueRouteClient::connect` and `Timer::after`.
+  It reports `Disconnected` once per loss (not per failed attempt), keeps the 1 s → 30 s
+  schedule, resets it after a successful connection, and returns, dropping its subscription,
+  when the consumer returns `Break` (the TUI does once its receiver is gone).
+- WATCH-3: the desktop banner now says "What is shown below may be out of date until the service
+  is back"; the TUI status line says "Lost contact; view may be out of date…" (fits the 40-column
+  minimum). Both front ends also reread on `Disconnected`, which replaces retained data with the
+  unavailable explanation as soon as the reads fail.
+- No healthy-state polling: a live subscription only awaits signals (WATCH-4).
+
+**Regressions** (private bus; serialized per file; all added to CI):
+
+| Test | Covers | Result |
+| --- | --- | --- |
+| `owner_watch::cr_f2_idle_daemon_loss_ends_the_event_subscription_without_any_event` | WATCH-1 idle loss, no Event; `OwnerLost` within 2 s | pass (baseline: **fail**, see CR-BASE) |
+| `owner_watch::cr_f2_an_unrelated_name_changing_hands_does_not_disturb_the_subscription` | WATCH-2 unrelated names | pass |
+| `owner_watch::cr_f2_losing_the_bus_connection_ends_the_subscription` | bus loss | pass |
+| `owner_race::cr_f2_an_owner_change_during_subscription_setup_is_not_missed` | WATCH-1 setup race (handover inside the `events()` version check) | pass |
+| `owner_race::cr_f8_a_subscription_never_delivers_a_replacement_owners_events` | OWN-4 / WATCH-1 replacement ends the old subscription with `OwnerLost`, never delivering the replacement's event | pass |
+| `watcher::cr_f2_idle_loss_is_reported_and_a_compatible_return_reconnects` | WATCH-2/4 idle stop → `Disconnected` (measured ≈0.5 ms from stop, bound 2 s) → compatible return → `Connected` → one event gives exactly one `Changed` (no duplicate listener); first backoff 1 s | pass |
+| `watcher::cr_f2_direct_replacement_moves_the_watcher_to_the_new_owner` | direct replacement; the retired owner's later event is not heard | pass |
+| `watcher::cr_f2_an_incompatible_return_stays_unavailable` | API 99.0 owner never connects or delivers; compatible return then connects | pass |
+| `watcher::cr_f2_backoff_keeps_the_production_schedule_and_reports_loss_once` | injected clock: requested delays 1, 2, 4, 8, 16, 30, 30, 30 s; one `Disconnected` | pass |
+| `watcher::cr_f2_the_watcher_stops_when_its_consumer_does` | cancellation/consumer shutdown | pass |
+| TUI `app.rs` link test, desktop `App.test.tsx` reconnect test | WATCH-3 stale labelling, cleared on reconnect | pass |
+
+`watcher` passed three consecutive runs (≈0.5 s each).
+
+**Checks at the fix (local):** fmt, clippy `-D warnings`, `cargo test --workspace --locked`;
+private-bus `dbus_service`, `authorization`, `dbus_client`, `cli_exit_contract`,
+`bridge_end_to_end`, `owner_race`, `owner_watch`, `watcher`; desktop `format:check`, `lint`,
+`typecheck`, `test` (34 passed, the CR-F6 expected failure), `build`.
+
+**Scope note:** the desktop's own subscription lifetime under StrictMode is CR-F6, which builds
+on this watcher contract.

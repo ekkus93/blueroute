@@ -22,7 +22,7 @@
 | --- | --- | --- | --- | --- |
 | CR-BASE | Durable baseline and reproductions | Foundation | None | `[-]` |
 | CR-F8 | Owner-bound compatibility and command delivery | P2 | CR-BASE | `[x]` |
-| CR-F2 | Idle owner-loss detection and watcher recovery | P2 | CR-BASE; owner contract from CR-F8 | `[ ]` |
+| CR-F2 | Idle owner-loss detection and watcher recovery | P2 | CR-BASE; owner contract from CR-F8 | `[x]` |
 | CR-F1 | Committed state publication and observer refresh | P2 | CR-BASE; CR-F2 for integrated acceptance | `[ ]` |
 | CR-F3 | Consistent graph insertion/update semantics | P2 | CR-BASE | `[ ]` |
 | CR-F4 | Fresh operational capabilities after recovery | P2 | CR-BASE; CR-F1 for observer acceptance | `[ ]` |
@@ -83,23 +83,27 @@ handover. Existing CLI/bridge compatibility and authorization tests remain green
 
 **Requirements:** WATCH-1–WATCH-4; OWN-4. **Original tasks:** P5-005; P11-001; P12-002.
 
-- [ ] **CR-F2-01:** Observe owner changes and bus closure independently of the Event stream,
+- [x] **CR-F2-01:** Observe owner changes and bus closure independently of the Event stream,
   including reconciliation of an owner change during subscription setup.
-- [ ] **CR-F2-02:** Invalidate/terminate old-owner subscriptions and reject stale queued events;
+- [x] **CR-F2-02:** Invalidate/terminate old-owner subscriptions and reject stale queued events;
   ignore unrelated bus-name changes.
-- [ ] **CR-F2-03:** Connect desktop and TUI watch loops to the new lifecycle result and expose
+- [x] **CR-F2-03:** Connect desktop and TUI watch loops to the new lifecycle result and expose
   disconnected/unavailable state without requiring an application Event.
-- [ ] **CR-F2-04:** Restore a fresh compatible owner-bound subscription and reread snapshots on
+- [x] **CR-F2-04:** Restore a fresh compatible owner-bound subscription and reread snapshots on
   return; retain bounded backoff and reject incompatible replacement.
-- [ ] **CR-F2-05:** Label retained UI data stale or unavailable while disconnected. Ensure
+- [x] **CR-F2-05:** Label retained UI data stale or unavailable while disconnected. Ensure
   consumer shutdown releases callbacks and watch resources.
-- [ ] **CR-F2-06:** Test idle stop/restart, direct replacement, incompatible return, bus loss,
+- [x] **CR-F2-06:** Test idle stop/restart, direct replacement, incompatible return, bus loss,
   setup races, cancellation, and reconnect without duplicate listeners.
-- [ ] **CR-F2-07:** Measure the controlled two-second owner-loss bound and verify production
+- [x] **CR-F2-07:** Measure the controlled two-second owner-loss bound and verify production
   backoff limits using injected timing rather than long or fragile sleeps.
 
 **Acceptance:** Idle daemon loss reaches both actual watcher implementations; compatible return
 refreshes state on the bounded retry schedule without a synthetic Event or manual refresh.
+
+**Accepted (2026-11-13, `e283b4e`):** met. Both front ends now run the one shared
+`blueroute_client::watch`, which is tested end to end on a private bus; see
+[evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-f2--owner-loss-detection-and-watcher-recovery-2026-11-13).
 
 ## CR-F1 — Publish actual daemon changes
 
@@ -325,7 +329,7 @@ Fill entries as work is qualified. Link concrete records; do not replace evidenc
 | --- | --- | --- | --- | --- | --- |
 | CR-BASE | Reproduction tests at the CR-BASE commit | Baseline failures recorded in [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-base--baseline-and-reproductions-2026-11-13) | Preserve recorded baseline scope | CR-BASE-04 F5 fixtures (with CR-F5-01) | IN PROGRESS |
 | CR-F8 / F8 | `b3ba0bd` | 5 `owner_race` tests pass (2 fail with the baseline client); all checks and bus suites green | Not required for the owner-race defect | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
-| CR-F2 / F2 | Pending | Pending | Private broker sufficient for the reported defect | Actual watcher loss/return behavior | NOT STARTED |
+| CR-F2 / F2 | `e283b4e` | `owner_watch` (3), `watcher` (5), setup race in `owner_race`; UI stale-label tests; all checks green | Private broker sufficient for the reported defect | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
 | CR-F1 / F1 | Pending | Pending | Radio claims remain separate | Real producer-to-observer delivery | NOT STARTED |
 | CR-F3 / F3 | Pending | Pending | Not required for pure graph consistency | Atomic mutation and consumer invariants | NOT STARTED |
 | CR-F4 / F4 | Pending | Pending | Adapter behavior if claimed | Same-instance software recovery; preserve hardware gates | NOT STARTED |
