@@ -607,7 +607,9 @@ fn nap_state_lock_error<T>(error: std::sync::PoisonError<T>) -> CoreError {
     )
 }
 
-async fn current_bluez_owner(connection: &Connection) -> Result<Option<String>, CoreError> {
+pub(crate) async fn current_bluez_owner(
+    connection: &Connection,
+) -> Result<Option<String>, CoreError> {
     let proxy = DBusProxy::new(connection).await.map_err(|error| {
         pan_error(
             ErrorKind::BluezUnavailable,

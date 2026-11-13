@@ -109,7 +109,8 @@ pub use registered_transport::{
     SessionAdmissionError,
 };
 pub use runtime_health::{
-    DaemonHealthWorker, spawn_daemon_capability_health_worker, system_diagnostics_from_report,
+    DaemonHealthWorker, spawn_daemon_capability_health_worker, spawn_daemon_runtime_worker,
+    system_diagnostics_from_report,
 };
 pub use single_star::{
     LinuxStarHostRuntime, NetworkIdGenerator, NetworkOperationFuture, NetworkOperations,

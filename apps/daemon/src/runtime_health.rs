@@ -1,18 +1,19 @@
-//! P13 daemon-owned live capability health observation.
+//! P13 daemon-owned live capability health observation and running host check.
 //!
-//! Refreshing status is deliberately read-only: this does not repair NAP/PANU
-//! links, infer authenticated peer state, or replace desired-state reconciliation.
+//! The capability probe is read-only. When given the network operations, each tick also
+//! re-asserts a persisted hosted network from observed service state (P13-001/002/003); it
+//! never infers authenticated peer state. Joined clients are the reconnector's job (P6-010).
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use blueroute_core::{HealthLevel, NodeCapabilities};
+use blueroute_core::{CoreError, HealthLevel, NodeCapabilities};
 use blueroute_linux::{SystemCapabilityProbe, SystemCapabilityReport, SystemSupportLevel};
 use blueroute_protocol::{DiagnosticAdapter, SystemDiagnosticMetadata};
 use futures_lite::future;
 
-use crate::DaemonService;
+use crate::{DaemonService, NetworkOperations};
 
 const HEALTH_RECHECK_INTERVAL: Duration = Duration::from_secs(15);
 
@@ -66,11 +67,26 @@ pub fn spawn_daemon_capability_health_worker(
     probe: SystemCapabilityProbe,
     startup_reconciled: bool,
 ) -> std::io::Result<DaemonHealthWorker> {
+    spawn_daemon_runtime_worker(service, probe, startup_reconciled, None)
+}
+
+/// The capability monitor plus, on every tick, the running host check (P13-001/002/003): a
+/// persisted hosted network is re-asserted from observed service state, so a BlueZ or
+/// NetworkManager restart is repaired without restarting BlueRoute and health reports the
+/// truth while it is not.
+pub fn spawn_daemon_runtime_worker(
+    service: DaemonService,
+    probe: SystemCapabilityProbe,
+    startup_reconciled: bool,
+    host: Option<Arc<dyn NetworkOperations>>,
+) -> std::io::Result<DaemonHealthWorker> {
     let stop = Arc::new(AtomicBool::new(false));
     let worker_stop = Arc::clone(&stop);
     let thread = thread::Builder::new()
         .name("blueroute-capability-health".to_owned())
         .spawn(move || {
+            // Starts from the startup result and follows every later check.
+            let mut host_ok = startup_reconciled;
             while !worker_stop.load(Ordering::Acquire) {
                 thread::park_timeout(HEALTH_RECHECK_INTERVAL);
                 if worker_stop.load(Ordering::Acquire) {
@@ -82,9 +98,14 @@ pub fn spawn_daemon_capability_health_worker(
                 if worker_stop.load(Ordering::Acquire) {
                     break;
                 }
+                if let Some(host) = &host {
+                    let result = future::block_on(host.reconcile_running());
+                    log_host_check(&result, host_ok);
+                    host_ok = result.is_ok();
+                }
                 let (health, capabilities, system) = match reported {
                     Ok(report) => (
-                        health_for_support(Some(report.support), startup_reconciled),
+                        health_for_support(Some(report.support), host_ok),
                         report.runtime.node.clone(),
                         Some(system_diagnostics_from_report(&report)),
                     ),
@@ -111,6 +132,27 @@ pub fn spawn_daemon_capability_health_worker(
         stop,
         thread: Some(thread),
     })
+}
+
+/// Log only what changed: a repair, a new failure, or recovery from one.
+fn log_host_check(result: &Result<bool, CoreError>, was_ok: bool) {
+    let event = match result {
+        Ok(true) => Some(("host_runtime_repaired", "succeeded", None)),
+        Ok(false) if !was_ok => Some(("host_runtime_recovered", "succeeded", None)),
+        Err(error) if was_ok => Some(("host_runtime_check", "failed", Some(error.kind()))),
+        _ => None,
+    };
+    if let Some((event, outcome, kind)) = event {
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "component": "daemon_runtime",
+                "event": event,
+                "outcome": outcome,
+                "failure_class": kind.map(|kind| format!("{kind:?}")),
+            })
+        );
+    }
 }
 
 fn health_for_support(

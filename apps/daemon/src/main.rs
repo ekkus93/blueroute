@@ -8,8 +8,8 @@ use blueroute_daemon::{
     DaemonService, DeviceNameStore, DurablePeerTrustOperations, EXPERIMENTAL_JOIN,
     JoinControlConfig, NetworkOperations, PeerPinStore, PendingHostCommitAuthorization,
     PendingJoinOperations, PendingJoinStore, ReconnectPolicy, SingleStarNetworkOperations,
-    TransactionalJoinNetworkOperations, current_network, spawn_daemon_capability_health_worker,
-    spawn_daemon_control_worker_with_peers, system_diagnostics_from_report,
+    TransactionalJoinNetworkOperations, current_network, spawn_daemon_control_worker_with_peers,
+    spawn_daemon_runtime_worker, system_diagnostics_from_report,
 };
 use blueroute_linux::{
     NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
@@ -169,6 +169,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
     };
     let system_diagnostics = system_diagnostics_from_report(&capability_report);
     let worker_network_operations: Arc<dyn NetworkOperations> = network_operations.clone();
+    let host_check: Arc<dyn NetworkOperations> = network_operations.clone();
     let worker_peer_trust = peer_trust_operations.clone();
     let control_peers = AuthenticatedControlPeers::default();
     // A stored name wins; an unreadable file is reported and left untouched (not overwritten
@@ -236,10 +237,11 @@ async fn run() -> Result<(), Box<dyn Error>> {
     // Probe live BlueZ/NetworkManager availability without blocking the
     // D-Bus executor. A failed startup host restoration must not be disguised
     // as Healthy merely because services later become reachable.
-    let _health_worker = spawn_daemon_capability_health_worker(
+    let _health_worker = spawn_daemon_runtime_worker(
         service_for_health,
         SystemCapabilityProbe::new(config)?,
         startup_reconciled,
+        Some(host_check),
     )?;
 
     future::pending::<()>().await;

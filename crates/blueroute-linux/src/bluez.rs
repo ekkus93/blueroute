@@ -70,6 +70,13 @@ impl BluezBackend {
         })
     }
 
+    /// The unique bus name of the running BlueZ instance, or `None` while BlueZ is gone. It
+    /// changes whenever `bluetoothd` restarts, and BlueZ drops every NAP registration and
+    /// advertisement made with an earlier instance, so a changed owner proves those are gone.
+    pub async fn service_owner(&self) -> Result<Option<String>, CoreError> {
+        crate::pan::current_bluez_owner(&self.connection).await
+    }
+
     /// Returns whether the BlueZ service currently owns its well-known bus name.
     pub async fn service_available(&self) -> Result<bool, CoreError> {
         bluez_service_available(&self.connection).await

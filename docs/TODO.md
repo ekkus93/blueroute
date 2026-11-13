@@ -2653,6 +2653,8 @@ The test also checks the bridge only ever sends its fixed commands. The UI and b
 - [x] bound startup corrective work to the deterministic host bridge/address/NAP/advertisement plan and preserve rollback behavior.
 - [ ] keep one long-running desired-vs-observed loop for BlueZ, NetworkManager, interface/address/route changes while the daemon stays up.
 
+**Running host check (software, 2026-11-12):** the 15-second runtime worker now also calls `NetworkOperations::reconcile_running` on every tick. For a persisted `Host` it re-asserts the runtime from observation, not remembered success: it compares the BlueZ and NetworkManager unique bus names recorded at host start with the live ones (`host_repairs_after_restart`), and checks that the owned address is still present. A changed BlueZ owner means BlueZ dropped the NAP and advertisement, so they are registered again on a freshly selected powered adapter; a changed NetworkManager owner or a missing address re-ensures the owned bridge and address (idempotent, owned only). With no active runtime (a failed start or restore) it retries the start, so a failed startup restore is now retried live. A service that is gone is an error. Health follows the latest check rather than the startup result, and logs record only repairs, new failures and recoveries. Joined clients, hosts in transition and nodes in no network are skipped. **Still open for this box:** routes (a single star applies none yet; P8) and adapter swaps while BlueZ keeps running (P13-004).
+
 **Software partial (2026-10-15):** P6-009 adds an ownership-aware startup reconciliation pass with deterministic re-observation and fail-closed collision handling. This is not yet the central continuous loop; service-owner change events, route reconciliation and live adapter reset handling remain open.
 
 **Software partial (2026-11-03):** The production daemon now owns a 15-second read-only `SystemCapabilityProbe` monitor on a separate thread (`apps/daemon/src/runtime_health.rs`) and publishes live BlueZ, NetworkManager and adapter availability changes to the shared D-Bus status/diagnostics health. Unknown probe results degrade health; a failed startup host restoration cannot be masked as healthy merely when services return. The monitor is shutdown-aware, emits transition-only structured logs, and has deterministic loss/recovery, shared-status and unchanged-state tests. Source `a81dd131`, formatting correction `ec6c5029`; [exact-head CI #41706036131](https://github.com/ekkus93/blueroute/actions/runs/41706036131) passed. **This is observation/health reporting only**: no live service-owner subscription, controlled PAN/route restoration, continuous owner-scoped reconciliation or physical reset/restart acceptance. Keep P13-001/002/003 open.
@@ -2665,9 +2667,11 @@ The test also checks the bridge only ever sends its fixed commands. The UI and b
 
 ## P13-002 — Handle BlueZ restart
 
-- [ ] detect disappearance.
-- [ ] health transition.
-- [ ] re-enumerate/reconcile.
+- [x] detect disappearance (the runtime worker sees no BlueZ owner; the host check fails and health degrades).
+- [x] health transition (Degraded while BlueZ is gone or re-registration fails; back to Healthy after a successful repair).
+- [x] re-enumerate/reconcile (on a new BlueZ owner: a powered adapter is selected again and the NAP and advertisement are registered again; tested as a pure owner decision and through `reconcile_running`).
+
+**SOFTWARE COMPLETE / HARDWARE DEFERRED (2026-11-12, host side):** see the P13-001 note. Not run against a real `bluetoothd` restart; joined clients recover through the P6-010 reconnector when their session ends.
 
 **Acceptance**
 
@@ -2675,9 +2679,11 @@ The test also checks the bridge only ever sends its fixed commands. The UI and b
 
 ## P13-003 — Handle NetworkManager restart
 
-- [ ] detect disappearance.
-- [ ] preserve desired state.
-- [ ] reconcile after return.
+- [x] detect disappearance (no NetworkManager owner: the host check fails and health degrades).
+- [x] preserve desired state (durable membership and the active runtime record are never cleared by the check).
+- [x] reconcile after return (a new NetworkManager owner, or a missing owned address, re-ensures the owned bridge and address idempotently).
+
+**SOFTWARE COMPLETE / HARDWARE DEFERRED (2026-11-12, host side):** see the P13-001 note. Not run against a real NetworkManager restart.
 
 **Acceptance**
 

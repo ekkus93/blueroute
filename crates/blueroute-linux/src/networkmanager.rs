@@ -68,6 +68,45 @@ impl NetworkManagerBackend {
         Ok(Self { connection })
     }
 
+    /// The unique bus name of the running NetworkManager instance, or `None` while it is gone.
+    /// It changes whenever NetworkManager restarts.
+    pub async fn service_owner(&self) -> Result<Option<String>, CoreError> {
+        let proxy = DBusProxy::new(&self.connection).await.map_err(|error| {
+            network_error(
+                ErrorKind::NetworkBackendUnavailable,
+                "failed to access the system D-Bus broker",
+                error,
+            )
+        })?;
+        let name = BusName::try_from(NM_SERVICE).map_err(|error| {
+            network_error(
+                ErrorKind::Internal,
+                "invalid built-in NetworkManager D-Bus service name",
+                error,
+            )
+        })?;
+        if !proxy.name_has_owner(name.clone()).await.map_err(|error| {
+            network_error(
+                ErrorKind::NetworkBackendUnavailable,
+                "failed to query NetworkManager availability",
+                error,
+            )
+        })? {
+            return Ok(None);
+        }
+        proxy
+            .get_name_owner(name)
+            .await
+            .map(|owner| Some(owner.as_str().to_owned()))
+            .map_err(|error| {
+                network_error(
+                    ErrorKind::NetworkBackendUnavailable,
+                    "failed to identify the current NetworkManager instance",
+                    error,
+                )
+            })
+    }
+
     /// Return the NetworkManager version exposed by the live system service.
     pub async fn version(&self) -> Result<String, CoreError> {
         network_manager_proxy(&self.connection)

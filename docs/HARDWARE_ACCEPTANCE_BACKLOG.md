@@ -69,6 +69,13 @@ For every scenario, also check: durable `Member` with role `client` survives; no
 - [ ] **Leave while connecting:** with the host powered off, restart the client daemon and run `blueroute network leave` during `connecting` or `waiting`. Expected: leave succeeds; the run stops; afterwards no control session, owned address, owned profile or PANU link for this network remains, and `network link` reports not a joined client.
 - [ ] **Leave after restart with nothing retained:** restart the client daemon with the host up and leave immediately. Expected: the PANU link to the recorded host is disconnected only when proven ours, owned state is removed, and a PANU link to any other device is left alone.
 
+**Host survives service restarts (P13-001..003, software written, not run; needs no join):** on a single host with a created network:
+
+- [ ] `sudo systemctl restart bluetooth.service`. Expected: health turns Degraded briefly, then within about 15 s the log shows `host_runtime_repaired`, a second computer sees the network advertised again, and health is Healthy, with no BlueRoute restart.
+- [ ] `sudo systemctl restart NetworkManager.service`. Expected: the owned bridge and address are present afterwards, exactly one of each (no duplicates), and health returns to Healthy.
+- [ ] Remove the owned address by hand (`nmcli`, outside BlueRoute). Expected: it is restored within about 15 s; no other connection is touched.
+- [ ] Stop `bluetooth.service` and leave it stopped. Expected: health stays Degraded with `host_runtime_check` logged once, not every tick.
+
 **Host leave after a failed restore (P6-008, software written, not run; needs no join):** on a single host, create a network, make the restore fail at the next daemon start (for example with `bluetooth.service` stopped), then run `blueroute network leave`.
 
 - [ ] Expected: leave succeeds, the owned BlueRoute bridge, address and profile are gone, other NetworkManager connections are untouched, and `blueroute status` shows no network. Stop NetworkManager instead and expect leave to fail with membership kept, then succeed after NetworkManager is back.

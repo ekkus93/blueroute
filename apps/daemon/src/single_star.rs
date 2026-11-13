@@ -53,6 +53,12 @@ pub trait NetworkOperations: Send + Sync {
     fn reconcile_on_startup(&self) -> NetworkOperationFuture<'_, ()> {
         Box::pin(async { Ok(()) })
     }
+    /// While running (P13): make a persisted hosted network really be up, repairing what a
+    /// BlueZ or NetworkManager restart took away. `Ok(true)` when something was redone. A node
+    /// that hosts nothing returns `Ok(false)`; joined clients are the reconnector's job.
+    fn reconcile_running(&self) -> NetworkOperationFuture<'_, bool> {
+        Box::pin(async { Ok(false) })
+    }
     fn list_networks(&self) -> NetworkOperationFuture<'_, Vec<NetworkSummary>>;
     /// Only return independently observed backend-owned interface addresses.
     /// None means no observation provider is available; it is not an empty
@@ -140,6 +146,57 @@ pub trait StarHostRuntime: Send + Sync {
         bridge: NetworkInterfaceHandle,
         address: InterfaceAddress,
     ) -> NetworkOperationFuture<'_, ()>;
+
+    /// Make sure the hosted runtime is really up while the daemon keeps running (P13). Returns
+    /// whether anything had to be redone. The default just (re)starts the host, which is all a
+    /// runtime without live observations can do.
+    fn reassert_host(
+        &self,
+        network: NetworkId,
+        bridge: NetworkInterfaceHandle,
+        address: InterfaceAddress,
+    ) -> NetworkOperationFuture<'_, bool> {
+        Box::pin(async move {
+            self.start_host(network, bridge, address)
+                .await
+                .map(|()| false)
+        })
+    }
+}
+
+/// What a service restart has taken away from a running host (P13-002/003).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct HostRepair {
+    /// BlueZ restarted: its NAP registration and advertisement are gone.
+    pub(crate) bluetooth: bool,
+    /// NetworkManager restarted: re-ensure the owned bridge and address.
+    pub(crate) network: bool,
+}
+
+/// Decide from observed service owners, never from remembered success. A service that is not
+/// running at all is an error, so health degrades instead of reporting a host that is down.
+pub(crate) fn host_repairs_after_restart(
+    started_bluez: Option<&str>,
+    current_bluez: Option<&str>,
+    started_network_manager: Option<&str>,
+    current_network_manager: Option<&str>,
+) -> Result<HostRepair, CoreError> {
+    let current_bluez = current_bluez.ok_or_else(|| {
+        CoreError::new(
+            ErrorKind::BluezUnavailable,
+            "BlueZ is not running, so the hosted network is down",
+        )
+    })?;
+    let current_network_manager = current_network_manager.ok_or_else(|| {
+        CoreError::new(
+            ErrorKind::NetworkBackendUnavailable,
+            "NetworkManager is not running, so the hosted network is down",
+        )
+    })?;
+    Ok(HostRepair {
+        bluetooth: started_bluez != Some(current_bluez),
+        network: started_network_manager != Some(current_network_manager),
+    })
 }
 
 #[derive(Default)]
@@ -157,6 +214,9 @@ struct ActiveLinuxStarHost {
     advertisement: NetworkAdvertisement,
     bluez: BluezBackend,
     network_backend: NetworkManagerBackend,
+    /// Service instances the registrations were made with (see `host_repairs_after_restart`).
+    bluez_owner: Option<String>,
+    network_manager_owner: Option<String>,
 }
 
 impl LinuxStarHostRuntime {
@@ -375,6 +435,9 @@ impl StarHostRuntime for LinuxStarHostRuntime {
                 }
             };
 
+            // Unknown owners are recorded as such and simply trigger a repair on the next check.
+            let bluez_owner = bluez.service_owner().await.ok().flatten();
+            let network_manager_owner = network_backend.service_owner().await.ok().flatten();
             let active_host = ActiveLinuxStarHost {
                 network,
                 bridge,
@@ -383,6 +446,8 @@ impl StarHostRuntime for LinuxStarHostRuntime {
                 advertisement,
                 bluez,
                 network_backend,
+                bluez_owner,
+                network_manager_owner,
             };
             let install_error = {
                 match self.active.lock() {
@@ -401,6 +466,103 @@ impl StarHostRuntime for LinuxStarHostRuntime {
                 Err(rollback_active_host(error, &active_host).await)
             } else {
                 Ok(())
+            }
+        })
+    }
+
+    fn reassert_host(
+        &self,
+        network: NetworkId,
+        bridge: NetworkInterfaceHandle,
+        address: InterfaceAddress,
+    ) -> NetworkOperationFuture<'_, bool> {
+        Box::pin(async move {
+            let active = self.active.lock().map_err(lock_error)?.clone();
+            let Some(active) = active else {
+                // Nothing running (a failed start, or after a restore failed): try again.
+                return self
+                    .start_host(network, bridge, address)
+                    .await
+                    .map(|()| true);
+            };
+            if !same_host_ownership(
+                active.network,
+                &active.bridge,
+                &active.address,
+                network,
+                &bridge,
+                &address,
+            ) {
+                return Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "a different BlueRoute host configuration is active",
+                ));
+            }
+            let _transition = TransitionGuard::claim(&self.transition)?;
+            let current_bluez = active.bluez.service_owner().await?;
+            let current_network_manager = active.network_backend.service_owner().await?;
+            let mut repair = host_repairs_after_restart(
+                active.bluez_owner.as_deref(),
+                current_bluez.as_deref(),
+                active.network_manager_owner.as_deref(),
+                current_network_manager.as_deref(),
+            )?;
+            // Without a restart, still observe the owned address: someone may have removed it.
+            if !repair.network
+                && !active
+                    .network_backend
+                    .addresses()
+                    .await?
+                    .contains(&active.address)
+            {
+                repair.network = true;
+            }
+            if repair == HostRepair::default() {
+                return Ok(false);
+            }
+            let mut repaired = active.clone();
+            if repair.network {
+                // Both are idempotent and touch only this network's owned bridge and address.
+                active
+                    .network_backend
+                    .ensure_bridge(network, active.bridge.clone())
+                    .await?;
+                active
+                    .network_backend
+                    .ensure_address(active.address.clone())
+                    .await?;
+                repaired.network_manager_owner = current_network_manager;
+            }
+            if repair.bluetooth {
+                // The old advertisement object is still exported on our connection; BlueZ no
+                // longer knows it (DoesNotExist is tolerated), so remove it before re-adding.
+                active
+                    .bluez
+                    .stop_network_advertisement(active.advertisement.clone())
+                    .await?;
+                let adapter = select_powered_adapter(&active.bluez).await?;
+                // `start_nap` registers again because the BlueZ owner changed.
+                active
+                    .bluez
+                    .start_nap(adapter.clone(), active.bridge.clone())
+                    .await?;
+                repaired.advertisement = active
+                    .bluez
+                    .start_network_advertisement(adapter.clone(), network)
+                    .await?;
+                repaired.adapter = adapter;
+                repaired.bluez_owner = current_bluez;
+            }
+            let mut slot = self.active.lock().map_err(lock_error)?;
+            match slot.as_ref() {
+                Some(current) if current.network == network => {
+                    *slot = Some(repaired);
+                    Ok(true)
+                }
+                _ => Err(CoreError::new(
+                    ErrorKind::InvalidState,
+                    "BlueRoute host runtime changed unexpectedly during repair",
+                )),
             }
         })
     }
@@ -793,6 +955,32 @@ where
             ensure_nap_capability(&self.capabilities)?;
             self.runtime
                 .start_host(
+                    network,
+                    bridge_name(network)?,
+                    local_star_address(network, &self.config)?,
+                )
+                .await
+        })
+    }
+
+    fn reconcile_running(&self) -> NetworkOperationFuture<'_, bool> {
+        Box::pin(async move {
+            // A create or leave in progress owns the host; check again on the next tick.
+            let Ok(_transition) = TransitionGuard::claim(&self.creating) else {
+                return Ok(false);
+            };
+            let registry = self.store.load()?;
+            let Some(network) = current_network(&registry)? else {
+                return Ok(false);
+            };
+            let hosting = registry
+                .network(&network)
+                .is_some_and(|membership| membership.role == Some(MembershipRole::Host));
+            if !hosting {
+                return Ok(false);
+            }
+            self.runtime
+                .reassert_host(
                     network,
                     bridge_name(network)?,
                     local_star_address(network, &self.config)?,
@@ -2269,6 +2457,125 @@ mod tests {
         let mut registry = MembershipRegistry::default();
         registry.remember_network(membership);
         registry
+    }
+
+    #[test]
+    fn service_restarts_are_decided_from_observed_owners_not_remembered_success() {
+        let same =
+            host_repairs_after_restart(Some(":1.5"), Some(":1.5"), Some(":1.9"), Some(":1.9"));
+        assert_eq!(same.unwrap(), HostRepair::default());
+        let bluez =
+            host_repairs_after_restart(Some(":1.5"), Some(":1.40"), Some(":1.9"), Some(":1.9"));
+        assert_eq!(
+            bluez.unwrap(),
+            HostRepair {
+                bluetooth: true,
+                network: false
+            }
+        );
+        let nm =
+            host_repairs_after_restart(Some(":1.5"), Some(":1.5"), Some(":1.9"), Some(":1.41"));
+        assert_eq!(
+            nm.unwrap(),
+            HostRepair {
+                bluetooth: false,
+                network: true
+            }
+        );
+        // An owner unknown at start is repaired rather than trusted.
+        let unknown = host_repairs_after_restart(None, Some(":1.5"), None, Some(":1.9"));
+        assert_eq!(
+            unknown.unwrap(),
+            HostRepair {
+                bluetooth: true,
+                network: true
+            }
+        );
+        // A service that is gone is an error, never a quiet "nothing to do".
+        assert_eq!(
+            host_repairs_after_restart(Some(":1.5"), None, Some(":1.9"), Some(":1.9"))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::BluezUnavailable
+        );
+        assert_eq!(
+            host_repairs_after_restart(Some(":1.5"), Some(":1.5"), Some(":1.9"), None)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::NetworkBackendUnavailable
+        );
+    }
+
+    #[test]
+    fn running_reconciliation_reasserts_only_a_persisted_host() {
+        futures_lite::future::block_on(async {
+            let operations_for = |store, runtime: &FakeRuntime| {
+                SingleStarNetworkOperations::with_runtime_and_generator(
+                    store,
+                    DaemonConfig::default(),
+                    nap_capabilities(Some(true)),
+                    runtime.clone(),
+                    SequenceGenerator::new([]),
+                )
+            };
+            // No network: nothing to do.
+            let (root, store) = temp_store("running-none");
+            let runtime = FakeRuntime::default();
+            assert!(
+                !operations_for(store, &runtime)
+                    .reconcile_running()
+                    .await
+                    .unwrap()
+            );
+            assert_eq!(runtime.starts(), 0);
+            fs::remove_dir_all(root).unwrap();
+
+            // A joined client or an unknown role is never hosted.
+            for (label, role) in [("client", Some(MembershipRole::Client)), ("unknown", None)] {
+                let (root, store) = temp_store(&format!("running-{label}"));
+                store
+                    .save(&registry_with_role(NetworkId::from_bytes([0x75; 16]), role))
+                    .unwrap();
+                let runtime = FakeRuntime::default();
+                assert!(
+                    !operations_for(store, &runtime)
+                        .reconcile_running()
+                        .await
+                        .unwrap()
+                );
+                assert_eq!(runtime.starts(), 0, "{label}");
+                fs::remove_dir_all(root).unwrap();
+            }
+
+            // A host is re-asserted every time, and a failure is reported, not hidden.
+            let (root, store) = temp_store("running-host");
+            let network = NetworkId::from_bytes([0x76; 16]);
+            store
+                .save(&registry_with_role(network, Some(MembershipRole::Host)))
+                .unwrap();
+            let runtime = FakeRuntime::default();
+            let operations = operations_for(store, &runtime);
+            operations.reconcile_running().await.unwrap();
+            operations.reconcile_running().await.unwrap();
+            assert_eq!(runtime.starts(), 2);
+            runtime.state.fail_start.store(true, Ordering::SeqCst);
+            assert_eq!(
+                operations.reconcile_running().await.unwrap_err().kind(),
+                ErrorKind::PanFailure
+            );
+            // Durable membership is never touched by the check.
+            assert_eq!(
+                current_network(&operations.store.load().unwrap()).unwrap(),
+                Some(network)
+            );
+
+            // While a create or leave owns the host, the check skips this tick.
+            runtime.state.fail_start.store(false, Ordering::SeqCst);
+            let _busy = TransitionGuard::claim(&operations.creating).unwrap();
+            assert!(!operations.reconcile_running().await.unwrap());
+            assert_eq!(runtime.starts(), 3);
+            fs::remove_dir_all(root).unwrap();
+        });
     }
 
     #[test]
