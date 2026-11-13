@@ -1,0 +1,12 @@
+Package: blueroute-desktop
+Version: @VERSION@
+Section: net
+Priority: optional
+Architecture: @ARCH@
+Maintainer: BlueRoute maintainers <ekkus93@users.noreply.github.com>
+Depends: blueroute (= @VERSION@), @SHLIBS@
+Description: Desktop app for BlueRoute Bluetooth networks
+ A graphical app for the BlueRoute daemon: shows network status in plain
+ language, creates and leaves networks, reconnects a joined computer,
+ renames this computer and helps diagnose problems. Every change is
+ authorized by the daemon through PolicyKit.

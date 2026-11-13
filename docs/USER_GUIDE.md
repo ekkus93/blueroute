@@ -1,6 +1,6 @@
 # BlueRoute user guide (development build)
 
-**Status: not a finished consumer release.** BlueRoute has a Linux background service and a command-line client, both in the Debian package. A read-only terminal app and a desktop app exist but are run from a source checkout for now. Hosting and inspecting a local network work. **Joining is disabled in every packaged build** until it has passed a two-computer test on real hardware, so this is not yet a complete two-computer networking solution.
+**Status: not a finished consumer release.** BlueRoute has a Linux background service, a command-line client and a read-only terminal app (package `blueroute`), and a desktop app (package `blueroute-desktop`). Hosting and inspecting a local network work. **Joining is disabled in every packaged build** until it has passed a two-computer test on real hardware, so this is not yet a complete two-computer networking solution.
 
 ## What BlueRoute does
 
@@ -23,7 +23,12 @@ The initial development and packaging baseline is **Debian 13** with BlueZ, Netw
    cargo test --workspace --locked
    ```
 3. Run `packaging/debian/build-package.sh`. The script validates its Debian package manifest and dependencies, **not** clean installation on your specific computer.
-4. On a controlled Debian test machine with a matching amd64 architecture, install the generated `target/debian/blueroute_0.1.0_amd64.deb` with the Debian package manager. For example, from the checkout: `sudo apt install ./target/debian/blueroute_0.1.0_amd64.deb`.
+4. On a controlled Debian test machine with a matching amd64 architecture, install the generated packages with the Debian package manager. `blueroute` holds the service, the command-line client and the terminal app; `blueroute-desktop` adds the desktop app and its menu entry, and needs a graphical desktop. From the checkout:
+   ```sh
+   sudo apt install ./target/debian/blueroute_0.1.0_amd64.deb
+   # on a computer with a desktop, optionally:
+   sudo apt install ./target/debian/blueroute-desktop_0.1.0_amd64.deb
+   ```
 5. Verify the installed service and client:
    ```sh
    systemctl status blueroute.service
@@ -47,15 +52,15 @@ blueroute diagnostics show --summary
 
 `diagnostics show --summary` is a short overview; `blueroute diagnostics show` gives more detail. On a computer hosting a network, "Authenticated control peers" counts the computers that hold a verified connection to it, against the configured limit (a setting, not a measured Bluetooth limit). Fields that say **unavailable** are not reported yet; routes and the network layout are among them. A healthy local daemon does not prove a peer connection or working traffic. `blueroute node list` reports the local node only.
 
-### Terminal app (source checkout)
+### Terminal app
 
-On a text terminal, run `cargo run -p blueroute-tui --locked` from the source checkout. It is a full-screen, **read-only** view of the local daemon: `1`–`4` (or Tab) switch between Overview, Networks, Devices and Diagnostics, arrow keys scroll, `r` refreshes, `h` shows help (Esc closes it) and `q` quits. It updates by itself when the daemon reports a change, and shows a banner while it has lost contact with the service.
+On a text terminal, run `blueroute-tui` (or `cargo run -p blueroute-tui --locked` from a source checkout). It is a full-screen, **read-only** view of the local daemon: `1`–`4` (or Tab) switch between Overview, Networks, Devices and Diagnostics, arrow keys scroll, `r` refreshes, `h` shows help (Esc closes it) and `q` quits. It updates by itself when the daemon reports a change, and shows a banner while it has lost contact with the service.
 
 It never changes anything. Changes need your password, which a full-screen terminal cannot ask for, so each screen shows the exact `blueroute` command to run in a normal shell instead. A missing or incompatible daemon is reported as unavailable, never as a made-up healthy state.
 
-### Desktop app (source checkout)
+### Desktop app
 
-The desktop app shows the same status in plain language. It can create and leave a network, ask a joined computer to reconnect to its host, rename this computer, and help diagnose problems. Every change may ask for your password. Joining is shown but disabled until it is available. Build instructions are in [DEVELOPMENT.md](DEVELOPMENT.md).
+After installing `blueroute-desktop`, open **BlueRoute** from the applications menu (or run `blueroute-desktop`). The desktop app shows the same status in plain language. It can create and leave a network, ask a joined computer to reconnect to its host, rename this computer, and help diagnose problems. Every change may ask for your password. Joining is shown but disabled until it is available. To run it from a source checkout instead, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Create a local network (host-only development flow)
 

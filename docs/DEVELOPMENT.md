@@ -87,7 +87,7 @@ npx tauri build --debug --no-bundle   # build the desktop binary without packagi
 
 To run the app against the daemon on this machine, use `npm run tauri dev` from `apps/desktop` (it starts the Vite dev server and opens the window).
 
-Debian packaging of the desktop application is deliberately not part of this task (P15 gates it on P12 completion).
+`packaging/debian/build-package.sh` builds two packages: `blueroute` (daemon, CLI, TUI) and `blueroute-desktop` (the app, launcher and icon). Building them needs the pinned Node.js as well as Rust, because the app embeds its built frontend; it also needs `dpkg-dev` for `dpkg-shlibdeps`.
 
 ## Test classes
 

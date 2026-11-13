@@ -2882,6 +2882,8 @@ Cover:
 - [x] fresh startup reconciles only persisted membership; an empty first-install state does not create/share a network.
 - [ ] GUI detects daemon and capability state.
 
+**TUI and desktop packaged (2026-11-12):** `blueroute` now also installs `/usr/bin/blueroute-tui`, and a separate `blueroute-desktop` package (maintainer decision: keep WebKitGTK off daemon-only machines) installs the app, its validated launcher and icon. It depends on `blueroute (= version)` and on libraries computed by `dpkg-shlibdeps`; the build checks the binary embeds the frontend it just built, and both packages' file lists and root modes. Both packages also had their staging root fixed from 0700 to 0755. The upgrade test still passes. **This box stays open:** the app detects the daemon and capabilities in tests, but nobody has opened the installed app on a real desktop.
+
 **Acceptance**
 
 - Installation alone exposes no Bluetooth network or Internet uplink.

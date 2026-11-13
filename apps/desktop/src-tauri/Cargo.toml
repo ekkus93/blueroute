@@ -16,5 +16,9 @@ blueroute-desktop = { path = ".." }
 blueroute-protocol = { path = "../../../crates/blueroute-protocol" }
 tauri = { version = "=2.12.5", features = [] }
 
+[features]
+# Release builds serve the embedded frontend (ui/dist) instead of the dev server URL.
+custom-protocol = ["tauri/custom-protocol"]
+
 [lints]
 workspace = true

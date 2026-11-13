@@ -1,6 +1,6 @@
 # P15-001 — Debian package contents manifest
 
-This manifest defines the intended `blueroute` binary package layout for Debian 13. It is a packaging contract, not evidence that a `.deb` has been built or installed. P15-002..005 qualify build and lifecycle behavior separately.
+This manifest defines the `blueroute` and `blueroute-desktop` binary package layouts for Debian 13. It is a packaging contract, not evidence that a `.deb` has been built or installed. P15-002..005 qualify build and lifecycle behavior separately.
 
 ## Runtime files
 
@@ -8,12 +8,22 @@ This manifest defines the intended `blueroute` binary package layout for Debian 
 | --- | --- | --- | --- |
 | `target/release/blueroute-daemon` | `/usr/libexec/blueroute/blueroute-daemon` | `root:root`, `0755` | Privileged system D-Bus daemon. |
 | `target/release/blueroute` | `/usr/bin/blueroute` | `root:root`, `0755` | Unprivileged CLI client. |
-| `target/release/blueroute-tui` | `/usr/bin/blueroute-tui` | `root:root`, `0755` | TUI client; install once its P11 screens are functional. |
+| `target/release/blueroute-tui` | `/usr/bin/blueroute-tui` | `root:root`, `0755` | Read-only full-screen terminal client (shipped since 2026-11-12). |
 | `packaging/systemd/blueroute.service` | `/usr/lib/systemd/system/blueroute.service` | `root:root`, `0644` | Root service, journald output, systemd-managed state/runtime directories. |
 | `packaging/dbus/org.blueroute.Service1.conf` | `/usr/share/dbus-1/system.d/org.blueroute.Service1.conf` | `root:root`, `0644` | Root-only service-name ownership and local client method-call policy. |
 | `packaging/polkit/org.blueroute.policy` | `/usr/share/polkit-1/actions/org.blueroute.policy` | `root:root`, `0644` | Explicit administrator authorization for mutations. |
 
-P12's desktop application is currently an empty Rust shell. It must not be presented as a usable application or installed as a desktop launcher until P12-001..P12-012 deliver its bridge, workflows, metadata and artwork. The reserved future paths are `/usr/bin/blueroute-desktop`, `/usr/share/applications/org.blueroute.desktop`, and `/usr/share/icons/hicolor/scalable/apps/org.blueroute.svg`.
+## `blueroute-desktop` package (2026-11-12)
+
+The desktop app ships as a **separate** package so daemon-only machines do not pull in WebKitGTK and GTK (maintainer decision, 2026-11-12).
+
+| Source | Installed path | Owner / mode | Purpose |
+| --- | --- | --- | --- |
+| `target/release/blueroute-desktop-app` (built with `--features custom-protocol`) | `/usr/bin/blueroute-desktop` | `root:root`, `0755` | Desktop app; embeds its built frontend and talks to the daemon only through its fixed Tauri commands. |
+| `packaging/desktop/org.blueroute.desktop` | `/usr/share/applications/org.blueroute.desktop` | `root:root`, `0644` | Application launcher (validated with `desktop-file-validate`). |
+| `apps/desktop/src-tauri/icons/128x128.png` | `/usr/share/icons/hicolor/128x128/apps/org.blueroute.png` | `root:root`, `0644` | Launcher icon. |
+
+It depends on `blueroute` at exactly the same version, plus the shared libraries `dpkg-shlibdeps` computes from the binary (WebKitGTK 4.1, GTK 3, libsoup 3 and their base libraries). The build script checks the binary embeds the frontend it just built, so it can never ship pointing at the development server. The package must be built on the target distribution so the computed library package names match it.
 
 ## Runtime dependencies
 
@@ -31,4 +41,4 @@ Package removal stops the service and removes package-owned system policy and bi
 
 ## Reproducibility boundary
 
-P15-002 should generate this file list from source paths and a clean locked release build, then compare the resulting package contents to this manifest. TUI and desktop deliverables stay gated on their respective implementation tasks; they must not be replaced by empty stub binaries in a release package.
+P15-002 should generate this file list from source paths and a clean locked release build, then compare the resulting package contents to this manifest. Both packages' file lists are generated and compared by `packaging/debian/build-package.sh`, which also checks each package's root directory mode.

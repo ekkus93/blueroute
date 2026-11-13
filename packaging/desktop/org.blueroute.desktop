@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=BlueRoute
+GenericName=Bluetooth Network
+Comment=Connect nearby Linux computers over Bluetooth
+Exec=blueroute-desktop
+Icon=org.blueroute
+Terminal=false
+Categories=Network;
+Keywords=Bluetooth;Network;PAN;
+StartupNotify=true
