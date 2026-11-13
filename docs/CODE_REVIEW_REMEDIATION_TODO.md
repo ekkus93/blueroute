@@ -21,7 +21,7 @@
 | Task | Finding / outcome | Priority | Dependencies | State |
 | --- | --- | --- | --- | --- |
 | CR-BASE | Durable baseline and reproductions | Foundation | None | `[-]` |
-| CR-F8 | Owner-bound compatibility and command delivery | P2 | CR-BASE | `[ ]` |
+| CR-F8 | Owner-bound compatibility and command delivery | P2 | CR-BASE | `[x]` |
 | CR-F2 | Idle owner-loss detection and watcher recovery | P2 | CR-BASE; owner contract from CR-F8 | `[ ]` |
 | CR-F1 | Committed state publication and observer refresh | P2 | CR-BASE; CR-F2 for integrated acceptance | `[ ]` |
 | CR-F3 | Consistent graph insertion/update semantics | P2 | CR-BASE | `[ ]` |
@@ -61,21 +61,23 @@ its interrupted-cleanup and stopped-daemon fixtures depend on the entry point CR
 
 **Requirements:** OWN-1–OWN-4. **Original tasks:** P5-001/005.
 
-- [ ] **CR-F8-01:** Resolve the unique owner and use the same destination for compatibility
+- [x] **CR-F8-01:** Resolve the unique owner and use the same destination for compatibility
   negotiation, normal command delivery, and response handling.
-- [ ] **CR-F8-02:** Scope cached compatibility/subscription metadata to that owner. Preserve
+- [x] **CR-F8-02:** Scope cached compatibility/subscription metadata to that owner. Preserve
   exact typed error classification and established major/minor compatibility rules.
-- [ ] **CR-F8-03:** Handle owner loss before dispatch safely; prevent automatic replay after a
+- [x] **CR-F8-03:** Handle owner loss before dispatch safely; prevent automatic replay after a
   mutation might have been delivered or its reply lost.
-- [ ] **CR-F8-04:** Add a barrier-controlled A-to-API-99.0 owner-swap test during Version and
+- [x] **CR-F8-04:** Add a barrier-controlled A-to-API-99.0 owner-swap test during Version and
   assert the replacement receives zero Request calls.
-- [ ] **CR-F8-05:** Cover compatible replacement, relinquished-but-connected A, disappearance,
+- [x] **CR-F8-05:** Cover compatible replacement, relinquished-but-connected A, disappearance,
   queued old-owner events, and lost reply without mutation replay.
-- [ ] **CR-F8-06:** Review frontend/client call sites for assumptions that the version or stream
+- [x] **CR-F8-06:** Review frontend/client call sites for assumptions that the version or stream
   remains valid across a well-known-name ownership change.
 
 **Acceptance:** Incompatible replacement cannot receive a normal command under any tested
 handover. Existing CLI/bridge compatibility and authorization tests remain green.
+
+**Accepted (2026-11-13, `b3ba0bd`):** met; see [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-f8--owner-bound-operations-2026-11-13).
 
 ## CR-F2 — Detect owner loss and reconnect observers
 
@@ -322,7 +324,7 @@ Fill entries as work is qualified. Link concrete records; do not replace evidenc
 | Task / finding | Fix SHA / source | Regression and software results | Installed-system / physical evidence | Remaining gate | Status |
 | --- | --- | --- | --- | --- | --- |
 | CR-BASE | Reproduction tests at the CR-BASE commit | Baseline failures recorded in [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-base--baseline-and-reproductions-2026-11-13) | Preserve recorded baseline scope | CR-BASE-04 F5 fixtures (with CR-F5-01) | IN PROGRESS |
-| CR-F8 / F8 | Pending | Pending | Not required for the owner-race defect | Owner-bound command/event qualification | NOT STARTED |
+| CR-F8 / F8 | `b3ba0bd` | 5 `owner_race` tests pass (2 fail with the baseline client); all checks and bus suites green | Not required for the owner-race defect | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
 | CR-F2 / F2 | Pending | Pending | Private broker sufficient for the reported defect | Actual watcher loss/return behavior | NOT STARTED |
 | CR-F1 / F1 | Pending | Pending | Radio claims remain separate | Real producer-to-observer delivery | NOT STARTED |
 | CR-F3 / F3 | Pending | Pending | Not required for pure graph consistency | Atomic mutation and consumer invariants | NOT STARTED |
