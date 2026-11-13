@@ -20,13 +20,13 @@
 
 | Task | Finding / outcome | Priority | Dependencies | State |
 | --- | --- | --- | --- | --- |
-| CR-BASE | Durable baseline and reproductions | Foundation | None | `[-]` |
+| CR-BASE | Durable baseline and reproductions | Foundation | None | `[x]` |
 | CR-F8 | Owner-bound compatibility and command delivery | P2 | CR-BASE | `[x]` |
 | CR-F2 | Idle owner-loss detection and watcher recovery | P2 | CR-BASE; owner contract from CR-F8 | `[x]` |
 | CR-F1 | Committed state publication and observer refresh | P2 | CR-BASE; CR-F2 for integrated acceptance | `[x]` |
 | CR-F3 | Consistent graph insertion/update semantics | P2 | CR-BASE | `[x]` |
 | CR-F4 | Fresh operational capabilities after recovery | P2 | CR-BASE; CR-F1 for observer acceptance | `[x]` |
-| CR-F5 | Ownership-safe remove/purge cleanup | P2 | CR-BASE; lifecycle design | `[ ]` |
+| CR-F5 | Ownership-safe remove/purge cleanup | P2 | CR-BASE; lifecycle design | `[-]` |
 | CR-F6 | Effect-generation resource ownership | P3 | CR-BASE; watcher contract from CR-F2 | `[x]` |
 | CR-F7 | Current documentation and acceptance reconciliation | P3 | Baseline fixes can start immediately; final pass follows implementation | `[ ]` |
 | CR-INTEGRATION | Real producer-to-consumer regression coverage | Acceptance | CR-F1/F2/F3/F4/F5/F6/F8 software work | `[ ]` |
@@ -42,7 +42,7 @@
   original task relationships in durable evidence linked to this backlog.
 - [x] **CR-BASE-03:** Convert the isolated demonstrations for F1/F2/F3/F4/F6/F8 into meaningful
   repository regression tests whose corrected expectations fail against the baseline.
-- [-] **CR-BASE-04:** Establish cleanup fixtures for F5: owned and foreign profiles/addresses,
+- [x] **CR-BASE-04:** Establish cleanup fixtures for F5: owned and foreign profiles/addresses,
   routes, forwarding baseline/lease, interrupted cleanup, and a stopped daemon.
 - [x] **CR-BASE-05:** Record F7's concrete source/document discrepancies, preserving dated
   hardware evidence and distinguishing stale summaries from still-open acceptance.
@@ -54,8 +54,10 @@ baseline failures demonstrate the reported condition, rather than merely asserti
 
 **Progress (2026-11-13):** acceptance met. F1/F2/F3/F4/F6/F8 have repository regressions that fail
 on the baseline for the reported reason (committed disabled; each fix re-enables its own), F5 has
-its static basis, and F7 its discrepancy list; see the evidence record. CR-BASE-04 stays open:
-its interrupted-cleanup and stopped-daemon fixtures depend on the entry point CR-F5-01 designs.
+its static basis, and F7 its discrepancy list; see the evidence record. CR-BASE-04 completed with
+CR-F5 (`0b0beab`): fake-backend owned/foreign profiles and addresses, interrupted cleanup and
+retry, and running/stopped daemon fixtures in `apps/daemon/src/removal.rs`; routes and forwarding
+have no fixture because the daemon creates neither (design record).
 
 ## CR-F8 — Bind commands and versions to one owner
 
@@ -184,33 +186,38 @@ Hardware adapter-reset acceptance stays with CR-QUALIFY.
 
 **Requirements:** CLEAN-1–CLEAN-7. **Original tasks:** P15-005; P17-006.
 
-- [ ] **CR-F5-01:** Record the maintenance entry point, removal ownership scope, writer
+- [x] **CR-F5-01:** Record the maintenance entry point, removal ownership scope, writer
   quiescence/locking, resource order, timeout, and Debian failure/recovery behavior.
-- [ ] **CR-F5-02:** Provide stopped-service cleanup through typed adapters without invoking
+- [x] **CR-F5-02:** Provide stopped-service cleanup through typed adapters without invoking
   networking shell tools or adding generic frontend privileges.
-- [ ] **CR-F5-03:** Prevent daemon/startup/reconnect/control writers from restoring resources
+- [x] **CR-F5-03:** Prevent daemon/startup/reconnect/control writers from restoring resources
   during removal. Retain ownership metadata and runtime forwarding lease until no longer needed.
-- [ ] **CR-F5-04:** Enumerate and remove supported owned PAN, profile/interface/address/route
+- [x] **CR-F5-04:** Enumerate and remove supported owned PAN, profile/interface/address/route
   resources; reject ambiguous/cross-installation ownership and preserve foreign/default state.
-- [ ] **CR-F5-05:** Release forwarding according to its recorded baseline, preserving externally
+- [x] **CR-F5-05:** Release forwarding according to its recorded baseline, preserving externally
   enabled forwarding. Do not add absent gateway/NAT/firewall behavior.
-- [ ] **CR-F5-06:** Support NetworkManager-only cleanup while Bluetooth is unavailable; attempt
+- [x] **CR-F5-06:** Support NetworkManager-only cleanup while Bluetooth is unavailable; attempt
   independent safe work and retain unresolved ownership/retry evidence on partial failure.
-- [ ] **CR-F5-07:** Wire remove/deconfigure/purge separately from upgrade/restart/abort paths;
+- [x] **CR-F5-07:** Wire remove/deconfigure/purge separately from upgrade/restart/abort paths;
   retain durable state on remove and delete it on purge only after cleanup succeeds.
-- [ ] **CR-F5-08:** Stop swallowing cleanup failure. Return a useful non-secret failure and test
+- [x] **CR-F5-08:** Stop swallowing cleanup failure. Return a useful non-secret failure and test
   Debian recovery/retry paths without deleting the executable or evidence prematurely.
-- [ ] **CR-F5-09:** Add fake-backend cases for active/absent/replaced/foreign resources,
+- [x] **CR-F5-09:** Add fake-backend cases for active/absent/replaced/foreign resources,
   concurrent writers, service absence, timeout, partial failure, and repeated cleanup.
-- [ ] **CR-F5-10:** Extend isolated dpkg tests to assert cleanup invocation, ordering,
+- [x] **CR-F5-10:** Extend isolated dpkg tests to assert cleanup invocation, ordering,
   failure propagation, remove-then-purge, direct purge, upgrade, and abort behavior.
-- [ ] **CR-F5-11:** Verify scripts and cleanup executable embedded in the actual packages;
+- [x] **CR-F5-11:** Verify scripts and cleanup executable embedded in the actual packages;
   preserve the v2-to-v3 migration/stable-identity upgrade test.
 - [ ] **CR-F5-12:** Complete the installed-system/physical qualification in CR-QUALIFY before
   claiming no active networking remains after uninstall.
 
 **Acceptance:** Package removal succeeds only after verified owned runtime state is absent;
 foreign networking and retained user state remain intact. Full closure requires CR-QUALIFY.
+
+**Progress (2026-11-13, `0b0beab`):** SOFTWARE COMPLETE / QUALIFICATION DEFERRED. CR-F5-01..11
+are met in software and isolated dpkg tests; CR-F5-12 (installed-system and physical
+qualification) remains with CR-QUALIFY. See
+[evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-f5--removal-cleanup-software-2026-11-13).
 
 ## CR-F6 — Own asynchronous UI resources by effect generation
 
@@ -338,13 +345,13 @@ Fill entries as work is qualified. Link concrete records; do not replace evidenc
 
 | Task / finding | Fix SHA / source | Regression and software results | Installed-system / physical evidence | Remaining gate | Status |
 | --- | --- | --- | --- | --- | --- |
-| CR-BASE | Reproduction tests at the CR-BASE commit | Baseline failures recorded in [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-base--baseline-and-reproductions-2026-11-13) | Preserve recorded baseline scope | CR-BASE-04 F5 fixtures (with CR-F5-01) | IN PROGRESS |
+| CR-BASE | `a57539e`; F5 fixtures `0b0beab` | Baseline failures recorded in [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-base--baseline-and-reproductions-2026-11-13) | Preserve recorded baseline scope | None | COMPLETE |
 | CR-F8 / F8 | `b3ba0bd` | 5 `owner_race` tests pass (2 fail with the baseline client); all checks and bus suites green | Not required for the owner-race defect | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
 | CR-F2 / F2 | `e283b4e` | `owner_watch` (3), `watcher` (5), setup race in `owner_race`; UI stale-label tests; all checks green | Private broker sufficient for the reported defect | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
 | CR-F1 / F1 | `4de29b1` | `state_events` (7), daemon-to-watcher, link-phase and peer-snapshot tests; all checks green | Radio claims remain separate | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
 | CR-F3 / F3 | `4583c6e` | 11 `cr_f3` tests (4 failed on baseline); workspace green | Not required for pure graph consistency | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
 | CR-F4 / F4 | `6025bbf` | 5 `cr_f4` tests (1 failed on baseline); workspace green | Adapter behavior if claimed (not claimed) | Exact-head CI recorded under CR-VALIDATE | SOFTWARE COMPLETE |
-| CR-F5 / F5 | Pending | Pending | Required: CR-QUALIFY | Owned cleanup, foreign preservation, failure/retry | NOT STARTED |
+| CR-F5 / F5 | `0b0beab` | 10 removal, 4 binary, lifecycle and real-dpkg tests green locally | Required: CR-QUALIFY (open) | Installed-system/physical qualification | SOFTWARE COMPLETE / QUALIFICATION DEFERRED |
 | CR-F6 / F6 | `25e6984` | 8 `useDaemon` tests (4 fail with the baseline hook); desktop checks green | Not required for effect ownership | Exact-head CI recorded under CR-VALIDATE | COMPLETE |
 | CR-F7 / F7 | Pending | Pending | Preserve existing records | Current summaries and final acceptance accuracy | NOT STARTED |
 | CR-INTEGRATION | Pending | Pending | Isolated-system results where relevant | Boundary regressions included in CI | NOT STARTED |

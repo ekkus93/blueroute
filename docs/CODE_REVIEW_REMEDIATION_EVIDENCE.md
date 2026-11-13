@@ -321,3 +321,30 @@ instance, fake runtime, no restart):
 
 Checks at the fix: fmt, clippy, workspace tests, `state_events`, `authorization` bus suites.
 Hardware adapter-reset acceptance remains separate (CR-QUALIFY).
+
+## CR-F5 — removal cleanup, software (2026-11-13)
+
+**Design (CR-F5-01):** [CR-F5-REMOVAL-CLEANUP.md](CR-F5-REMOVAL-CLEANUP.md): entry point, scope,
+lock/marker quiescence, order, 60 s bound, failure and Debian behavior. **Fix:**
+`0b0beabae3a83c20fbd759fa307a25189dd4f8a3`.
+
+| Subtask | Where | Evidence |
+| --- | --- | --- |
+| 02 stopped-service cleanup, typed adapters, no new frontend privilege | `apps/daemon/src/removal.rs`, `main.rs` `--remove-owned-networking`; `SystemClientLeave` (NetworkManager/BlueZ D-Bus) | root-only (`/proc/self` owner), single fixed flag, not on the D-Bus API; `maintenance_mode.rs` (4 tests: other arguments → 2, non-root → 2 before touching state) |
+| 03 no writer during removal | instance lock `daemon.lock` (daemon holds it for life), `removal-pending` marker (daemon refuses to start) | `a_running_daemon_blocks_cleanup_and_a_pending_removal_blocks_the_daemon`; binary tests: marker → exit 1 "being removed", held lock → exit 1 |
+| 04 owned resources only | `remove_known_networks` over `leave_observed`; scope = registry NetworkIds + client record | `owned_state_of_known_networks_goes_and_everything_else_stays` (foreign preserved, counted unresolved); `a_foreign_panu_link_is_left_alone` |
+| 05 forwarding | none: the daemon never writes forwarding (no lease exists); cleanup never touches it | design table; code search: no forwarding writer in `apps/daemon` |
+| 06 NetworkManager-only, partial failure | Bluetooth optional; per-network failures do not stop others; reobservation decides | `a_proven_owned_panu_link_is_disconnected_first_and_only_with_bluetooth` (both cases), `a_partial_failure_reports_what_remains_and_keeps_going` (membership untouched, retry succeeds) |
+| 07 Debian paths | `prerm` remove/deconfigure only; `postinst` configure/abort-remove/abort-deconfigure clear marker; `postrm` purge deletes state | `test-maintainer-lifecycle.sh` (install, upgrade, remove, deconfigure, both aborts, direct purge order, purge after remove) |
+| 08 failure not swallowed | cleanup exit status propagates through `set -e`; message tells the administrator to fix and retry | lifecycle test: failing cleanup fails `prerm`, state kept; real dpkg: removal fails, package stays installed, `abort-remove` restarts the service, retry succeeds |
+| 09 fake-backend matrix | `removal.rs` tests (10) | active/absent (repeat no-op)/foreign/PANU proof, concurrent writer (lock), service absence (unreachable, no known network → no contact), timeout, partial failure, blind inventory (error, not success), unreadable registry (nothing removed) |
+| 10 isolated dpkg | `test-package-upgrade.sh` | real `dpkg --remove` with failing then succeeding cleanup, exact call order `stop → cleanup → disable`, purge, v2→v3 upgrade kept; `rm` guard on for every operation |
+| 11 packaged artifacts | CI extracts the built `.deb`, runs the lifecycle test on its embedded scripts, checks `/usr/libexec/blueroute/blueroute-daemon` is executable before the dpkg test swaps it for a mock | local run of both tests on `blueroute_0.1.0_amd64.deb` passed |
+| 12 installed-system qualification | — | **open**, CR-QUALIFY |
+
+Scripts prefix every fixed path with `${DPKG_ROOT:-}` (empty in normal operation; set by dpkg for
+chrootless runs), and the lifecycle test fails if any fixed path lacks it.
+
+**Not claimed:** that no active networking remains after uninstall on a real system; that a PANU
+link of a joined client ends with the daemon (BlueZ is expected to drop it with the caller, but
+cleanup does not rely on it). Both need CR-QUALIFY.
