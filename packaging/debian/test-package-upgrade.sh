@@ -2,11 +2,14 @@
 # Exercise an actual dpkg upgrade in an isolated package database and filesystem.
 # No host package installation, systemd operation, or Bluetooth device is required.
 set -euo pipefail
-if [[ $# -ne 1 || ! -f $1 ]]; then
-    echo "Usage: $0 path/to/blueroute_VERSION_ARCH.deb" >&2
+# STATE_CHECK is the `state_check` example from blueroute-linux, built from the same revision:
+# it loads the upgraded state with the new code the way the daemon does at startup.
+if [[ $# -ne 2 || ! -f $1 || ! -x $2 ]]; then
+    echo "Usage: $0 path/to/blueroute_VERSION_ARCH.deb path/to/state_check" >&2
     exit 2
 fi
 package="$(realpath -- "$1")"
+state_check="$(realpath -- "$2")"
 tmp="$(mktemp -d)"
 trap '/bin/rm -rf -- "$tmp"' EXIT
 mkdir -p "$tmp/old-root" "$tmp/old-control" "$tmp/root/var/lib/dpkg/updates" "$tmp/bin" "$tmp/guard-bin"
@@ -73,9 +76,19 @@ install_pkg() {
 }
 install_pkg "$tmp/old.deb"
 grep -Fxq 'invoke start blueroute.service' "$tmp/service.log"
-mkdir -p "$tmp/root/var/lib/blueroute"
-printf 'node-identity-fixture\n' > "$tmp/root/var/lib/blueroute/node-id"
-printf 'network-membership-fixture\n' > "$tmp/root/var/lib/blueroute/membership"
+# State as an older daemon left it, in the real formats and file names: a node identity and a
+# schema-v2 membership file (before host/client roles existed) with one hosted network and one
+# remembered network.
+state="$tmp/root/var/lib/blueroute"
+node=0102030405060708090a0b0c0d0e0f10
+hosted=11111111111111111111111111111111
+remembered=22222222222222222222222222222222
+mkdir -p "$state"
+printf '%s\n' "$node" > "$state/node-id"
+printf 'BLUEROUTE_MEMBERSHIP_V2\nnetwork\t%s\tmember\t4c6162\nnetwork\t%s\tnot-member\t4f6c64\n' \
+    "$hosted" "$remembered" > "$state/memberships-v1"
+chmod 600 "$state/node-id" "$state/memberships-v1"
+cp -a "$state" "$tmp/state-before"
 : > "$tmp/service.log"
 install_pkg "$package"
 test "$(dpkg-query --admindir="$tmp/root/var/lib/dpkg" -W -f='${Version}' blueroute)" = "$version"
@@ -84,8 +97,19 @@ if grep -Fq 'invoke stop blueroute.service' "$tmp/service.log"; then
     echo "Upgrade unexpectedly stopped the service" >&2
     exit 1
 fi
-test "$(cat "$tmp/root/var/lib/blueroute/node-id")" = node-identity-fixture
-test "$(cat "$tmp/root/var/lib/blueroute/membership")" = network-membership-fixture
+# dpkg itself must not touch the state.
+diff -r "$tmp/state-before" "$state"
+# The new code loads it as the daemon would at startup: same identity, the hosted network
+# migrated to the host role, the remembered one to no role, and the file rewritten as v3.
+expected="node=$node
+network=$hosted state=Member role=host
+network=$remembered state=NotMember role=none"
+test "$("$state_check" "$state")" = "$expected"
+test "$(head -n1 "$state/memberships-v1")" = BLUEROUTE_MEMBERSHIP_V3
+# Loading again is a no-op: same result, file unchanged.
+cp "$state/memberships-v1" "$tmp/migrated"
+test "$("$state_check" "$state")" = "$expected"
+cmp "$tmp/migrated" "$state/memberships-v1"
 test -x "$tmp/root/usr/bin/blueroute"
 test -x "$tmp/root/usr/libexec/blueroute/blueroute-daemon"
 # Verify the actual dpkg removal transition, including the packaged prerm/postrm.
@@ -106,8 +130,8 @@ if test -e "$tmp/root/usr/bin/blueroute" ||
     echo "Package removal left package-owned files behind" >&2
     exit 1
 fi
-test "$(cat "$tmp/root/var/lib/blueroute/node-id")" = node-identity-fixture
-test "$(cat "$tmp/root/var/lib/blueroute/membership")" = network-membership-fixture
+# Removal keeps the state, and it still loads.
+test "$("$state_check" "$state")" = "$expected"
 # Purge is a separate explicit action: unlike remove, it must delete the
 # persisted identity and membership. The guarded rm wrapper redirects the
 # packaged absolute deletion into the isolated dpkg root.
@@ -123,4 +147,4 @@ if dpkg-query --admindir="$tmp/root/var/lib/dpkg" -W -f='${Status}' blueroute 2>
     echo "Purged package still marked installed" >&2
     exit 1
 fi
-echo "Isolated dpkg upgrade $arch 0.0.1 -> $version preserved state and restarted service; removal retained state; purge deleted state."
+echo "Isolated dpkg upgrade $arch 0.0.1 -> $version kept identity, migrated v2 membership to v3 roles and restarted the service; removal retained state; purge deleted state."

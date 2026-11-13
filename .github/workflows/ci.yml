@@ -129,7 +129,9 @@ jobs:
           # Exercise the scripts embedded in the actual .deb, not only source files.
           BLUEROUTE_MAINTAINER_SCRIPT_DIR="$tmp/control" bash packaging/debian/test-maintainer-lifecycle.sh
           echo "Release Debian artifact built and inspected successfully."
-          bash packaging/debian/test-package-upgrade.sh "$package"
+          # Load the upgraded state with this revision's code, as the daemon would at startup.
+          cargo build --release --locked -p blueroute-linux --example state_check
+          bash packaging/debian/test-package-upgrade.sh "$package" target/release/examples/state_check
 
       - name: Validate D-Bus and PolicyKit authorization packaging
         run: |

@@ -2890,10 +2890,12 @@ Cover:
 
 ## P15-004 — Upgrade test
 
-- [ ] older fixture.
-- [ ] create state.
-- [ ] upgrade.
-- [ ] verify migration/service.
+- [x] older fixture (a package numbered 0.0.1 built from the same files stands in for an older release, which does not exist yet; the *state* is genuinely older: schema-v2 membership from before host/client roles).
+- [x] create state (real formats and file names: `node-id` and a v2 `memberships-v1` with one hosted and one remembered network, owner-only).
+- [x] upgrade (a real `dpkg` upgrade in an isolated root; the service is restarted, never stopped; the state files are byte-identical afterwards).
+- [x] verify migration/service (the new build's `state_check` example loads the state as the daemon does at startup: same NodeId, the hosted network migrated to `host` and the remembered one to no role, the file rewritten as v3; a second load is a no-op; after remove it still loads; purge deletes it).
+
+**Software complete (2026-11-12):** `packaging/debian/test-package-upgrade.sh` now takes the `state_check` binary and CI builds and passes it. The earlier version wrote placeholder text under a file name the daemon does not use (`membership`), so it never touched real state. **Still open:** an upgrade between two real releases on an installed system with systemd.
 
 **Acceptance**
 
