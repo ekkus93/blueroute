@@ -14,7 +14,9 @@ use std::time::{Duration, Instant};
 
 use async_io::Timer;
 use blueroute_desktop::{DaemonSignal, watch_daemon};
-use blueroute_protocol::{ApiVersion, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME};
+use blueroute_protocol::{
+    ApiVersion, DBUS_INTERFACE_NAME, DBUS_OBJECT_PATH, DBUS_SERVICE_NAME, STATE_CHANGED_SIGNAL,
+};
 use futures_lite::future;
 use zbus::connection::Builder;
 use zbus::object_server::SignalEmitter;
@@ -24,12 +26,19 @@ const CHILD: &str = "BLUEROUTE_WATCH_HANDOVER_CHILD";
 /// The child scenarios share the daemon's well-known name on one private bus.
 static BUS: Mutex<()> = Mutex::new(());
 const CURRENT: (u16, u16) = (ApiVersion::CURRENT.major, ApiVersion::CURRENT.minor);
+/// More signals, and more ownership notices, than zbus queues per stream (64).
+const FLOOD_SIGNALS: usize = 100;
+const FLOOD_CYCLES: usize = 40;
 
 /// Hands the name to `successor` inside its `handover`-th Version call. With `returns`, the
-/// successor gives it straight back (A→B→A) before A replies (LC-INTEGRATION-01).
+/// successor gives it straight back (A→B→A) before A replies (LC-INTEGRATION-01). With `flood`,
+/// that call instead emits [`FLOOD_SIGNALS`] change signals and then releases and reacquires the
+/// name [`FLOOD_CYCLES`] times before replying, overflowing both the signal and the ownership
+/// queues ahead of the reply (QR-INTEGRATION-01).
 struct Daemon {
     handover: Option<usize>,
     returns: bool,
+    flood: bool,
     calls: Arc<AtomicUsize>,
     own: Arc<OnceLock<Connection>>,
     successor: Arc<OnceLock<Connection>>,
@@ -39,7 +48,26 @@ struct Daemon {
 impl Daemon {
     async fn version(&self) -> (u16, u16) {
         let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
-        if self.handover == Some(call) {
+        if self.handover == Some(call) && self.flood {
+            let own = self.own.get().expect("own connection");
+            for _ in 0..FLOOD_SIGNALS {
+                own.emit_signal(
+                    None::<&str>,
+                    DBUS_OBJECT_PATH,
+                    DBUS_INTERFACE_NAME,
+                    STATE_CHANGED_SIGNAL,
+                    &7_u64,
+                )
+                .await
+                .expect("emit");
+            }
+            for _ in 0..FLOOD_CYCLES {
+                own.release_name(DBUS_SERVICE_NAME).await.expect("release");
+                own.request_name(DBUS_SERVICE_NAME)
+                    .await
+                    .expect("reacquire");
+            }
+        } else if self.handover == Some(call) {
             let own = self.own.get().expect("own connection");
             own.release_name(DBUS_SERVICE_NAME).await.expect("release");
             let successor = self.successor.get().expect("successor");
@@ -79,10 +107,11 @@ async fn serve(daemon: Daemon, owns_name: bool) -> Result<Connection, Box<dyn Er
     Ok(connection)
 }
 
-fn daemon(handover: Option<usize>, returns: bool) -> Daemon {
+fn daemon(handover: Option<usize>, returns: bool, flood: bool) -> Daemon {
     Daemon {
         handover,
         returns,
+        flood,
         calls: Arc::default(),
         own: Arc::default(),
         successor: Arc::default(),
@@ -150,28 +179,44 @@ fn the_desktop_watcher_reports_a_returning_daemon_as_a_new_period() {
     }
 }
 
+/// QR-INTEGRATION-01: A floods both queues and ends its period inside the check of its change.
+/// None of the old period's 100 changes reaches the UI; the loss does, then the returning A.
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn the_desktop_watcher_reports_a_saturated_loss_without_the_old_changes() {
+    if std::env::var_os(CHILD).is_none() {
+        run_child("saturated_loss_scenario");
+    }
+}
+
 #[test]
 #[ignore = "run by the_desktop_watcher_follows_an_event_time_handover_to_the_successor"]
 fn handover_scenario() -> Result<(), Box<dyn Error>> {
-    scenario(false)
+    scenario(false, false)
 }
 
 #[test]
 #[ignore = "run by the_desktop_watcher_reports_a_returning_daemon_as_a_new_period"]
 fn returning_owner_scenario() -> Result<(), Box<dyn Error>> {
-    scenario(true)
+    scenario(true, false)
 }
 
-fn scenario(returns: bool) -> Result<(), Box<dyn Error>> {
+#[test]
+#[ignore = "run by the_desktop_watcher_reports_a_saturated_loss_without_the_old_changes"]
+fn saturated_loss_scenario() -> Result<(), Box<dyn Error>> {
+    scenario(true, true)
+}
+
+fn scenario(returns: bool, flood: bool) -> Result<(), Box<dyn Error>> {
     if std::env::var_os(CHILD).is_none() {
         return Ok(());
     }
     future::block_on(async {
         use DaemonSignal::{Changed, Connected, Disconnected};
         // Version calls on A: 1 at connect, 2 when subscribing, 3 for A's change signal.
-        let a = daemon(Some(3), returns);
+        let a = daemon(Some(3), returns, flood);
         let successor = a.successor.clone();
-        let b = serve(daemon(None, false), false).await?;
+        let b = serve(daemon(None, false, false), false).await?;
         let _ = successor.set(b.clone());
         let a = serve(a, true).await?;
 

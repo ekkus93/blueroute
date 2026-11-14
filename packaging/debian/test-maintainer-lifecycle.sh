@@ -145,6 +145,22 @@ CLEANUP_EXIT=1 step prerm remove
 [[ $status -ne 0 ]] || fail 'a direct purge must stop at prerm while a role is unresolved'
 [[ -s "$state/memberships-v1" && -s "$state/client-record/record" ]] \
     || fail 'an unresolved cleanup must keep the membership and client record'
+# QR-RECOVERY (RLC-02): an incomplete manual recovery deletes only the membership. The matching
+# record is then an orphan and the real helper still exits 1
+# (qr_recovery_deleting_only_the_membership_leaves_an_orphan_record_and_fails), so the retry
+# stops at prerm again and the record, the proof for a correct retry, survives.
+: > "$state/memberships-v1"
+for action in remove deconfigure; do
+    : > "$BLUEROUTE_MAINTAINER_LOG"
+    CLEANUP_EXIT=1 step prerm "$action"
+    [[ $status -ne 0 ]] || fail "prerm $action must fail after an incomplete recovery"
+    check postinst "abort-$action" 'invoke start blueroute.service'
+done
+[[ -s "$state/client-record/record" && -e "$state/node-id" ]] \
+    || fail 'an incomplete recovery must keep the client record and identity'
+# The documented recovery also deletes the matching record; the real helper then exits 0
+# (qr_recovery_the_documented_recovery_of_an_unknown_role_completes), and purge completes.
+rm -f "$state/client-record/record"
 for script_action in 'prerm remove' 'postrm remove' 'postrm purge'; do
     read -r script action <<< "$script_action"
     step "$script" "$action"
@@ -160,4 +176,4 @@ step postrm remove
 check postrm purge ''
 [[ ! -e "$state" ]] || fail 'purge of a removed package must delete the state directory'
 
-printf 'Maintainer lifecycle contract passed (install, upgrade, remove, purge, abort, cleanup failure, unresolved role).\n'
+printf 'Maintainer lifecycle contract passed (install, upgrade, remove, purge, abort, cleanup failure, unresolved role, manual recovery).\n'

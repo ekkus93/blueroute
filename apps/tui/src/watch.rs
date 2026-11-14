@@ -209,17 +209,48 @@ mod tests {
     /// Hands the name to `successor` inside its third Version call: the check of its first change
     /// signal (calls 1 and 2 are the watcher's connect and subscribe). With `returns`, the
     /// successor gives the name straight back (A→B→A) before A replies.
+    ///
+    /// With `flood`, the third call instead emits [`FLOOD_SIGNALS`] change signals and then
+    /// releases and reacquires the name [`FLOOD_CYCLES`] times before replying (QR-INTEGRATION):
+    /// both the signal and the ownership queues overflow ahead of the reply.
     struct HandoverDaemon {
         calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
         own: std::sync::Arc<std::sync::OnceLock<zbus::Connection>>,
         successor: Option<zbus::Connection>,
         returns: bool,
+        flood: bool,
     }
+
+    /// More signals, and more ownership notices, than zbus queues per stream (64).
+    const FLOOD_SIGNALS: usize = 100;
+    const FLOOD_CYCLES: usize = 40;
 
     #[zbus::interface(name = "org.blueroute.Service1")]
     impl HandoverDaemon {
         async fn version(&self) -> (u16, u16) {
             let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            if call == 3 && self.flood {
+                let own = self.own.get().expect("own connection");
+                for _ in 0..FLOOD_SIGNALS {
+                    own.emit_signal(
+                        None::<&str>,
+                        blueroute_protocol::DBUS_OBJECT_PATH,
+                        blueroute_protocol::DBUS_INTERFACE_NAME,
+                        blueroute_protocol::STATE_CHANGED_SIGNAL,
+                        &7_u64,
+                    )
+                    .await
+                    .unwrap();
+                }
+                for _ in 0..FLOOD_CYCLES {
+                    own.release_name(blueroute_protocol::DBUS_SERVICE_NAME)
+                        .await
+                        .unwrap();
+                    own.request_name(blueroute_protocol::DBUS_SERVICE_NAME)
+                        .await
+                        .unwrap();
+                }
+            }
             if call == 3
                 && let Some(successor) = &self.successor
             {
@@ -269,7 +300,7 @@ mod tests {
     #[test]
     #[ignore = "needs a private bus: run with dbus-run-session"]
     fn tui_watcher_follows_an_event_time_handover_to_the_successor() {
-        handover_through_the_tui(false);
+        handover_through_the_tui(false, false);
     }
 
     /// LC-INTEGRATION-01: A→B→A inside the check of A's change. The old period's change never
@@ -278,10 +309,20 @@ mod tests {
     #[test]
     #[ignore = "needs a private bus: run with dbus-run-session"]
     fn tui_watcher_reports_a_returning_daemon_as_a_new_period() {
-        handover_through_the_tui(true);
+        handover_through_the_tui(true, false);
     }
 
-    fn handover_through_the_tui(returns: bool) {
+    /// QR-INTEGRATION-01: inside the check of A's change, A floods both queues past their
+    /// capacity and ends its period (40 release/reacquire cycles) before replying. None of the
+    /// old period's 100 changes shows; the loss does, within the bound, then the returning A in a
+    /// new period. On f957d80 the watcher stalls behind its own full queues and reports nothing.
+    #[test]
+    #[ignore = "needs a private bus: run with dbus-run-session"]
+    fn tui_watcher_reports_a_saturated_loss_without_the_old_changes() {
+        handover_through_the_tui(true, true);
+    }
+
+    fn handover_through_the_tui(returns: bool, flood: bool) {
         let _bus = bus();
         futures_lite::future::block_on(async {
             let b = zbus::connection::Builder::session()
@@ -293,6 +334,7 @@ mod tests {
                         own: Default::default(),
                         successor: None,
                         returns: false,
+                        flood: false,
                     },
                 )
                 .unwrap()
@@ -309,8 +351,9 @@ mod tests {
                     HandoverDaemon {
                         calls: Default::default(),
                         own: own.clone(),
-                        successor: Some(b.clone()),
+                        successor: (!flood).then(|| b.clone()),
                         returns,
+                        flood,
                     },
                 )
                 .unwrap()

@@ -565,3 +565,126 @@ fn qr_queue_the_transport_argument_is_pinned_to_the_verified_zbus() {
         );
     }
 }
+
+/// Runs the scripted daemon on its own thread until dropped, so the test thread can block.
+struct DaemonThread {
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<Result<(), String>>>,
+}
+
+impl DaemonThread {
+    fn spawn(rig: &Rig) -> Self {
+        let daemon = Daemon {
+            connection: rig.a.clone(),
+            script: rig.script.clone(),
+        };
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopped = stop.clone();
+        let thread = std::thread::spawn(move || {
+            future::block_on(future::or(
+                async { daemon.serve().await.map_err(|error| error.to_string()) },
+                async {
+                    wait_for(&stopped).await;
+                    Ok(())
+                },
+            ))
+        });
+        Self {
+            stop,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for DaemonThread {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// QR-INTEGRATION-01: the RLC-01 reproduction through the production shared watcher. The test
+/// blocks the watcher's executor thread from the item's Version call until the daemon has
+/// replied and finished 40 release/reacquire cycles. The watcher must then report the loss within
+/// the bound, pass nothing of the old period on, reconnect and hear the current period.
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn qr_integration_the_shared_watcher_reports_a_saturated_loss() -> Result<(), Box<dyn Error>> {
+    use blueroute_client::WatchSignal::{Changed, Connected, Disconnected};
+    let _bus = BUS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    future::block_on(async {
+        let rig = rig().await?;
+        // Watcher connect = Version 1, subscribe = 2, the item's check = 3.
+        rig.script.at.store(3, Ordering::SeqCst);
+        rig.script.cycles_after_reply.store(40, Ordering::SeqCst);
+        let _daemon = DaemonThread::spawn(&rig);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let connection = rig.client_connection.clone();
+        let watcher = blueroute_client::watch(
+            move || {
+                let connection = connection.clone();
+                async move { BlueRouteClient::from_connection(connection).await }
+            },
+            |_| async {
+                Timer::after(Duration::from_millis(10)).await;
+            },
+            move |signal| {
+                sink.lock().unwrap().push(signal);
+                std::ops::ControlFlow::Continue(())
+            },
+        );
+        let wait_for_signals = |expected: Vec<blueroute_client::WatchSignal>, bound| {
+            let seen = seen.clone();
+            async move {
+                within(bound, async {
+                    while *seen.lock().unwrap() != expected {
+                        Timer::after(Duration::from_millis(5)).await;
+                    }
+                })
+                .await
+                .ok_or_else(|| format!("expected {expected:?}, saw {:?}", seen.lock().unwrap()))
+            }
+        };
+        let scenario = async {
+            wait_for_signals(vec![Connected], Duration::from_secs(3)).await?;
+            emit(&rig.a, Item::State).await?;
+            wait_for(&rig.script.arrived).await;
+            // Block this thread, and with it the watcher, across the reply and the burst.
+            rig.script.go.store(true, Ordering::SeqCst);
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !rig.script.done.load(Ordering::SeqCst) {
+                if std::time::Instant::now() > deadline {
+                    return Err("the daemon never finished its burst".into());
+                }
+                std::thread::yield_now();
+            }
+            // Resumed: the loss within the bound, then the reconnect on the 10 ms backoff.
+            wait_for_signals(vec![Connected, Disconnected], BOUND).await?;
+            wait_for_signals(
+                vec![Connected, Disconnected, Connected],
+                Duration::from_secs(3),
+            )
+            .await?;
+            emit(&rig.a, Item::State).await?;
+            wait_for_signals(
+                vec![Connected, Disconnected, Connected, Changed],
+                Duration::from_secs(2),
+            )
+            .await?;
+            Ok::<(), Box<dyn Error>>(())
+        };
+        future::or(
+            async {
+                watcher.await;
+                Err("the watcher stopped".into())
+            },
+            scenario,
+        )
+        .await
+    })
+}
