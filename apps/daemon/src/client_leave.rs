@@ -73,7 +73,15 @@ pub async fn leave_observed(
         && live.peer.as_ref() == Some(&host)
         && (retained.is_some_and(|expected| &live == expected) || owned.contains(&live.interface))
     {
-        backend.disconnect_panu(live).await?;
+        backend.disconnect_panu(live.clone()).await?;
+        // Keep the ownership proof until the link is observed gone (FU-04, REMOVE-2): a
+        // disconnect that did not take leaves everything in place for a retry.
+        if backend.observe_panu(host).await?.as_ref() == Some(&live) {
+            return Err(CoreError::new(
+                ErrorKind::PanFailure,
+                "the BlueRoute PANU link is still connected after disconnecting it",
+            ));
+        }
     }
 
     for address in addresses {

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use async_io::Timer;
-use blueroute_core::{CoreError, ErrorKind, NetworkId};
+use blueroute_core::{CoreError, ErrorKind, MembershipRole, NetworkId};
 use blueroute_linux::{BackendFuture, NetworkMembershipStore, PeerHandle};
 use futures_lite::future;
 
@@ -56,13 +56,17 @@ pub struct RemovalReport {
     /// Resources carrying BlueRoute ownership of networks this installation does not know.
     /// Preserved, and reported, but not a failure: they are not this installation's.
     pub unresolved: usize,
+    /// Joined-client networks whose PANU link could not be observed (Bluetooth unavailable, or
+    /// no recorded host device). Their owned state is kept as proof for a retry, and cleanup
+    /// fails (FU-04, REMOVE-1).
+    pub unresolved_links: usize,
     /// Whether Bluetooth was reachable, so a proven-owned PANU link could be disconnected.
     pub bluetooth: bool,
 }
 
 impl RemovalReport {
     pub fn succeeded(&self) -> bool {
-        self.failed_networks == 0 && self.remaining == 0
+        self.failed_networks == 0 && self.remaining == 0 && self.unresolved_links == 0
     }
 }
 
@@ -122,28 +126,55 @@ fn mark_removal_pending(state_directory: &Path) -> Result<(), CoreError> {
         .map_err(|error| io_error("BlueRoute removal marker could not be written", &error))
 }
 
-/// The networks this installation owns state for, each with the recorded host device of a joined
-/// client (an untrusted hint, used only to find a PANU link to prove).
-pub fn removal_scope(
-    paths: &RemovalPaths,
-) -> Result<BTreeMap<NetworkId, Option<PeerHandle>>, CoreError> {
+/// What cleanup must do for one known network.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct NetworkScope {
+    /// This node joined the network as a client (persisted role, or a client record), so a PANU
+    /// link may exist and must be observed before the proof of ownership goes.
+    pub client: bool,
+    /// The recorded host device: an untrusted hint, used only to find a PANU link to prove.
+    pub host_hint: Option<PeerHandle>,
+}
+
+/// The networks this installation owns state for.
+pub fn removal_scope(paths: &RemovalPaths) -> Result<BTreeMap<NetworkId, NetworkScope>, CoreError> {
     // An unreadable registry fails: ownership could not be proven.
     let registry = NetworkMembershipStore::new(paths.memberships.clone()).load()?;
-    let mut known: BTreeMap<NetworkId, Option<PeerHandle>> = registry
+    let mut known: BTreeMap<NetworkId, NetworkScope> = registry
         .networks()
-        .map(|membership| (membership.network_id, None))
+        .map(|membership| {
+            let client = membership.role == Some(MembershipRole::Client);
+            (
+                membership.network_id,
+                NetworkScope {
+                    client,
+                    host_hint: None,
+                },
+            )
+        })
         .collect();
     if let Some(record) = ClientRecordStore::new(paths.client_record.clone()).load()? {
-        known.insert(record.network(), record.device_hint().cloned());
+        known.insert(
+            record.network(),
+            NetworkScope {
+                client: true,
+                host_hint: record.device_hint().cloned(),
+            },
+        );
     }
     Ok(known)
 }
 
 /// Remove every known network's owned state, then reobserve. One network's failure does not
 /// stop the others; nothing without a known network's ownership is touched.
+///
+/// A host network needs only NetworkManager. A joined-client network may have a PANU link, and
+/// "Bluetooth unreachable" is not evidence that it is gone: unless Bluetooth is up and the host
+/// device is recorded, its owned profile and address are left in place (they prove the link is
+/// ours on a retry) and it counts as unresolved, which fails cleanup (FU-04).
 pub async fn remove_known_networks(
     backend: &dyn OwnedInventory,
-    known: &BTreeMap<NetworkId, Option<PeerHandle>>,
+    known: &BTreeMap<NetworkId, NetworkScope>,
     bluetooth: bool,
 ) -> Result<RemovalReport, CoreError> {
     let mut report = RemovalReport {
@@ -151,9 +182,15 @@ pub async fn remove_known_networks(
         bluetooth,
         ..RemovalReport::default()
     };
-    for (network, hint) in known {
-        // Without Bluetooth there is no PANU link to look at; NetworkManager cleanup still runs.
-        let hint = if bluetooth { hint.as_ref() } else { None };
+    for (network, scope) in known {
+        let hint = match (scope.client, bluetooth, scope.host_hint.as_ref()) {
+            (false, _, _) => None,
+            (true, true, Some(hint)) => Some(hint),
+            (true, _, _) => {
+                report.unresolved_links += 1;
+                continue;
+            }
+        };
         if leave_observed(backend, *network, None, hint).await.is_err() {
             report.failed_networks += 1;
         }
@@ -203,6 +240,34 @@ where
     .await
 }
 
+/// The maintenance helper's exit status and its single log line: 0 only for a full success,
+/// 1 for any failure (including unresolved client links). Counts and a coarse class only.
+pub fn cleanup_outcome(outcome: &Result<RemovalReport, CoreError>) -> (i32, serde_json::Value) {
+    match outcome {
+        Ok(report) => (
+            i32::from(!report.succeeded()),
+            serde_json::json!({
+                "component": "removal_cleanup",
+                "outcome": if report.succeeded() { "succeeded" } else { "failed" },
+                "networks": report.networks,
+                "failed_networks": report.failed_networks,
+                "remaining_owned_resources": report.remaining,
+                "unresolved_foreign_resources": report.unresolved,
+                "unresolved_client_links": report.unresolved_links,
+                "bluetooth_available": report.bluetooth,
+            }),
+        ),
+        Err(error) => (
+            1,
+            serde_json::json!({
+                "component": "removal_cleanup",
+                "outcome": "failed",
+                "failure_class": format!("{:?}", error.kind()),
+            }),
+        ),
+    }
+}
+
 fn io_error(message: &'static str, error: &std::io::Error) -> CoreError {
     CoreError::with_diagnostic(ErrorKind::Internal, message, error.to_string())
 }
@@ -248,6 +313,8 @@ mod tests {
         unremovable: Vec<NetworkInterfaceHandle>,
         panu: Option<PanAttachment>,
         disconnected: usize,
+        /// The link survives a disconnect request.
+        sticky_link: bool,
         fail_inventory: bool,
     }
 
@@ -324,7 +391,7 @@ mod tests {
         fn disconnect_panu(&self, expected: PanAttachment) -> BackendFuture<'_, ()> {
             Box::pin(async move {
                 let mut world = self.0.lock().unwrap();
-                if world.panu.as_ref() == Some(&expected) {
+                if world.panu.as_ref() == Some(&expected) && !world.sticky_link {
                     world.panu = None;
                     world.disconnected += 1;
                 }
@@ -485,7 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn a_proven_owned_panu_link_is_disconnected_first_and_only_with_bluetooth() {
+    fn a_proven_owned_panu_link_is_disconnected_with_bluetooth_and_unresolved_without() {
         for bluetooth in [true, false] {
             let paths = state(&[net(1)], true);
             let fake = Fake::with(|world| {
@@ -499,14 +566,19 @@ mod tests {
             });
             let (outcome, fake) = run(&paths, fake, bluetooth);
             let report = outcome.unwrap();
-            assert!(report.succeeded(), "{report:?}");
             assert_eq!(report.bluetooth, bluetooth);
-            // Without Bluetooth, NetworkManager cleanup still completes.
-            assert_eq!(
-                fake.world(|world| world.disconnected),
-                usize::from(bluetooth)
-            );
-            assert!(fake.world(|world| world.profiles.is_empty()));
+            if bluetooth {
+                assert!(report.succeeded(), "{report:?}");
+                assert_eq!(fake.world(|world| world.disconnected), 1);
+                assert!(fake.world(|world| world.profiles.is_empty()));
+            } else {
+                // Corrected (FU-04): an unobservable client link is unresolved, not success, and
+                // the proof it needs stays.
+                assert!(!report.succeeded(), "{report:?}");
+                assert_eq!(report.unresolved_links, 1);
+                assert_eq!(fake.world(|world| world.disconnected), 0);
+                assert_eq!(fake.world(|world| world.profiles.len()), 1);
+            }
             std::fs::remove_dir_all(&paths.state_directory).unwrap();
         }
     }
@@ -658,7 +730,6 @@ mod tests {
     // 6d200d0, where cleanup without Bluetooth removes the proof, reports success, and leaves a
     // later Bluetooth-enabled retry unable to disconnect the owned link.
     #[test]
-    #[ignore = "FU-04 regression: fails on 6d200d0 until FU-04 is fixed"]
     fn fu_04_unresolved_client_teardown_fails_and_keeps_its_proof_for_the_retry() {
         let owned_link = PanAttachment {
             role: PanRole::Panu,
@@ -706,5 +777,118 @@ mod tests {
             "a repeat after full cleanup must succeed"
         );
         std::fs::remove_dir_all(&paths.state_directory).unwrap();
+    }
+
+    fn owned_link(interface: &str) -> PanAttachment {
+        PanAttachment {
+            role: PanRole::Panu,
+            interface: iface(interface),
+            peer: Some(host_device()),
+        }
+    }
+
+    fn client_world(panu: Option<PanAttachment>) -> Fake {
+        Fake::with(|world| {
+            world.addresses = vec![address(net(1), "bnep0")];
+            world.profiles = vec![(net(1), iface("bnep0"))];
+            world.panu = panu;
+        })
+    }
+
+    #[test]
+    fn fu_04_an_already_absent_link_with_bluetooth_up_is_proven_gone() {
+        // Also the state after an interruption between disconnecting and removing the proof.
+        let paths = state(&[net(1)], true);
+        let (outcome, fake) = run(&paths, client_world(None), true);
+        assert!(outcome.unwrap().succeeded());
+        assert!(fake.world(|world| world.profiles.is_empty() && world.addresses.is_empty()));
+        std::fs::remove_dir_all(&paths.state_directory).unwrap();
+    }
+
+    #[test]
+    fn fu_04_a_disconnect_that_does_not_take_keeps_the_proof() {
+        let paths = state(&[net(1)], true);
+        let fake = client_world(Some(owned_link("bnep0")));
+        fake.0.lock().unwrap().sticky_link = true;
+        let (outcome, fake) = run(&paths, fake, true);
+        let report = outcome.unwrap();
+        assert!(!report.succeeded(), "{report:?}");
+        assert_eq!(report.failed_networks, 1);
+        // Nothing was removed: the retry can still prove the link ours.
+        assert_eq!(fake.world(|world| world.profiles.len()), 1);
+        assert_eq!(fake.world(|world| world.addresses.len()), 1);
+        fake.0.lock().unwrap().sticky_link = false;
+        let (outcome, _) = run(&paths, fake, true);
+        assert!(outcome.unwrap().succeeded());
+        std::fs::remove_dir_all(&paths.state_directory).unwrap();
+    }
+
+    #[test]
+    fn fu_04_a_link_to_another_device_on_a_reused_interface_name_is_left_alone() {
+        let paths = state(&[net(1)], true);
+        let other = PanAttachment {
+            role: PanRole::Panu,
+            interface: iface("bnep0"),
+            peer: Some(PeerHandle::new("/org/bluez/hci0/dev_BB_00_00_00_00_02").unwrap()),
+        };
+        let (outcome, fake) = run(&paths, client_world(Some(other.clone())), true);
+        assert!(outcome.unwrap().succeeded());
+        // Only the recorded host's link could be ours; this one was not touched.
+        assert_eq!(fake.world(|world| world.panu.clone()), Some(other));
+        assert_eq!(fake.world(|world| world.disconnected), 0);
+        std::fs::remove_dir_all(&paths.state_directory).unwrap();
+    }
+
+    #[test]
+    fn fu_04_without_proof_a_live_link_is_never_disconnected() {
+        // The owned profile and address are already gone (vanished proof), or name a different
+        // interface (conflicting proof): the live link cannot be proven ours.
+        for profiles in [Vec::new(), vec![(net(1), iface("bnep3"))]] {
+            let paths = state(&[net(1)], true);
+            let fake = Fake::with(|world| {
+                world.profiles = profiles.clone();
+                world.panu = Some(owned_link("bnep0"));
+            });
+            let (outcome, fake) = run(&paths, fake, true);
+            assert!(outcome.unwrap().succeeded());
+            assert_eq!(fake.world(|world| world.disconnected), 0);
+            assert!(fake.world(|world| world.panu.is_some()));
+            std::fs::remove_dir_all(&paths.state_directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn fu_04_a_client_network_known_only_by_role_is_unresolved_without_a_host_device() {
+        // A joined client whose client record could not be written: the role still says client.
+        let paths = state(&[], false);
+        let mut registry = MembershipRegistry::default();
+        let mut membership = NetworkMembership::new(net(1), DisplayName::new("Joined").unwrap());
+        membership.state = blueroute_core::MembershipState::Member;
+        membership.role = Some(blueroute_core::MembershipRole::Client);
+        registry.remember_network(membership);
+        NetworkMembershipStore::new(paths.memberships.clone())
+            .save(&registry)
+            .unwrap();
+        let (outcome, fake) = run(&paths, client_world(Some(owned_link("bnep0"))), true);
+        let report = outcome.unwrap();
+        assert!(!report.succeeded());
+        assert_eq!(report.unresolved_links, 1);
+        assert_eq!(fake.world(|world| world.profiles.len()), 1);
+        std::fs::remove_dir_all(&paths.state_directory).unwrap();
+    }
+
+    #[test]
+    fn an_unresolved_client_link_makes_the_helper_exit_nonzero() {
+        let unresolved = RemovalReport {
+            networks: 1,
+            unresolved_links: 1,
+            ..RemovalReport::default()
+        };
+        let (code, line) = cleanup_outcome(&Ok(unresolved));
+        assert_eq!(code, 1);
+        assert_eq!(line["outcome"], "failed");
+        assert_eq!(line["unresolved_client_links"], 1);
+        let (code, line) = cleanup_outcome(&Ok(RemovalReport::default()));
+        assert_eq!((code, line["outcome"].as_str()), (0, Some("succeeded")));
     }
 }

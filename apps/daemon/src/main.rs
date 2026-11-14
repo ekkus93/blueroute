@@ -9,9 +9,9 @@ use blueroute_daemon::{
     EXPERIMENTAL_JOIN, JoinControlConfig, NetworkOperations, PeerPinStore,
     PendingHostCommitAuthorization, PendingJoinOperations, PendingJoinStore, ReconnectPolicy,
     RemovalPaths, SingleStarNetworkOperations, SystemClientLeave,
-    TransactionalJoinNetworkOperations, acquire_instance_lock, current_network, removal_pending,
-    run_removal_cleanup, spawn_daemon_control_worker_with_peers, spawn_daemon_runtime_worker,
-    spawn_state_publisher, system_diagnostics_from_report,
+    TransactionalJoinNetworkOperations, acquire_instance_lock, cleanup_outcome, current_network,
+    removal_pending, run_removal_cleanup, spawn_daemon_control_worker_with_peers,
+    spawn_daemon_runtime_worker, spawn_state_publisher, system_diagnostics_from_report,
 };
 use blueroute_linux::{
     NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
@@ -99,28 +99,7 @@ fn remove_owned_networking() -> i32 {
         },
         CLEANUP_BOUND,
     ));
-    let (code, line) = match outcome {
-        Ok(report) => (
-            i32::from(!report.succeeded()),
-            serde_json::json!({
-                "component": "removal_cleanup",
-                "outcome": if report.succeeded() { "succeeded" } else { "failed" },
-                "networks": report.networks,
-                "failed_networks": report.failed_networks,
-                "remaining_owned_resources": report.remaining,
-                "unresolved_foreign_resources": report.unresolved,
-                "bluetooth_available": report.bluetooth,
-            }),
-        ),
-        Err(error) => (
-            1,
-            serde_json::json!({
-                "component": "removal_cleanup",
-                "outcome": "failed",
-                "failure_class": format!("{:?}", error.kind()),
-            }),
-        ),
-    };
+    let (code, line) = cleanup_outcome(&outcome);
     eprintln!("{line}");
     if code != 0 {
         eprintln!(

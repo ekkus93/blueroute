@@ -1,6 +1,6 @@
 # CR-F5: Removal Cleanup Design
 
-Status: accepted for implementation (2026-11-13). Requirements: CLEAN-1–CLEAN-7 in
+Status: accepted (2026-11-13); **revised 2026-11-13 by FU-04** (see "Joined-client networks"): the original skip-and-succeed rule for an unobservable PANU link conflicted with CLEAN-5 and is withdrawn. Requirements: CLEAN-1–CLEAN-7 in
 [CODE_REVIEW_REMEDIATION_SPEC.md](CODE_REVIEW_REMEDIATION_SPEC.md). This records CR-F5-01.
 
 ## What can remain after the service stops
@@ -15,8 +15,8 @@ Status: accepted for implementation (2026-11-13). Requirements: CLEAN-1–CLEAN-
 | IP forwarding | nothing | The daemon never enables forwarding (routing is not implemented; P18 stays off). Cleanup must not touch forwarding. No lease exists to release. |
 | Routes, NAT, firewall | nothing | Never created; cleanup adds no such behavior (CLEAN-3). |
 
-So the stopped-service cleanup is NetworkManager state plus, when Bluetooth is up, a proven-owned
-PANU link.
+So the stopped-service cleanup is NetworkManager state plus, for a joined client, a PANU link
+that must be observed: proven ours and disconnected, or observed absent.
 
 ## Entry point (CLEAN-1, CLEAN-7)
 
@@ -47,6 +47,24 @@ of `/proc/self`, without `unsafe`). The state directory is the daemon's (`BLUERO
   installation, a purged one): preserved and reported as unresolved. They do not fail removal,
   because they are not this installation's.
 - Anything without BlueRoute ownership metadata is never touched.
+
+### Joined-client networks (FU-04, REMOVE-1..3)
+
+A network is a joined-client network when its persisted membership role is `client` or the client
+record names it. Bluetooth being unreachable is not evidence that its PANU link is gone, so:
+
+- With Bluetooth up and the host device recorded, the link to that device is disconnected only
+  when it runs on an interface carrying this network's ownership, and then observed again; the
+  owned address and profile (the proof) are removed only after it is observed gone. A link that
+  is already absent counts as gone. A link to another device, or one on an interface without this
+  network's ownership, is never touched.
+- Otherwise (Bluetooth unreachable, or no recorded host device) the network is left completely
+  untouched, counted as `unresolved_client_links`, and cleanup fails. A retry with Bluetooth
+  back finds the proof still in place.
+- Host networks never need Bluetooth.
+
+No new durable cleanup record exists: the NetworkManager ownership metadata stays the proof
+(maintainer decision, 2026-11-13).
 - An unreadable membership registry fails cleanup: ownership cannot be proven.
 
 ## Order, bounds and failure (CLEAN-4, CLEAN-5)
@@ -55,14 +73,16 @@ of `/proc/self`, without `unsafe`). The state directory is the daemon's (`BLUERO
 2. Load the registry and client record.
 3. Connect NetworkManager (required when any network is known; with none known there is nothing
    this installation can own, so cleanup succeeds without it). Connect BlueZ best effort; without
-   it, PANU handling is skipped and NetworkManager cleanup still runs.
-4. Per known network: PANU first (while the owned profile still proves it), then addresses, then
-   profiles. One network's failure does not stop the others.
-5. Reobserve. Success only if no address or profile owned by a known network remains.
+   it, host networks are still cleaned and joined-client networks are left unresolved.
+4. Per known network: PANU first (while the owned profile still proves it, then observed gone),
+   then addresses, then profiles. One network's failure does not stop the others.
+5. Reobserve. Success only if no address or profile owned by a known network remains, no step
+   failed, and no joined-client link is unresolved.
 6. The whole run is bounded by 60 seconds; a timeout is a failure.
 
 Logs are JSON lines with categories, counts and coarse failure classes only. Exit status 0 is
-success, 1 is failure (resources remain, a backend was unreachable, timeout, a running daemon),
+success, 1 is failure (resources remain, a client link is unresolved, a backend was unreachable, timeout, a
+running daemon),
 2 is a refused invocation. A retry reobserves and resumes; every step is idempotent. Membership is
 never cleared to hide a failure.
 
