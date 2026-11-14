@@ -196,7 +196,7 @@ scope and limitations are recorded without installed-system/physical claims.
 [qualification procedure](CR-QUALIFY-PROCEDURE.md),
 [hardware tracker](HARDWARE_ACCEPTANCE_BACKLOG.md).
 
-- [ ] **LC-QUALIFY-01:** Extend adapter-free Part A fixtures/procedure with active unknown role
+- [x] **LC-QUALIFY-01:** Extend adapter-free Part A fixtures/procedure with active unknown role
   plus client record, retained proof and failed removal/purge; retain confirmed completed-leave
   and recovery cases. State clearly that procedure readiness is separate from execution.
 - [ ] **LC-QUALIFY-02:** On designated disposable equipment, execute the revised installed-system

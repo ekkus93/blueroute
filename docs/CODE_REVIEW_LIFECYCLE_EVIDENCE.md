@@ -273,3 +273,21 @@ At the LC-INTEGRATION source:
 - `cargo clippy --workspace --all-targets --locked -- -D warnings` and `cargo fmt --check` are
   clean, and the lifecycle harness passes.
 - The frontend (UI effect generation) is unchanged; it is re-run in LC-VALIDATE.
+
+## LC-QUALIFY-01 — Procedure revised; execution deferred (2026-11-14)
+
+- **Fixture.** `apps/daemon/examples/qualify_fixture.rs` gains two modes. `unknown` creates an
+  active membership with no role, a client record and an owned address on a given (dummy)
+  interface. `left` creates a completed leave (`not-member`) whose client record was not cleared.
+  Both use the production stores and NetworkManager adapter. The fixture is still test-only and
+  not packaged. It builds and its usage check runs (exit 2 without arguments). Its
+  NetworkManager path needs a real system bus and root, so it has not been run.
+- **Procedure.** [CR-QUALIFY-PROCEDURE.md](CR-QUALIFY-PROCEDURE.md) Part A3 gains three cases:
+  - unknown role with Bluetooth stopped and running: removal and purge fail with
+    `"unresolved_roles":1`, and the proof, membership and record are kept;
+  - unknown-role recovery through the documented administrator steps, then a repeat;
+  - completed leave with a stale record, which succeeds.
+
+  The status line states that procedure readiness is not execution.
+- **Not done here.** Executing Part A (LC-QUALIFY-02) needs a disposable VM with sudo. Part B
+  (LC-QUALIFY-03) needs the designated Bluetooth rig. Neither is available to this session.

@@ -9,6 +9,10 @@
 //! qualify_fixture host    <state-dir>             # known hosted network: owned bridge + address
 //! qualify_fixture client  <state-dir> <iface>     # known joined client: owned address on <iface>
 //!                                                 #   plus a client record (Bluetooth host hint)
+//! qualify_fixture unknown <state-dir> <iface>     # as `client`, but the membership has no role
+//!                                                 #   (member/none): removal must stay unresolved
+//! qualify_fixture left    <state-dir> <iface>     # as `client`, but a completed leave
+//!                                                 #   (not-member) whose record was not cleared
 //! qualify_fixture foreign <state-dir>             # owned bridge + address of a network the
 //!                                                 #   registry does NOT know (another install)
 //! ```
@@ -47,10 +51,13 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let (mode, state, interface) = match arguments.as_slice() {
         [mode, state] if mode == "host" || mode == "foreign" => (mode.as_str(), state, None),
-        [mode, state, interface] if mode == "client" => (mode.as_str(), state, Some(interface)),
+        [mode, state, interface] if matches!(mode.as_str(), "client" | "unknown" | "left") => {
+            (mode.as_str(), state, Some(interface))
+        }
         _ => {
             eprintln!(
-                "usage: qualify_fixture host|foreign <state-dir> | client <state-dir> <iface>"
+                "usage: qualify_fixture host|foreign <state-dir> | client|unknown|left \
+                 <state-dir> <iface>"
             );
             std::process::exit(2);
         }
@@ -61,7 +68,8 @@ async fn run() -> Result<(), Box<dyn Error>> {
         Ipv4StarAddressPlan::for_network(network, DaemonConfig::default().ipv4_address_pool)?;
     let backend = NetworkManagerBackend::connect_system().await?;
 
-    if mode == "client" {
+    let joined = matches!(mode, "client" | "unknown" | "left");
+    if joined {
         let interface = NetworkInterfaceHandle::new(interface.expect("checked above").as_str())?;
         backend
             .ensure_address(InterfaceAddress {
@@ -87,16 +95,18 @@ async fn run() -> Result<(), Box<dyn Error>> {
         let store = NetworkMembershipStore::new(state.join("memberships-v1"));
         let mut registry = store.load()?;
         let mut membership = NetworkMembership::new(network, DisplayName::new("QA fixture")?);
-        membership.state = MembershipState::Member;
-        membership.role = Some(if mode == "client" {
-            MembershipRole::Client
-        } else {
-            MembershipRole::Host
-        });
+        // `unknown` stores an active membership without a role, which the store accepts and
+        // removal cleanup must leave unresolved (LC-CLEANUP). `left` is a completed leave.
+        (membership.state, membership.role) = match mode {
+            "client" => (MembershipState::Member, Some(MembershipRole::Client)),
+            "unknown" => (MembershipState::Member, None),
+            "left" => (MembershipState::NotMember, None),
+            _ => (MembershipState::Member, Some(MembershipRole::Host)),
+        };
         registry.remember_network(membership);
         store.save(&registry)?;
     }
-    if mode == "client" {
+    if joined {
         let record = ClientRecord::new(
             network,
             NodeId::from_bytes([0x51; 16]),
