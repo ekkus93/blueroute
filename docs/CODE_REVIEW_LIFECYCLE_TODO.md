@@ -35,7 +35,7 @@
 | Task | Outcome | Dependencies | State |
 | --- | --- | --- | --- |
 | LC-BASE | Durable reproductions and isolated failing tests | None | `[-]` |
-| LC-OWNER | P2 RFU-01: ownership-period retirement | LC-BASE | `[ ]` |
+| LC-OWNER | P2 RFU-01: ownership-period retirement | LC-BASE | `[x]` |
 | LC-CLEANUP | P2 RFU-02: unknown active role and proof retention | LC-BASE | `[ ]` |
 | LC-INTEGRATION | Actual consumer/helper boundaries and CI coverage | LC-OWNER, LC-CLEANUP | `[ ]` |
 | LC-VALIDATE | Exact-candidate software/package/CI checks | LC-INTEGRATION | `[ ]` |
@@ -68,20 +68,20 @@ the intended reason; setup and teardown are isolated and bounded.
 
 **Requirements:** EPOCH-1..5. **Earlier tasks:** FU-02-02/03, FU-INTEGRATION-02.
 
-- [ ] **LC-OWNER-01:** Define subscription ownership periods, delivery decision ordering,
+- [x] **LC-OWNER-01:** Define subscription ownership periods, delivery decision ordering,
   queued owner notices, transient verification errors, cancellation and monitor resource lifetime.
-- [ ] **LC-OWNER-02:** Account for retirement at signal selection, during Version and during
+- [x] **LC-OWNER-02:** Account for retirement at signal selection, during Version and during
   final verification. Prevent a ready reply or reacquired unique name from bypassing a transition.
-- [ ] **LC-OWNER-03:** Keep retirement terminal, including late replies/queued events; ensure
+- [x] **LC-OWNER-03:** Keep retirement terminal, including late replies/queued events; ensure
   cancellation cannot consume a retirement without recording it. Require a fresh subscription.
-- [ ] **LC-OWNER-04:** Test A→B→A with the consumer paused until reply and notices are ready,
+- [x] **LC-OWNER-04:** Test A→B→A with the consumer paused until reply and notices are ready,
   for typed Event and StateChanged. Require OwnerLost first and rejection on every later old wait.
-- [ ] **LC-OWNER-05:** Cover A→unowned→A, retirement before signal selection, held/late Version,
+- [x] **LC-OWNER-05:** Cover A→unowned→A, retirement before signal selection, held/late Version,
   final-verification ordering and cancellation during validation; use controlled acknowledgements.
-- [ ] **LC-OWNER-06:** Verify fresh returning-A subscription and snapshot refresh; retain ordinary
+- [x] **LC-OWNER-06:** Verify fresh returning-A subscription and snapshot refresh; retain ordinary
   compatible/incompatible B, no successor, healthy A, and transient-check-error behavior. Preserve
   the two-second actively-polled loss bound, bounded backoff and no busy polling/task leaks.
-- [ ] **LC-OWNER-07:** Recheck unique-owner Version/Request destinations, compatibility rules,
+- [x] **LC-OWNER-07:** Recheck unique-owner Version/Request destinations, compatibility rules,
   zero ordinary Requests to incompatible successors, and no mutation replay after possible delivery.
 
 **Acceptance:** RFU-01 fails at the baseline and passes with all required ordering scenarios.
@@ -238,7 +238,7 @@ Keep software outcomes separate from actual installed-system/physical results.
 | Task / finding | Fix SHA and source | Regression / negative control / software evidence | Qualification or remaining gate | State |
 | --- | --- | --- | --- | --- |
 | LC-BASE | `e167198` baseline | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-base--findings-preserved-and-corrected-expectations-established-2026-11-14): RFU-01 2/2 corrected tests fail; RFU-02 test fails, committed with its fix | Isolated reproducible fixtures | IN PROGRESS |
-| LC-OWNER / RFU-01 | — | EPOCH-1..5 pending | Software ownership-period acceptance | NOT STARTED |
+| LC-OWNER / RFU-01 | LC-OWNER commit, `crates/blueroute-client/src/lib.rs` | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-owner--subscriptions-retire-when-their-ownership-period-ends-2026-11-14): EPOCH-1..5, 9 broker tests and 1 unit test; 5/9 fail on both negative controls | Software ownership-period acceptance | ACCEPTED (software) |
 | LC-CLEANUP / RFU-02 | — | SCOPE-1..6 pending | LC-QUALIFY for actual installed/PAN claims | NOT STARTED |
 | LC-INTEGRATION | — | VERIFY-1/2/4 pending | Actual consumer/helper boundaries and CI scheduling | NOT STARTED |
 | LC-VALIDATE | — | VERIFY-3/4 pending | Exact-candidate checks/packages/CI | NOT STARTED |

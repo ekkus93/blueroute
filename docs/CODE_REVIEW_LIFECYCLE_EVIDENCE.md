@@ -67,3 +67,75 @@ never-committed `.serena/` and `AGENTS.md`. rustc/cargo 1.95.0, zbus 5.19.0 (asy
   NetworkManager, BlueZ or system bus is reached.
 - Package-level tests (`packaging/debian/test-maintainer-lifecycle.sh`) already use a temporary
   `DPKG_ROOT` with a mocked helper, so they cannot reach host buses. LC-INTEGRATION extends them.
+
+## LC-OWNER — Subscriptions retire when their ownership period ends (2026-11-14)
+
+**Source.** The LC-OWNER commit on top of `5845584` (`crates/blueroute-client/src/lib.rs`).
+
+### Design (LC-OWNER-01..03)
+
+- **Ownership period.** The subscription records `since`: the receive position (zbus
+  `Message::recv_position`) of the `GetNameOwner` reply that named its owner during validation.
+  A `NameOwnerChanged` notice received after `since` that leaves the name with anyone but that
+  owner ends the period. An owner's own acquisition notice does not, and nor do notices
+  received before `since`, which describe earlier history. An unreadable notice ends the period.
+- **Delivery decision point.** After an item's Version check, the final `GetNameOwner` reply is
+  the decision point. The item is delivered only if (a) the reply names the bound owner and
+  (b) no period-ending notice was received before that reply. zbus's single socket reader hands
+  each message to every stream before it reads the next one, so when the reply is in hand every
+  earlier notice is already queued and can be settled without waiting (`ended_before`).
+  Comparing names alone (the 75c1a01 behavior) cannot distinguish A from A-after-B.
+- **Progress.** The period stays watched while the subscription waits for signals and while the
+  Version reply is pending, so neither a held reply nor a paused signal source delays the loss.
+- **Terminal and cancellation-safe.** Every detected end sets the persistent `retired` flag in
+  the same poll that consumes the notice; a cancelled wait therefore cannot consume and forget
+  it. A period-ending notice received *after* a valid decision does not withdraw that
+  delivery; it retires the subscription for the next call. A returning owner is reachable only
+  through a fresh subscription, which validates compatibility again.
+- **Transient errors.** Only `NameHasNoOwner` from the final check retires (`shows_no_owner`).
+  Timeouts, no-reply, limits and I/O errors are returned without ending a healthy subscription.
+- **Unchanged.** API 1.7, no wire epoch field, unique-owner Version/Request destinations,
+  major/minor compatibility rules and no mutation replay. No polling: the drain is a
+  non-blocking read of already-queued notices, and no task or buffer is added.
+
+### Regressions (LC-OWNER-04..07)
+
+`crates/blueroute-client/tests/ownership_period.rs` (private broker, raw fake daemon, barrier
+acknowledgements). All 9 pass with the fix:
+
+| Test | Scenario |
+| --- | --- |
+| `lc_owner_a_returning_owner_does_not_deliver_its_obsolete_event` / `…_state_change` | A→B→A inside the item's Version check; consumer paused until the reply and notices are queued; OwnerLost first, every later wait retired, fresh subscription hears A's new period |
+| `lc_owner_a_signal_queued_before_a_release_and_reacquire_is_not_delivered` | A→unowned→A with old Event and StateChanged queued before selection |
+| `lc_owner_a_handover_and_return_during_final_verification_is_not_delivered` / `lc_owner_a_release_and_reacquire_during_final_verification_is_not_delivered` | The period ends after A replied, while the final check is pending |
+| `lc_owner_a_held_reply_does_not_delay_the_end_of_the_period` | A→B→A then a held reply; actively polled loss within 2 s; late reply changes nothing |
+| `lc_owner_cancelling_during_validation_does_not_erase_the_end_of_the_period` | The wait is dropped mid-validation; the next wait reports OwnerLost |
+| `lc_owner_a_returning_owner_is_validated_again_before_a_fresh_subscription` | A returns incompatible: the fresh subscription is refused and no Request reaches A |
+| `lc_owner_a_continuous_period_keeps_delivering` | Healthy A delivers Event and StateChanged items in order; Requests still reach A |
+
+Unit test `lc_owner_only_a_missing_owner_retires_on_a_failed_final_check` covers the
+transient-error classification, since a broker-level GetNameOwner fault cannot be injected.
+
+Preserved suites, all passing with the fix (private brokers): `event_owner_race` 6,
+`owner_race` 6, `owner_watch` 3, `watcher` 8, `dbus_client` 1; desktop `watch_integration` 2
+and `watch_handover` 2; TUI `tui_watcher` 2; client unit tests 4.
+
+### Negative controls (isolated worktree, shared target directory)
+
+| Control | Result |
+| --- | --- |
+| Fix with the ordered decision drain disabled | 5 of 9 fail: both returning-owner cases, both final-verification cases, revalidation |
+| Baseline `75c1a01` subscription code | The same 5 fail |
+
+The 4 that pass under both controls are held-reply progress, cancellation, the queued-signal
+A→unowned→A case and the healthy period. The baseline already passes them, because its
+ownership watch wins when the notice is ready before the Version reply. They guard against
+regressions rather than detect RFU-01.
+
+### Limitations
+
+- The "notice received after a valid decision" branch is reasoned, not exercised. Its window is
+  between two consecutive messages at the client, and a broker test cannot place a notice
+  there deterministically.
+- The queue-ordering argument relies on zbus 5.19's single socket reader, which is documented
+  for `MessageStream::poll_next_before`. A zbus upgrade must keep that property.

@@ -87,6 +87,7 @@ jobs:
         run: |
           dbus-run-session -- cargo test -p blueroute-client --test owner_race --locked -- --ignored
           dbus-run-session -- cargo test -p blueroute-client --test event_owner_race --locked -- --ignored
+          dbus-run-session -- cargo test -p blueroute-client --test ownership_period --locked -- --ignored
 
       - name: Run state publication tests (CR-F1)
         run: |

@@ -15,7 +15,8 @@ use blueroute_protocol::{
 };
 use futures_lite::StreamExt;
 use zbus::fdo::{DBusProxy, NameOwnerChangedStream};
-use zbus::names::{BusName, OwnedUniqueName};
+use zbus::message::Sequence;
+use zbus::names::OwnedUniqueName;
 use zbus::proxy::SignalStream;
 use zbus::{Connection, Proxy};
 
@@ -39,6 +40,9 @@ pub struct BlueRouteClient {
 struct ValidatedOwner {
     name: OwnedUniqueName,
     version: ApiVersion,
+    /// Receive position of the `GetNameOwner` reply that named this owner: the start of the
+    /// ownership period it was validated in.
+    since: Sequence,
 }
 
 impl BlueRouteClient {
@@ -170,6 +174,7 @@ impl BlueRouteClient {
         Ok(EventSubscription {
             connection: self.connection.clone(),
             owner: owner.name,
+            since: owner.since,
             stream,
             state,
             owner_changes,
@@ -189,36 +194,98 @@ pub enum Change {
 }
 
 /// Event stream that rechecks daemon compatibility before accepting every event payload.
+///
+/// A subscription belongs to one continuous ownership period of the daemon's name: the one in
+/// which `owner` was validated, starting at `since`. Once that owner gives the name up, the
+/// period is over for good; the same connection taking the name back starts a new period that
+/// only a fresh subscription can bind to (LC-OWNER, EPOCH-1).
 pub struct EventSubscription {
     connection: Connection,
     /// The unique bus name the subscription is bound to.
     owner: OwnedUniqueName,
+    /// Where the bound ownership period began, in this connection's receive order. Ownership
+    /// notices received before it describe earlier history and are ignored.
+    since: Sequence,
     stream: SignalStream<'static>,
     /// `StateChanged` invalidations, for a [`BlueRouteClient::changes`] subscription.
     state: Option<SignalStream<'static>>,
     /// Ownership changes of the daemon's well-known name only.
     owner_changes: NameOwnerChangedStream,
-    /// Set once the bound owner was seen to go; nothing is delivered afterwards (FU-02).
+    /// Set once the bound period was seen to end; nothing is delivered afterwards (FU-02).
     retired: bool,
 }
 
-/// Resolves when an ownership change retires `owner`: the name moved to another owner or was
-/// released, or the bus connection closed. A change that leaves the name with `owner` is only
-/// the queued notice of it taking the name, and is skipped.
-async fn owner_retired(changes: &mut NameOwnerChangedStream, owner: &OwnedUniqueName) {
+/// Whether one ownership notice ends `owner`'s period that began at `since`: received after
+/// that start, it leaves the name with anyone but `owner` (another owner, or nobody). A notice
+/// that leaves the name with `owner` (its own acquisition) does not, and neither does one from
+/// before the period began. An unreadable notice ends it: ownership can no longer be proven.
+fn ends_period(
+    change: &zbus::fdo::NameOwnerChanged,
+    owner: &OwnedUniqueName,
+    since: Sequence,
+) -> bool {
+    if change.message().recv_position() <= since {
+        return false;
+    }
+    change
+        .args()
+        .ok()
+        .and_then(|args| args.new_owner().as_ref().map(|new| new == owner))
+        != Some(true)
+}
+
+/// Whether a failed final ownership check demonstrates owner loss. Only "nobody owns the name"
+/// does. A transient failure of the check itself (a bus timeout, for instance) is reported
+/// without ending a healthy subscription (EPOCH-3).
+fn shows_no_owner(error: &ClientError) -> bool {
+    matches!(
+        error,
+        ClientError::Bus(zbus::Error::FDO(error))
+            if matches!(**error, zbus::fdo::Error::NameHasNoOwner(_))
+    )
+}
+
+/// Resolves when an ownership notice ends the bound period, or the bus connection closes.
+async fn owner_retired(
+    changes: &mut NameOwnerChangedStream,
+    owner: &OwnedUniqueName,
+    since: Sequence,
+) {
+    while let Some(change) = changes.next().await {
+        if ends_period(&change, owner, since) {
+            return;
+        }
+    }
+}
+
+/// Settles every ownership notice already queued when the decision reply was received.
+///
+/// zbus reads one connection's messages in order and hands each to every stream before it reads
+/// the next, so by the time the reply at `decision` is in hand every notice received before it
+/// is already queued: an empty queue means none exists. Returns whether one of them ended the
+/// period. A period-ending notice received after the decision does not withdraw it; it retires
+/// the subscription for the next call instead, so it is never consumed and forgotten (EPOCH-2/3).
+async fn ended_before(
+    changes: &mut NameOwnerChangedStream,
+    owner: &OwnedUniqueName,
+    since: Sequence,
+    decision: Sequence,
+    retired: &mut bool,
+) -> bool {
     loop {
-        match changes.next().await {
-            Some(change) => {
-                let still_ours = change
-                    .args()
-                    .ok()
-                    .and_then(|args| args.new_owner().as_ref().map(|new| new == owner))
-                    == Some(true);
-                if !still_ours {
-                    return;
+        match futures_lite::future::poll_once(changes.next()).await {
+            None => return false,
+            // The bus connection closed: nothing can be proven any more.
+            Some(None) => return true,
+            Some(Some(change)) => {
+                if ends_period(&change, owner, since) {
+                    if change.message().recv_position() < decision {
+                        return true;
+                    }
+                    *retired = true;
+                    return false;
                 }
             }
-            None => return,
         }
     }
 }
@@ -244,10 +311,13 @@ impl EventSubscription {
     /// The next event or invalidation. Ends with [`ClientError::OwnerLost`] when the bound owner
     /// goes away, and every item is accepted only after that same owner's version is rechecked.
     ///
-    /// Delivery decision (FU-02, OWNER-1..3): the owner is watched the whole time, including
-    /// while an item's version is checked. An item is delivered only if, after that check, the
-    /// bound owner still holds the name; a retirement seen at any point ends the subscription for
-    /// good, and the pending check (and its late reply) is dropped.
+    /// Delivery decision (FU-02, LC-OWNER, EPOCH-1..3): the period is watched the whole time,
+    /// including while an item's version is checked, so a held reply cannot delay the loss.
+    /// After the check, a final `GetNameOwner` is the decision point: the item is delivered only
+    /// if the bound owner holds the name there *and* no notice received before that reply ended
+    /// the period. Comparing names alone would let an owner that gave the name away and took it
+    /// back (A→B→A) deliver an item of its old period. A retirement seen at any point ends the
+    /// subscription for good, and the pending check (and its late reply) is dropped.
     pub async fn next_change(&mut self) -> Result<Change, ClientError> {
         if self.retired {
             return Err(ClientError::OwnerLost);
@@ -255,6 +325,7 @@ impl EventSubscription {
         let Self {
             connection,
             owner,
+            since,
             stream,
             state,
             owner_changes,
@@ -266,8 +337,9 @@ impl EventSubscription {
                 None => futures_lite::future::pending().await,
             }
         });
+        let since = *since;
         let next = futures_lite::future::or(signals, async {
-            owner_retired(owner_changes, owner).await;
+            owner_retired(owner_changes, owner, since).await;
             Next::Retired
         })
         .await;
@@ -287,7 +359,7 @@ impl EventSubscription {
         let checked = futures_lite::future::or(
             async { Some(negotiate_version_at(connection, owner).await) },
             async {
-                owner_retired(owner_changes, owner).await;
+                owner_retired(owner_changes, owner, since).await;
                 None
             },
         )
@@ -300,22 +372,22 @@ impl EventSubscription {
             Some(Err(error)) => return Err(error),
             Some(Ok(_)) => {}
         }
-        // The decision point: the checked owner must still be the current one.
-        match current_owner(connection).await {
-            Ok(current) if current == *owner => {}
+        // The decision point: the checked owner must still be the current one, in the same period.
+        let decision = match current_owner(connection).await {
+            Ok((current, decision)) if current == *owner => decision,
             Ok(_) => {
                 *retired = true;
                 return Err(ClientError::OwnerLost);
             }
-            // Only "nobody owns the name" retires. A transient failure of the check itself (a bus
-            // timeout, for instance) is reported without ending a healthy subscription.
-            Err(ClientError::Bus(zbus::Error::FDO(error)))
-                if matches!(*error, zbus::fdo::Error::NameHasNoOwner(_)) =>
-            {
+            Err(error) if shows_no_owner(&error) => {
                 *retired = true;
                 return Err(ClientError::OwnerLost);
             }
             Err(error) => return Err(error),
+        };
+        if ended_before(owner_changes, owner, since, decision, retired).await {
+            *retired = true;
+            return Err(ClientError::OwnerLost);
         }
 
         if is_state {
@@ -338,20 +410,35 @@ impl EventSubscription {
 
 /// Resolve the well-known name to its current unique owner and check that owner's version there.
 async fn validated_owner(connection: &Connection) -> Result<ValidatedOwner, ClientError> {
-    let name = current_owner(connection).await?;
+    let (name, since) = current_owner(connection).await?;
     let version = negotiate_version_at(connection, &name).await?;
-    Ok(ValidatedOwner { name, version })
+    Ok(ValidatedOwner {
+        name,
+        version,
+        since,
+    })
 }
 
-/// The unique bus name currently owning the daemon's well-known name. No owner is
-/// `NameHasNoOwner`, which classifies as unavailable.
-async fn current_owner(connection: &Connection) -> Result<OwnedUniqueName, ClientError> {
-    let bus = DBusProxy::new(connection).await.map_err(ClientError::Bus)?;
-    let name = BusName::try_from(DBUS_SERVICE_NAME)
-        .map_err(|error| ClientError::Bus(zbus::Error::Names(error)))?;
-    bus.get_name_owner(name)
+/// The unique bus name currently owning the daemon's well-known name, and the receive position
+/// of the reply that said so. No owner is `NameHasNoOwner`, which classifies as unavailable.
+async fn current_owner(
+    connection: &Connection,
+) -> Result<(OwnedUniqueName, Sequence), ClientError> {
+    let bus_error = |error: zbus::Error| {
+        ClientError::Bus(zbus::Error::FDO(Box::new(zbus::fdo::Error::from(error))))
+    };
+    let reply = connection
+        .call_method(
+            Some("org.freedesktop.DBus"),
+            "/org/freedesktop/DBus",
+            Some("org.freedesktop.DBus"),
+            "GetNameOwner",
+            &DBUS_SERVICE_NAME,
+        )
         .await
-        .map_err(|error| ClientError::Bus(zbus::Error::FDO(Box::new(error))))
+        .map_err(bus_error)?;
+    let name: OwnedUniqueName = reply.body().deserialize().map_err(bus_error)?;
+    Ok((name, reply.recv_position()))
 }
 
 async fn negotiate_version_at(
@@ -520,6 +607,24 @@ pub const PROJECT_NAME: &str = "BlueRoute";
 #[cfg(test)]
 mod error_class_tests {
     use super::*;
+
+    #[test]
+    fn lc_owner_only_a_missing_owner_retires_on_a_failed_final_check() {
+        let fdo = |error| ClientError::Bus(zbus::Error::FDO(Box::new(error)));
+        assert!(shows_no_owner(&fdo(zbus::fdo::Error::NameHasNoOwner(
+            "gone".into()
+        ))));
+        for transient in [
+            fdo(zbus::fdo::Error::Timeout("slow".into())),
+            fdo(zbus::fdo::Error::NoReply("lost".into())),
+            fdo(zbus::fdo::Error::LimitsExceeded("busy".into())),
+            ClientError::Bus(zbus::Error::InputOutput(std::sync::Arc::new(
+                std::io::Error::other("interrupted"),
+            ))),
+        ] {
+            assert!(!shows_no_owner(&transient), "{transient:?}");
+        }
+    }
 
     #[test]
     fn error_names_are_exact_and_never_classify_untrusted_message_text() {

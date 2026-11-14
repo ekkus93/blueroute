@@ -55,6 +55,13 @@ struct Script {
     go: AtomicBool,
     /// Set once the reply is sent and the client has acknowledged the barrier behind it.
     replied: AtomicBool,
+    /// Move the name only after replying (inside the client's final verification), not before.
+    after_reply: AtomicBool,
+    /// After moving the name, hold the reply until `release`.
+    hold: AtomicBool,
+    release: AtomicBool,
+    /// Report an incompatible version from now on.
+    incompatible: AtomicBool,
 }
 
 struct Daemon {
@@ -64,8 +71,6 @@ struct Daemon {
     script: Arc<Script>,
     /// The client connection's unique name, for the barrier call.
     client: OwnedUniqueName,
-    /// The version this daemon reports.
-    version: (u16, u16),
 }
 
 impl Daemon {
@@ -83,14 +88,28 @@ impl Daemon {
                 Some("Version") => {
                     let call = self.script.version_calls.fetch_add(1, Ordering::SeqCst) + 1;
                     let scripted = self.script.at.load(Ordering::SeqCst) == call;
+                    let after_reply = self.script.after_reply.load(Ordering::SeqCst);
                     if scripted {
                         self.script.arrived.store(true, Ordering::SeqCst);
                         wait_for(&self.script.go).await;
-                        self.move_name().await?;
+                        if !after_reply {
+                            self.move_name().await?;
+                        }
+                        if self.script.hold.load(Ordering::SeqCst) {
+                            wait_for(&self.script.release).await;
+                        }
                     }
-                    let reply = zbus::Message::method_return(&header)?.build(&self.version)?;
+                    let version = if self.script.incompatible.load(Ordering::SeqCst) {
+                        (99, 0)
+                    } else {
+                        COMPATIBLE
+                    };
+                    let reply = zbus::Message::method_return(&header)?.build(&version)?;
                     self.connection.send(&reply).await?;
                     if scripted {
+                        if after_reply {
+                            self.move_name().await?;
+                        }
                         // Behind the reply on this socket: answered only once the reply is queued.
                         self.connection
                             .call_method(
@@ -222,7 +241,6 @@ impl Rig {
                 .unique_name()
                 .expect("a bus connection has a unique name")
                 .to_owned(),
-            version: COMPATIBLE,
         }
     }
 }
@@ -349,6 +367,218 @@ fn lc_owner_a_signal_queued_before_a_release_and_reacquire_is_not_delivered()
                 old.next_change().await,
                 Err(ClientError::OwnerLost)
             ));
+            Ok(())
+        })
+        .await
+    })
+}
+
+/// Polls `next` only until the scripted Version call reaches the daemon, then releases the
+/// daemon and stays paused until its reply (and everything before it) is queued at the client.
+async fn pause_across_the_script<T: std::fmt::Debug>(
+    script: &Script,
+    mut next: std::pin::Pin<&mut impl Future<Output = T>>,
+) -> Result<(), Box<dyn Error>> {
+    while !script.arrived.load(Ordering::SeqCst) {
+        if let Some(early) = future::poll_once(next.as_mut()).await {
+            return Err(format!("finished before its check: {early:?}").into());
+        }
+        Timer::after(Duration::from_millis(2)).await;
+    }
+    script.go.store(true, Ordering::SeqCst);
+    wait_for(&script.replied).await;
+    Ok(())
+}
+
+/// LC-OWNER-05: the period ends after A has replied to the item's Version check, while the
+/// client's final `GetNameOwner` verification is pending. The name is A's again by then.
+fn ends_during_final_verification(transfer: Transfer) -> Result<(), Box<dyn Error>> {
+    let _bus = BUS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    future::block_on(async {
+        let rig = rig().await?;
+        let daemon = rig.daemon(transfer);
+        with_daemon(daemon, async {
+            let client = BlueRouteClient::from_connection(rig.client_connection.clone()).await?;
+            let mut old = client.changes().await?;
+            rig.script.after_reply.store(true, Ordering::SeqCst);
+            rig.script.at.store(3, Ordering::SeqCst);
+            emit(&rig.a, Item::Event).await?;
+            let mut next = pin!(old.next_change());
+            pause_across_the_script(&rig.script, next.as_mut()).await?;
+            match within(Duration::from_secs(2), next).await {
+                Some(Err(ClientError::OwnerLost)) => Ok(()),
+                other => Err(format!("delivered across a {transfer:?}: {other:?}").into()),
+            }
+        })
+        .await
+    })
+}
+
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn lc_owner_a_handover_and_return_during_final_verification_is_not_delivered()
+-> Result<(), Box<dyn Error>> {
+    ends_during_final_verification(Transfer::ThroughSuccessor)
+}
+
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn lc_owner_a_release_and_reacquire_during_final_verification_is_not_delivered()
+-> Result<(), Box<dyn Error>> {
+    ends_during_final_verification(Transfer::ThroughNoOwner)
+}
+
+/// LC-OWNER-05/06: A goes A→B→A and then holds the item's Version reply. An actively polled
+/// consumer learns of the loss within the two-second bound, without the reply; the late reply
+/// changes nothing.
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn lc_owner_a_held_reply_does_not_delay_the_end_of_the_period() -> Result<(), Box<dyn Error>> {
+    let _bus = BUS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    future::block_on(async {
+        let rig = rig().await?;
+        let daemon = rig.daemon(Transfer::ThroughSuccessor);
+        with_daemon(daemon, async {
+            let client = BlueRouteClient::from_connection(rig.client_connection.clone()).await?;
+            let mut old = client.changes().await?;
+            rig.script.hold.store(true, Ordering::SeqCst);
+            rig.script.go.store(true, Ordering::SeqCst);
+            rig.script.at.store(3, Ordering::SeqCst);
+            emit(&rig.a, Item::State).await?;
+            match within(Duration::from_secs(2), old.next_change()).await {
+                Some(Err(ClientError::OwnerLost)) => {}
+                other => return Err(format!("loss waited for the reply: {other:?}").into()),
+            }
+            assert!(
+                !rig.script.replied.load(Ordering::SeqCst),
+                "the reply was held"
+            );
+            rig.script.release.store(true, Ordering::SeqCst);
+            wait_for(&rig.script.replied).await;
+            emit(&rig.a, Item::State).await?;
+            assert!(matches!(
+                within(Duration::from_secs(1), old.next_change()).await,
+                Some(Err(ClientError::OwnerLost))
+            ));
+            Ok(())
+        })
+        .await
+    })
+}
+
+/// LC-OWNER-03/05: the caller abandons the wait while the item's Version check is pending; A
+/// then goes A→B→A and replies. The next wait still reports the end of the period: cancelling
+/// cannot erase it, and the abandoned item is never delivered.
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn lc_owner_cancelling_during_validation_does_not_erase_the_end_of_the_period()
+-> Result<(), Box<dyn Error>> {
+    let _bus = BUS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    future::block_on(async {
+        let rig = rig().await?;
+        let daemon = rig.daemon(Transfer::ThroughSuccessor);
+        with_daemon(daemon, async {
+            let client = BlueRouteClient::from_connection(rig.client_connection.clone()).await?;
+            let mut old = client.changes().await?;
+            rig.script.at.store(3, Ordering::SeqCst);
+            emit(&rig.a, Item::Event).await?;
+            {
+                let mut next = pin!(old.next_change());
+                while !rig.script.arrived.load(Ordering::SeqCst) {
+                    if let Some(early) = future::poll_once(next.as_mut()).await {
+                        return Err(format!("finished before its check: {early:?}").into());
+                    }
+                    Timer::after(Duration::from_millis(2)).await;
+                }
+            } // the wait is dropped here, mid-validation
+            rig.script.go.store(true, Ordering::SeqCst);
+            wait_for(&rig.script.replied).await;
+            match within(Duration::from_secs(2), old.next_change()).await {
+                Some(Err(ClientError::OwnerLost)) => Ok(()),
+                other => Err(format!("the cancelled period was revived: {other:?}").into()),
+            }
+        })
+        .await
+    })
+}
+
+/// LC-OWNER-06/07: a fresh subscription to the returning A is validated again. Once A reports
+/// an incompatible version it is refused, and no ordinary request reaches it.
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn lc_owner_a_returning_owner_is_validated_again_before_a_fresh_subscription()
+-> Result<(), Box<dyn Error>> {
+    let _bus = BUS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    future::block_on(async {
+        let rig = rig().await?;
+        let daemon = rig.daemon(Transfer::ThroughSuccessor);
+        with_daemon(daemon, async {
+            let client = BlueRouteClient::from_connection(rig.client_connection.clone()).await?;
+            let mut old = client.changes().await?;
+            rig.script.at.store(3, Ordering::SeqCst);
+            emit(&rig.a, Item::Event).await?;
+            let mut next = pin!(old.next_change());
+            pause_across_the_script(&rig.script, next.as_mut()).await?;
+            assert!(matches!(
+                within(Duration::from_secs(2), next).await,
+                Some(Err(ClientError::OwnerLost))
+            ));
+            rig.script.incompatible.store(true, Ordering::SeqCst);
+            assert!(matches!(
+                client.changes().await,
+                Err(ClientError::IncompatibleVersion { .. })
+            ));
+            let refused = client
+                .request(&blueroute_protocol::Command::GetStatus)
+                .await;
+            assert!(refused.is_err(), "{refused:?}");
+            assert_eq!(rig.script.requests.load(Ordering::SeqCst), 0);
+            Ok(())
+        })
+        .await
+    })
+}
+
+/// LC-OWNER-06: a continuous period keeps delivering every item, in order, with no ownership
+/// change at all; its own acquisition notice does not end it.
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn lc_owner_a_continuous_period_keeps_delivering() -> Result<(), Box<dyn Error>> {
+    let _bus = BUS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    future::block_on(async {
+        let rig = rig().await?;
+        let daemon = rig.daemon(Transfer::ThroughNoOwner);
+        with_daemon(daemon, async {
+            let client = BlueRouteClient::from_connection(rig.client_connection.clone()).await?;
+            let mut changes = client.changes().await?;
+            for item in [Item::Event, Item::State, Item::Event, Item::State] {
+                emit(&rig.a, item).await?;
+                let delivered = within(Duration::from_secs(2), changes.next_change()).await;
+                assert!(
+                    matches!(
+                        (&delivered, item),
+                        (Some(Ok(Change::Event(_))), Item::Event)
+                            | (Some(Ok(Change::State { revision: 7 })), Item::State)
+                    ),
+                    "{item:?}: {delivered:?}"
+                );
+            }
+            // Ordinary requests still go to A while its period lasts.
+            client
+                .request(&blueroute_protocol::Command::GetStatus)
+                .await
+                .ok();
+            assert_eq!(rig.script.requests.load(Ordering::SeqCst), 1);
             Ok(())
         })
         .await
