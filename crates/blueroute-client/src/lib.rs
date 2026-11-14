@@ -222,8 +222,11 @@ pub const SUBSCRIPTION_BACKLOG: usize = 256;
 /// they arrive and signals move into a backlog of at most [`SUBSCRIPTION_BACKLOG`] items. A
 /// consumer that falls further behind gets [`ClientError::SubscriptionLagged`] and should reread
 /// state. Retirement and lag release all three streams, so a handle kept alive afterwards holds
-/// nothing back; dropping the subscription releases them too. Between calls the streams are not
-/// read: a caller that pauses for long can stop its connection's reader until it resumes.
+/// nothing back; that includes a retirement found after the decision, which ends the
+/// subscription as its last item is delivered. Dropping the subscription releases them too. One
+/// case waits for the next call or a drop: a call cancelled after it read a period end, which
+/// only that next call can report. Between calls the streams are not read: a caller that pauses
+/// for long can stop its connection's reader until it resumes.
 pub struct EventSubscription {
     connection: Connection,
     /// The unique bus name the subscription is bound to.
@@ -452,6 +455,12 @@ impl EventSubscription {
     }
 
     fn interrupted(&mut self, interrupt: Interrupt) -> ClientError {
+        // A period end already read wins: the loss is the more precise report.
+        let interrupt = if self.period_end.is_some() {
+            Interrupt::Retired
+        } else {
+            interrupt
+        };
         match interrupt {
             Interrupt::Retired => self.end(Ended::OwnerLost),
             Interrupt::Lagged => self.end(Ended::Lagged),
@@ -514,6 +523,15 @@ impl EventSubscription {
             }
         }
 
+        // Settle what is already queued first, so a period end already received costs no
+        // round trip to an owner that has left.
+        if let Some(interrupt) = settle(live, owner, since, backlog, period_end).await {
+            return Err(self.interrupted(interrupt));
+        }
+        if period_end.is_some() {
+            return Err(self.end(Ended::OwnerLost));
+        }
+
         // The streams only carry this owner's signals; recheck that same owner's version, while
         // still reading, so nothing is accepted on another owner's check, a held reply cannot
         // delay the loss, and the reply itself can be read.
@@ -558,15 +576,18 @@ impl EventSubscription {
             }
             Err(error) => return Err(error),
         };
-        match decide(decision, *period_end) {
-            Decision::Retire => return Err(self.end(Ended::OwnerLost)),
-            // `period_end` stays recorded: the next call ends the subscription.
-            Decision::DeliverThenRetire | Decision::Deliver => {}
+        let decided = decide(decision, *period_end);
+        if decided == Decision::Retire {
+            return Err(self.end(Ended::OwnerLost));
         }
-
         let message = backlog
             .pop_front()
             .expect("the item being checked is still first in the backlog");
+        if decided == Decision::DeliverThenRetire {
+            // The permitted delivery stands, but the period is over: end now, releasing the
+            // streams, so every later call reports OwnerLost and nothing is held back meanwhile.
+            self.end(Ended::OwnerLost);
+        }
         if message.header().member().map(|member| member.as_str()) == Some(STATE_CHANGED_SIGNAL) {
             let revision: u64 = message
                 .body()

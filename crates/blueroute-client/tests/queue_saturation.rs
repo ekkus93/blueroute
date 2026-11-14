@@ -355,6 +355,18 @@ fn qr_queue_a_burst_at_capacity_retires_event() -> Result<(), Box<dyn Error>> {
     burst_after_the_reply(Item::Event, ZBUS_QUEUE / 2, Keep::Retained)
 }
 
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn qr_queue_a_burst_at_capacity_retires_state() -> Result<(), Box<dyn Error>> {
+    burst_after_the_reply(Item::State, ZBUS_QUEUE / 2, Keep::Retained)
+}
+
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn qr_queue_a_burst_just_above_capacity_retires_event() -> Result<(), Box<dyn Error>> {
+    burst_after_the_reply(Item::Event, ZBUS_QUEUE / 2 + 1, Keep::Retained)
+}
+
 /// One cycle past capacity (66 notices).
 #[test]
 #[ignore = "needs a private bus: run with dbus-run-session"]
@@ -380,6 +392,13 @@ fn qr_queue_forty_cycles_after_the_reply_retire_state() -> Result<(), Box<dyn Er
 #[ignore = "needs a private bus: run with dbus-run-session"]
 fn qr_queue_forty_cycles_then_drop_keep_the_connection_working() -> Result<(), Box<dyn Error>> {
     burst_after_the_reply(Item::Event, 40, Keep::Dropped)
+}
+
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn qr_queue_forty_cycles_then_drop_keep_the_connection_working_state() -> Result<(), Box<dyn Error>>
+{
+    burst_after_the_reply(Item::State, 40, Keep::Dropped)
 }
 
 /// QUEUE-1 signal selection: `count` owner signals are queued ahead of the item's Version reply
@@ -702,6 +721,103 @@ fn qr_integration_the_shared_watcher_reports_a_saturated_loss() -> Result<(), Bo
             },
             scenario,
         )
+        .await
+    })
+}
+
+/// A broker round trip on `connection`; its reply arrives behind every earlier reply the broker
+/// sent to that connection.
+async fn broker_round_trip(connection: &Connection) -> Result<(), Box<dyn Error>> {
+    zbus::fdo::DBusProxy::new(connection)
+        .await?
+        .get_id()
+        .await?;
+    Ok(())
+}
+
+/// QR-REVIEW / QUEUE-3: a period end received **after** the final `GetNameOwner` reply. A bus
+/// monitor shows when the client has sent that call; the client is then left unpolled while the
+/// broker answers it (a later round trip on the same connection proves the reply is queued) and
+/// while A releases and reacquires the name, so both notices arrive after the decision. On
+/// resumption the permitted delivery must stand, the next call must report OwnerLost, and the
+/// retired handle must hold nothing back.
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn qr_queue_a_period_end_after_the_decision_keeps_the_delivery_and_retires_next()
+-> Result<(), Box<dyn Error>> {
+    let _bus = BUS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    future::block_on(async {
+        let rig = rig().await?;
+        with_daemon(&rig, async {
+            let client = BlueRouteClient::from_connection(rig.client_connection.clone()).await?;
+            let mut old = client.events().await?;
+            let client_name = rig
+                .client_connection
+                .unique_name()
+                .expect("a bus connection has a unique name")
+                .to_owned();
+            let monitor = Connection::session().await?;
+            let rule = zbus::MatchRule::builder()
+                .msg_type(Type::MethodCall)
+                .sender(client_name.as_str())?
+                .member("GetNameOwner")?
+                .build();
+            zbus::fdo::MonitoringProxy::new(&monitor)
+                .await?
+                .become_monitor(&[rule], 0)
+                .await?;
+            let mut calls = MessageStream::from(&monitor);
+            emit(&rig.a, Item::Event).await?;
+            {
+                let mut next = pin!(old.next_change());
+                // Poll the client one step at a time, and after each step wait (unpolled) to see
+                // whether that step sent the final check.
+                let mut sent = false;
+                for _ in 0..500 {
+                    if let Some(early) = future::poll_once(next.as_mut()).await {
+                        return Err(format!("finished before its final check: {early:?}").into());
+                    }
+                    if let Some(Some(call)) = within(Duration::from_millis(10), calls.next()).await
+                    {
+                        let call = call?;
+                        if call.header().member().map(|member| member.as_str())
+                            == Some("GetNameOwner")
+                        {
+                            sent = true;
+                            break;
+                        }
+                    }
+                }
+                if !sent {
+                    return Err("the final check was never sent".into());
+                }
+                // Unpolled: the reply is queued behind this round trip's own, then the period
+                // ends and its notices are queued after both.
+                broker_round_trip(&rig.client_connection).await?;
+                rig.a.release_name(DBUS_SERVICE_NAME).await?;
+                take_name(&rig.a).await?;
+                broker_round_trip(&rig.client_connection).await?;
+                match within(BOUND, next).await {
+                    Some(Ok(Change::Event(Event::HealthChanged(HealthLevel::Degraded)))) => {}
+                    other => {
+                        return Err(format!(
+                            "a post-decision end withdrew the delivery: {other:?}"
+                        )
+                        .into());
+                    }
+                }
+            }
+            // Retired already, before it is polled again: the handle holds nothing back through
+            // more churn and signals, and the next call reports the loss.
+            churn_after_retirement(&rig).await?;
+            second_call_completes(&rig.client_connection).await?;
+            match within(BOUND, old.next_change()).await {
+                Some(Err(ClientError::OwnerLost)) => Ok(()),
+                other => Err(format!("the retirement was not kept: {other:?}").into()),
+            }
+        })
         .await
     })
 }

@@ -127,7 +127,8 @@ writes the state directory:
 
    When the network has both, delete both. Deleting only the membership lines leaves a client
    record without a membership, which is unresolved in its own right, and removal keeps failing.
-5. Run the removal again. It must report `"unresolved_roles":0` and succeed. While this
+5. Run the removal again. `unresolved_roles` must have dropped by one; once every unresolved
+   network has been recovered this way it must be 0 and the removal must succeed. While this
    computer still knows another network, `unresolved_foreign_resources` must have the same value
    as before recovery; if it went up, step 3 left owned state behind: delete it the same way. If
    the recovered network was the last one it knew, the retry has nothing to clean and does not
