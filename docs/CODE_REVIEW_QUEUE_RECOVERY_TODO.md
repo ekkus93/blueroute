@@ -118,18 +118,18 @@ Guide and qualification procedure agree without weakening cleanup classification
 
 **Requirements:** ACCEPT-1/2; QUEUE-5/6, RECOVER-3/4.
 
-- [ ] **QR-INTEGRATION-01:** Carry saturated ownership loss through the production shared
+- [x] **QR-INTEGRATION-01:** Carry saturated ownership loss through the production shared
   watcher and desktop/TUI adapters. Verify disconnected/stale before fresh connection/change,
   timely notification and no old payload; identify which tests expose the baseline defect.
-- [ ] **QR-INTEGRATION-02:** Exercise production stores→scope→cleanup→helper outcome for the
+- [x] **QR-INTEGRATION-02:** Exercise production stores→scope→cleanup→helper outcome for the
   complete manual record transition, then compose maintainer/isolated-dpkg failure, retained
   evidence, retry and purge checks. Identify every mocked backend or installed helper layer.
-- [ ] **QR-INTEGRATION-03:** Run negative controls safely in isolated checkout/target directories:
+- [x] **QR-INTEGRATION-03:** Run negative controls safely in isolated checkout/target directories:
   the old final-await behavior must fail saturation, and the old recovery sequence must fail
   completed-recovery acceptance. Retain passing below-capacity and incomplete-record controls.
-- [ ] **QR-INTEGRATION-04:** Schedule every new required regression in CI, including explicit
+- [x] **QR-INTEGRATION-04:** Schedule every new required regression in CI, including explicit
   private-bus invocations for ignored tests. Verify filters include the intended consumer cases.
-- [ ] **QR-INTEGRATION-05:** Re-run preserved publisher progress/shutdown/startup, graph import/
+- [-] **QR-INTEGRATION-05:** Re-run preserved publisher progress/shutdown/startup, graph import/
   atomicity, normal owner handover, unknown-role proof retention, stale-record cleanup, UI effect
   generation, authorization, pins/revocation, rollback, no-replay and closed join/sharing checks.
 

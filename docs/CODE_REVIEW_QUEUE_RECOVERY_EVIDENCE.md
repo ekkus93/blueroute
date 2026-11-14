@@ -261,3 +261,69 @@ edits `memberships-v1` and deletes `client-record-v1` exactly as the corrected s
 **Limitations.** Software simulation of the manual workflow only: the administrator's
 observation of PAN links and NetworkManager is modelled by the fake backend. Installed-system
 execution remains QR-QUALIFY-02 / LC-QUALIFY-02 / CR-QUALIFY on a disposable VM.
+
+## QR-INTEGRATION — Consumer and helper boundaries, sensitivity and CI (2026-11-14)
+
+### Production consumers (QR-INTEGRATION-01)
+
+| Test | Boundary | Scenario | Expectation |
+| --- | --- | --- | --- |
+| `qr_integration_the_shared_watcher_reports_a_saturated_loss` (`crates/blueroute-client/tests/queue_saturation.rs`) | production `blueroute_client::watch` | the exact RLC-01 recipe: the test blocks the watcher's executor thread from the item's Version call until the daemon has replied and run 40 release/reacquire cycles | `Connected, Disconnected` within 2 s of resuming, then `Connected` and `Changed` for the current period; no `Changed` from the old one |
+| `tui_watcher_reports_a_saturated_loss_without_the_old_changes` (`apps/tui/src/watch.rs`) | the TUI's real watcher thread (`spawn_with`) | inside the check of A's change, A emits 100 StateChanged signals and runs 40 release/reacquire cycles before replying | `Disconnected` within 2 s with none of the 100 old changes, then `Connected` to the returning A and its new change |
+| `the_desktop_watcher_reports_a_saturated_loss_without_the_old_changes` (`apps/desktop/tests/watch_handover.rs`) | the desktop's real `watch_daemon`, with the private bus as the system bus | same flood as the TUI case | `Connected, Disconnected, Connected, Changed`, nothing else |
+
+The adapters run their own watcher threads, which cannot be paused across a reply, so their
+scenario is ordered entirely by the daemon's socket (flood, then cycles, then the reply). That
+makes it deterministic: at baseline the full signal queue stops the reader before any ownership
+notice is read, so the watcher reports nothing. The after-reply recipe is covered at the shared
+watcher, which the adapters wrap.
+
+### Recovery through the helper and package boundaries (QR-INTEGRATION-02)
+
+- **Production stores → scope → cleanup → helper outcome.** The QR-RECOVERY tests call
+  `run_removal_cleanup` and `cleanup_outcome`, the same functions the
+  `--remove-owned-networking` helper in `apps/daemon/src/main.rs` uses, with the production
+  membership and client-record stores. **Mocked:** the NetworkManager/BlueZ backend (a fake
+  `ClientLeaveBackend`/`OwnedInventory`) and the root check (the real helper refuses non-root and
+  talks to the system services, so it cannot run in CI).
+- **Maintainer scripts.** `packaging/debian/test-maintainer-lifecycle.sh` now walks the manual
+  recovery: an unresolved role fails remove, deconfigure and a direct purge at `prerm`; the
+  incomplete recovery (membership only) still fails both, with abort paths restarting the
+  service, and keeps the client record and identity; the complete recovery lets remove and purge
+  finish and deletes the state directory. **Mocked:** the installed helper (its exit status is set
+  per step to what the production helper returns for that state, citing the unit test that proves
+  it) and the systemd helpers; the scripts are the real ones, under `DPKG_ROOT`.
+
+### Negative controls (QR-INTEGRATION-03)
+
+`tmp/neg-controls.sh` (ignored workspace directory) creates an isolated worktree under `tmp/`
+with its own `CARGO_TARGET_DIR`, restores one old behavior at a time in that worktree only,
+runs the tests that must catch it, and removes the worktree; tracked files are never modified.
+Run at `128d44e`:
+
+| Control | Restored behavior | Tests that fail |
+| --- | --- | --- |
+| C1 | old final await: no settle before it, nothing read during `GetNameOwner` | `qr_queue_a_burst_just_above_capacity_retires_state`, `qr_queue_forty_cycles_after_the_reply_retire_event`, `_retire_state`, `qr_queue_forty_cycles_then_drop_keep_the_connection_working`, `qr_queue_a_live_subscription_survives_a_retired_one_on_the_same_rules`, `qr_integration_the_shared_watcher_reports_a_saturated_loss` (6 of 14; the below/at-capacity controls pass) |
+| C2 | retirement keeps its streams | `qr_queue_forty_cycles_after_the_reply_retire_event`, `_retire_state` (the retained-handle cases; the dropped case passes) |
+| C3 | signals not read while a check is pending | `qr_queue_events_queued_ahead_of_a_reply_are_all_delivered`, `qr_queue_state_changes_queued_ahead_of_a_reply_are_all_delivered`, `qr_queue_an_event_flood_ends_the_subscription_without_stalling` |
+| C4 | a post-decision period end withholds the item | `qr_queue_a_period_end_before_the_decision_withholds_and_one_after_retires_next` |
+| C5 | the whole `f957d80` client library | `tui_watcher_reports_a_saturated_loss_without_the_old_changes`, `the_desktop_watcher_reports_a_saturated_loss_without_the_old_changes` (other TUI/desktop tests pass) |
+| C6 | the guide's old step 4 (membership lines only) | `qr_recovery_the_documented_recovery_of_an_unknown_role_completes` |
+
+**Correction found by C2.** The first run of C2 (at `e09f697`) failed nothing: the burst is fully
+drained by `settle` before retirement, so nothing was left for a retained handle to hold back.
+The retained-handle cases now add 40 more cycles and 200 more signals after retirement, with the
+handle alive and never polled, before a second call (`128d44e`); C2 then fails them. The
+incomplete-record (C6 passes `qr_recovery_deleting_only_the_membership_…`) and below-capacity
+controls keep passing where they should.
+
+### CI scheduling (QR-INTEGRATION-04)
+
+- `.github/workflows/ci.yml` runs `dbus-run-session -- cargo test -p blueroute-client --test
+  queue_saturation --locked -- --ignored` in the client owner-binding step.
+- The TUI step's filter `-- --ignored tui_watcher` selects the new TUI test, and the desktop
+  `watch_handover` step runs all of that binary's ignored tests, including the new outer test
+  and its child scenario.
+- The recovery unit tests and the zbus pin guard are ordinary tests in `cargo test --workspace`;
+  the maintainer harness already runs in CI.
+- `CLAUDE.md` lists the new suite.
