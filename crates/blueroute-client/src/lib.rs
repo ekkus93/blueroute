@@ -173,6 +173,7 @@ impl BlueRouteClient {
             stream,
             state,
             owner_changes,
+            retired: false,
         })
     }
 }
@@ -197,13 +198,36 @@ pub struct EventSubscription {
     state: Option<SignalStream<'static>>,
     /// Ownership changes of the daemon's well-known name only.
     owner_changes: NameOwnerChangedStream,
+    /// Set once the bound owner was seen to go; nothing is delivered afterwards (FU-02).
+    retired: bool,
+}
+
+/// Resolves when an ownership change retires `owner`: the name moved to another owner or was
+/// released, or the bus connection closed. A change that leaves the name with `owner` is only
+/// the queued notice of it taking the name, and is skipped.
+async fn owner_retired(changes: &mut NameOwnerChangedStream, owner: &OwnedUniqueName) {
+    loop {
+        match changes.next().await {
+            Some(change) => {
+                let still_ours = change
+                    .args()
+                    .ok()
+                    .and_then(|args| args.new_owner().as_ref().map(|new| new == owner))
+                    == Some(true);
+                if !still_ours {
+                    return;
+                }
+            }
+            None => return,
+        }
+    }
 }
 
 /// What the next thing to happen on a subscription was.
 enum Next {
     Event(Option<zbus::Message>),
     State(Option<zbus::Message>),
-    OwnerChanged(bool),
+    Retired,
 }
 
 impl EventSubscription {
@@ -219,64 +243,91 @@ impl EventSubscription {
 
     /// The next event or invalidation. Ends with [`ClientError::OwnerLost`] when the bound owner
     /// goes away, and every item is accepted only after that same owner's version is rechecked.
+    ///
+    /// Delivery decision (FU-02, OWNER-1..3): the owner is watched the whole time, including
+    /// while an item's version is checked. An item is delivered only if, after that check, the
+    /// bound owner still holds the name; a retirement seen at any point ends the subscription for
+    /// good, and the pending check (and its late reply) is dropped.
     pub async fn next_change(&mut self) -> Result<Change, ClientError> {
-        let next = loop {
-            let owner = &self.owner;
-            let state = &mut self.state;
-            let signals =
-                futures_lite::future::or(async { Next::Event(self.stream.next().await) }, async {
-                    match state {
-                        Some(state) => Next::State(state.next().await),
-                        None => futures_lite::future::pending().await,
-                    }
-                });
-            let next = futures_lite::future::or(signals, async {
-                match self.owner_changes.next().await {
-                    // A change that leaves the name with this owner is not a loss: it is
-                    // the queued notice of this owner taking the name.
-                    Some(change) => Next::OwnerChanged(
-                        change
-                            .args()
-                            .ok()
-                            .and_then(|args| args.new_owner().as_ref().map(|new| new == owner))
-                            != Some(true),
-                    ),
-                    // The bus connection itself is gone.
-                    None => Next::OwnerChanged(true),
-                }
-            })
-            .await;
-            match next {
-                Next::Event(Some(message)) => break Next::Event(Some(message)),
-                Next::State(Some(message)) => break Next::State(Some(message)),
-                Next::Event(None) | Next::State(None) => {
-                    return Err(ClientError::EventStreamClosed);
-                }
-                Next::OwnerChanged(true) => return Err(ClientError::OwnerLost),
-                Next::OwnerChanged(false) => {}
+        if self.retired {
+            return Err(ClientError::OwnerLost);
+        }
+        let Self {
+            connection,
+            owner,
+            stream,
+            state,
+            owner_changes,
+            retired,
+        } = self;
+        let signals = futures_lite::future::or(async { Next::Event(stream.next().await) }, async {
+            match state {
+                Some(state) => Next::State(state.next().await),
+                None => futures_lite::future::pending().await,
+            }
+        });
+        let next = futures_lite::future::or(signals, async {
+            owner_retired(owner_changes, owner).await;
+            Next::Retired
+        })
+        .await;
+        let is_state = matches!(next, Next::State(_));
+        let message = match next {
+            Next::Event(Some(message)) | Next::State(Some(message)) => message,
+            Next::Event(None) | Next::State(None) => return Err(ClientError::EventStreamClosed),
+            Next::Retired => {
+                *retired = true;
+                return Err(ClientError::OwnerLost);
             }
         };
-        // The streams only carry this owner's signals; recheck that same owner's version so
-        // nothing is accepted on the strength of a different owner's check.
-        negotiate_version_at(&self.connection, &self.owner).await?;
-        match next {
-            Next::Event(Some(message)) => {
-                let payload: String = message
-                    .body()
-                    .deserialize()
-                    .map_err(|error| ClientError::InvalidTransportPayload(error.to_string()))?;
-                decode_event(&payload)
-                    .map(Change::Event)
-                    .map_err(ClientError::Protocol)
+
+        // The streams only carry this owner's signals; recheck that same owner's version, while
+        // still watching for its retirement, so nothing is accepted on another owner's check and
+        // a held reply cannot delay the loss.
+        let checked = futures_lite::future::or(
+            async { Some(negotiate_version_at(connection, owner).await) },
+            async {
+                owner_retired(owner_changes, owner).await;
+                None
+            },
+        )
+        .await;
+        match checked {
+            None => {
+                *retired = true;
+                return Err(ClientError::OwnerLost);
             }
-            Next::State(Some(message)) => {
-                let revision: u64 = message
-                    .body()
-                    .deserialize()
-                    .map_err(|error| ClientError::InvalidTransportPayload(error.to_string()))?;
-                Ok(Change::State { revision })
+            Some(Err(error)) => return Err(error),
+            Some(Ok(_)) => {}
+        }
+        // The decision point: the checked owner must still be the current one.
+        match current_owner(connection).await {
+            Ok(current) if current == *owner => {}
+            Ok(_) => {
+                *retired = true;
+                return Err(ClientError::OwnerLost);
             }
-            _ => Err(ClientError::EventStreamClosed),
+            Err(error) if error.kind() == ClientErrorKind::Unavailable => {
+                *retired = true;
+                return Err(ClientError::OwnerLost);
+            }
+            Err(error) => return Err(error),
+        }
+
+        if is_state {
+            let revision: u64 = message
+                .body()
+                .deserialize()
+                .map_err(|error| ClientError::InvalidTransportPayload(error.to_string()))?;
+            Ok(Change::State { revision })
+        } else {
+            let payload: String = message
+                .body()
+                .deserialize()
+                .map_err(|error| ClientError::InvalidTransportPayload(error.to_string()))?;
+            decode_event(&payload)
+                .map(Change::Event)
+                .map_err(ClientError::Protocol)
         }
     }
 }

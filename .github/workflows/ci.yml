@@ -84,7 +84,9 @@ jobs:
         run: dbus-run-session -- cargo test -p blueroute-client --test dbus_client --locked client_queries_events_reconnects_and_fails_closed_on_incompatibility -- --ignored --exact
 
       - name: Run client owner-binding tests (CR-F8)
-        run: dbus-run-session -- cargo test -p blueroute-client --test owner_race --locked -- --ignored
+        run: |
+          dbus-run-session -- cargo test -p blueroute-client --test owner_race --locked -- --ignored
+          dbus-run-session -- cargo test -p blueroute-client --test event_owner_race --locked -- --ignored
 
       - name: Run state publication tests (CR-F1)
         run: |
