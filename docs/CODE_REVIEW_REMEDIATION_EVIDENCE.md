@@ -463,3 +463,12 @@ hardware claims stay with CR-QUALIFY.
 - **04:** not complete. CR-QUALIFY (installed-system and Bluetooth-rig evidence) has not run, so
   CR-F5 stays SOFTWARE COMPLETE / QUALIFICATION DEFERRED and the remediation is a **software
   milestone**, not COMPLETE. Nothing here implies completion of the wider product roadmap.
+
+## Correction (2026-11-13, code-review follow-up)
+
+The CR-CLOSEOUT-01 entry above accepted "a change within those microseconds before the baseline
+could go unannounced" as a startup-only limitation. That gap (GAP-01) is now closed by FU-05: the
+publisher announces once at start and once at its first network sample. Further follow-up
+findings reopened the checked CR-F1, CR-F2, CR-F3 and CR-F5 claims; see
+[CODE_REVIEW_FOLLOWUP_EVIDENCE.md](CODE_REVIEW_FOLLOWUP_EVIDENCE.md). The entries above are kept as
+the historical record of what was verified at the time.

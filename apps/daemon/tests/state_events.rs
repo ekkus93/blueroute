@@ -179,7 +179,15 @@ async fn observer() -> Result<Observer, Box<dyn Error>> {
     )
     .await?;
     let signals = proxy.receive_signal(STATE_CHANGED_SIGNAL).await?;
-    Ok(Observer { proxy, signals })
+    let mut observer = Observer { proxy, signals };
+    // The publisher announces once at startup (FU-05); start each observer after that, so every
+    // signal a test sees comes from what the test did.
+    while observer
+        .next_within(Duration::from_millis(300))
+        .await
+        .is_some()
+    {}
+    Ok(observer)
 }
 
 impl Observer {
@@ -471,6 +479,10 @@ fn cr_f1_failing_reads_do_not_make_observers_reread_in_a_loop() {
         let daemon = daemon().await.unwrap();
         let mut observer = observer().await.unwrap();
         daemon.fail_list.store(true, Ordering::SeqCst);
+        // The publisher's own network sample notices the store failing and announces that once
+        // (a change, FU-01); let that pass before the reads under test.
+        Timer::after(Duration::from_millis(1300)).await;
+        observer.drain().await;
         // A front end rereads on every signal; a read that keeps failing must not cause one.
         for _ in 0..5 {
             assert!(observer.request(&Command::ListNetworks).await.is_err());

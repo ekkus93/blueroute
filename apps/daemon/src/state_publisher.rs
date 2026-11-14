@@ -17,8 +17,13 @@
 //!   never as an empty list), stores the result, and wakes the emitter. Samples are taken one
 //!   after another, so a result can never overwrite a newer one.
 //! - The **emitter** never waits for a sample. It compares the cheap in-memory snapshot and the
-//!   latest stored sample with what it last announced, and emits off every state lock. The first
-//!   sample only sets the network baseline.
+//!   latest stored sample with what it last announced, and emits off every state lock.
+//!
+//! Startup handoff (FU-05): a client can read a snapshot before the emitter's baseline exists, so
+//! a change before it would be absorbed silently. The emitter therefore announces once as soon as
+//! it runs and once when the first network sample lands, whether or not anything differs. A
+//! client that subscribes and then reads (as the shared watcher does) can never be left on a
+//! snapshot from before the baseline.
 //!
 //! Marks only set a flag and wake a thread, so bursts coalesce into one pending invalidation and
 //! cannot drop the last one. A failed emission is logged without payload, kept pending and retried
@@ -165,6 +170,10 @@ pub fn spawn_state_publisher(
     }
     worker.threads.push(sampler);
 
+    // Startup handoff (FU-05): a client may have read a snapshot before the baselines exist, and a
+    // change before them would otherwise be absorbed silently. So announce once as soon as the
+    // emitter runs, and again when the first network sample lands (see `emit_loop`).
+    publisher.forced.store(true, Ordering::Release);
     // A mark set before the threads were registered must not wait for the first recheck.
     for thread in &worker.threads {
         thread.thread().unpark();
@@ -224,11 +233,14 @@ fn emit_loop(
         let forced = publisher.forced.swap(false, Ordering::AcqRel);
         let state = service.observable_state();
         let networks = samples.lock().ok().and_then(|slot| slot.clone());
-        if published_networks.is_none() {
+        // The first sample becomes the baseline and is announced once, since a client may have
+        // read the network list before it existed (FU-05).
+        let first_sample = published_networks.is_none() && networks.is_some();
+        if first_sample {
             published_networks = networks.clone();
         }
         let networks_changed = networks.is_some() && networks != published_networks;
-        if !(forced || networks_changed || state != published_state) {
+        if !(forced || first_sample || networks_changed || state != published_state) {
             continue;
         }
         revision = revision.wrapping_add(1);

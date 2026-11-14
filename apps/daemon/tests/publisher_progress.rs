@@ -117,6 +117,13 @@ fn fu_01_a_pending_network_read_does_not_hold_back_a_health_change() -> Result<(
         // The network backend stalls; let the publisher's periodic network sample reach it.
         held.store(true, Ordering::SeqCst);
         Timer::after(NETWORK_RECHECK + Duration::from_millis(300)).await;
+        // Discard the startup announcements (FU-05) queued meanwhile.
+        while future::or(async { signals.next().await.is_some() }, async {
+            Timer::after(Duration::from_millis(100)).await;
+            false
+        })
+        .await
+        {}
 
         // A real worker publication, unrelated to the network list.
         let published = Instant::now();
@@ -195,7 +202,7 @@ async fn fixture(held: bool) -> Result<Fixture, Box<dyn Error>> {
     .await?;
     let signals = proxy.receive_signal(STATE_CHANGED_SIGNAL).await?;
     let publisher = spawn_state_publisher(connection.clone(), service.clone())?;
-    Ok(Fixture {
+    let mut fixture = Fixture {
         service,
         held,
         failing,
@@ -204,7 +211,10 @@ async fn fixture(held: bool) -> Result<Fixture, Box<dyn Error>> {
         signals,
         _connection: connection,
         _observer: observer,
-    })
+    };
+    // Consume the startup announcements (FU-05) so a test only sees what it caused.
+    while fixture.signal_within(Duration::from_millis(300)).await {}
+    Ok(fixture)
 }
 
 impl Fixture {
@@ -314,4 +324,90 @@ fn fu_01_a_failing_sample_is_announced_once_and_its_recovery_too() {
         fx.publish_health(HealthLevel::Error);
         assert!(fx.signal_within(DELIVERY_BOUND).await);
     });
+}
+
+// FU-05 (GAP-01, START-1..3): a change that lands after a client read its snapshot but before the
+// publisher took its first baseline must still reach that client. The order is forced explicitly:
+// subscribe, read, change, and only then start the publisher.
+
+/// Serve a service, then subscribe and read before any publisher exists.
+async fn served_without_publisher(
+    held: bool,
+) -> Result<(DaemonService, Connection, Fixture2), Box<dyn Error>> {
+    let networks = SlowNetworks::default();
+    networks.held.store(held, Ordering::SeqCst);
+    let release = networks.held.clone();
+    let service = DaemonService::with_network_operations(
+        DaemonStatus {
+            api_version: ApiVersion::CURRENT,
+            local_node: Some(NodeId::from_bytes([0xf3; 16])),
+            current_network: None,
+            health: HealthLevel::Healthy,
+            capabilities: NodeCapabilities::default(),
+        },
+        Arc::new(networks),
+    );
+    let connection = Builder::session()?
+        .name(DBUS_SERVICE_NAME)?
+        .serve_at(DBUS_OBJECT_PATH, service.clone())?
+        .build()
+        .await?;
+    let observer = Connection::session().await?;
+    let proxy = zbus::Proxy::new_owned(
+        observer.clone(),
+        DBUS_SERVICE_NAME,
+        DBUS_OBJECT_PATH,
+        DBUS_INTERFACE_NAME,
+    )
+    .await?;
+    // Subscribe first, then read: the client's view is now the pre-change state.
+    let signals = proxy.receive_signal(STATE_CHANGED_SIGNAL).await?;
+    let status: String = proxy.call("Status", &()).await?;
+    assert!(status.contains("healthy"), "{status}");
+    Ok((
+        service,
+        connection,
+        Fixture2 {
+            signals,
+            _observer: observer,
+            _release: ReleaseOnDrop(release),
+        },
+    ))
+}
+
+struct Fixture2 {
+    signals: zbus::proxy::SignalStream<'static>,
+    _observer: Connection,
+    _release: ReleaseOnDrop,
+}
+
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn fu_05_a_change_before_the_first_baseline_still_reaches_a_client() {
+    for held in [false, true] {
+        let _bus = lock();
+        future::block_on(async {
+            let (service, connection, mut fx) = served_without_publisher(held).await.unwrap();
+            // The change lands before the publisher takes its first baseline.
+            service
+                .update_runtime_observation(
+                    HealthLevel::Degraded,
+                    NodeCapabilities::default(),
+                    None,
+                )
+                .unwrap();
+            let _publisher = spawn_state_publisher(connection.clone(), service.clone()).unwrap();
+            let signals = &mut fx.signals;
+            let notified = future::or(async { signals.next().await.is_some() }, async {
+                Timer::after(DELIVERY_BOUND).await;
+                false
+            })
+            .await;
+            assert!(
+                notified,
+                "a change absorbed into the startup baseline was never announced (network read \
+                 held: {held})"
+            );
+        });
+    }
 }

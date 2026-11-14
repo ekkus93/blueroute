@@ -358,6 +358,9 @@ fn cr_f1_a_real_daemon_change_reaches_the_production_watcher() -> Result<(), Box
                 log.until(LOSS_BOUND, |log| log.count(Connected) == 1)
                     .await
                     .ok_or("never connected")?;
+                // Startup announcements (FU-05) may arrive first; count only what follows.
+                Timer::after(Duration::from_millis(300)).await;
+                let before = log.count(Changed);
                 // A worker observation, with no typed Event and no manual refresh.
                 let changed_at = Instant::now();
                 service.update_runtime_observation(
@@ -365,7 +368,7 @@ fn cr_f1_a_real_daemon_change_reaches_the_production_watcher() -> Result<(), Box
                     NodeCapabilities::default(),
                     None,
                 )?;
-                log.until(Duration::from_secs(1), |log| log.count(Changed) >= 1)
+                log.until(Duration::from_secs(1), |log| log.count(Changed) > before)
                     .await
                     .ok_or("the change did not reach the watcher within 1s")?;
                 eprintln!(
@@ -374,6 +377,72 @@ fn cr_f1_a_real_daemon_change_reaches_the_production_watcher() -> Result<(), Box
                 );
                 Ok(())
             },
+        )
+        .await
+    })
+}
+
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn fu_05_a_replacement_daemons_pre_baseline_change_reaches_the_watcher()
+-> Result<(), Box<dyn Error>> {
+    use blueroute_core::{NodeCapabilities, NodeId};
+    use blueroute_daemon::{DaemonService, spawn_state_publisher};
+
+    let _bus = BUS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    future::block_on(async {
+        let a = daemon(COMPATIBLE, true).await?;
+        let log = Log::default();
+        let signals = log.signals.clone();
+        let watcher = watch(
+            connect,
+            |_| Timer::after(Duration::from_millis(10)).map(|_| ()),
+            move |signal| {
+                signals.lock().unwrap().push(signal);
+                ControlFlow::Continue(())
+            },
+        );
+        let scenario = async {
+            log.until(LOSS_BOUND, |log| log.count(Connected) == 1)
+                .await
+                .ok_or("never connected to A")?;
+            stop(a).await?;
+            // B takes over; the watcher reconnects and rereads B before B's publisher exists.
+            let service = DaemonService::new(
+                NodeId::from_bytes([0xc5; 16]),
+                HealthLevel::Healthy,
+                NodeCapabilities::default(),
+            );
+            let b = Builder::session()?
+                .name(DBUS_SERVICE_NAME)?
+                .serve_at(DBUS_OBJECT_PATH, service.clone())?
+                .build()
+                .await?;
+            log.until(LOSS_BOUND, |log| log.count(Connected) == 2)
+                .await
+                .ok_or("never connected to B")?;
+            let before = log.count(Changed);
+            // B changes before its publisher takes a baseline …
+            service.update_runtime_observation(
+                HealthLevel::Degraded,
+                NodeCapabilities::default(),
+                None,
+            )?;
+            let _publisher = spawn_state_publisher(b.clone(), service.clone())?;
+            // … and the watcher still learns of it.
+            log.until(Duration::from_secs(1), |log| log.count(Changed) > before)
+                .await
+                .ok_or("B's pre-baseline change never reached the watcher")?;
+            Ok::<(), Box<dyn Error>>(())
+        };
+        future::or(
+            async {
+                watcher.await;
+                Err::<(), Box<dyn Error>>("the watcher stopped on its own".into())
+            },
+            scenario,
         )
         .await
     })

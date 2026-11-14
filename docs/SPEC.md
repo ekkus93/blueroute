@@ -445,7 +445,7 @@ reaches connected observers within one second even from a producer that does not
 outside every state lock; unchanged observations and failed reads emit nothing (a failed read's caller already has the error, and announcing it would make every front end repeat it); bursts coalesce into one pending
 invalidation that is never dropped; a failed emission is logged without payload and retried, and
 never turns a committed change into a failed request. Receivers treat a signal only as "reread":
-the revision orders signals of one daemon process and is not a state version. Front ends also
+the revision orders signals of one daemon process and is not a state version. The publisher also announces once when it starts and once when its first network sample lands, so a change made before its baselines existed is never absorbed silently (FU-05). Front ends also
 reread when a new owner-bound subscription is established, so a change between their first read
 and the subscription is never missed (CR-F1).
 
