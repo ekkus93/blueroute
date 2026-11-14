@@ -22,3 +22,6 @@ target
 
 # Python bytecode
 __pycache__/
+
+# Local scratch space for temporary files (builds, logs, test kits)
+/tmp/
