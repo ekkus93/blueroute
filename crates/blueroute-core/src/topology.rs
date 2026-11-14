@@ -130,8 +130,11 @@ impl TopologyGraph {
         self.nodes.get(id)
     }
 
-    /// Insert a segment. `Ok(true)`: a new segment. `Ok(false)`: the segment already exists with
-    /// the same NAP; it is kept, with its link members, and any new explicit members are added.
+    /// Insert a segment. `Ok(true)`: a new segment, whose members are rebuilt from this graph: its
+    /// NAP, its explicit members, and the PANU of every link here in it. Members a cloned or
+    /// imported segment derived from links in another graph are never taken over (FU-03).
+    /// `Ok(false)`: the segment already exists with the same NAP; it is kept, with its link
+    /// members, and any new explicit members are added.
     /// A different NAP for an existing SegmentId is refused (its links would no longer match),
     /// as are a NAP or explicit member that is not a node of the graph. A refused call changes
     /// nothing (CR-F3, GRAPH-1/2/4).
@@ -165,7 +168,26 @@ impl TopologyGraph {
                 Ok(false)
             }
             None => {
-                self.segments.insert(segment.id, segment);
+                // Never trust membership derived elsewhere (a segment cloned from another graph,
+                // or one whose public NAP was changed after creation): rebuild it from this
+                // graph's evidence alone (FU-03, SEG-1/2).
+                let mut members: BTreeSet<NodeId> = segment.explicit.clone();
+                members.insert(segment.nap);
+                members.extend(
+                    self.links
+                        .values()
+                        .filter(|link| link.segment_id == segment.id && link.nap == segment.nap)
+                        .map(|link| link.panu),
+                );
+                self.segments.insert(
+                    segment.id,
+                    PanSegment {
+                        id: segment.id,
+                        nap: segment.nap,
+                        members,
+                        explicit: segment.explicit,
+                    },
+                );
                 Ok(true)
             }
         }
@@ -715,11 +737,9 @@ mod tests {
         assert_consistent(&graph);
     }
 
-    // FU-03 regression (docs/CODE_REVIEW_FOLLOWUP_TODO.md, REV-03, SEG-2/4). It states the
-    // corrected contract and fails on 6d200d0, where a segment cloned from another graph keeps
-    // that graph's link-derived members.
+    // FU-03 (docs/CODE_REVIEW_FOLLOWUP_TODO.md, REV-03, SEG-1..4). The first test failed on
+    // 6d200d0, where a segment cloned from another graph kept that graph's link-derived members.
     #[test]
-    #[ignore = "FU-03 regression: fails on 6d200d0 until FU-03 is fixed"]
     fn fu_03_a_segment_cloned_from_another_graph_brings_no_phantom_members() {
         let source = star_with_one_client(); // segment 1: NAP 1, client 2 via link 1
         let (_, cloned) = source
@@ -731,17 +751,104 @@ mod tests {
         // (a) The client does not exist in the destination graph.
         let mut missing = TopologyGraph::default();
         add_node(&mut missing, 1, true);
-        if missing.add_segment(cloned.clone()).is_ok() {
-            assert_consistent(&missing);
-        }
+        assert_eq!(missing.add_segment(cloned.clone()), Ok(true));
+        assert_consistent(&missing);
+        assert_eq!(members_of(&missing, 1), vec![node(1)]);
 
         // (b) The client exists, but no link there justifies its membership.
         let mut unlinked = TopologyGraph::default();
         add_node(&mut unlinked, 1, true);
         add_node(&mut unlinked, 2, false);
-        if unlinked.add_segment(cloned).is_ok() {
-            assert_consistent(&unlinked);
-            assert_eq!(members_of(&unlinked, 1), vec![node(1)]);
-        }
+        assert_eq!(unlinked.add_segment(cloned), Ok(true));
+        assert_consistent(&unlinked);
+        assert_eq!(members_of(&unlinked, 1), vec![node(1)]);
+    }
+
+    #[test]
+    fn fu_03_a_cloned_segment_with_a_changed_nap_is_rebuilt_or_refused_atomically() {
+        let source = star_with_one_client();
+        let (_, original) = source
+            .segments()
+            .find(|(id, _)| **id == segment(1))
+            .unwrap();
+
+        // A clone whose public NAP was changed, into a fresh graph: membership follows the new
+        // NAP, and the old NAP and client do not come along.
+        let mut moved = original.clone();
+        moved.nap = node(4);
+        let mut fresh = TopologyGraph::default();
+        add_node(&mut fresh, 1, true);
+        add_node(&mut fresh, 2, false);
+        add_node(&mut fresh, 4, true);
+        assert_eq!(fresh.add_segment(moved.clone()), Ok(true));
+        assert_eq!(members_of(&fresh, 1), vec![node(4)]);
+        assert_consistent(&fresh);
+
+        // The same clone into the graph that holds segment 1 under NAP 1: refused, unchanged.
+        let mut graph = star_with_one_client();
+        let before = graph.clone();
+        assert!(graph.add_segment(moved).is_err());
+        assert_eq!(graph, before);
+
+        // An unknown NAP or explicit member: refused, unchanged.
+        let mut unknown_nap = original.clone();
+        unknown_nap.nap = node(9);
+        let mut fresh_before = fresh.clone();
+        assert!(fresh.add_segment(unknown_nap).is_err());
+        assert_eq!(fresh, fresh_before);
+        let mut unknown_member = PanSegment::new(segment(7), node(1));
+        unknown_member.add_member(node(9));
+        fresh_before = fresh.clone();
+        assert!(fresh.add_segment(unknown_member).is_err());
+        assert_eq!(fresh, fresh_before);
+    }
+
+    #[test]
+    fn fu_03_explicit_members_and_same_graph_reinsertion_still_work() {
+        // Same-graph identical reinsertion keeps the link member.
+        let mut graph = star_with_one_client();
+        let (_, own) = graph
+            .segments()
+            .find(|(id, _)| **id == segment(1))
+            .map(|(id, segment)| (*id, segment.clone()))
+            .unwrap();
+        assert_eq!(graph.add_segment(own), Ok(false));
+        assert_eq!(members_of(&graph, 1), vec![node(1), node(2)]);
+
+        // A new segment with an explicit non-link member keeps it; a cloned explicit member
+        // that exists in the destination comes along as explicit, not as link-derived.
+        let mut with_explicit = PanSegment::new(segment(4), node(4));
+        with_explicit.add_member(node(3));
+        let mut destination = TopologyGraph::default();
+        add_node(&mut destination, 3, false);
+        add_node(&mut destination, 4, true);
+        assert_eq!(destination.add_segment(with_explicit), Ok(true));
+        assert_eq!(members_of(&destination, 4), vec![node(3), node(4)]);
+        assert_consistent(&destination);
+    }
+
+    #[test]
+    fn fu_03_phantom_membership_cannot_reach_routing() {
+        // In the source, 1 reaches 2 through segment 1. A clone into a graph without that link
+        // must not make 2 look attached, so no path exists there.
+        let source = star_with_one_client();
+        let (_, cloned) = source
+            .segments()
+            .find(|(id, _)| **id == segment(1))
+            .unwrap();
+        let mut destination = TopologyGraph::default();
+        add_node(&mut destination, 1, true);
+        add_node(&mut destination, 2, false);
+        destination.add_segment(cloned.clone()).unwrap();
+        assert_eq!(destination.shortest_path(node(1), node(2)), None);
+        assert!(destination.direct_neighbors(node(1)).is_empty());
+        // Adding the real link there makes 2 a member and reachable, as it should.
+        destination.add_link(active_link(1, 1, 1, 2)).unwrap();
+        assert_eq!(members_of(&destination, 1), vec![node(1), node(2)]);
+        assert_eq!(
+            destination.shortest_path(node(1), node(2)),
+            Some(vec![node(1), node(2)])
+        );
+        assert_consistent(&destination);
     }
 }
