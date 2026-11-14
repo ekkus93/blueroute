@@ -213,3 +213,28 @@ signals from five failing client reads. `publisher_progress` (6), `state_events`
 | 05 checklist | Expected log fields (`unresolved_client_links`, `bluetooth_available`), statuses, equipment and evidence fields updated; status reads "procedure ready, NOT EXECUTED". |
 
 Procedure readiness is not qualification: FU-QUALIFY / CR-QUALIFY stay open.
+
+## FU-INTEGRATION — production boundaries and regression sensitivity (2026-11-13)
+
+**Commit:** `41417a9` (plus the per-finding tests above).
+
+| Subtask | Evidence |
+| --- | --- |
+| 01 | `watcher::fu_integration_the_watcher_hears_real_changes_while_network_sampling_is_stalled`: real `DaemonService` + production publisher + production `watch`, network read stalled from a cold start; a change made before the publisher exists and a later change each reach the watcher within 1 s. Also `fu_05_a_replacement_daemons_pre_baseline_change_reaches_the_watcher`. |
+| 02 | Desktop `watch_handover` (unchanged `watch_daemon`, system-bus address pointed at the private bus) and TUI `tui_watcher_follows_an_event_time_handover_to_the_successor` (real watcher thread via `spawn_with`): `Connected → Disconnected → Connected` (successor) → `Changed`, never A's obsolete change. Incompatible-owner refusal with zero Requests and no replay: `event_owner_race`. |
+| 03 | Imported graph through a consumer: `fu_03_phantom_membership_cannot_reach_routing`. Unresolved cleanup through the packaged path: `cleanup_outcome` maps an unresolved link to exit 1 (tested), and that status fails `prerm` in the lifecycle test and real `dpkg --remove` (isolated harness, mocked helper exit 1, then retry). The real helper against real services is FU-QUALIFY. |
+| 04 | CI runs every new bus suite: `publisher_progress`, `event_owner_race`, `watch_handover`; new tests in `watcher`, `state_events` and the TUI `tui_watcher` filter run in existing steps. Exact invocations in `CLAUDE.md`. Nothing required is left ignored outside a CI step; the only environment-dependent pieces are the private-bus suites (run under `dbus-run-session`). |
+| 05 | Negative controls below. |
+
+**Negative controls** (each defect restored in the working tree, tests run, file restored to HEAD
+and verified with `git diff`):
+
+| Restored | How | Failing tests |
+| --- | --- | --- |
+| REV-01 | blocking `observable_networks()` read put back inside the emitter loop | `fu_01_a_pending_network_read…` (publisher_progress); `fu_integration_…stalled` (watcher) |
+| REV-02 | Version check no longer raced against owner changes; post-check owner verification disabled | desktop `watch_handover`; TUI handover test; `fu_02_the_shared_watcher…`; 5 of 6 `event_owner_race` |
+| REV-03 | new segment stored as given | 2 of 4 `fu_03` tests (clone and changed-NAP) |
+| REV-04 | unobservable client link skipped, proof removed, success | 3 of 17 removal tests (REV-04 regression, corrected fixture, role-only client) |
+| GAP-01 | startup announcements removed (FU-05 entry) | `fu_05_a_change_before_the_first_baseline…`; `fu_05_a_replacement_daemons…` |
+
+The REV-01..04 baseline failures at `6d200d0` are in the FU-BASE entry.

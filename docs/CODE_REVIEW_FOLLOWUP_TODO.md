@@ -44,7 +44,7 @@
 | FU-04 | P2 REV-04: unresolved cleanup and durable retry proof | FU-BASE | `[x]` |
 | FU-05 | GAP-01: startup snapshot/publication handoff | FU-01 design; FU-02 for reconnect integration | `[x]` |
 | FU-06 | GAP-02: adapter-free qualification fixture and clear isolation | FU-04 contract; procedure work can start earlier | `[x]` |
-| FU-INTEGRATION | Boundary regressions and negative controls | FU-01..05 | `[ ]` |
+| FU-INTEGRATION | Boundary regressions and negative controls | FU-01..05 | `[x]` |
 | FU-VALIDATE | Exact-candidate software, packages, CI | FU-INTEGRATION; FU-06 software/fixture work | `[ ]` |
 | FU-QUALIFY | Existing installed-system/physical gate evidence | FU-04/06; validated packages; designated equipment | `[ ]` |
 | FU-CLOSEOUT | Consistent status and evidenced closure | Software: FU-01..06, FU-INTEGRATION/VALIDATE; full: FU-QUALIFY | `[ ]` |
@@ -196,15 +196,15 @@ claim has an explicit equipment/evidence gate; path relocation is never called b
 
 **Requirements:** ACCEPT-1; PUB-4, OWNER-4, SEG-4, REMOVE-5, START-3.
 
-- [ ] **FU-INTEGRATION-01:** Connect real service producers, private-broker invalidation, shared
+- [x] **FU-INTEGRATION-01:** Connect real service producers, private-broker invalidation, shared
   watcher, and snapshot refresh while network sampling is stalled, including cold startup.
-- [ ] **FU-INTEGRATION-02:** Carry event-time owner replacement through desktop/TUI consumers
+- [x] **FU-INTEGRATION-02:** Carry event-time owner replacement through desktop/TUI consumers
   and fresh-state recovery; verify incompatible-owner refusal and no mutation replay.
-- [ ] **FU-INTEGRATION-03:** Exercise imported graph state through a downstream consumer and
+- [x] **FU-INTEGRATION-03:** Exercise imported graph state through a downstream consumer and
   unresolved cleanup through the packaged failure/retry path, not only helper predicates.
-- [ ] **FU-INTEGRATION-04:** Add relevant tests to CI, explicitly scheduling ignored broker
+- [x] **FU-INTEGRATION-04:** Add relevant tests to CI, explicitly scheduling ignored broker
   tests on private buses; identify any intentionally ignored/environment-dependent checks.
-- [ ] **FU-INTEGRATION-05:** Run safe negative controls for REV-01..04 and GAP-01 and record
+- [x] **FU-INTEGRATION-05:** Run safe negative controls for REV-01..04 and GAP-01 and record
   expected failures. Confirm fixtures actually exercise the real code being corrected.
 
 **Acceptance:** Each software defect has a production-path regression sensitive to its root cause.
@@ -308,7 +308,7 @@ separately from the unresolved qualification gate.
 | FU-04 / REV-04 | `718983c` | 17 removal tests (REV-04 failed at baseline); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-04--unresolved-client-cleanup-fails-and-stays-retryable-2026-11-13) | FU-QUALIFY for actual installed/PAN claims | SOFTWARE COMPLETE / QUALIFICATION DEFERRED |
 | FU-05 / GAP-01 | `c104bea` | 2 forced-order tests (both fail without the handoff); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-05--startup-snapshotpublication-handoff-2026-11-13) | None | COMPLETE |
 | FU-06 / GAP-02 | `f3d875a` | Fixture builds (clippy all-targets); procedure revised; [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-06--honest-adapter-free-qualification-prerequisites-2026-11-13) | Execution remains separate (FU-QUALIFY) | COMPLETE (procedure) |
-| FU-INTEGRATION | — | ACCEPT-1 pending | Boundary sensitivity and CI scheduling | NOT STARTED |
+| FU-INTEGRATION | `41417a9` | Real watcher/desktop/TUI boundaries; every restored defect fails; [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-integration--production-boundaries-and-regression-sensitivity-2026-11-13) | None | COMPLETE |
 | FU-VALIDATE | — | ACCEPT-2 pending | Exact-candidate checks/packages/CI | NOT STARTED |
 | FU-QUALIFY | — | Software results do not satisfy this row | CR-QUALIFY-01..08; designated equipment | NOT STARTED |
 | FU-CLOSEOUT | — | ACCEPT-3/4 pending | Software milestone; full qualification separately | NOT STARTED |
