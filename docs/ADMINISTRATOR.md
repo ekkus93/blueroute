@@ -101,23 +101,51 @@ that network's NetworkManager profile and address are the proof that such a link
 Starting Bluetooth does not change this. The removal keeps failing until the role question is
 settled; do not guess it.
 
-Recovery is manual and outside the cleanup's success guarantee. With the service stopped
-(`systemctl stop blueroute.service`):
+Recovery is manual and outside the cleanup's success guarantee: it is an administrator's
+decision, based on what they observed themselves. Cleanup does not change this: it keeps failing
+for as long as a role or ownership question is open, and nothing here makes it guess. Work on one
+network at a time, with the service stopped (`systemctl stop blueroute.service`) so nothing else
+writes the state directory:
 
-1. Find the network's NetworkId (`network` lines of `memberships-v1`, or the client record in
-   `client-record/client-record-v1`).
+1. Find the network's full NetworkId: 32 hexadecimal digits, from its `network` line in
+   `memberships-v1` or the first field of the second line of `client-record/client-record-v1`.
+   Profile and device names show only the first 8 digits; never match on those alone.
 2. Confirm that no Bluetooth PAN link of that network is up. Check for a `bnep` interface carrying
    a NetworkManager profile whose `user.data` has `org.blueroute.owner` set to that NetworkId,
    and check the Bluetooth device it connects to. If a link is up and is BlueRoute's, disconnect it.
+   An interface name or a device hint alone proves nothing; if you cannot establish whether a link
+   is BlueRoute's, stop here and leave everything as it is.
 3. Delete the NetworkManager profiles (and with them their addresses) whose `org.blueroute.owner`
    is that NetworkId. Never delete a profile without that ownership.
    Do this before step 4. Afterwards, the network's owned state is no longer this
    computer's to clean, and anything left would only be reported, not removed.
-4. Remove what made the role unresolved. For a client record with no membership, delete
-   `client-record/client-record-v1`. For a `member` network with no role, delete that network's
-   `network` line and every `peer` line for the same NetworkId from `memberships-v1`.
-5. Run the removal again. `unresolved_foreign_resources` must have the same value as before
-   recovery. If it went up, step 3 left owned state behind: delete it the same way.
+4. Remove the records that leave this network's role unresolved, and only those:
+   - in `memberships-v1`, the network's `network` line and every `peer` line with the same
+     NetworkId, if there is a `network` line for it;
+   - `client-record/client-record-v1`, if its record names this same NetworkId. A record that
+     names another network belongs to that network: leave it alone.
+
+   When the network has both, delete both. Deleting only the membership lines leaves a client
+   record without a membership, which is unresolved in its own right, and removal keeps failing.
+5. Run the removal again. It must report `"unresolved_roles":0` and succeed. While this
+   computer still knows another network, `unresolved_foreign_resources` must have the same value
+   as before recovery; if it went up, step 3 left owned state behind: delete it the same way. If
+   the recovered network was the last one it knew, the retry has nothing to clean and does not
+   look at NetworkManager at all, so every count is 0 whatever is left: check step 3 yourself by
+   listing every profile's `user.data` (`nmcli -g user.data connection show <uuid>` for each
+   profile) and confirming none still names the NetworkId. A further run must succeed too.
+
+| What step 1 found for the network | What step 4 deletes |
+| --- | --- |
+| `member` with no role, and a client record naming it | its `network` and `peer` lines, and the client record |
+| `member` with no role, no client record (or one naming another network) | its `network` and `peer` lines; any other network's record stays |
+| a client record naming it, but no `network` line | the client record |
+| `not-member` (a completed leave), with or without a stale client record | nothing: this is not an unresolved role, and removal already succeeds |
+
+Leave every other network's lines, the `node-id`, keys and other files untouched. This recovery
+is a manual procedure; the qualification procedure's Part A exercises it on a disposable machine
+([CR-QUALIFY-PROCEDURE.md](CR-QUALIFY-PROCEDURE.md)), and nothing in BlueRoute performs it
+automatically.
 
 ## Join on a test rig
 

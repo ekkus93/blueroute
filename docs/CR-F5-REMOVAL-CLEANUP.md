@@ -69,8 +69,11 @@ disconnect. Its owned profile and address, membership and client record all stay
 networks are still cleaned. Each run re-reads the stores. No daemon path assigns a role
 to such a network, so in practice the only way forward is the manual administrator recovery
 ([ADMINISTRATOR.md](ADMINISTRATOR.md#removal-with-an-unresolved-role)). That recovery
-establishes the facts (no PAN link, owned state removed) before it removes the record.
-Bluetooth becoming available proves nothing about the role. The current daemon never writes
+establishes the facts (no PAN link, owned state removed) before it removes the records: the
+network's membership lines and the client record if it names the same NetworkId. Removing only
+the membership turns a matching record into an OrphanClientRecord, which is unresolved in its
+own right, so both go together (QR-RECOVERY, RLC-02). A record naming another network is that
+network's and stays. Bluetooth becoming available proves nothing about the role. The current daemon never writes
 `member`/`none` (leave stores `not-member`/`none`), so it comes only from damaged,
 hand-edited or otherwise unexpected state.
 

@@ -401,6 +401,11 @@ mod tests {
         fn world<T>(&self, read: impl FnOnce(&World) -> T) -> T {
             read(&self.0.lock().unwrap())
         }
+
+        /// Changes the world from outside cleanup, as an administrator would.
+        fn world_mut(&self, change: impl FnOnce(&mut World)) {
+            change(&mut self.0.lock().unwrap());
+        }
     }
 
     impl ClientLeaveBackend for Fake {
@@ -1354,5 +1359,226 @@ mod tests {
         let (outcome, fake) = run(&paths, fake, false);
         assert!(outcome.unwrap().succeeded());
         assert!(fake.world(|world| world.profiles.is_empty() && world.addresses.is_empty()));
+    }
+
+    /// Deletes `network`'s `network` line and every `peer` line for it from the membership file,
+    /// as an administrator editing `memberships-v1` would.
+    fn delete_membership_lines(paths: &RemovalPaths, network: NetworkId) {
+        let id = network.to_string();
+        let kept: String = std::fs::read_to_string(&paths.memberships)
+            .unwrap()
+            .lines()
+            .filter(|line| {
+                let mut fields = line.split('\t');
+                !(matches!(fields.next(), Some("network" | "peer")) && fields.next() == Some(&id))
+            })
+            .map(|line| format!("{line}\n"))
+            .collect();
+        std::fs::write(&paths.memberships, kept).unwrap();
+    }
+
+    /// Step 4 of ADMINISTRATOR.md "Removal with an unresolved role", exactly as documented, for
+    /// the network whose role is unresolved: its `network` and `peer` lines if it has a `network`
+    /// line, and the client record only if that record names this same network.
+    fn follow_the_documented_step_4(paths: &RemovalPaths, network: NetworkId) {
+        let (registry, record) = stored(paths);
+        if registry.network(&network).is_some() {
+            delete_membership_lines(paths, network);
+        }
+        if record.is_some_and(|record| record.network() == network) {
+            std::fs::remove_file(paths.client_record.join("client-record-v1")).unwrap();
+        }
+    }
+
+    /// Adds known peers to `network`'s membership through the production store.
+    fn with_peers(paths: &RemovalPaths, network: NetworkId, peers: &[u8]) {
+        let store = NetworkMembershipStore::new(paths.memberships.clone());
+        let mut registry = store.load().unwrap();
+        let membership = registry.network_mut(&network).expect("seeded network");
+        for byte in peers {
+            membership.remember_peer(blueroute_core::NodeId::from_bytes([*byte; 16]));
+        }
+        store.save(&registry).unwrap();
+    }
+
+    /// Steps 2-3 done independently: the network's owned NetworkManager state is deleted.
+    fn delete_owned_state(fake: &Fake, network: NetworkId) {
+        fake.world_mut(|world| {
+            world.profiles.retain(|(owner, _)| *owner != network);
+            world.addresses.retain(|address| address.owner != network);
+        });
+    }
+
+    // RLC-02 / QR-BASE-03 (docs/CODE_REVIEW_QUEUE_RECOVERY_TODO.md, RECOVER-1/3): Member/None
+    // with a matching client record, the RFU-02 state. The administrator has independently
+    // confirmed there is no PAN link and deleted the network's owned NetworkManager state
+    // (steps 2-3); the documented record step must then complete the recovery. A foreign
+    // network's resources must stay reported, never counted as abandoned owned state.
+    #[test]
+    fn qr_recovery_the_documented_recovery_of_an_unknown_role_completes() {
+        use blueroute_core::MembershipState::Member;
+        let foreign = net(9);
+        let (_temp, paths) = seeded(&[(net(1), Member, None)], Some(net(1)));
+        let fake = Fake::with(|world| {
+            world.addresses = vec![address(net(1), "bnep0"), address(foreign, "br-f")];
+            world.profiles = vec![(net(1), iface("bnep0")), (foreign, iface("br-f"))];
+        });
+        let (outcome, fake) = run(&paths, fake, false);
+        let before = outcome.unwrap();
+        assert_eq!(before.unresolved_roles, 1, "{before:?}");
+        delete_owned_state(&fake, net(1));
+        follow_the_documented_step_4(&paths, net(1));
+        let (outcome, fake) = run(&paths, fake, false);
+        let report = outcome.unwrap();
+        assert!(
+            report.succeeded(),
+            "the documented recovery left removal failing: {report:?}"
+        );
+        // That was the only network this installation knew, so the retry has nothing to clean
+        // and does not inventory NetworkManager at all: every count is zero, including foreign
+        // resources. The guide therefore has the administrator check step 3 with `nmcli`
+        // in this case; the count comparison only works while other networks are known.
+        assert_eq!(report, RemovalReport::default());
+        assert_eq!(cleanup_outcome(&Ok(report)).0, 0, "the helper exits 0");
+        fake.world(|world| assert_eq!(world.profiles, vec![(foreign, iface("br-f"))]));
+        let (registry, record) = stored(&paths);
+        assert!(registry.network(&net(1)).is_none() && record.is_none());
+        // A repeat is idempotent.
+        let (outcome, _) = run(&paths, fake, false);
+        assert!(outcome.unwrap().succeeded());
+    }
+
+    // QR-RECOVERY-03: the incomplete sequence (membership lines only, the matching record kept)
+    // is not a recovery. The record becomes an OrphanClientRecord and removal keeps failing,
+    // with the record preserved for a correct retry.
+    #[test]
+    fn qr_recovery_deleting_only_the_membership_leaves_an_orphan_record_and_fails() {
+        use blueroute_core::MembershipState::Member;
+        let (_temp, paths) = seeded(&[(net(1), Member, None)], Some(net(1)));
+        delete_membership_lines(&paths, net(1));
+        let scope = removal_scope(&paths).unwrap();
+        assert_eq!(scope[&net(1)].class, ScopeClass::OrphanClientRecord);
+        for bluetooth in [false, true] {
+            let (outcome, _) = run(&paths, Fake::default(), bluetooth);
+            let report = outcome.unwrap();
+            assert_eq!(
+                report.unresolved_roles, 1,
+                "bluetooth {bluetooth}: {report:?}"
+            );
+            assert_eq!(cleanup_outcome(&Ok(report)).0, 1);
+        }
+        assert!(stored(&paths).1.is_some(), "the record is kept for a retry");
+        // Completing step 4 then finishes the recovery.
+        follow_the_documented_step_4(&paths, net(1));
+        let (outcome, _) = run(&paths, Fake::default(), false);
+        assert!(outcome.unwrap().succeeded());
+    }
+
+    // QR-RECOVERY-04: no matching record (one names another, still known network). Only the
+    // target network's lines go; the other network's membership, peers and record survive,
+    // foreign counts are unchanged, and success repeats.
+    #[test]
+    fn qr_recovery_without_a_matching_record_keeps_another_networks_record_and_peers() {
+        use blueroute_core::MembershipState::Member;
+        let other = net(2);
+        let foreign = net(9);
+        let (_temp, paths) = seeded(
+            &[
+                (net(1), Member, None),
+                (other, Member, Some(MembershipRole::Host)),
+            ],
+            Some(other),
+        );
+        with_peers(&paths, net(1), &[0x41]);
+        with_peers(&paths, other, &[0x42, 0x43]);
+        let fake = Fake::with(|world| {
+            world.addresses = vec![address(net(1), "br-a"), address(foreign, "br-f")];
+            world.profiles = vec![(net(1), iface("br-a")), (foreign, iface("br-f"))];
+        });
+        let (outcome, fake) = run(&paths, fake, false);
+        let before = outcome.unwrap();
+        assert_eq!(before.unresolved_roles, 1, "{before:?}");
+        delete_owned_state(&fake, net(1));
+        follow_the_documented_step_4(&paths, net(1));
+        let (registry, record) = stored(&paths);
+        assert!(registry.network(&net(1)).is_none(), "target lines deleted");
+        let kept = registry.network(&other).expect("the other network is kept");
+        assert_eq!(
+            (kept.state, kept.role, kept.peers().count()),
+            (Member, Some(MembershipRole::Host), 2)
+        );
+        assert_eq!(record.map(|record| record.network()), Some(other));
+        let (outcome, fake) = run(&paths, fake, false);
+        let report = outcome.unwrap();
+        assert!(report.succeeded(), "{report:?}");
+        assert_eq!(
+            report.unresolved, before.unresolved,
+            "foreign counts unchanged: before {before:?}, after {report:?}"
+        );
+        assert_eq!(
+            fake.world(|world| world.profiles.clone()),
+            vec![(foreign, iface("br-f"))]
+        );
+        let (outcome, _) = run(&paths, fake, false);
+        assert!(outcome.unwrap().succeeded(), "a repeat succeeds");
+        assert!(stored(&paths).0.network(&other).is_some());
+    }
+
+    // The count comparison is what catches an incomplete step 3: an owned profile of the
+    // forgotten network left behind shows up as one more foreign resource on the retry.
+    #[test]
+    fn qr_recovery_an_owned_profile_left_behind_raises_the_foreign_count() {
+        use blueroute_core::MembershipState::Member;
+        let other = net(2);
+        let (_temp, paths) = seeded(
+            &[
+                (net(1), Member, None),
+                (other, Member, Some(MembershipRole::Host)),
+            ],
+            None,
+        );
+        let fake = Fake::with(|world| {
+            world.addresses = vec![address(net(1), "br-a")];
+            world.profiles = vec![(net(1), iface("br-a"))];
+        });
+        let (outcome, fake) = run(&paths, fake, false);
+        let before = outcome.unwrap();
+        // Step 3 skipped: the profile and address are still there.
+        follow_the_documented_step_4(&paths, net(1));
+        let (outcome, _) = run(&paths, fake, false);
+        let report = outcome.unwrap();
+        assert_eq!(report.unresolved, before.unresolved + 2, "{report:?}");
+    }
+
+    #[test]
+    fn qr_recovery_an_existing_orphan_record_is_cleared_after_its_resources() {
+        let (_temp, paths) = seeded(&[], Some(net(1)));
+        let fake = client_world(None);
+        let (outcome, fake) = run(&paths, fake, true);
+        assert_eq!(outcome.unwrap().unresolved_roles, 1);
+        assert_eq!(fake.world(|world| world.profiles.len()), 1, "proof kept");
+        delete_owned_state(&fake, net(1));
+        follow_the_documented_step_4(&paths, net(1));
+        assert!(stored(&paths).1.is_none());
+        let (outcome, fake) = run(&paths, fake, true);
+        assert!(outcome.unwrap().succeeded());
+        let (outcome, _) = run(&paths, fake, true);
+        assert!(outcome.unwrap().succeeded());
+    }
+
+    // A completed leave needs no recovery: its stale record adds no obligation, cleanup removes
+    // the network's owned state, and step 4 is not part of it (SCOPE-1, RECOVER-1 table).
+    #[test]
+    fn qr_recovery_a_completed_leave_needs_no_manual_step() {
+        use blueroute_core::MembershipState::NotMember;
+        let (_temp, paths) = seeded(&[(net(1), NotMember, None)], Some(net(1)));
+        let fake = client_world(None);
+        let (outcome, fake) = run(&paths, fake, false);
+        let report = outcome.unwrap();
+        assert!(report.succeeded(), "{report:?}");
+        assert_eq!(report.unresolved_roles, 0);
+        assert!(fake.world(|world| world.profiles.is_empty() && world.addresses.is_empty()));
+        let (outcome, _) = run(&paths, fake, false);
+        assert!(outcome.unwrap().succeeded());
     }
 }

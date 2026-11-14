@@ -199,3 +199,65 @@ recipe set aside):
   `dbus_client` 1, `cli_exit_contract` 1, `dbus_service` 1, `authorization` 1,
   `state_events` 8, `publisher_progress` 6, `watch_integration` 2, `watch_handover` 4,
   `bridge_end_to_end` 1, `tui_watcher` 3.
+
+## QR-RECOVERY — Complete targeted manual recovery (2026-11-14)
+
+**Source.** Documentation: `docs/ADMINISTRATOR.md` "Removal with an unresolved role" (steps
+1–5 and a case table), `docs/CR-F5-REMOVAL-CLEANUP.md` (recovery paragraph),
+`docs/CR-QUALIFY-PROCEDURE.md` (A3 recovery case and status line). Tests:
+`apps/daemon/src/removal.rs`. **No production code changed** (QR-RECOVERY-05): no role-editing
+API, no schema change, no automatic record deletion; the classifier is untouched.
+
+### Guide corrections (QR-RECOVERY-01/02/06)
+
+- Step 1 requires the **full** 32-digit NetworkId and warns that profile/device names show only 8.
+- Step 2 stops (leaves everything) when a link's ownership cannot be established; an interface
+  name or hint alone proves nothing.
+- Step 4 (the RLC-02 defect) now removes the network's `network`/`peer` lines **and** the client
+  record if it names the same NetworkId, says that deleting only the membership leaves an
+  unresolved orphan record, and keeps another network's record.
+- A table covers Member/None with a matching record, Member/None without one (or with another
+  network's), an orphan record, and a completed leave (no manual step).
+- **Additional finding during this work (step 5).** The guide's check "`unresolved_foreign_resources`
+  unchanged" was blind in one case: when the recovered network is the last one the installation
+  knows, `run_removal_cleanup` returns an all-zero report without inventorying NetworkManager
+  (`known.is_empty()`), so an owned profile left behind by an incomplete step 3 would not show.
+  The guide now says so and has the administrator check `user.data` of every profile with
+  `nmcli` in that case. The code is unchanged (that early return is the existing design: an
+  installation that knows no network owns no networking state); the Part A recovery case still
+  knows `H`, so its count comparison is meaningful, and the procedure now says so.
+- Service-stopped/writer-quiesced ordering and "step 3 before step 4" are kept.
+
+### Regressions (QR-RECOVERY-03/04/05)
+
+Production membership and client-record stores, fake NetworkManager/BlueZ backend, the
+production scope → cleanup → `cleanup_outcome` helper result. `follow_the_documented_step_4`
+edits `memberships-v1` and deletes `client-record-v1` exactly as the corrected step 4 says;
+`delete_owned_state` stands in for the administrator's independent steps 2–3.
+
+| Test | Result |
+| --- | --- |
+| `qr_recovery_the_documented_recovery_of_an_unknown_role_completes` | the RFU-02 state recovers: success, helper exit 0, both records gone, repeat succeeds; all-zero report because no network is left known |
+| `qr_recovery_deleting_only_the_membership_leaves_an_orphan_record_and_fails` | incomplete sequence: OrphanClientRecord, `unresolved_roles` 1 and exit 1 with Bluetooth off and on, record kept; completing step 4 then succeeds |
+| `qr_recovery_without_a_matching_record_keeps_another_networks_record_and_peers` | another known network's membership, role, 2 peers and its record survive; foreign count unchanged; repeat succeeds |
+| `qr_recovery_an_owned_profile_left_behind_raises_the_foreign_count` | negative control: skipping step 3 shows as +2 foreign resources |
+| `qr_recovery_an_existing_orphan_record_is_cleared_after_its_resources` | orphan record: proof kept until its resources are resolved, then cleared; success repeats |
+| `qr_recovery_a_completed_leave_needs_no_manual_step` | NotMember with a stale record: succeeds without recovery, owned state removed |
+
+- **Baseline sensitivity.** With step 4 as documented at `f957d80` (membership lines only), the
+  first test fails with `unresolved_roles: 1` (QR-BASE); it passes with the corrected step.
+- **Retained.** LC-CLEANUP-07 tests that restore a verified Host/Client role
+  (`lc_cleanup_recovery_needs_the_role_established_and_then_completes`,
+  `lc_cleanup_a_recovered_host_role_finishes_with_host_cleanup`) and every proof-retention test
+  pass unchanged.
+
+**Results** (QR-QUEUE committed, this change on top):
+- fmt clean; strict Clippy clean.
+- `cargo test -p blueroute-daemon --lib --locked removal`: 33 passed (27 before, plus 6 new).
+- `cargo test --workspace --locked`: 920 passed, 0 failed, 77 ignored.
+- `cargo test -p blueroute-daemon --features experimental-join --locked`: 392 passed.
+- `bash packaging/debian/test-maintainer-lifecycle.sh`: passed.
+
+**Limitations.** Software simulation of the manual workflow only: the administrator's
+observation of PAN links and NetworkManager is modelled by the fake backend. Installed-system
+execution remains QR-QUALIFY-02 / LC-QUALIFY-02 / CR-QUALIFY on a disposable VM.

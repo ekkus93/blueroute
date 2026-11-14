@@ -26,7 +26,7 @@
 | --- | --- | --- | --- |
 | QR-BASE | Durable recipes and corrected failing expectations | None | `[x]` |
 | QR-QUEUE | P2 RLC-01: bounded-queue progress with ordered retirement | QR-BASE | `[x]` |
-| QR-RECOVERY | P3 RLC-02: complete targeted manual recovery | QR-BASE | `[ ]` |
+| QR-RECOVERY | P3 RLC-02: complete targeted manual recovery | QR-BASE | `[x]` |
 | QR-INTEGRATION | Actual consumer/helper boundaries and sensitive CI tests | QR-QUEUE, QR-RECOVERY | `[ ]` |
 | QR-VALIDATE | Exact-candidate software/package/CI checks | QR-INTEGRATION | `[ ]` |
 | QR-QUALIFY | Preserve existing installed-system/physical gates | Procedure: QR-RECOVERY; execution: validated packages and designated equipment | `[ ]` |
@@ -91,22 +91,22 @@ The formerly unexercised post-decision boundary has direct evidence.
 
 **Requirements:** RECOVER-1..4. **Earlier tasks:** LC-CLEANUP-07, LC-CLOSEOUT-01..05.
 
-- [ ] **QR-RECOVERY-01:** Align ADMINISTRATOR.md with qualification Part A: after independently
+- [x] **QR-RECOVERY-01:** Align ADMINISTRATOR.md with qualification Part A: after independently
   verified PAN/NM teardown, remove the targeted unknown membership/peer rows and any client
   record naming the same full NetworkId. Preserve the service-stopped/writer-quiesced ordering.
-- [ ] **QR-RECOVERY-02:** Explain no-matching-record, unrelated-record, orphan-record and
+- [x] **QR-RECOVERY-02:** Explain no-matching-record, unrelated-record, orphan-record and
   confirmed completed-leave cases. Preserve foreign resources/records and fail unresolved
   preconditions; do not suggest guessing roles or clearing unrelated state.
-- [ ] **QR-RECOVERY-03:** Seed Member/None plus matching record through production stores.
+- [x] **QR-RECOVERY-03:** Seed Member/None plus matching record through production stores.
   Verify membership-only deletion still fails as OrphanClientRecord; the completed documented
   sequence must remove the target obligation and produce helper exit 0.
-- [ ] **QR-RECOVERY-04:** Test no matching record, a record for another network, existing orphan,
+- [x] **QR-RECOVERY-04:** Test no matching record, a record for another network, existing orphan,
   unrelated memberships/peers and completed-leave behavior. Verify retries, idempotent success
   and unchanged foreign-resource counts after independently completed resource cleanup.
-- [ ] **QR-RECOVERY-05:** Retain tests that restore an independently verified Host/Client role
+- [x] **QR-RECOVERY-05:** Retain tests that restore an independently verified Host/Client role
   and all automatic proof-retention/failure behavior. Do not add a production role-editing API,
   schema change or automatic record deletion to make manual recovery pass.
-- [ ] **QR-RECOVERY-06:** Reconcile administrator guide, cleanup design, qualification procedure
+- [x] **QR-RECOVERY-06:** Reconcile administrator guide, cleanup design, qualification procedure
   and current lifecycle evidence/summaries. State the manual preconditions, exact record scope,
   expected retry outcome and distinction from executed qualification consistently.
 
@@ -231,7 +231,7 @@ link exact revisions/results; keep software and real environment outcomes separa
 | --- | --- | --- | --- | --- |
 | QR-BASE | `e7720a9` baseline; `queue_saturation.rs`, recovery recipe | RLC-01: 6 of 9 fail at baseline, 64-notice boundary passes, 66 fails; RLC-02 recipe fails with `unresolved_roles: 1` ([evidence](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md#qr-base--findings-preserved-and-corrected-expectations-established-2026-11-14)) | Durable isolated recipes | ACCEPTED |
 | QR-QUEUE / RLC-01 | `crates/blueroute-client/src/lib.rs`; SPEC client paragraph | 13 saturation tests pass (10 runs), `decide` post-decision seam, zbus pin guard; all preserved suites pass ([evidence](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md#qr-queue--bounded-queue-progress-with-ordered-retirement-2026-11-14)) | Saturation, shared progress, post-decision evidence | ACCEPTED |
-| QR-RECOVERY / RLC-02 | — | RECOVER-1..4 pending | Complete targeted manual workflow | NOT STARTED |
+| QR-RECOVERY / RLC-02 | ADMINISTRATOR.md step 4/5 and table; CR-F5 design; CR-QUALIFY A3; no production code | 6 recovery tests (incomplete sequence fails as OrphanClientRecord, complete sequence exit 0, idempotent, unrelated state kept, step-3 negative control); step 5 blind spot found and documented ([evidence](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md#qr-recovery--complete-targeted-manual-recovery-2026-11-14)) | Complete targeted manual workflow | ACCEPTED |
 | QR-INTEGRATION | — | ACCEPT-1/2 pending | Actual consumers/helper boundaries and CI scheduling | NOT STARTED |
 | QR-VALIDATE | — | Exact-candidate checks/packages/CI pending | No installed-system/physical claim | NOT STARTED |
 | QR-QUALIFY | — | Procedure alignment pending | Existing installed-system/physical gates | NOT STARTED |

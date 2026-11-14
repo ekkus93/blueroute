@@ -3,7 +3,8 @@
 Status: **procedure ready, NOT EXECUTED** (needs equipment; revised 2026-11-13 by FU-06: Part A
 no longer needs an adapter, and a seeded joined client must fail honestly; revised 2026-11-14 by
 LC-QUALIFY-01: an active membership with an unknown role must fail too, and recover only once
-resolved). Procedure readiness is not execution: no box below has been run. Task: CR-QUALIFY in
+resolved; revised again 2026-11-14 by QR-RECOVERY/QR-QUALIFY-01: the recovery case states that
+both records go and checks the foreign count). Procedure readiness is not execution: no box below has been run. Task: CR-QUALIFY in
 [CODE_REVIEW_REMEDIATION_TODO.md](CODE_REVIEW_REMEDIATION_TODO.md). The design under test is
 [CR-F5-REMOVAL-CLEANUP.md](CR-F5-REMOVAL-CLEANUP.md). Software and isolated-dpkg results are in
 [CODE_REVIEW_REMEDIATION_EVIDENCE.md](CODE_REVIEW_REMEDIATION_EVIDENCE.md); this procedure is what
@@ -174,8 +175,11 @@ Revert to the A1 snapshot before each case.
   [ADMINISTRATOR.md](ADMINISTRATOR.md#removal-with-an-unresolved-role): confirm there is no PAN link
   (there is none: `qa-bnep0` is a dummy), delete the NetworkManager profiles whose
   `org.blueroute.owner` is `U`, and delete `U`'s `network` line (and `peer` lines) and the client
-  record. Remove again: succeeds (`"unresolved_roles":0`). Repeat the removal command (service
-  stopped): still exit 0. Record every manual step.
+  record, which names `U` (check its NetworkId first). Both must go: deleting the membership
+  alone leaves an orphan record and removal keeps failing (RLC-02). Remove again: succeeds
+  (`"unresolved_roles":0`), and `unresolved_foreign_resources` equals its value before recovery
+  (`H` is still known, so the retry inventories NetworkManager; `F` is untouched). Repeat the
+  removal command (service stopped): still exit 0. Record every manual step.
 - [ ] **Completed leave with a stale client record (SCOPE-1):** with the dummy `qa-bnep0`,
   `sudo ./qualify_fixture left /var/lib/blueroute qa-bnep0` → NetworkId `L` (`not-member`, a
   client record left behind, an owned address on `qa-bnep0`). Remove with `bluetoothd` stopped.
