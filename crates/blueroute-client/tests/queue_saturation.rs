@@ -224,6 +224,19 @@ async fn second_call_completes(connection: &Connection) -> Result<(), Box<dyn Er
     }
 }
 
+/// Another 40 release/reacquire cycles and 100 signals, more than any zbus queue holds.
+async fn churn_after_retirement(rig: &Rig) -> Result<(), Box<dyn Error>> {
+    for _ in 0..40 {
+        rig.a.release_name(DBUS_SERVICE_NAME).await?;
+        take_name(&rig.a).await?;
+    }
+    for _ in 0..100 {
+        emit(&rig.a, Item::Event).await?;
+        emit(&rig.a, Item::State).await?;
+    }
+    Ok(())
+}
+
 async fn subscribe(client: &BlueRouteClient, item: Item) -> Result<EventSubscription, ClientError> {
     match item {
         Item::Event => client.events().await,
@@ -299,6 +312,10 @@ fn burst_after_the_reply(item: Item, cycles: usize, keep: Keep) -> Result<(), Bo
                         Some(Err(ClientError::OwnerLost)) => {}
                         other => return Err(format!("not kept retired: {other:?}").into()),
                     }
+                    // More churn and more signals after retirement, with the handle still alive
+                    // and never polled again: it must hold none of them back (QUEUE-4).
+                    churn_after_retirement(&rig).await?;
+                    second_call_completes(&rig.client_connection).await?;
                 }
                 Keep::Dropped => {
                     drop(old);
