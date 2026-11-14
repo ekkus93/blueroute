@@ -198,3 +198,18 @@ before measuring, so a test only counts signals it caused; the failing-read test
 sampler's single "store failing" announcement (a legitimate change, FU-01) pass, then requires zero
 signals from five failing client reads. `publisher_progress` (6), `state_events` (8) and `watcher`
 (7) passed three consecutive runs.
+
+## FU-06 — honest, adapter-free qualification prerequisites (2026-11-13)
+
+**Change:** `f3d875a` ([CR-QUALIFY-PROCEDURE.md](CR-QUALIFY-PROCEDURE.md);
+`apps/daemon/examples/qualify_fixture.rs`).
+
+| Subtask | Result |
+| --- | --- |
+| 01 fixture | `qualify_fixture host|foreign|client` creates owned state through `NetworkManagerBackend::ensure_bridge/ensure_address` and the production membership and client-record stores, so ownership metadata (`org.blueroute.owner`, `kind`, `schema=1`), profile names and permissions are exactly the daemon's. The procedure lists the expected resources, verification and teardown (snapshot revert). |
+| 02 VM dependencies | Disposable Debian 13 VM, no adapter; foreign bridge/address/route and optional `ip_forward=1` comparisons; independent `nmcli`/`ip`/`sysctl`/`dpkg` snapshots for each case. |
+| 03 layering | A seeded client with no Bluetooth must fail (`unresolved_client_links`, proof kept) and is explicitly not client teardown; real NAP/PANU teardown, including Bluetooth down-then-up, is Part B only. |
+| 04 isolation audit | Private-bus tests and fakes never reach host services; `maintenance_mode` cases exit before any bus even as root; the isolated dpkg harness mocks the helper because `DPKG_ROOT` relocates files, not D-Bus — now stated in the procedure. The fixture is outside every production path and is not built by `build-package.sh` (which builds only the daemon, CLI and TUI binaries). |
+| 05 checklist | Expected log fields (`unresolved_client_links`, `bluetooth_available`), statuses, equipment and evidence fields updated; status reads "procedure ready, NOT EXECUTED". |
+
+Procedure readiness is not qualification: FU-QUALIFY / CR-QUALIFY stay open.

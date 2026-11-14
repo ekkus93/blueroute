@@ -43,7 +43,7 @@
 | FU-03 | P2 REV-03: safe segment cloning/import | FU-BASE | `[x]` |
 | FU-04 | P2 REV-04: unresolved cleanup and durable retry proof | FU-BASE | `[x]` |
 | FU-05 | GAP-01: startup snapshot/publication handoff | FU-01 design; FU-02 for reconnect integration | `[x]` |
-| FU-06 | GAP-02: adapter-free qualification fixture and clear isolation | FU-04 contract; procedure work can start earlier | `[ ]` |
+| FU-06 | GAP-02: adapter-free qualification fixture and clear isolation | FU-04 contract; procedure work can start earlier | `[x]` |
 | FU-INTEGRATION | Boundary regressions and negative controls | FU-01..05 | `[ ]` |
 | FU-VALIDATE | Exact-candidate software, packages, CI | FU-INTEGRATION; FU-06 software/fixture work | `[ ]` |
 | FU-QUALIFY | Existing installed-system/physical gate evidence | FU-04/06; validated packages; designated equipment | `[ ]` |
@@ -178,15 +178,15 @@ neither startup nor reconnect leaves a connected client permanently on the old s
 
 **Requirements:** QUAL-1..4. **Earlier tasks:** CR-QUALIFY-01..05.
 
-- [ ] **FU-06-01:** Replace Part A's adapter-dependent fixture with an explicit test-only owned
+- [x] **FU-06-01:** Replace Part A's adapter-dependent fixture with an explicit test-only owned
   NetworkManager/registry setup; document exact ownership/schema, permissions and teardown.
-- [ ] **FU-06-02:** Specify adapter-free VM dependencies, isolated dummy/bridge devices,
+- [x] **FU-06-02:** Specify adapter-free VM dependencies, isolated dummy/bridge devices,
   foreign-state comparisons, and independent kernel/backend observations for each case.
-- [ ] **FU-06-03:** Separate VM NetworkManager cleanup from physical client/PAN teardown.
+- [x] **FU-06-03:** Separate VM NetworkManager cleanup from physical client/PAN teardown.
   Assign unfaithful VM cases to Part B; seeded unresolved client state must fail honestly.
-- [ ] **FU-06-04:** Audit test harness/helper/bus isolation and document the `DPKG_ROOT`
+- [x] **FU-06-04:** Audit test harness/helper/bus isolation and document the `DPKG_ROOT`
   limitation. Keep fixture tools outside production paths and ownership authorization.
-- [ ] **FU-06-05:** Update the procedure's evidence checklist, expected statuses/log fields,
+- [x] **FU-06-05:** Update the procedure's evidence checklist, expected statuses/log fields,
   equipment requirements, and links; distinguish procedure readiness from executed qualification.
 
 **Acceptance:** Part A has an actionable adapter-free path with honest scope. Every physical
@@ -307,7 +307,7 @@ separately from the unresolved qualification gate.
 | FU-03 / REV-03 | `1f2d48d` | 4 `fu_03` tests (REV-03 failed at baseline); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-03--safe-segment-cloningimport-2026-11-13) | None | COMPLETE |
 | FU-04 / REV-04 | `718983c` | 17 removal tests (REV-04 failed at baseline); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-04--unresolved-client-cleanup-fails-and-stays-retryable-2026-11-13) | FU-QUALIFY for actual installed/PAN claims | SOFTWARE COMPLETE / QUALIFICATION DEFERRED |
 | FU-05 / GAP-01 | `c104bea` | 2 forced-order tests (both fail without the handoff); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-05--startup-snapshotpublication-handoff-2026-11-13) | None | COMPLETE |
-| FU-06 / GAP-02 | — | QUAL-1..4 procedure/fixture pending | Execution remains separate | NOT STARTED |
+| FU-06 / GAP-02 | `f3d875a` | Fixture builds (clippy all-targets); procedure revised; [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-06--honest-adapter-free-qualification-prerequisites-2026-11-13) | Execution remains separate (FU-QUALIFY) | COMPLETE (procedure) |
 | FU-INTEGRATION | — | ACCEPT-1 pending | Boundary sensitivity and CI scheduling | NOT STARTED |
 | FU-VALIDATE | — | ACCEPT-2 pending | Exact-candidate checks/packages/CI | NOT STARTED |
 | FU-QUALIFY | — | Software results do not satisfy this row | CR-QUALIFY-01..08; designated equipment | NOT STARTED |
