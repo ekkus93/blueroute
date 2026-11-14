@@ -385,3 +385,80 @@ count is treated as a fixed expectation; these are this candidate's results.
   and the designated two-machine Bluetooth rig (Part B); neither is available to this work.
 - **QR-QUALIFY-03 (deferral).** Recorded here. QR-QUALIFY, LC-QUALIFY-02/03, FU-QUALIFY-01..03 and
   CR-QUALIFY-01..08 stay open. No installed-system or physical claim is made.
+
+## QR-CLOSEOUT-01 — Independent review of `f957d80..c317716` (2026-11-14)
+
+An independent reviewer read the specification and the diff, not this evidence. No P1 defect was
+found; the reviewer confirmed that every await in `next_change` keeps reading, cancellation is
+safe at each await, the decision rule holds, buffering is bounded and retirement/lag release the
+receivers, and that the guide's steps agree with `removal.rs`, the cleanup design and Part A.
+All findings were resolved in `f17b87b`:
+
+| # | Finding (reviewer's severity) | Resolution |
+| --- | --- | --- |
+| 1 | P3 test gap, confirmed by two scratch controls: nothing exercised what `next_change` does with a post-decision `decide` result | `qr_queue_a_period_end_after_the_decision_keeps_the_delivery_and_retires_next`: a bus monitor shows when the client has sent its final `GetNameOwner`; the client is left unpolled while a broker round trip proves the reply is queued and A releases and reacquires the name, so both notices follow the reply. The delivery must stand, the handle must hold nothing back through further churn, and the next call must report OwnerLost. Controls at `f17b87b` in an isolated worktree: forgetting the retirement (X1') fails ("a second call on the shared connection stalled"), withdrawing the delivery (X2') fails ("a post-decision end withdrew the delivery: Some(Err(OwnerLost))"), keeping the streams until the next poll (X3, the pre-review behavior) fails (stall). Passes 5 of 5 runs |
+| 2 | P3: after `DeliverThenRetire` the retired subscription kept its streams until polled again, contrary to SPEC | the subscription now ends (streams released) as its last item is delivered |
+| 3 | P3: a recorded period end could be reported as `SubscriptionLagged` | `interrupted` reports OwnerLost whenever a period end has been read |
+| 4 | P3 nit: a Version request could be sent before queued notices were settled | `settle` runs before the Version request |
+| 5 | P3: the capacity matrix lacked Event/StateChanged pairs | at-capacity State, just-above Event and dropped State added |
+| 6 | P3: cancellation with a period end already recorded is not exercised | reasoned only, not placed on a broker: `period_end` lives on the subscription and the next call ends it; the type documentation and SPEC now state that such a handle keeps its streams until its next call or drop |
+| 7 | P3 doc: guide step 5 said `unresolved_roles` must reach 0 even with several unresolved networks | step 5 now says it drops by one per recovered network and reaches 0 after the last |
+
+Also confirmed by the reviewer, unchanged: the maintainer harness mocks the helper (documented),
+and its mock record path is a placeholder name (`client-record/record`); the real file name is
+asserted by the unit tests.
+
+## QR-CLOSEOUT — Revalidation, requirement map and software milestone (2026-11-14)
+
+**Revalidated candidate.** `b700577182b92f5466ae0ff30d63595f8cb93a24` (code at `f17b87b`; the
+docs commit on top changes no code), clean apart from `.serena/` and `AGENTS.md`, same toolchains:
+
+- fmt clean; strict Clippy (workspace, and the daemon with `experimental-join`) clean.
+- `cargo test --workspace --locked`: 920 passed, 0 failed, 85 ignored.
+- `cargo test -p blueroute-daemon --features experimental-join --locked`: 392 passed.
+- Removal: 33 passed.
+- Private brokers, all passed: `queue_saturation` 18, `ownership_period` 12, `owner_race` 6,
+  `event_owner_race` 6, `owner_watch` 3, `watcher` 8, `dbus_client` 1, `cli_exit_contract` 1,
+  `dbus_service` 1, `authorization` 1, `bridge_end_to_end` 1, `state_events` 8,
+  `publisher_progress` 6, `watch_integration` 2, `watch_handover` 6, `tui_watcher` 4 (84 total).
+- Python 7 passed; frontend all rc 0, 43 tests.
+- Packages: core `38750ac0cd9f9e29de539c0cc1c884f5a1944cc6660688061d4140fb1094e2d5`, desktop
+  `344974eb11de0ba3694d61f8d2472b2a1986e55ba25e58964519eac6209cb3ad`.
+- Maintainer lifecycle, source and extracted packaged scripts: passed both. Isolated upgrade:
+  passed (with `/usr/sbin` on `PATH`). Join gate closed by default. No leftover test files.
+- Negative controls C1–C6 rerun at `b700577`, each still failing its target tests (C1 now 8 of
+  18, including the new matrix cases).
+- Part A kit rebuilt at `b700577`: core package as above, fixture `a6ae47ad…`, upgrade package
+  `c0eac18d9046b6888d2549cb8d08fc627ad73822d5b59b98d1161fe919ec4b4e`.
+- Exact-revision CI: [run 43653522625](https://github.com/ekkus93/blueroute/actions/runs/43653522625) on `b700577`, success (Rust and Desktop frontend); its log shows `queue_saturation` 18 passed, including `qr_queue_a_period_end_after_the_decision_keeps_the_delivery_and_retires_next`.
+
+### Requirement map (QR-CLOSEOUT-04)
+
+| Requirement | Tasks | Source | Baseline failure / control | Final evidence | Limits |
+| --- | --- | --- | --- | --- | --- |
+| QUEUE-1 no circular wait | QR-QUEUE-01/02 | `lib.rs` `step`, `keep_reading`, `settle` | 6/9 saturation tests fail at `e7720a9`; C1, C3 | saturation suite; queue table above | pinned zbus behavior |
+| QUEUE-2 observable bound | QR-QUEUE-05 | `next_change` | "no OwnerLost within 2s of resuming" at baseline | 2 s bound in every saturation and watcher test | no bound while the caller is paused |
+| QUEUE-3 delivery decision | QR-QUEUE-03/07 | `decide`, `period_end`, `DeliverThenRetire` | C4; review X1', X2' | `decide` seam test; post-decision monitor test; `ownership_period` 12 | broker placement of the post-decision window via a monitor |
+| QUEUE-4 connection and lifetime | QR-QUEUE-04/06 | `end`, `interrupted` | C2; review X3 | retained/dropped/cancel/shared-rule tests with post-retirement churn | a call cancelled after reading a period end keeps streams until next call or drop |
+| QUEUE-5 regression matrix | QR-QUEUE-05/06 | `queue_saturation.rs` | baseline table (QR-BASE) | Event and State at 20/32/33/40 cycles, retained and dropped, signals 96/384 | finite fixtures, one broker |
+| QUEUE-6 ordering and compatibility evidence | QR-QUEUE-07/08 | seam test, pin guard | C4 | preserved suites pass; zbus/async-broadcast pin guard in CI | upgrade must re-verify |
+| RECOVER-1 complete record transition | QR-RECOVERY-01 | `ADMINISTRATOR.md` step 4, table | `qr_recovery_the_documented…` fails at baseline; C6 | 6 recovery tests | manual procedure |
+| RECOVER-2 safe scope and postconditions | QR-RECOVERY-02/04 | guide steps 1, 2, 5 | step-3 negative control (+2 foreign) | other network, peers and record kept; foreign counts unchanged; last-network blind spot documented | administrator's own observation |
+| RECOVER-3 test the actual workflow | QR-RECOVERY-03/04 | `removal.rs` tests | incomplete sequence stays OrphanClientRecord | production stores → scope → cleanup → `cleanup_outcome` | backend mocked |
+| RECOVER-4 consistent guidance | QR-RECOVERY-06, QR-QUALIFY-01 | guide, `CR-F5-REMOVAL-CLEANUP.md`, `CR-QUALIFY-PROCEDURE.md`, kit runbook | review item 7 | review confirmed agreement | procedure readiness only |
+| ACCEPT-1 sensitive maintained tests | QR-BASE, QR-INTEGRATION-03 | both recipes as tests | QR-BASE failures; C1–C6; X1'–X3 | all pass at `b700577` | — |
+| ACCEPT-2 production boundaries and exact candidate | QR-INTEGRATION-01/02/04, QR-VALIDATE | watcher, TUI, desktop, helper path, packaged scripts, CI | C5 | revalidation above; CI on the exact head | helper and NetworkManager mocked |
+| ACCEPT-3 reconcile completion claims | QR-CLOSEOUT-02/03 | lifecycle TODO/evidence corrections, pointers in TODO.md, remediation, follow-up and hardware backlogs, SPEC | — | `b700577` | history preserved |
+| ACCEPT-4 separate milestones and gates | QR-QUALIFY, QR-CLOSEOUT-05 | status lines | — | SOFTWARE COMPLETE / QUALIFICATION DEFERRED | Part A VM and Part B rig not run |
+
+The post-decision coverage gap named in the specification is closed by the `decide` seam and,
+after review, by the broker test that places a notice after the final reply.
+
+### Software milestone (QR-CLOSEOUT-05)
+
+**SOFTWARE COMPLETE / QUALIFICATION DEFERRED** at `b700577`. Both findings and the post-decision
+gap have software outcomes: RLC-01 fixed with sensitive tests at the client, watcher, TUI and
+desktop boundaries; RLC-02 fixed in the guidance with tests through the production cleanup
+path. Full closure stays open: QR-QUALIFY-02 (Part A on a disposable VM, Part B on the
+designated rig), LC-QUALIFY-02/03, FU-QUALIFY-01..03, CR-QUALIFY-01..08 and the original hardware
+and product gates. No installed-system or physical claim is made.

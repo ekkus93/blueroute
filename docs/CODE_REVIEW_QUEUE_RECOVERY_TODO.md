@@ -1,6 +1,6 @@
 # Code Review Queue and Recovery Remediation TODO
 
-**Status:** IN PROGRESS (2026-11-14). **Evidence:** [CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md).  
+**Status:** SOFTWARE COMPLETE / QUALIFICATION DEFERRED (2026-11-14, candidate `b700577`); QR-QUALIFY-02 blocked on equipment. **Evidence:** [CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md).  
 **Baseline:** `f957d80207930ccb481bec8f23cefd8bb2506cde`.  
 **Companion specification:** [CODE_REVIEW_QUEUE_RECOVERY_SPEC.md](CODE_REVIEW_QUEUE_RECOVERY_SPEC.md).  
 **Earlier work:** [lifecycle backlog](CODE_REVIEW_LIFECYCLE_TODO.md),
@@ -27,10 +27,10 @@
 | QR-BASE | Durable recipes and corrected failing expectations | None | `[x]` |
 | QR-QUEUE | P2 RLC-01: bounded-queue progress with ordered retirement | QR-BASE | `[x]` |
 | QR-RECOVERY | P3 RLC-02: complete targeted manual recovery | QR-BASE | `[x]` |
-| QR-INTEGRATION | Actual consumer/helper boundaries and sensitive CI tests | QR-QUEUE, QR-RECOVERY | `[ ]` |
-| QR-VALIDATE | Exact-candidate software/package/CI checks | QR-INTEGRATION | `[ ]` |
-| QR-QUALIFY | Preserve existing installed-system/physical gates | Procedure: QR-RECOVERY; execution: validated packages and designated equipment | `[ ]` |
-| QR-CLOSEOUT | Reviewed closure and current status reconciliation | Software: QR-QUEUE/RECOVERY/INTEGRATION/VALIDATE; full: QR-QUALIFY | `[ ]` |
+| QR-INTEGRATION | Actual consumer/helper boundaries and sensitive CI tests | QR-QUEUE, QR-RECOVERY | `[x]` |
+| QR-VALIDATE | Exact-candidate software/package/CI checks | QR-INTEGRATION | `[x]` |
+| QR-QUALIFY | Preserve existing installed-system/physical gates | Procedure: QR-RECOVERY; execution: validated packages and designated equipment | `[!]` no designated equipment |
+| QR-CLOSEOUT | Reviewed closure and current status reconciliation | Software: QR-QUEUE/RECOVERY/INTEGRATION/VALIDATE; full: QR-QUALIFY | `[-]` software closed |
 
 QR-QUEUE and QR-RECOVERY can proceed independently after baseline preparation. Documentation and
 qualification-procedure work can start with their designs. Equipment is not a dependency for the
@@ -129,7 +129,7 @@ Guide and qualification procedure agree without weakening cleanup classification
   completed-recovery acceptance. Retain passing below-capacity and incomplete-record controls.
 - [x] **QR-INTEGRATION-04:** Schedule every new required regression in CI, including explicit
   private-bus invocations for ignored tests. Verify filters include the intended consumer cases.
-- [-] **QR-INTEGRATION-05:** Re-run preserved publisher progress/shutdown/startup, graph import/
+- [x] **QR-INTEGRATION-05:** Re-run preserved publisher progress/shutdown/startup, graph import/
   atomicity, normal owner handover, unknown-role proof retention, stale-record cleanup, UI effect
   generation, authorization, pins/revocation, rollback, no-replay and closed join/sharing checks.
 
@@ -140,17 +140,17 @@ layer attribution. Existing green suites and helper mocks alone cannot close the
 
 **Requirements:** ACCEPT-2; preserved security, platform and compatibility invariants.
 
-- [ ] **QR-VALIDATE-01:** Run pinned Rust formatting, locked workspace build/check/tests and
+- [x] **QR-VALIDATE-01:** Run pinned Rust formatting, locked workspace build/check/tests and
   strict all-target Clippy, plus experimental-join software tests. Confirm default builds keep
   join closed; record actual passed/failed/ignored counts.
-- [ ] **QR-VALIDATE-02:** Run all existing/new private-broker suites and Python socket-tooling
+- [x] **QR-VALIDATE-02:** Run all existing/new private-broker suites and Python socket-tooling
   tests; record commands, environment and any ignored or unavailable cases explicitly.
-- [ ] **QR-VALIDATE-03:** With pinned Node/npm, run frontend clean install, format/lint/type
+- [x] **QR-VALIDATE-03:** With pinned Node/npm, run frontend clean install, format/lint/type
   checks, component/StrictMode tests and production build; preserve narrow Tauri permissions.
-- [ ] **QR-VALIDATE-04:** Build both Debian packages and inspect manifests/dependencies/assets.
+- [x] **QR-VALIDATE-04:** Build both Debian packages and inspect manifests/dependencies/assets.
   Run source/extracted packaged-script lifecycle tests, state migration, isolated upgrade,
   cleanup failure/retry, remove and purge checks against the fresh candidate.
-- [ ] **QR-VALIDATE-05:** Record exact SHA, toolchains, commands/results, package hashes,
+- [x] **QR-VALIDATE-05:** Record exact SHA, toolchains, commands/results, package hashes,
   preserved-invariant results and limitations. Inspect exact-revision CI with repository-approved
   tooling and attribute earlier candidate results to their own source revisions.
 
@@ -189,13 +189,13 @@ review's earlier 911 Rust, 63 broker and 43 frontend passes are historical basel
 
 **Requirements:** ACCEPT-4; existing LC-QUALIFY/FU-QUALIFY/CR-QUALIFY and hardware criteria.
 
-- [ ] **QR-QUALIFY-01:** Reconcile the installed-system recovery procedure with the corrected
+- [x] **QR-QUALIFY-01:** Reconcile the installed-system recovery procedure with the corrected
   administrator sequence, matching-record/foreign comparisons and candidate identity. Preserve
   its complete two-record deletion case and distinguish procedure readiness from execution.
-- [ ] **QR-QUALIFY-02:** On designated disposable equipment, execute the applicable recovery /
+- [!] **QR-QUALIFY-02:** *(blocked: needs a disposable Debian 13 VM with sudo for Part A and the designated Bluetooth rig for Part B; the kit is built at `b700577`)* On designated disposable equipment, execute the applicable recovery /
   remove/retry/purge acceptance and record real backend/kernel/systemd/dpkg observations. Retain
   the separate Part B physical PAN gate and link results through existing qualification trackers.
-- [ ] **QR-QUALIFY-03:** If equipment remains unavailable, record deferral and keep this parent
+- [x] **QR-QUALIFY-03:** If equipment remains unavailable, record deferral and keep this parent
   and all unmet original installed-system/physical criteria open; continue independent software.
 
 **Acceptance:** Applicable environment criteria have actual evidence. A revised procedure or
@@ -205,17 +205,17 @@ completed deferral-reporting leaf cannot satisfy execution or complete this pare
 
 **Requirements:** ACCEPT-3/4 and all requirement-to-evidence mappings.
 
-- [ ] **QR-CLOSEOUT-01:** Review both fixes against reproduction, saturation/control results,
+- [x] **QR-CLOSEOUT-01:** Review both fixes against reproduction, saturation/control results,
   delivery-decision/cancellation semantics, complete manual workflow and preserved boundaries.
-- [ ] **QR-CLOSEOUT-02:** Append dated corrections to LC-OWNER/LC-CLEANUP/LC-INTEGRATION/
+- [x] **QR-CLOSEOUT-02:** Append dated corrections to LC-OWNER/LC-CLEANUP/LC-INTEGRATION/
   LC-CLOSEOUT software claims and related evidence; preserve history and LC/FU/CR/P identities.
   Link this backlog as the current RLC-01/02 status authority.
-- [ ] **QR-CLOSEOUT-03:** Reconcile product/current summaries, client queue/lifecycle contract,
+- [x] **QR-CLOSEOUT-03:** Reconcile product/current summaries, client queue/lifecycle contract,
   administrator recovery, cleanup design and qualification procedure. Preserve every unsatisfied
   original product/hardware gate and the existing safe unknown-role policy.
-- [ ] **QR-CLOSEOUT-04:** Complete versioned evidence mapping all 14 requirements to tasks,
+- [x] **QR-CLOSEOUT-04:** Complete versioned evidence mapping all 14 requirements to tasks,
   source, corrected baseline failures, final tests/proofs and limitations; verify links and states.
-- [ ] **QR-CLOSEOUT-05:** Record software completion only after fixes, integration, validation,
+- [-] **QR-CLOSEOUT-05:** *(software closure recorded at `b700577`; full closure waits for QR-QUALIFY)* Record software completion only after fixes, integration, validation,
   documentation and review pass. Keep full closure open until QR-QUALIFY and existing required
   gates pass; use SOFTWARE COMPLETE / QUALIFICATION DEFERRED where appropriate.
 
@@ -232,7 +232,7 @@ link exact revisions/results; keep software and real environment outcomes separa
 | QR-BASE | `e7720a9` baseline; `queue_saturation.rs`, recovery recipe | RLC-01: 6 of 9 fail at baseline, 64-notice boundary passes, 66 fails; RLC-02 recipe fails with `unresolved_roles: 1` ([evidence](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md#qr-base--findings-preserved-and-corrected-expectations-established-2026-11-14)) | Durable isolated recipes | ACCEPTED |
 | QR-QUEUE / RLC-01 | `crates/blueroute-client/src/lib.rs`; SPEC client paragraph | 13 saturation tests pass (10 runs), `decide` post-decision seam, zbus pin guard; all preserved suites pass ([evidence](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md#qr-queue--bounded-queue-progress-with-ordered-retirement-2026-11-14)) | Saturation, shared progress, post-decision evidence | ACCEPTED |
 | QR-RECOVERY / RLC-02 | ADMINISTRATOR.md step 4/5 and table; CR-F5 design; CR-QUALIFY A3; no production code | 6 recovery tests (incomplete sequence fails as OrphanClientRecord, complete sequence exit 0, idempotent, unrelated state kept, step-3 negative control); step 5 blind spot found and documented ([evidence](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md#qr-recovery--complete-targeted-manual-recovery-2026-11-14)) | Complete targeted manual workflow | ACCEPTED |
-| QR-INTEGRATION | — | ACCEPT-1/2 pending | Actual consumers/helper boundaries and CI scheduling | NOT STARTED |
-| QR-VALIDATE | — | Exact-candidate checks/packages/CI pending | No installed-system/physical claim | NOT STARTED |
-| QR-QUALIFY | — | Procedure alignment pending | Existing installed-system/physical gates | NOT STARTED |
-| QR-CLOSEOUT | — | ACCEPT-3/4 and requirement map pending | Software milestone; full qualification separately | NOT STARTED |
+| QR-INTEGRATION | `e09f697`, `128d44e`, `c317716` | saturated loss at watcher/TUI/desktop; helper path and maintainer recovery walk; controls C1–C6 each fail their targets; suite scheduled in CI ([evidence](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md#qr-integration--consumer-and-helper-boundaries-sensitivity-and-ci-2026-11-14)) | Actual consumers/helper boundaries and CI scheduling | ACCEPTED |
+| QR-VALIDATE | `c317716`, revalidated `b700577` | 920 workspace, 392 join, 84 broker, 7 Python, 43 frontend; packages, upgrade, packaged scripts; [CI 43652001563](https://github.com/ekkus93/blueroute/actions/runs/43652001563) and [CI 43653522625](https://github.com/ekkus93/blueroute/actions/runs/43653522625) ([evidence](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md#qr-validate--exact-software-candidate-2026-11-14)) | No installed-system/physical claim | COMPLETE |
+| QR-QUALIFY | `0b58cef` procedure; kit at `b700577` | procedure reconciled; execution deferred ([evidence](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md#qr-qualify--environment-gates-2026-11-14)) | Existing installed-system/physical gates | BLOCKED (execution) |
+| QR-CLOSEOUT | `f17b87b` review fixes; `b700577` | [review](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md#qr-closeout-01--independent-review-of-f957d80c317716-2026-11-14) (7 items resolved), dated corrections, [requirement map](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md#qr-closeout--revalidation-requirement-map-and-software-milestone-2026-11-14); [CI 43653522625](https://github.com/ekkus93/blueroute/actions/runs/43653522625) success | Software milestone; full qualification separately | SOFTWARE COMPLETE / QUALIFICATION DEFERRED |
