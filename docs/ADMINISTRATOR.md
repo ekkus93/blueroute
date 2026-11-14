@@ -111,11 +111,13 @@ Recovery is manual and outside the cleanup's success guarantee. With the service
    and check the Bluetooth device it connects to. If a link is up and is BlueRoute's, disconnect it.
 3. Delete the NetworkManager profiles (and with them their addresses) whose `org.blueroute.owner`
    is that NetworkId. Never delete a profile without that ownership.
+   Do this before step 4. Afterwards, the network's owned state is no longer this
+   computer's to clean, and anything left would only be reported, not removed.
 4. Remove what made the role unresolved. For a client record with no membership, delete
    `client-record/client-record-v1`. For a `member` network with no role, delete that network's
    `network` line and every `peer` line for the same NetworkId from `memberships-v1`.
-5. Run the removal again. Any owned state you did not delete is still listed, as another
-   installation's state, under `unresolved_foreign_resources`.
+5. Run the removal again. `unresolved_foreign_resources` must have the same value as before
+   recovery. If it went up, step 3 left owned state behind: delete it the same way.
 
 ## Join on a test rig
 

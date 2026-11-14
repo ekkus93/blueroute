@@ -62,6 +62,8 @@ struct Script {
     release: AtomicBool,
     /// Report an incompatible version from now on.
     incompatible: AtomicBool,
+    /// Answer the scripted Version call with an error instead of a version.
+    fail: AtomicBool,
 }
 
 struct Daemon {
@@ -104,7 +106,12 @@ impl Daemon {
                     } else {
                         COMPATIBLE
                     };
-                    let reply = zbus::Message::method_return(&header)?.build(&version)?;
+                    let reply = if scripted && self.script.fail.load(Ordering::SeqCst) {
+                        zbus::Message::error(&header, "org.freedesktop.DBus.Error.Failed")?
+                            .build(&"scripted failure")?
+                    } else {
+                        zbus::Message::method_return(&header)?.build(&version)?
+                    };
                     self.connection.send(&reply).await?;
                     if scripted {
                         if after_reply {
@@ -138,10 +145,10 @@ impl Daemon {
     async fn move_name(&self) -> Result<(), Box<dyn Error>> {
         self.connection.release_name(DBUS_SERVICE_NAME).await?;
         if self.transfer == Transfer::ThroughSuccessor {
-            self.successor.request_name(DBUS_SERVICE_NAME).await?;
+            take_name(&self.successor).await?;
             self.successor.release_name(DBUS_SERVICE_NAME).await?;
         }
-        self.connection.request_name(DBUS_SERVICE_NAME).await?;
+        take_name(&self.connection).await?;
         Ok(())
     }
 }
@@ -212,9 +219,23 @@ struct Rig {
     script: Arc<Script>,
 }
 
+/// Takes the daemon's name, failing instead of silently queueing behind a lingering owner.
+async fn take_name(connection: &Connection) -> Result<(), Box<dyn Error>> {
+    let reply = connection
+        .request_name_with_flags(
+            DBUS_SERVICE_NAME,
+            zbus::fdo::RequestNameFlags::DoNotQueue.into(),
+        )
+        .await?;
+    if reply != zbus::fdo::RequestNameReply::PrimaryOwner {
+        return Err(format!("could not take the name: {reply:?}").into());
+    }
+    Ok(())
+}
+
 async fn rig() -> Result<Rig, Box<dyn Error>> {
     let a = Connection::session().await?;
-    a.request_name(DBUS_SERVICE_NAME).await?;
+    take_name(&a).await?;
     let b = Connection::session().await?;
     let client_connection = Connection::session().await?;
     client_connection
@@ -264,13 +285,13 @@ async fn with_daemon(
 /// name to B and takes it back before replying. The consumer is paused until the reply and all
 /// ownership notices are queued. The old subscription must retire first, stay retired, and a
 /// fresh subscription must hear A's new period.
-fn returning_owner_case(item: Item) -> Result<(), Box<dyn Error>> {
+fn returning_owner_case(item: Item, transfer: Transfer) -> Result<(), Box<dyn Error>> {
     let _bus = BUS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     future::block_on(async {
         let rig = rig().await?;
-        let daemon = rig.daemon(Transfer::ThroughSuccessor);
+        let daemon = rig.daemon(transfer);
         with_daemon(daemon, async {
             let client = BlueRouteClient::from_connection(rig.client_connection.clone()).await?;
             let mut old = client.changes().await?;
@@ -323,14 +344,23 @@ fn returning_owner_case(item: Item) -> Result<(), Box<dyn Error>> {
 #[test]
 #[ignore = "needs a private bus: run with dbus-run-session"]
 fn lc_owner_a_returning_owner_does_not_deliver_its_obsolete_event() -> Result<(), Box<dyn Error>> {
-    returning_owner_case(Item::Event)
+    returning_owner_case(Item::Event, Transfer::ThroughSuccessor)
 }
 
 #[test]
 #[ignore = "needs a private bus: run with dbus-run-session"]
 fn lc_owner_a_returning_owner_does_not_deliver_its_obsolete_state_change()
 -> Result<(), Box<dyn Error>> {
-    returning_owner_case(Item::State)
+    returning_owner_case(Item::State, Transfer::ThroughSuccessor)
+}
+
+/// LC-OWNER-05: A→unowned→A inside the item's check, with the consumer paused across the reply
+/// (the queued-signal case above cannot distinguish the baseline).
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn lc_owner_a_release_and_reacquire_inside_the_check_does_not_deliver() -> Result<(), Box<dyn Error>>
+{
+    returning_owner_case(Item::Event, Transfer::ThroughNoOwner)
 }
 
 /// LC-OWNER-05: A→unowned→A with A's old signal already queued before the subscription selects
@@ -352,7 +382,7 @@ fn lc_owner_a_signal_queued_before_a_release_and_reacquire_is_not_delivered()
                 emit(&rig.a, item).await?;
             }
             rig.a.release_name(DBUS_SERVICE_NAME).await?;
-            rig.a.request_name(DBUS_SERVICE_NAME).await?;
+            take_name(&rig.a).await?;
             // A broker round trip on the client's connection: the signals and both notices are
             // now queued there.
             zbus::fdo::DBusProxy::new(&rig.client_connection)
@@ -691,6 +721,34 @@ fn lc_integration_the_shared_watcher_treats_a_returning_owner_as_a_new_period()
             },
             scenario,
         )
+        .await
+    })
+}
+
+/// LC-OWNER-02/03 (review): the item's Version check fails, and a period end is already queued
+/// ahead of the failure. The loss is reported now, not deferred to the next call.
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn lc_owner_a_queued_loss_wins_over_a_failed_check() -> Result<(), Box<dyn Error>> {
+    let _bus = BUS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    future::block_on(async {
+        let rig = rig().await?;
+        let daemon = rig.daemon(Transfer::ThroughNoOwner);
+        with_daemon(daemon, async {
+            let client = BlueRouteClient::from_connection(rig.client_connection.clone()).await?;
+            let mut old = client.changes().await?;
+            rig.script.fail.store(true, Ordering::SeqCst);
+            rig.script.at.store(3, Ordering::SeqCst);
+            emit(&rig.a, Item::Event).await?;
+            let mut next = pin!(old.next_change());
+            pause_across_the_script(&rig.script, next.as_mut()).await?;
+            match within(Duration::from_secs(2), next).await {
+                Some(Err(ClientError::OwnerLost)) => Ok(()),
+                other => Err(format!("the queued loss was deferred: {other:?}").into()),
+            }
+        })
         .await
     })
 }

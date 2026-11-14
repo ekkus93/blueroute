@@ -47,7 +47,7 @@ pub trait OwnedInventory: ClientLeaveBackend {
 /// message, so it is safe to log.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct RemovalReport {
-    /// Networks this installation knows, and so cleaned.
+    /// Networks this installation knows: cleaned, or left untouched as unresolved.
     pub networks: usize,
     /// Of those, how many had a removal step fail.
     pub failed_networks: usize,
@@ -159,7 +159,7 @@ pub enum ScopeClass {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NetworkScope {
     pub class: ScopeClass,
-    /// Whether the client record names this network (provenance, for the log and tests).
+    /// Whether the client record names this network (provenance, for diagnostics and tests).
     pub recorded: bool,
     /// The recorded host device, for a `Client` network only: an untrusted hint, used only to
     /// find a PANU link to prove. It never authorizes a disconnect on its own.

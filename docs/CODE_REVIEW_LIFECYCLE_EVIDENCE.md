@@ -291,3 +291,33 @@ At the LC-INTEGRATION source:
   The status line states that procedure readiness is not execution.
 - **Not done here.** Executing Part A (LC-QUALIFY-02) needs a disposable VM with sudo. Part B
   (LC-QUALIFY-03) needs the designated Bluetooth rig. Neither is available to this session.
+
+## LC-CLOSEOUT-01 — Independent review of 75c1a01..c0a266b (2026-11-14)
+
+An independent read-only reviewer was given the specification and the diff, not this record's
+conclusions. It found no defect that delivers an old period's item or cleans up an unknown role.
+It confirmed the following:
+
+- the zbus ordering argument: one socket reader, no overflow, and Pending from `poll_once` is
+  reliable through the SignalStream `Join`;
+- the `since` filtering, cancellation at every await, and the after-decision branch;
+- that the error mapping is unchanged for `NameHasNoOwner`;
+- every SCOPE-1 row, foreign preservation and independent progress;
+- doc paths, and that the tests are deterministic.
+
+It raised nine items. All were resolved in the LC-CLOSEOUT review-fix commit:
+
+| # | Finding | Resolution |
+| --- | --- | --- |
+| 1 | Risk: a failed Version check or failed final check returned its error while a period end was already queued, so the loss was deferred to the next call (EPOCH-2/3) | `ended_before` takes an optional decision. On either error path every queued period end is settled first, and if one exists the call returns OwnerLost. New test `lc_owner_a_queued_loss_wins_over_a_failed_check` fails with the error-path drain disabled (control O3) and on the baseline |
+| 2 | Nit: an item taken before cancellation is dropped | Documented on `next_change` (retirements are never lost; callers reread state) |
+| 3 | Coverage: no paused A→unowned→A test was sensitive to the baseline | New `lc_owner_a_release_and_reacquire_inside_the_check_does_not_deliver`, which fails on the baseline |
+| 4 | Flakiness: `request_name` could queue behind a lingering owner | Tests take the name with `DoNotQueue` and require `PrimaryOwner` |
+| 5 | Doc risk: recovery step 4 before step 3 would let removal succeed with an owned profile left behind | ADMINISTRATOR.md orders step 3 first and requires `unresolved_foreign_resources` to be unchanged afterwards |
+| 6 | Doc nit: "stored by the daemon" cannot happen | CR-F5 doc says manual recovery is the only route in practice |
+| 7 | Nits: the `networks` and `recorded` field docs | Corrected |
+| 8 | The harness block checks only the script contract (mocked helper) | Stated in the script; the helper status is asserted by the removal unit test |
+| 9 | Fixture could overwrite another case's client record | The fixture refuses when a record exists |
+
+After the fixes, the ownership suite has 12 tests and all pass. Against the baseline `75c1a01`
+subscription code (isolated target), 8 of the 12 fail, including both new tests.

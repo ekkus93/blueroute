@@ -127,7 +127,10 @@ CLEANUP_EXIT=1 step prerm remove
 
 # LC-CLEANUP (RFU-02): an unresolved role makes the helper exit 1. Remove, deconfigure and a
 # direct purge all stop at prerm, and the membership and client record survive for the
-# evidence-based retry. Once the retry's cleanup succeeds, purge deletes them.
+# evidence-based retry. Once the retry's cleanup succeeds, purge deletes them. This checks only
+# the maintainer-script contract, because the helper here is a mock. That the real helper exits
+# 1 for an unresolved role is asserted by the removal unit tests
+# (lc_cleanup_an_unknown_role_is_unresolved_in_every_combination).
 fresh_state
 printf 'network\tunknown-role\n' > "$state/memberships-v1"
 mkdir -p "$state/client-record"

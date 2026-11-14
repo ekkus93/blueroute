@@ -66,9 +66,10 @@ combinations; a client record never overrides a known role.
 An unresolved role is not proven-absent client work, even when no owned NetworkManager state
 is left and even with Bluetooth up: a host hint alone never resolves it and never authorizes a
 disconnect. Its owned profile and address, membership and client record all stay, and other
-networks are still cleaned. Each run re-reads the stores. Cleanup can finish only once the
-role is established from evidence and stored by the daemon, or once an administrator has
-resolved it by hand ([ADMINISTRATOR.md](ADMINISTRATOR.md#removal-with-an-unresolved-role)).
+networks are still cleaned. Each run re-reads the stores. No daemon path assigns a role
+to such a network, so in practice the only way forward is the manual administrator recovery
+([ADMINISTRATOR.md](ADMINISTRATOR.md#removal-with-an-unresolved-role)). That recovery
+establishes the facts (no PAN link, owned state removed) before it removes the record.
 Bluetooth becoming available proves nothing about the role. The current daemon never writes
 `member`/`none` (leave stores `not-member`/`none`), so it comes only from damaged,
 hand-edited or otherwise unexpected state.

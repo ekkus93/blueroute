@@ -69,6 +69,15 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let backend = NetworkManagerBackend::connect_system().await?;
 
     let joined = matches!(mode, "client" | "unknown" | "left");
+    // There is one client record per installation: refuse to replace another case's record,
+    // which would silently change that case (revert to the A1 snapshot between cases).
+    if joined
+        && ClientRecordStore::new(state.join("client-record"))
+            .load()?
+            .is_some()
+    {
+        return Err("a client record already exists; revert to the A1 snapshot first".into());
+    }
     if joined {
         let interface = NetworkInterfaceHandle::new(interface.expect("checked above").as_str())?;
         backend

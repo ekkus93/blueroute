@@ -258,18 +258,21 @@ async fn owner_retired(
     }
 }
 
-/// Settles every ownership notice already queued when the decision reply was received.
+/// Settles every ownership notice already queued when a reply was received.
 ///
 /// zbus reads one connection's messages in order and hands each to every stream before it reads
-/// the next, so by the time the reply at `decision` is in hand every notice received before it
-/// is already queued: an empty queue means none exists. Returns whether one of them ended the
-/// period. A period-ending notice received after the decision does not withdraw it; it retires
-/// the subscription for the next call instead, so it is never consumed and forgotten (EPOCH-2/3).
+/// the next, so by the time a reply is in hand every notice received before it is already
+/// queued: an empty queue means none exists. Returns whether one of them ended the period.
+///
+/// With a `decision` (the final check's reply), a period-ending notice received after it does not
+/// withdraw the delivery; it retires the subscription for the next call instead, so it is never
+/// consumed and forgotten (EPOCH-2/3). Without one (a failed check), any queued period end counts:
+/// a loss that was already queued is reported now, not on the next call.
 async fn ended_before(
     changes: &mut NameOwnerChangedStream,
     owner: &OwnedUniqueName,
     since: Sequence,
-    decision: Sequence,
+    decision: Option<Sequence>,
     retired: &mut bool,
 ) -> bool {
     loop {
@@ -279,7 +282,7 @@ async fn ended_before(
             Some(None) => return true,
             Some(Some(change)) => {
                 if ends_period(&change, owner, since) {
-                    if change.message().recv_position() < decision {
+                    if decision.is_none_or(|decision| change.message().recv_position() < decision) {
                         return true;
                     }
                     *retired = true;
@@ -317,7 +320,12 @@ impl EventSubscription {
     /// if the bound owner holds the name there *and* no notice received before that reply ended
     /// the period. Comparing names alone would let an owner that gave the name away and took it
     /// back (A→B→A) deliver an item of its old period. A retirement seen at any point ends the
-    /// subscription for good, and the pending check (and its late reply) is dropped.
+    /// subscription for good, and the pending check (and its late reply) is dropped. A failed
+    /// check is reported as itself unless a period end is already queued, which wins.
+    ///
+    /// Cancelling the returned future never loses a retirement, but an item already taken from
+    /// the signal streams (while its check is pending) is dropped with it: callers that cancel
+    /// should reread state, as the shared watcher does on reconnect.
     pub async fn next_change(&mut self) -> Result<Change, ClientError> {
         if self.retired {
             return Err(ClientError::OwnerLost);
@@ -369,7 +377,14 @@ impl EventSubscription {
                 *retired = true;
                 return Err(ClientError::OwnerLost);
             }
-            Some(Err(error)) => return Err(error),
+            Some(Err(error)) => {
+                // A failed check proves nothing by itself, but a loss already queued wins.
+                if ended_before(owner_changes, owner, since, None, retired).await {
+                    *retired = true;
+                    return Err(ClientError::OwnerLost);
+                }
+                return Err(error);
+            }
             Some(Ok(_)) => {}
         }
         // The decision point: the checked owner must still be the current one, in the same period.
@@ -383,9 +398,15 @@ impl EventSubscription {
                 *retired = true;
                 return Err(ClientError::OwnerLost);
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                if ended_before(owner_changes, owner, since, None, retired).await {
+                    *retired = true;
+                    return Err(ClientError::OwnerLost);
+                }
+                return Err(error);
+            }
         };
-        if ended_before(owner_changes, owner, since, decision, retired).await {
+        if ended_before(owner_changes, owner, since, Some(decision), retired).await {
             *retired = true;
             return Err(ClientError::OwnerLost);
         }
