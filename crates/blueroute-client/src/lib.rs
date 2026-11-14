@@ -307,7 +307,11 @@ impl EventSubscription {
                 *retired = true;
                 return Err(ClientError::OwnerLost);
             }
-            Err(error) if error.kind() == ClientErrorKind::Unavailable => {
+            // Only "nobody owns the name" retires. A transient failure of the check itself (a bus
+            // timeout, for instance) is reported without ending a healthy subscription.
+            Err(ClientError::Bus(zbus::Error::FDO(error)))
+                if matches!(*error, zbus::fdo::Error::NameHasNoOwner(_)) =>
+            {
                 *retired = true;
                 return Err(ClientError::OwnerLost);
             }

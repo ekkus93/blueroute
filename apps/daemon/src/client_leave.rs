@@ -37,6 +37,8 @@ pub trait ClientLeaveBackend: Send + Sync {
         interface: NetworkInterfaceHandle,
     ) -> BackendFuture<'_, ()>;
     fn observe_panu(&self, peer: PeerHandle) -> BackendFuture<'_, Option<PanAttachment>>;
+    /// Whether the host device is present, so that "no link observed" is conclusive.
+    fn panu_device_present(&self, peer: PeerHandle) -> BackendFuture<'_, bool>;
     /// Disconnect only if the live attachment still equals `expected`.
     fn disconnect_panu(&self, expected: PanAttachment) -> BackendFuture<'_, ()>;
 }
@@ -206,6 +208,10 @@ impl ClientLeaveBackend for SystemClientLeave {
         Box::pin(async move { self.bluez()?.observe_panu(&peer).await })
     }
 
+    fn panu_device_present(&self, peer: PeerHandle) -> BackendFuture<'_, bool> {
+        Box::pin(async move { self.bluez()?.panu_device_present(&peer).await })
+    }
+
     fn disconnect_panu(&self, expected: PanAttachment) -> BackendFuture<'_, ()> {
         Box::pin(async move { self.bluez()?.disconnect_matching_panu(&expected).await })
     }
@@ -330,6 +336,10 @@ mod tests {
                     .retain(|(owner, existing)| !(*owner == network && existing == &interface));
                 Ok(())
             })
+        }
+
+        fn panu_device_present(&self, _peer: PeerHandle) -> BackendFuture<'_, bool> {
+            Box::pin(async { Ok(true) })
         }
 
         fn observe_panu(&self, _peer: PeerHandle) -> BackendFuture<'_, Option<PanAttachment>> {

@@ -121,8 +121,9 @@ Expected:
 
 - [ ] apt succeeded; one `"component":"removal_cleanup"` line (in the apt output and
   `/var/log/apt/term.log`) with `"outcome":"succeeded"`, `"remaining_owned_resources":0`,
-  `"unresolved_client_links":0`, `"unresolved_foreign_resources"` ≥ 2 (`F`'s profile and address),
-  `"bluetooth_available":false`.
+  `"unresolved_client_links":0`, `"unresolved_foreign_resources"` ≥ 2 (`F`'s profile and address).
+  `"bluetooth_available"` is `true` if `bluetoothd` runs without an adapter and `false` if it does
+  not; record which. Host networks pass either way.
 - [ ] `H`'s profile, `brb-` device and address are gone.
 - [ ] `F`'s bridge and address, `qa-foreign-br`, the extra address, the static route, the default
   route and every other profile are unchanged; `ip_forward` is unchanged.
@@ -139,7 +140,9 @@ Revert to the A1 snapshot before each case.
 - [ ] **Seeded joined client, no Bluetooth (QUAL-2):** create a dummy interface
   (`ip link add qa-bnep0 type dummy && ip link set qa-bnep0 up`), then
   `sudo ./qualify_fixture client /var/lib/blueroute qa-bnep0` → NetworkId `C`. Remove. Expected:
-  **removal fails** (package stays `ii`), log line `"unresolved_client_links":1`; `C`'s owned
+  **removal fails** (package stays `ii`), log line `"unresolved_client_links":1`, whether or not
+  `bluetoothd` is running (with it running, BlueZ has no object for the fixture's host device,
+  which is inconclusive, not absence); `C`'s owned
   address and profile on `qa-bnep0` remain (proof for a retry); `H` is still removed;
   `abort-remove` restarted the service. This proves the honest failure on a real system. It is
   **not** client PAN teardown, which only Part B can show. Teardown: revert the snapshot.

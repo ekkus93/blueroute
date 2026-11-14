@@ -129,8 +129,8 @@ fn mark_removal_pending(state_directory: &Path) -> Result<(), CoreError> {
 /// What cleanup must do for one known network.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct NetworkScope {
-    /// This node joined the network as a client (persisted role, or a client record), so a PANU
-    /// link may exist and must be observed before the proof of ownership goes.
+    /// This node joined the network as a client (persisted membership role), so a PANU link may
+    /// exist and must be observed before the proof of ownership goes.
     pub client: bool,
     /// The recorded host device: an untrusted hint, used only to find a PANU link to prove.
     pub host_hint: Option<PeerHandle>,
@@ -153,14 +153,14 @@ pub fn removal_scope(paths: &RemovalPaths) -> Result<BTreeMap<NetworkId, Network
             )
         })
         .collect();
+    // The persisted role alone decides whether a network is a joined client. The client record
+    // only supplies the host hint; a record left behind by a leave whose clear failed names a
+    // network that is no longer a client, which must not block removal (FU-04 review).
     if let Some(record) = ClientRecordStore::new(paths.client_record.clone()).load()? {
-        known.insert(
-            record.network(),
-            NetworkScope {
-                client: true,
-                host_hint: record.device_hint().cloned(),
-            },
-        );
+        let scope = known.entry(record.network()).or_default();
+        if scope.client {
+            scope.host_hint = record.device_hint().cloned();
+        }
     }
     Ok(known)
 }
@@ -185,7 +185,21 @@ pub async fn remove_known_networks(
     for (network, scope) in known {
         let hint = match (scope.client, bluetooth, scope.host_hint.as_ref()) {
             (false, _, _) => None,
-            (true, true, Some(hint)) => Some(hint),
+            (true, true, Some(hint)) => {
+                // "No link observed" only counts if BlueZ actually has the host device: a
+                // missing object (no adapter, a stale or renumbered path) is inconclusive.
+                match backend.panu_device_present(hint.clone()).await {
+                    Ok(true) => Some(hint),
+                    Ok(false) => {
+                        report.unresolved_links += 1;
+                        continue;
+                    }
+                    Err(_) => {
+                        report.failed_networks += 1;
+                        continue;
+                    }
+                }
+            }
             (true, _, _) => {
                 report.unresolved_links += 1;
                 continue;
@@ -315,6 +329,8 @@ mod tests {
         disconnected: usize,
         /// The link survives a disconnect request.
         sticky_link: bool,
+        /// BlueZ has no object for the recorded host device.
+        device_absent: bool,
         fail_inventory: bool,
     }
 
@@ -384,6 +400,10 @@ mod tests {
             })
         }
 
+        fn panu_device_present(&self, _peer: PeerHandle) -> BackendFuture<'_, bool> {
+            Box::pin(async move { Ok(!self.0.lock().unwrap().device_absent) })
+        }
+
         fn observe_panu(&self, _peer: PeerHandle) -> BackendFuture<'_, Option<PanAttachment>> {
             Box::pin(async move { Ok(self.0.lock().unwrap().panu.clone()) })
         }
@@ -441,11 +461,14 @@ mod tests {
             client_record: root.join("client-record"),
         };
         let mut registry = MembershipRegistry::default();
-        for network in networks {
-            registry.remember_network(NetworkMembership::new(
-                *network,
-                DisplayName::new("Owned").unwrap(),
-            ));
+        for (index, network) in networks.iter().enumerate() {
+            let mut membership =
+                NetworkMembership::new(*network, DisplayName::new("Owned").unwrap());
+            if client && index == 0 {
+                membership.state = blueroute_core::MembershipState::Member;
+                membership.role = Some(blueroute_core::MembershipRole::Client);
+            }
+            registry.remember_network(membership);
         }
         NetworkMembershipStore::new(paths.memberships.clone())
             .save(&registry)
@@ -508,6 +531,9 @@ mod tests {
         }
         fn observe_panu(&self, peer: PeerHandle) -> BackendFuture<'_, Option<PanAttachment>> {
             self.0.observe_panu(peer)
+        }
+        fn panu_device_present(&self, peer: PeerHandle) -> BackendFuture<'_, bool> {
+            self.0.panu_device_present(peer)
         }
         fn disconnect_panu(&self, expected: PanAttachment) -> BackendFuture<'_, ()> {
             self.0.disconnect_panu(expected)
@@ -890,5 +916,48 @@ mod tests {
         assert_eq!(line["unresolved_client_links"], 1);
         let (code, line) = cleanup_outcome(&Ok(RemovalReport::default()));
         assert_eq!((code, line["outcome"].as_str()), (0, Some("succeeded")));
+    }
+
+    #[test]
+    fn fu_04_a_missing_host_device_is_inconclusive_even_with_bluetooth_running() {
+        // bluetoothd answers but has no object for the recorded host (no adapter, or a stale
+        // path): "no link observed" proves nothing, so the proof stays and cleanup fails.
+        let paths = state(&[net(1), net(2)], true);
+        let fake = Fake::with(|world| {
+            world.profiles = vec![(net(1), iface("bnep0")), (net(2), iface("br-b"))];
+            world.device_absent = true;
+        });
+        let (outcome, fake) = run(&paths, fake, true);
+        let report = outcome.unwrap();
+        assert!(!report.succeeded(), "{report:?}");
+        assert_eq!(report.unresolved_links, 1);
+        assert_eq!(
+            fake.world(|world| world.profiles.clone()),
+            vec![(net(1), iface("bnep0"))],
+            "the client proof must stay; the host network is still cleaned"
+        );
+        std::fs::remove_dir_all(&paths.state_directory).unwrap();
+    }
+
+    #[test]
+    fn fu_04_a_stale_client_record_does_not_block_removal() {
+        // A leave succeeded but clearing the record failed: the registry no longer says client.
+        let paths = state(&[net(1)], false);
+        ClientRecordStore::new(paths.client_record.clone())
+            .save(Some(
+                &ClientRecord::new(
+                    net(1),
+                    blueroute_core::NodeId::from_bytes([0x33; 16]),
+                    Some(host_device()),
+                )
+                .unwrap(),
+            ))
+            .unwrap();
+        let fake = Fake::with(|world| world.profiles = vec![(net(1), iface("br-a"))]);
+        let (outcome, fake) = run(&paths, fake, false);
+        let report = outcome.unwrap();
+        assert!(report.succeeded(), "{report:?}");
+        assert!(fake.world(|world| world.profiles.is_empty()));
+        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 }

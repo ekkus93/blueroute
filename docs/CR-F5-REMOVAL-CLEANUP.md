@@ -50,16 +50,19 @@ of `/proc/self`, without `unsafe`). The state directory is the daemon's (`BLUERO
 
 ### Joined-client networks (FU-04, REMOVE-1..3)
 
-A network is a joined-client network when its persisted membership role is `client` or the client
-record names it. Bluetooth being unreachable is not evidence that its PANU link is gone, so:
+A network is a joined-client network when its persisted membership role is `client`; the client
+record only supplies the recorded host device (a record left behind by a leave is ignored).
+Bluetooth being unreachable is not evidence that its PANU link is gone, so:
 
 - With Bluetooth up and the host device recorded, the link to that device is disconnected only
   when it runs on an interface carrying this network's ownership, and then observed again; the
   owned address and profile (the proof) are removed only after it is observed gone. A link that
   is already absent counts as gone. A link to another device, or one on an interface without this
   network's ownership, is never touched.
-- Otherwise (Bluetooth unreachable, or no recorded host device) the network is left completely
-  untouched, counted as `unresolved_client_links`, and cleanup fails. A retry with Bluetooth
+- "No link observed" counts only when BlueZ has the recorded host device object; a missing
+  object (no adapter, a stale or renumbered path) is inconclusive.
+- Otherwise (Bluetooth unreachable, no recorded host device, or BlueZ without that device) the
+  network is left completely untouched, counted as `unresolved_client_links`, and cleanup fails. A retry with Bluetooth
   back finds the proof still in place.
 - Host networks never need Bluetooth.
 

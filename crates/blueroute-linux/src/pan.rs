@@ -171,6 +171,18 @@ impl BluezBackend {
         current_panu_attachment(&self.connection, peer).await
     }
 
+    /// Whether BlueZ currently has the device object (with its Network1 interface) at `peer`.
+    /// A missing object makes a PANU observation inconclusive rather than proof of absence: a
+    /// stale or renumbered path, or a controller BlueZ does not see, could still carry the link.
+    pub async fn panu_device_present(&self, peer: &PeerHandle) -> Result<bool, CoreError> {
+        let proxy = network_proxy(&self.connection, peer).await?;
+        match proxy.get_property::<bool>(CONNECTED_PROPERTY).await {
+            Ok(_) => Ok(true),
+            Err(error) if network_interface_is_absent(&error) => Ok(false),
+            Err(error) => Err(property_error(CONNECTED_PROPERTY, error)),
+        }
+    }
+
     pub async fn disconnect_matching_panu(
         &self,
         expected: &PanAttachment,
