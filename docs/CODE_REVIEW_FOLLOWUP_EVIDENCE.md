@@ -75,3 +75,34 @@ runs green):
 Unchanged samples, bursts and emitter failure/retry remain covered by `state_events` (8 pass).
 The startup test waits for the emitter's baseline before publishing, because a change racing
 that baseline is GAP-01 (FU-05), observed as an intermittent failure without the wait.
+
+## FU-02 — ownership monitored through validation (2026-11-13)
+
+**Fix:** `d2b94c1` (`crates/blueroute-client/src/lib.rs`, `EventSubscription::next_change`; SPEC
+client bullet).
+
+**FU-01 decision ordering:** (1) wait for a signal or an owner retirement; (2) race the bound
+owner's Version check against the owner-change stream; (3) after a successful check, require
+`GetNameOwner` to still return the bound owner — the delivery decision point; (4) decode and
+deliver. A retirement at (1), (2) or (3) sets `retired` and returns `OwnerLost`; every later call
+returns `OwnerLost` (terminal) and the pending check, with any late reply, is dropped. Queued
+notices that only record the bound owner taking the name are skipped; any other notice retires.
+Each notice is read and decided without an intervening await, so cancelling a `next_change`
+cannot consume a retirement silently. Commands still go only to the unique owner validated for
+them (CR-F8), with no retry or replay.
+
+**Regressions** (`crates/blueroute-client/tests/event_owner_race.rs`, private bus, in CI; three
+consecutive runs green):
+
+| Test | Covers | Result |
+| --- | --- | --- |
+| `fu_02_an_event_whose_owner_hands_over_during_its_version_check_is_not_delivered` | OWNER-2 (REV-02 a) | pass; **failed at 6d200d0** |
+| `fu_02_owner_loss_is_reported_while_the_events_version_reply_is_held` | OWNER-1/3 (REV-02 b), late reply and later events not delivered | pass; **failed at 6d200d0** |
+| `fu_02_an_incompatible_successor_after_an_event_time_handover_is_never_used` | OWNER-3: B (API 99.0) refused, zero Requests reach it | pass |
+| `fu_02_an_owner_leaving_with_no_successor_during_validation_is_reported` | no replacement, reply held | pass |
+| `fu_02_an_interrupted_wait_loses_nothing_and_a_fresh_subscription_follows_b` | cancellation, terminal retirement, fresh subscription to B | pass |
+| `fu_02_the_shared_watcher_moves_to_b_after_an_event_time_handover` | FU-02-07: A's obsolete event is not a `Changed`; `Connected → Disconnected → Connected` to B, then B's change | pass |
+
+The desktop and TUI run the same `watch` (their adapters are covered by `watch_integration` and
+`tui_watcher`, both green). Existing `owner_race` (6), `owner_watch` (3), `watcher` (6) and
+`dbus_client` (1) pass unchanged, so command-owner safety and idle owner loss are intact.

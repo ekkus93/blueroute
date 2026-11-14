@@ -39,7 +39,7 @@
 | --- | --- | --- | --- |
 | FU-BASE | Durable baseline, corrected regressions, isolation | None | `[x]` |
 | FU-01 | P2 REV-01: independent publication and bounded shutdown | FU-BASE | `[x]` |
-| FU-02 | P2 REV-02: ownership monitored through validation | FU-BASE | `[ ]` |
+| FU-02 | P2 REV-02: ownership monitored through validation | FU-BASE | `[x]` |
 | FU-03 | P2 REV-03: safe segment cloning/import | FU-BASE | `[ ]` |
 | FU-04 | P2 REV-04: unresolved cleanup and durable retry proof | FU-BASE | `[ ]` |
 | FU-05 | GAP-01: startup snapshot/publication handoff | FU-01 design; FU-02 for reconnect integration | `[ ]` |
@@ -95,19 +95,19 @@ all four PUB requirements hold without sacrificing bounded work or committed-ope
 
 **Requirements:** OWNER-1..4. **Earlier tasks:** CR-F2-01/02/06/07, CR-F8-05, CR-INTEGRATION-01.
 
-- [ ] **FU-02-01:** Define lifecycle and delivery decision ordering for signal selection,
+- [x] **FU-02-01:** Define lifecycle and delivery decision ordering for signal selection,
   Version validation, queued owner transitions, cancellation, and terminal retirement.
-- [ ] **FU-02-02:** Monitor owner changes while Version is pending and verify the owner again
+- [x] **FU-02-02:** Monitor owner changes while Version is pending and verify the owner again
   before accepting an event; do not depend on another `next_event` call to notice retirement.
-- [ ] **FU-02-03:** Make a retired subscription reject all later A events/replies. Preserve
+- [x] **FU-02-03:** Make a retired subscription reject all later A events/replies. Preserve
   typed failure, unique-owner requests, mutation no-replay, and bounded watcher backoff.
-- [ ] **FU-02-04:** Transfer A to compatible B inside A's event-time Version handler; keep A
+- [x] **FU-02-04:** Transfer A to compatible B inside A's event-time Version handler; keep A
   connected and require rejection of the selected obsolete event and queued A events.
-- [ ] **FU-02-05:** Hold that Version response after transfer. Require owner-loss reporting
+- [x] **FU-02-05:** Hold that Version response after transfer. Require owner-loss reporting
   within two seconds, then release the late reply and verify retirement remains terminal.
-- [ ] **FU-02-06:** Cover incompatible B, no replacement, cancellation, and fresh subscription.
+- [x] **FU-02-06:** Cover incompatible B, no replacement, cancellation, and fresh subscription.
   Verify B receives no ordinary Request when incompatible and no mutation is replayed.
-- [ ] **FU-02-07:** Exercise shared watcher, desktop, and TUI recovery: visibly stale retained
+- [x] **FU-02-07:** Exercise shared watcher, desktop, and TUI recovery: visibly stale retained
   state, bounded reconnect, compatible B negotiation, and fresh snapshots rather than A replay.
 
 **Acceptance:** Both REV-02 manifestations fail against the baseline and pass with the fix.
@@ -303,7 +303,7 @@ separately from the unresolved qualification gate.
 | --- | --- | --- | --- | --- |
 | FU-BASE | Tests at this commit | 5 failing corrected expectations ([evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-base--baseline-and-failing-expectations-2026-11-13)) | None | COMPLETE |
 | FU-01 / REV-01 | `19a58a0` | 5 `publisher_progress` tests (REV-01 failed at baseline); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-01--independent-publication-and-bounded-shutdown-2026-11-13) | None | COMPLETE |
-| FU-02 / REV-02 | — | OWNER-1..4 pending | Owner-transfer/consumer evidence | NOT STARTED |
+| FU-02 / REV-02 | `d2b94c1` | 6 `event_owner_race` tests (both REV-02 cases failed at baseline); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-02--ownership-monitored-through-validation-2026-11-13) | None | COMPLETE |
 | FU-03 / REV-03 | — | SEG-1..4 pending | Import/invariant/consumer evidence | NOT STARTED |
 | FU-04 / REV-04 | — | REMOVE-1..5 pending | FU-QUALIFY for actual installed/PAN claims | NOT STARTED |
 | FU-05 / GAP-01 | — | START-1..3 pending | Startup/reconnect ordering evidence | NOT STARTED |
