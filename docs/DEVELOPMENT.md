@@ -112,6 +112,10 @@ These must be suitable for ordinary CI whenever feasible:
 - adapter translation using fakes/mocks;
 - CLI/UI behavior driven by a fake daemon.
 
+Tests put their temporary files under `std::env::temp_dir()`. `.cargo/config.toml` sets `TMPDIR`
+to the workspace's git-ignored `tmp/` directory for everything Cargo runs, so they stay out of the
+system `/tmp`. An explicitly set `TMPDIR` still takes precedence.
+
 ### Linux integration tests
 
 Use namespaces, virtual interfaces, fake D-Bus services, or controlled system services when practical. These tests may require a Linux runner but should avoid physical radio requirements unless the behavior under test is inherently hardware-dependent.

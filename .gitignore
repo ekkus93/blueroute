@@ -23,5 +23,7 @@ target
 # Python bytecode
 __pycache__/
 
-# Local scratch space for temporary files (builds, logs, test kits)
-/tmp/
+# Local scratch space for temporary files (builds, logs, test kits, test temp files via
+# .cargo/config.toml). Only the placeholder that keeps the directory in a fresh clone is tracked.
+/tmp/*
+!/tmp/.gitkeep

@@ -1,0 +1,5 @@
+[env]
+# Tests create their temporary files under std::env::temp_dir(), which follows TMPDIR. Keep them in
+# the workspace's git-ignored tmp/ instead of the system /tmp (a small partition on some machines).
+# An explicitly set TMPDIR still wins.
+TMPDIR = { value = "tmp", relative = true }
