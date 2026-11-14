@@ -40,3 +40,38 @@ temporary directories; removal tests use the fake backend; the isolated dpkg tes
 installed maintenance helper with a mock before any `prerm remove` runs (install and upgrade never
 call it), and its `rm` guard rejects paths outside the isolated root. `DPKG_ROOT` relocates paths
 only and does not isolate D-Bus; that limitation is FU-06-04's to document in the procedure.
+
+## FU-01 — independent publication and bounded shutdown (2026-11-13)
+
+**Fix:** `19a58a0` (`apps/daemon/src/state_publisher.rs`; SPEC §11).
+
+- **FU-01-01 design** (module documentation): a sampler thread owns the only slow read
+  (`observable_networks`: membership store, BlueZ discovery). It samples once at start, every
+  `NETWORK_RECHECK` (1 s) and on `committed()`, one sample at a time, each bounded by
+  `SAMPLE_DEADLINE` (10 s; a timeout is a failed read, logged payload-free as
+  `network_sample`/`timed_out`). It stores the latest result in a slot and unparks the emitter.
+  The emitter never awaits a sample: it compares the in-memory snapshot and the slot with what it
+  last announced; the first sample is the network baseline. Sampler deadline + stop polling are the
+  only termination paths for a blocked read; no thread is detached.
+- **FU-01-02:** the initial and periodic network reads moved off the emitter.
+- **FU-01-03:** the forced flag is re-set when an emission fails (retried every 250 ms); a stored
+  sample only advances the announced baseline after a successful emission; samples are taken
+  sequentially, so no older result overwrites a newer one; a failed or timed-out read is `None`,
+  distinct from an empty list.
+- **FU-01-04:** exactly two threads; `Drop` sets the stop flag, which cancels a pending sample or
+  emission within `STOP_POLL` (50 ms), then joins both.
+
+**Regressions** (`apps/daemon/tests/publisher_progress.rs`, private bus, in CI; 5 consecutive
+runs green):
+
+| Test | Covers | Result |
+| --- | --- | --- |
+| `fu_01_a_pending_network_read_does_not_hold_back_a_health_change` | PUB-1/4 (REV-01) | pass, delivered ≈0.6 ms after publication; **failed at 6d200d0** (FU-BASE) |
+| `fu_01_a_read_pending_from_startup_does_not_block_announcements` | initial sample never finishes | pass |
+| `fu_01_shutdown_finishes_while_a_sample_is_pending` | PUB-3: shutdown ≈0.2 ms with the read held (bound 2 s) | pass; on 6d200d0 `Drop` joins the blocked thread, i.e. waits for the read |
+| `fu_01_a_released_read_brings_the_final_network_state` | PUB-2/4 final state after release | pass |
+| `fu_01_a_failing_sample_is_announced_once_and_its_recovery_too` | failure is a change once, no loop, recovery announced, other changes still prompt | pass |
+
+Unchanged samples, bursts and emitter failure/retry remain covered by `state_events` (8 pass).
+The startup test waits for the emitter's baseline before publishing, because a change racing
+that baseline is GAP-01 (FU-05), observed as an intermittent failure without the wait.

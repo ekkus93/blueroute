@@ -38,7 +38,7 @@
 | Task | Outcome / issue | Dependencies | State |
 | --- | --- | --- | --- |
 | FU-BASE | Durable baseline, corrected regressions, isolation | None | `[x]` |
-| FU-01 | P2 REV-01: independent publication and bounded shutdown | FU-BASE | `[ ]` |
+| FU-01 | P2 REV-01: independent publication and bounded shutdown | FU-BASE | `[x]` |
 | FU-02 | P2 REV-02: ownership monitored through validation | FU-BASE | `[ ]` |
 | FU-03 | P2 REV-03: safe segment cloning/import | FU-BASE | `[ ]` |
 | FU-04 | P2 REV-04: unresolved cleanup and durable retry proof | FU-BASE | `[ ]` |
@@ -75,17 +75,17 @@ durable recipe. Setup/teardown is isolated and does not confuse mocks with insta
 
 **Requirements:** PUB-1..4. **Earlier tasks:** CR-F1-04/06/09, CR-INTEGRATION-03.
 
-- [ ] **FU-01-01:** Document bounded sampler/emitter responsibilities, observation ordering,
+- [x] **FU-01-01:** Document bounded sampler/emitter responsibilities, observation ordering,
   dirty revision ownership, adapter deadlines, cancellation, and shutdown behavior.
-- [ ] **FU-01-02:** Remove pending network/storage observation from the signal delivery path,
+- [x] **FU-01-02:** Remove pending network/storage observation from the signal delivery path,
   including initial sampling; keep slow work off shared publication locks.
-- [ ] **FU-01-03:** Retain the latest dirty state across sampling/emission races, queue
+- [x] **FU-01-03:** Retain the latest dirty state across sampling/emission races, queue
   saturation, and emission failures. Reject obsolete results and false empty-success snapshots.
-- [ ] **FU-01-04:** Bound sampler concurrency and terminate workers/tasks on shutdown without
+- [x] **FU-01-04:** Bound sampler concurrency and terminate workers/tasks on shutdown without
   unbounded joins, abandoned blocking threads, or accumulated background work.
-- [ ] **FU-01-05:** On a private broker, hold production list observation pending and publish
+- [x] **FU-01-05:** On a private broker, hold production list observation pending and publish
   actual health/capability state. Require invalidation within one second before releasing it.
-- [ ] **FU-01-06:** Cover startup pending reads, sample failure/recovery, emitter failure/retry,
+- [x] **FU-01-06:** Cover startup pending reads, sample failure/recovery, emitter failure/retry,
   bursts/final-state delivery, unchanged samples, and shutdown within two seconds in the fixture.
 
 **Acceptance:** REV-01 fails with the baseline and passes with independent notification progress;
@@ -302,7 +302,7 @@ separately from the unresolved qualification gate.
 | Task / issue | Fix SHA and source | Regression / negative-control / software evidence | Qualification or remaining gate | State |
 | --- | --- | --- | --- | --- |
 | FU-BASE | Tests at this commit | 5 failing corrected expectations ([evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-base--baseline-and-failing-expectations-2026-11-13)) | None | COMPLETE |
-| FU-01 / REV-01 | — | PUB-1..4 pending | Private-broker/shutdown evidence | NOT STARTED |
+| FU-01 / REV-01 | `19a58a0` | 5 `publisher_progress` tests (REV-01 failed at baseline); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-01--independent-publication-and-bounded-shutdown-2026-11-13) | None | COMPLETE |
 | FU-02 / REV-02 | — | OWNER-1..4 pending | Owner-transfer/consumer evidence | NOT STARTED |
 | FU-03 / REV-03 | — | SEG-1..4 pending | Import/invariant/consumer evidence | NOT STARTED |
 | FU-04 / REV-04 | — | REMOVE-1..5 pending | FU-QUALIFY for actual installed/PAN claims | NOT STARTED |
