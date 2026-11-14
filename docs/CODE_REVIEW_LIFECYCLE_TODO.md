@@ -37,7 +37,7 @@
 | LC-BASE | Durable reproductions and isolated failing tests | None | `[x]` |
 | LC-OWNER | P2 RFU-01: ownership-period retirement | LC-BASE | `[x]` |
 | LC-CLEANUP | P2 RFU-02: unknown active role and proof retention | LC-BASE | `[x]` |
-| LC-INTEGRATION | Actual consumer/helper boundaries and CI coverage | LC-OWNER, LC-CLEANUP | `[ ]` |
+| LC-INTEGRATION | Actual consumer/helper boundaries and CI coverage | LC-OWNER, LC-CLEANUP | `[x]` |
 | LC-VALIDATE | Exact-candidate software/package/CI checks | LC-INTEGRATION | `[ ]` |
 | LC-QUALIFY | Existing installed-system/physical evidence gates | Procedure: LC-CLEANUP design; execution: validated packages and designated equipment | `[ ]` |
 | LC-CLOSEOUT | Documentation reconciliation and reviewed closure | Software: LC-OWNER/CLEANUP/INTEGRATION/VALIDATE; full: LC-QUALIFY | `[ ]` |
@@ -121,17 +121,17 @@ survives unresolved cleanup; independent safe work, valid recovery and prior sta
 
 **Requirements:** VERIFY-1/2/4, EPOCH-4, SCOPE-6.
 
-- [ ] **LC-INTEGRATION-01:** Carry ownership-period loss through the production shared watcher,
+- [x] **LC-INTEGRATION-01:** Carry ownership-period loss through the production shared watcher,
   desktop and TUI adapters. Require disconnected/stale before fresh connection/change; reject old
   payloads and validate snapshots on returning A as well as ordinary B.
-- [ ] **LC-INTEGRATION-02:** Exercise production store→scope→cleanup→report→helper outcome for
+- [x] **LC-INTEGRATION-02:** Exercise production store→scope→cleanup→report→helper outcome for
   unknown roles, then maintainer/isolated-dpkg removal failure, preserved state, recovery and purge.
   Identify mocked layers explicitly; retain safe adapter UnknownObject failure/proof preservation.
-- [ ] **LC-INTEGRATION-03:** Add new tests to CI, explicitly scheduling required ignored broker
+- [x] **LC-INTEGRATION-03:** Add new tests to CI, explicitly scheduling required ignored broker
   suites on private buses. Verify no required regression is skipped by default/filter changes.
-- [ ] **LC-INTEGRATION-04:** Restore each defect safely in a temporary checkout or equivalent
+- [x] **LC-INTEGRATION-04:** Restore each defect safely in a temporary checkout or equivalent
   isolated setup; confirm its corrected regression fails for the intended reason. Record results.
-- [ ] **LC-INTEGRATION-05:** Re-run existing publisher progress/shutdown, startup handoff, graph
+- [x] **LC-INTEGRATION-05:** Re-run existing publisher progress/shutdown, startup handoff, graph
   import/atomicity, ordinary owner handover, client cleanup/retry, NotMember stale-record, UI
   effect-generation and security regressions. Resolve new failures before acceptance.
 
@@ -240,7 +240,7 @@ Keep software outcomes separate from actual installed-system/physical results.
 | LC-BASE | `e167198` baseline | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-base--findings-preserved-and-corrected-expectations-established-2026-11-14): RFU-01 2/2 corrected tests fail; RFU-02 test fails, committed with its fix | Isolated reproducible fixtures | ACCEPTED |
 | LC-OWNER / RFU-01 | LC-OWNER commit, `crates/blueroute-client/src/lib.rs` | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-owner--subscriptions-retire-when-their-ownership-period-ends-2026-11-14): EPOCH-1..5, 9 broker tests and 1 unit test; 5/9 fail on both negative controls | Software ownership-period acceptance | ACCEPTED (software) |
 | LC-CLEANUP / RFU-02 | LC-CLEANUP commit, `apps/daemon/src/removal.rs` | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-cleanup--ambiguous-active-membership-stays-unresolved-2026-11-14): SCOPE-1..6, 8 new removal tests, lifecycle harness scenario; 2 negative controls | LC-QUALIFY for actual installed/PAN claims | ACCEPTED (software) |
-| LC-INTEGRATION | — | VERIFY-1/2/4 pending | Actual consumer/helper boundaries and CI scheduling | NOT STARTED |
+| LC-INTEGRATION | LC-INTEGRATION commit | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-integration--real-boundaries-ci-scheduling-and-sensitivity-2026-11-14): watcher/desktop/TUI returning-owner tests, helper/package path, adapter test, 5 negative controls, 61 broker + 911 workspace passes | Actual consumer/helper boundaries and CI scheduling | ACCEPTED |
 | LC-VALIDATE | — | VERIFY-3/4 pending | Exact-candidate checks/packages/CI | NOT STARTED |
 | LC-QUALIFY | — | Procedure revision pending | FU-QUALIFY, CR-QUALIFY-01..08, hardware tracker | NOT STARTED |
 | LC-CLOSEOUT | — | CLOSE-1..3 pending | Software milestone; full qualification separately | NOT STARTED |

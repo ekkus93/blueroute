@@ -197,3 +197,79 @@ unresolved-role scenario.
 | RFU-02 baseline (`e167198`) | LC-BASE-04 test fails (see LC-BASE) |
 | Fix with `member`/`none` classified as `CompletedLeave` | 7 of 27 fail: every unknown-role test, recovery and the table |
 | Fix with an orphan record classified as `CompletedLeave` | 2 of 27 fail: the orphan test and the table |
+
+## LC-INTEGRATION — Real boundaries, CI scheduling and sensitivity (2026-11-14)
+
+**Source.** The LC-INTEGRATION commit on top of `0106e3a`.
+
+### Consumers (LC-INTEGRATION-01)
+
+| Boundary | Test | Observation |
+| --- | --- | --- |
+| Shared watcher (`blueroute_client::watch`) | `ownership_period::lc_integration_the_shared_watcher_treats_a_returning_owner_as_a_new_period` | The watcher's executor thread is blocked, using only acknowledgements, from the moment A receives the Version call until A has gone A→B→A and its reply is queued. Signals are exactly `[Connected, Disconnected, Connected]`, then `Changed` for A's new period. The old item is never passed on. The returning A is revalidated on reconnect (Versions 4 and 5) |
+| Desktop (`watch_daemon`, re-run with the private bus as the system bus) | `watch_handover::the_desktop_watcher_reports_a_returning_daemon_as_a_new_period` | A→B→A inside the change's check. The desktop sees `Connected, Disconnected, Connected` and then the new period's `Changed` |
+| TUI (`spawn_with`, real watcher thread) | `watch::tests::tui_watcher_reports_a_returning_daemon_as_a_new_period` | The same sequence through the TUI's channel |
+
+The existing A→B handover tests for all three consumers still pass. The desktop file now
+serializes its child scenarios with a lock, because two of them share the name.
+
+### Cleanup through the production layers (LC-INTEGRATION-02)
+
+- **Store → scope → cleanup → report → helper status.** The `lc_cleanup_*` tests seed the
+  production membership and client-record stores. They run the production `removal_scope`,
+  `run_removal_cleanup` (instance lock, removal marker, 60 s bound) and `cleanup_outcome`, and
+  assert exit status 1 and the `unresolved_roles` field. **Mocked:** the NetworkManager/BlueZ
+  backend (in-memory `Fake`). The root-only helper binary is not run, because it needs root and
+  the system bus. Its `main` calls `cleanup_outcome` unchanged.
+- **Packaged scripts.** `packaging/debian/test-maintainer-lifecycle.sh` runs the real
+  `prerm`/`postrm`/`postinst` under a temporary `DPKG_ROOT`. Its unresolved-role scenario covers
+  remove, deconfigure, abort, direct-purge stop, preserved state, retry and purge. **Mocked:**
+  the packaged helper and `deb-systemd-*`.
+- **Adapter.** The new unit test `pan::tests::a_missing_device_object_is_absent_and_other_failures_stay_errors`
+  fixes the adapter half of the safe UnknownObject behavior. A missing device object (UnknownObject,
+  UnknownInterface, DoesNotExist) reports `panu_device_present = false`, which cleanup treats as
+  inconclusive (`fu_04_a_missing_host_device_is_inconclusive_even_with_bluetooth_running`).
+  AccessDenied, NoReply, ServiceUnknown, Failed and I/O stay errors, which cleanup counts as a
+  failed network. Neither becomes "link gone".
+
+### CI scheduling (LC-INTEGRATION-03)
+
+`.github/workflows/ci.yml` runs `ownership_period` with `--ignored` (added in LC-OWNER).
+`watch_handover` runs with `--ignored`, and the TUI filter `tui_watcher` matches the new test's
+name. The removal, client and adapter unit tests run in `cargo test --workspace`. The lifecycle
+harness runs both from source and against the built package's extracted scripts.
+
+### Negative controls (LC-INTEGRATION-04)
+
+The controls were re-run in an isolated worktree with **its own target directory**. An earlier
+attempt shared the main target directory, and cargo then reused the control's build in the main
+tree for one run; the main-tree results were re-taken after forcing a rebuild. The script is
+recorded in the session, not the repository. The fixed tree was the sanity baseline: 10/10
+ownership tests and 27/27 removal tests passed.
+
+| Control | Result |
+| --- | --- |
+| O1: ordered decision drain disabled | 6 of 10 ownership tests fail, including the shared-watcher integration test |
+| O2: baseline `75c1a01` subscription code | The same 6 fail. The shared watcher reports `[Connected, Changed, Disconnected, Connected]`: the old item reaches the consumer |
+| C1: `member`/`none` classified as completed leave | 7 of 27 removal tests fail |
+| C2: orphan record classified as completed leave | 2 of 27 fail |
+| C3: `unresolved_roles` ignored by `succeeded()` | 1 fails (`lc_cleanup_an_unknown_role_fails_even_with_no_owned_state_left`). In the other cases the untouched owned state still fails the run as `remaining`; the zero-resource test exists for this case |
+
+The desktop and TUI returning-owner tests pass under O2. Their watchers poll continuously, so
+the ownership notice always wins against the reply. They guard the consumer contract, and the
+blocked-executor shared-watcher test is the sensitive one at that layer.
+
+### Preserved behavior (LC-INTEGRATION-05)
+
+At the LC-INTEGRATION source:
+
+- All 15 CI broker suites pass: 61 tests across dbus_service, authorization, dbus_client,
+  owner_race, event_owner_race, ownership_period, state_events, publisher_progress, owner_watch,
+  watcher, watch_integration, watch_handover, tui_watcher, cli_exit_contract and
+  bridge_end_to_end. These cover publisher progress and shutdown, startup handoff, ordinary
+  owner handover and security boundaries.
+- `cargo test --workspace --locked`: 911 passed, 0 failed, 62 ignored. This includes graph
+  import/atomicity, client cleanup/retry and the NotMember stale-record case.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` and `cargo fmt --check` are
+  clean, and the lifecycle harness passes.
+- The frontend (UI effect generation) is unchanged; it is re-run in LC-VALIDATE.

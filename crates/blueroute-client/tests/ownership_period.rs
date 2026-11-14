@@ -584,3 +584,113 @@ fn lc_owner_a_continuous_period_keeps_delivering() -> Result<(), Box<dyn Error>>
         .await
     })
 }
+
+/// Runs the scripted daemon on its own thread until dropped, so the test thread can block.
+struct DaemonThread {
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<Result<(), String>>>,
+}
+
+impl DaemonThread {
+    fn spawn(daemon: Daemon) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopped = stop.clone();
+        let thread = std::thread::spawn(move || {
+            future::block_on(future::or(
+                async { daemon.serve().await.map_err(|error| error.to_string()) },
+                async {
+                    wait_for(&stopped).await;
+                    Ok(())
+                },
+            ))
+        });
+        Self {
+            stop,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for DaemonThread {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// LC-INTEGRATION-01: the production shared watcher sees A→B→A inside the check of A's item,
+/// while its thread is busy: the test blocks the watcher's executor thread from the moment the
+/// Version call reaches A until the reply and all notices are queued (acknowledged by the
+/// barrier). It must report the loss before anything of the new period and never pass the old
+/// item on. It then reconnects to the returning A, validated afresh, and hears its new period.
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn lc_integration_the_shared_watcher_treats_a_returning_owner_as_a_new_period()
+-> Result<(), Box<dyn Error>> {
+    use blueroute_client::WatchSignal::{Changed, Connected, Disconnected};
+    let _bus = BUS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    future::block_on(async {
+        let rig = rig().await?;
+        // Watcher connect = Version 1, subscribe = 2, A's item check = 3.
+        rig.script.at.store(3, Ordering::SeqCst);
+        let _daemon = DaemonThread::spawn(rig.daemon(Transfer::ThroughSuccessor));
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let connection = rig.client_connection.clone();
+        let watcher = blueroute_client::watch(
+            move || {
+                let connection = connection.clone();
+                async move { BlueRouteClient::from_connection(connection).await }
+            },
+            |_| async {
+                Timer::after(Duration::from_millis(10)).await;
+            },
+            move |signal| {
+                sink.lock().unwrap().push(signal);
+                std::ops::ControlFlow::Continue(())
+            },
+        );
+        let wait_for_signals = |expected: Vec<blueroute_client::WatchSignal>| {
+            let seen = seen.clone();
+            async move {
+                within(Duration::from_secs(3), async {
+                    while *seen.lock().unwrap() != expected {
+                        Timer::after(Duration::from_millis(5)).await;
+                    }
+                })
+                .await
+                .ok_or_else(|| format!("expected {expected:?}, saw {:?}", seen.lock().unwrap()))
+            }
+        };
+        let scenario = async {
+            wait_for_signals(vec![Connected]).await?;
+            emit(&rig.a, Item::Event).await?;
+            wait_for(&rig.script.arrived).await;
+            // Block this thread, and with it the watcher, across A→B→A and the reply.
+            rig.script.go.store(true, Ordering::SeqCst);
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !rig.script.replied.load(Ordering::SeqCst) {
+                if std::time::Instant::now() > deadline {
+                    return Err("the daemon never replied".into());
+                }
+                std::thread::yield_now();
+            }
+            wait_for_signals(vec![Connected, Disconnected, Connected]).await?;
+            emit(&rig.a, Item::State).await?;
+            wait_for_signals(vec![Connected, Disconnected, Connected, Changed]).await?;
+            Ok::<(), Box<dyn Error>>(())
+        };
+        future::or(
+            async {
+                watcher.await;
+                Err("the watcher stopped".into())
+            },
+            scenario,
+        )
+        .await
+    })
+}

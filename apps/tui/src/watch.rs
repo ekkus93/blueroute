@@ -207,11 +207,13 @@ mod tests {
     }
 
     /// Hands the name to `successor` inside its third Version call: the check of its first change
-    /// signal (calls 1 and 2 are the watcher's connect and subscribe).
+    /// signal (calls 1 and 2 are the watcher's connect and subscribe). With `returns`, the
+    /// successor gives the name straight back (A→B→A) before A replies.
     struct HandoverDaemon {
         calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
         own: std::sync::Arc<std::sync::OnceLock<zbus::Connection>>,
         successor: Option<zbus::Connection>,
+        returns: bool,
     }
 
     #[zbus::interface(name = "org.blueroute.Service1")]
@@ -229,6 +231,15 @@ mod tests {
                     .request_name(blueroute_protocol::DBUS_SERVICE_NAME)
                     .await
                     .unwrap();
+                if self.returns {
+                    successor
+                        .release_name(blueroute_protocol::DBUS_SERVICE_NAME)
+                        .await
+                        .unwrap();
+                    own.request_name(blueroute_protocol::DBUS_SERVICE_NAME)
+                        .await
+                        .unwrap();
+                }
             }
             (
                 blueroute_protocol::ApiVersion::CURRENT.major,
@@ -258,6 +269,19 @@ mod tests {
     #[test]
     #[ignore = "needs a private bus: run with dbus-run-session"]
     fn tui_watcher_follows_an_event_time_handover_to_the_successor() {
+        handover_through_the_tui(false);
+    }
+
+    /// LC-INTEGRATION-01: A→B→A inside the check of A's change. The old period's change never
+    /// shows; the loss does, then the TUI reconnects to the returning A, validated afresh, and
+    /// hears its new period.
+    #[test]
+    #[ignore = "needs a private bus: run with dbus-run-session"]
+    fn tui_watcher_reports_a_returning_daemon_as_a_new_period() {
+        handover_through_the_tui(true);
+    }
+
+    fn handover_through_the_tui(returns: bool) {
         let _bus = bus();
         futures_lite::future::block_on(async {
             let b = zbus::connection::Builder::session()
@@ -268,6 +292,7 @@ mod tests {
                         calls: Default::default(),
                         own: Default::default(),
                         successor: None,
+                        returns: false,
                     },
                 )
                 .unwrap()
@@ -285,6 +310,7 @@ mod tests {
                         calls: Default::default(),
                         own: own.clone(),
                         successor: Some(b.clone()),
+                        returns,
                     },
                 )
                 .unwrap()
@@ -305,7 +331,8 @@ mod tests {
                 Some(Signal::Connected)
             );
             announce(&a).await;
-            // A's obsolete change never shows; the loss does, then B on the production backoff.
+            // A's obsolete change never shows; the loss does, then the current owner (B, or the
+            // returning A) on the production backoff.
             assert_eq!(
                 next(&receive, Duration::from_secs(2)),
                 Some(Signal::Disconnected)
@@ -314,7 +341,7 @@ mod tests {
                 next(&receive, Duration::from_secs(5)),
                 Some(Signal::Connected)
             );
-            announce(&b).await;
+            announce(if returns { &a } else { &b }).await;
             assert_eq!(
                 next(&receive, Duration::from_secs(1)),
                 Some(Signal::Changed)

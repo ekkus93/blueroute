@@ -1454,6 +1454,42 @@ fn pan_error(
 mod tests {
     use super::*;
 
+    // LC-INTEGRATION-02 / VERIFY-2: a host device BlueZ has no object for is reported as absent
+    // (`panu_device_present` = false), which removal cleanup treats as inconclusive and keeps the
+    // proof. Any other failure stays an error, which cleanup counts as a failed network. Neither
+    // becomes "link gone".
+    #[test]
+    fn a_missing_device_object_is_absent_and_other_failures_stay_errors() {
+        let error = |name: &str| {
+            zbus::Error::MethodError(
+                zbus::names::OwnedErrorName::try_from(name).unwrap(),
+                None,
+                zbus::Message::method_call("/", "Get")
+                    .unwrap()
+                    .build(&())
+                    .unwrap(),
+            )
+        };
+        for absent in [
+            "org.freedesktop.DBus.Error.UnknownObject",
+            "org.freedesktop.DBus.Error.UnknownInterface",
+            "org.bluez.Error.DoesNotExist",
+        ] {
+            assert!(network_interface_is_absent(&error(absent)), "{absent}");
+        }
+        for failure in [
+            "org.freedesktop.DBus.Error.AccessDenied",
+            "org.freedesktop.DBus.Error.NoReply",
+            "org.freedesktop.DBus.Error.ServiceUnknown",
+            "org.bluez.Error.Failed",
+        ] {
+            assert!(!network_interface_is_absent(&error(failure)), "{failure}");
+        }
+        assert!(!network_interface_is_absent(&zbus::Error::InputOutput(
+            std::sync::Arc::new(std::io::Error::other("bus closed"))
+        )));
+    }
+
     fn peer() -> PeerHandle {
         PeerHandle::new("/org/bluez/hci0/dev_00_11_22_33_44_55").unwrap()
     }
