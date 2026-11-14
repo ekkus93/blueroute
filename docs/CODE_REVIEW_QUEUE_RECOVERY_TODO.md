@@ -1,6 +1,6 @@
 # Code Review Queue and Recovery Remediation TODO
 
-**Status:** NOT STARTED; all tasks are pending.  
+**Status:** IN PROGRESS (2026-11-14). **Evidence:** [CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md).  
 **Baseline:** `f957d80207930ccb481bec8f23cefd8bb2506cde`.  
 **Companion specification:** [CODE_REVIEW_QUEUE_RECOVERY_SPEC.md](CODE_REVIEW_QUEUE_RECOVERY_SPEC.md).  
 **Earlier work:** [lifecycle backlog](CODE_REVIEW_LIFECYCLE_TODO.md),
@@ -24,7 +24,7 @@
 
 | Task | Outcome | Dependencies | State |
 | --- | --- | --- | --- |
-| QR-BASE | Durable recipes and corrected failing expectations | None | `[ ]` |
+| QR-BASE | Durable recipes and corrected failing expectations | None | `[x]` |
 | QR-QUEUE | P2 RLC-01: bounded-queue progress with ordered retirement | QR-BASE | `[ ]` |
 | QR-RECOVERY | P3 RLC-02: complete targeted manual recovery | QR-BASE | `[ ]` |
 | QR-INTEGRATION | Actual consumer/helper boundaries and sensitive CI tests | QR-QUEUE, QR-RECOVERY | `[ ]` |
@@ -40,14 +40,14 @@ two fixes, their software regressions, or an explicitly limited software milesto
 
 **Requirements:** ACCEPT-1/2; finding recipes in the companion specification.
 
-- [ ] **QR-BASE-01:** Record current HEAD, dirty state, pinned toolchains and differences from
+- [x] **QR-BASE-01:** Record current HEAD, dirty state, pinned toolchains and differences from
   the review baseline. Read current product/lifecycle/queue-recovery requirements and guidance.
-- [ ] **QR-BASE-02:** Preserve RLC-01/02 triggers, paths, results and prior task relationships
+- [x] **QR-BASE-02:** Preserve RLC-01/02 triggers, paths, results and prior task relationships
   in versioned evidence, including queue-capacity control and the distinction between safe
   cleanup refusal and incomplete administrator instructions.
-- [ ] **QR-BASE-03:** Add corrected above-capacity owner-loss/shared-connection expectations and
+- [x] **QR-BASE-03:** Add corrected above-capacity owner-loss/shared-connection expectations and
   a production-store manual-recovery scenario; demonstrate intended baseline failures.
-- [ ] **QR-BASE-04:** Make fixtures finite, acknowledgement-controlled and isolated. Keep state /
+- [x] **QR-BASE-04:** Make fixtures finite, acknowledgement-controlled and isolated. Keep state /
   logs in ignored workspace `tmp/`; ensure private buses, helper mocks and teardown cannot reach
   host services, ordinary networking or the host package database.
 
@@ -229,7 +229,7 @@ link exact revisions/results; keep software and real environment outcomes separa
 
 | Task / finding | Fix SHA / source | Regression, control and software evidence | Qualification or remaining gate | State |
 | --- | --- | --- | --- | --- |
-| QR-BASE | — | Corrected baseline failures and safe fixtures pending | Durable isolated recipes | NOT STARTED |
+| QR-BASE | `e7720a9` baseline; `queue_saturation.rs`, recovery recipe | RLC-01: 6 of 9 fail at baseline, 64-notice boundary passes, 66 fails; RLC-02 recipe fails with `unresolved_roles: 1` ([evidence](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md#qr-base--findings-preserved-and-corrected-expectations-established-2026-11-14)) | Durable isolated recipes | ACCEPTED |
 | QR-QUEUE / RLC-01 | — | QUEUE-1..6 pending | Saturation, shared progress, post-decision evidence | NOT STARTED |
 | QR-RECOVERY / RLC-02 | — | RECOVER-1..4 pending | Complete targeted manual workflow | NOT STARTED |
 | QR-INTEGRATION | — | ACCEPT-1/2 pending | Actual consumers/helper boundaries and CI scheduling | NOT STARTED |
