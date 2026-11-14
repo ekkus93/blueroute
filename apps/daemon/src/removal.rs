@@ -653,4 +653,58 @@ mod tests {
         assert_eq!(fake.world(|world| world.profiles.len()), 1);
         std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
+
+    // FU-04 regression (docs/CODE_REVIEW_FOLLOWUP_TODO.md, REV-04, REMOVE-1..3). It fails on
+    // 6d200d0, where cleanup without Bluetooth removes the proof, reports success, and leaves a
+    // later Bluetooth-enabled retry unable to disconnect the owned link.
+    #[test]
+    #[ignore = "FU-04 regression: fails on 6d200d0 until FU-04 is fixed"]
+    fn fu_04_unresolved_client_teardown_fails_and_keeps_its_proof_for_the_retry() {
+        let owned_link = PanAttachment {
+            role: PanRole::Panu,
+            interface: iface("bnep0"),
+            peer: Some(host_device()),
+        };
+        // Network 1: a joined client with a live owned PANU; network 2: a host-only network.
+        let paths = state(&[net(1), net(2)], true);
+        let fake = Fake::with(|world| {
+            world.addresses = vec![address(net(1), "bnep0"), address(net(2), "br-b")];
+            world.profiles = vec![(net(1), iface("bnep0")), (net(2), iface("br-b"))];
+            world.panu = Some(owned_link.clone());
+        });
+
+        // Bluetooth is unavailable: the link cannot be observed, so it is unresolved.
+        let (outcome, fake) = run(&paths, fake, false);
+        let report = outcome.expect("cleanup ran");
+        assert!(
+            !report.succeeded(),
+            "unobserved client teardown reported success: {report:?}"
+        );
+        fake.world(|world| {
+            // The proof for the retry is kept …
+            assert_eq!(world.profiles, vec![(net(1), iface("bnep0"))]);
+            assert_eq!(world.panu, Some(owned_link.clone()));
+            // … while independent safe work for the other network still happened.
+            assert!(
+                world
+                    .addresses
+                    .iter()
+                    .all(|address| address.owner != net(2))
+            );
+        });
+
+        // Bluetooth is back: the retry proves the link ours, disconnects it, and finishes.
+        let (outcome, fake) = run(&paths, fake, true);
+        assert!(outcome.unwrap().succeeded());
+        fake.world(|world| {
+            assert_eq!(world.disconnected, 1);
+            assert!(world.profiles.is_empty() && world.addresses.is_empty());
+        });
+        let (outcome, _) = run(&paths, fake, true);
+        assert!(
+            outcome.unwrap().succeeded(),
+            "a repeat after full cleanup must succeed"
+        );
+        std::fs::remove_dir_all(&paths.state_directory).unwrap();
+    }
 }

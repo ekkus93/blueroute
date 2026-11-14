@@ -714,4 +714,34 @@ mod tests {
         assert_eq!(graph.shortest_path(node(2), node(3)), path);
         assert_consistent(&graph);
     }
+
+    // FU-03 regression (docs/CODE_REVIEW_FOLLOWUP_TODO.md, REV-03, SEG-2/4). It states the
+    // corrected contract and fails on 6d200d0, where a segment cloned from another graph keeps
+    // that graph's link-derived members.
+    #[test]
+    #[ignore = "FU-03 regression: fails on 6d200d0 until FU-03 is fixed"]
+    fn fu_03_a_segment_cloned_from_another_graph_brings_no_phantom_members() {
+        let source = star_with_one_client(); // segment 1: NAP 1, client 2 via link 1
+        let (_, cloned) = source
+            .segments()
+            .find(|(id, _)| **id == segment(1))
+            .unwrap();
+        let cloned = cloned.clone();
+
+        // (a) The client does not exist in the destination graph.
+        let mut missing = TopologyGraph::default();
+        add_node(&mut missing, 1, true);
+        if missing.add_segment(cloned.clone()).is_ok() {
+            assert_consistent(&missing);
+        }
+
+        // (b) The client exists, but no link there justifies its membership.
+        let mut unlinked = TopologyGraph::default();
+        add_node(&mut unlinked, 1, true);
+        add_node(&mut unlinked, 2, false);
+        if unlinked.add_segment(cloned).is_ok() {
+            assert_consistent(&unlinked);
+            assert_eq!(members_of(&unlinked, 1), vec![node(1)]);
+        }
+    }
 }

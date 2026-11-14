@@ -1,6 +1,6 @@
 # Code Review Follow-up TODO
 
-**Status:** NOT STARTED; every item is pending.  
+**Status:** IN PROGRESS. **Evidence:** [CODE_REVIEW_FOLLOWUP_EVIDENCE.md](CODE_REVIEW_FOLLOWUP_EVIDENCE.md).  
 **Baseline:** `6d200d0cda24acd00b1f3a6b8981b1d0bb2d6eec`, reviewed 2026-11-13.  
 **Companion specification:** [CODE_REVIEW_FOLLOWUP_SPEC.md](CODE_REVIEW_FOLLOWUP_SPEC.md).  
 **Earlier backlog and evidence:** [CODE_REVIEW_REMEDIATION_TODO.md](CODE_REVIEW_REMEDIATION_TODO.md),
@@ -37,7 +37,7 @@
 
 | Task | Outcome / issue | Dependencies | State |
 | --- | --- | --- | --- |
-| FU-BASE | Durable baseline, corrected regressions, isolation | None | `[ ]` |
+| FU-BASE | Durable baseline, corrected regressions, isolation | None | `[x]` |
 | FU-01 | P2 REV-01: independent publication and bounded shutdown | FU-BASE | `[ ]` |
 | FU-02 | P2 REV-02: ownership monitored through validation | FU-BASE | `[ ]` |
 | FU-03 | P2 REV-03: safe segment cloning/import | FU-BASE | `[ ]` |
@@ -57,15 +57,15 @@ FU-QUALIFY, not for the other software tasks or an explicitly limited software m
 
 **Requirements:** ACCEPT-1/2/3 and the finding register in the specification.
 
-- [ ] **FU-BASE-01:** Record current HEAD, dirty state, toolchains, and differences from the
+- [x] **FU-BASE-01:** Record current HEAD, dirty state, toolchains, and differences from the
   review baseline. Read contributor guidance and current product/remediation requirements.
-- [ ] **FU-BASE-02:** Preserve REV-01..04 recipes and GAP-01..02 scope in versioned evidence,
+- [x] **FU-BASE-02:** Preserve REV-01..04 recipes and GAP-01..02 scope in versioned evidence,
   including the distinction between reproduced bugs and documented/qualification gaps.
-- [ ] **FU-BASE-03:** Add corrected expectations for slow sampling, event-time owner handover,
+- [x] **FU-BASE-03:** Add corrected expectations for slow sampling, event-time owner handover,
   cloned graph membership, and unavailable-Bluetooth cleanup/retry. Confirm baseline failures.
-- [ ] **FU-BASE-04:** Establish fixtures with barriers, bounded waits, known ownership, foreign
+- [x] **FU-BASE-04:** Establish fixtures with barriers, bounded waits, known ownership, foreign
   resources, and pending operations. Ensure shutdown of test fixtures remains controllable.
-- [ ] **FU-BASE-05:** Verify private broker, temporary filesystem/package-root, and fake backend
+- [x] **FU-BASE-05:** Verify private broker, temporary filesystem/package-root, and fake backend
   isolation. Prevent a real maintenance helper from reaching host services in package tests.
 
 **Acceptance:** Every reproduced defect has a meaningful failing corrected expectation and a
@@ -301,7 +301,7 @@ separately from the unresolved qualification gate.
 
 | Task / issue | Fix SHA and source | Regression / negative-control / software evidence | Qualification or remaining gate | State |
 | --- | --- | --- | --- | --- |
-| FU-BASE | — | Baseline and isolation pending | Corrected failing expectations | NOT STARTED |
+| FU-BASE | Tests at this commit | 5 failing corrected expectations ([evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-base--baseline-and-failing-expectations-2026-11-13)) | None | COMPLETE |
 | FU-01 / REV-01 | — | PUB-1..4 pending | Private-broker/shutdown evidence | NOT STARTED |
 | FU-02 / REV-02 | — | OWNER-1..4 pending | Owner-transfer/consumer evidence | NOT STARTED |
 | FU-03 / REV-03 | — | SEG-1..4 pending | Import/invariant/consumer evidence | NOT STARTED |
