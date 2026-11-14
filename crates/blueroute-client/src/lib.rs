@@ -3,6 +3,7 @@
 mod watch;
 pub use watch::{WatchSignal, reconnect_delay, watch};
 
+use std::collections::VecDeque;
 use std::fmt;
 use std::time::{Duration, Instant};
 
@@ -175,10 +176,14 @@ impl BlueRouteClient {
             connection: self.connection.clone(),
             owner: owner.name,
             since: owner.since,
-            stream,
-            state,
-            owner_changes,
-            retired: false,
+            live: Some(Receivers {
+                events: stream,
+                state,
+                owner_changes,
+            }),
+            backlog: VecDeque::new(),
+            period_end: None,
+            ended: None,
         })
     }
 }
@@ -193,12 +198,32 @@ pub enum Change {
     State { revision: u64 },
 }
 
+/// The most items a subscription holds that it has received but not yet delivered. Beyond it the
+/// subscription ends with [`ClientError::SubscriptionLagged`] instead of stalling its connection
+/// (QR-QUEUE, QUEUE-4).
+pub const SUBSCRIPTION_BACKLOG: usize = 256;
+
 /// Event stream that rechecks daemon compatibility before accepting every event payload.
 ///
 /// A subscription belongs to one continuous ownership period of the daemon's name: the one in
 /// which `owner` was validated, starting at `since`. Once that owner gives the name up, the
 /// period is over for good; the same connection taking the name back starts a new period that
 /// only a fresh subscription can bind to (LC-OWNER, EPOCH-1).
+///
+/// # Queues and progress (QR-QUEUE, QUEUE-1/4)
+///
+/// The subscription owns three zbus match streams: the bound owner's `Event` signals, its
+/// `StateChanged` signals (for [`BlueRouteClient::changes`]), and the ownership notices of the
+/// daemon's name. zbus 5.19 reads a connection's messages one at a time and waits for room in
+/// every matching stream (64 entries each by default) before reading the next, so a stream that
+/// is not read stops every reply on the connection, including this subscription's own checks.
+/// Therefore no await inside [`Self::next_change`] is left without reading all three: while a
+/// signal, a Version reply or the final `GetNameOwner` reply is awaited, notices are settled as
+/// they arrive and signals move into a backlog of at most [`SUBSCRIPTION_BACKLOG`] items. A
+/// consumer that falls further behind gets [`ClientError::SubscriptionLagged`] and should reread
+/// state. Retirement and lag release all three streams, so a handle kept alive afterwards holds
+/// nothing back; dropping the subscription releases them too. Between calls the streams are not
+/// read: a caller that pauses for long can stop its connection's reader until it resumes.
 pub struct EventSubscription {
     connection: Connection,
     /// The unique bus name the subscription is bound to.
@@ -206,13 +231,43 @@ pub struct EventSubscription {
     /// Where the bound ownership period began, in this connection's receive order. Ownership
     /// notices received before it describe earlier history and are ignored.
     since: Sequence,
-    stream: SignalStream<'static>,
+    /// The match streams; `None` once the subscription has ended.
+    live: Option<Receivers>,
+    /// Signals received but not yet delivered, in receive order. The front one is the item being
+    /// checked; it leaves only when delivered, so a cancelled call loses nothing.
+    backlog: VecDeque<zbus::Message>,
+    /// The receive position of a period-ending notice read while a final verification was
+    /// pending. It is kept here, not in the call, so cancelling that call cannot lose it.
+    period_end: Option<Sequence>,
+    /// Set once the subscription has ended; every later call reports the same error.
+    ended: Option<Ended>,
+}
+
+/// The three match streams a live subscription reads.
+struct Receivers {
+    events: SignalStream<'static>,
     /// `StateChanged` invalidations, for a [`BlueRouteClient::changes`] subscription.
     state: Option<SignalStream<'static>>,
     /// Ownership changes of the daemon's well-known name only.
     owner_changes: NameOwnerChangedStream,
-    /// Set once the bound period was seen to end; nothing is delivered afterwards (FU-02).
-    retired: bool,
+}
+
+/// Why a subscription ended.
+#[derive(Clone, Copy)]
+enum Ended {
+    OwnerLost,
+    Lagged,
+}
+
+impl Ended {
+    fn error(self) -> ClientError {
+        match self {
+            Self::OwnerLost => ClientError::OwnerLost,
+            Self::Lagged => ClientError::SubscriptionLagged {
+                limit: SUBSCRIPTION_BACKLOG,
+            },
+        }
+    }
 }
 
 /// Whether one ownership notice ends `owner`'s period that began at `since`: received after
@@ -245,62 +300,169 @@ fn shows_no_owner(error: &ClientError) -> bool {
     )
 }
 
-/// Resolves when an ownership notice ends the bound period, or the bus connection closes.
-async fn owner_retired(
-    changes: &mut NameOwnerChangedStream,
-    owner: &OwnedUniqueName,
-    since: Sequence,
-) {
-    while let Some(change) = changes.next().await {
-        if ends_period(&change, owner, since) {
-            return;
-        }
+/// What a final verification decided about the item in hand (QUEUE-3, EPOCH-2).
+#[derive(Debug, PartialEq)]
+enum Decision {
+    /// Deliver it; the period is still running.
+    Deliver,
+    /// Deliver it, but its period ended after the decision: every later call reports OwnerLost.
+    DeliverThenRetire,
+    /// The period ended before the decision: do not deliver.
+    Retire,
+}
+
+/// The delivery decision. `decision` is the receive position of the final `GetNameOwner` reply
+/// naming the bound owner; `period_end` is the earliest period-ending notice read so far, if any.
+/// A notice received before the reply ends the period before the decision and prevents delivery;
+/// one received after it cannot withdraw a delivery already permitted, and retires the
+/// subscription for the next call instead.
+///
+/// Generic over the position type only so the ordering rule can be tested without a bus;
+/// production passes zbus receive positions.
+fn decide<Position: Ord>(decision: Position, period_end: Option<Position>) -> Decision {
+    match period_end {
+        None => Decision::Deliver,
+        Some(end) if end < decision => Decision::Retire,
+        Some(_) => Decision::DeliverThenRetire,
     }
 }
 
-/// Settles every ownership notice already queued when a reply was received.
-///
-/// zbus reads one connection's messages in order and hands each to every stream before it reads
-/// the next, so by the time a reply is in hand every notice received before it is already
-/// queued: an empty queue means none exists. Returns whether one of them ended the period.
-///
-/// With a `decision` (the final check's reply), a period-ending notice received after it does not
-/// withdraw the delivery; it retires the subscription for the next call instead, so it is never
-/// consumed and forgotten (EPOCH-2/3). Without one (a failed check), any queued period end counts:
-/// a loss that was already queued is reported now, not on the next call.
-async fn ended_before(
-    changes: &mut NameOwnerChangedStream,
+/// One message read from a subscription's streams.
+enum Step {
+    /// A signal moved into the backlog.
+    Signal,
+    /// An ownership notice; `Some` with its receive position when it ends the period.
+    Notice(Option<Sequence>),
+    /// The ownership stream ended: the connection closed and nothing can be proven any more.
+    NoticesClosed,
+    /// A signal stream ended.
+    SignalsClosed,
+}
+
+/// Reads the next message from any of the three streams. Signals join the backlog in receive
+/// order. Cancel-safe: a stream's message is taken only in the poll that completes this future.
+async fn step(
+    live: &mut Receivers,
     owner: &OwnedUniqueName,
     since: Sequence,
-    decision: Option<Sequence>,
-    retired: &mut bool,
-) -> bool {
-    loop {
-        match futures_lite::future::poll_once(changes.next()).await {
-            None => return false,
-            // The bus connection closed: nothing can be proven any more.
-            Some(None) => return true,
-            Some(Some(change)) => {
-                if ends_period(&change, owner, since) {
-                    if decision.is_none_or(|decision| change.message().recv_position() < decision) {
-                        return true;
-                    }
-                    *retired = true;
-                    return false;
-                }
+    backlog: &mut VecDeque<zbus::Message>,
+) -> Step {
+    let Receivers {
+        events,
+        state,
+        owner_changes,
+    } = live;
+    let notice = async {
+        match owner_changes.next().await {
+            Some(change) => Step::Notice(
+                ends_period(&change, owner, since).then(|| change.message().recv_position()),
+            ),
+            None => Step::NoticesClosed,
+        }
+    };
+    let signal = async {
+        let next = futures_lite::future::or(events.next(), async {
+            match state {
+                Some(state) => state.next().await,
+                None => futures_lite::future::pending().await,
             }
+        })
+        .await;
+        match next {
+            Some(message) => {
+                let position = message.recv_position();
+                let at = backlog.partition_point(|queued| queued.recv_position() < position);
+                backlog.insert(at, message);
+                Step::Signal
+            }
+            None => Step::SignalsClosed,
+        }
+    };
+    futures_lite::future::or(notice, signal).await
+}
+
+/// Why reading during an await had to stop.
+enum Interrupt {
+    /// The period ended (or ownership can no longer be proven).
+    Retired,
+    /// The backlog is over its bound.
+    Lagged,
+    /// A signal stream ended.
+    Closed,
+}
+
+/// Keeps reading the streams while another await is pending, so that await's reply can be read
+/// (QUEUE-1). With `record_end`, a period end does not stop reading: its position is kept in
+/// `period_end` for the delivery decision, because a notice that arrives after the decision must
+/// not withdraw it. Without it, the first period end interrupts. Never returns otherwise.
+async fn keep_reading(
+    live: &mut Receivers,
+    owner: &OwnedUniqueName,
+    since: Sequence,
+    backlog: &mut VecDeque<zbus::Message>,
+    period_end: &mut Option<Sequence>,
+    record_end: bool,
+) -> Interrupt {
+    loop {
+        match step(live, owner, since, backlog).await {
+            Step::Signal if backlog.len() > SUBSCRIPTION_BACKLOG => return Interrupt::Lagged,
+            Step::Signal | Step::Notice(None) => {}
+            Step::Notice(Some(position)) if record_end => {
+                period_end.get_or_insert(position);
+            }
+            Step::Notice(Some(_)) | Step::NoticesClosed => return Interrupt::Retired,
+            Step::SignalsClosed => return Interrupt::Closed,
         }
     }
 }
 
-/// What the next thing to happen on a subscription was.
-enum Next {
-    Event(Option<zbus::Message>),
-    State(Option<zbus::Message>),
-    Retired,
+/// Reads everything already queued without waiting. zbus hands a message to every stream before
+/// it reads the next one, so once a reply is in hand every notice received before it is queued:
+/// an empty queue means none exists. Period ends are kept in `period_end`.
+async fn settle(
+    live: &mut Receivers,
+    owner: &OwnedUniqueName,
+    since: Sequence,
+    backlog: &mut VecDeque<zbus::Message>,
+    period_end: &mut Option<Sequence>,
+) -> Option<Interrupt> {
+    loop {
+        match futures_lite::future::poll_once(step(live, owner, since, backlog)).await {
+            None => return None,
+            Some(Step::Signal) if backlog.len() > SUBSCRIPTION_BACKLOG => {
+                return Some(Interrupt::Lagged);
+            }
+            Some(Step::Signal | Step::Notice(None)) => {}
+            Some(Step::Notice(Some(position))) => {
+                period_end.get_or_insert(position);
+            }
+            Some(Step::NoticesClosed) => return Some(Interrupt::Retired),
+            Some(Step::SignalsClosed) => return Some(Interrupt::Closed),
+        }
+    }
 }
 
 impl EventSubscription {
+    /// Ends the subscription for good and releases its streams and backlog (QUEUE-4).
+    fn end(&mut self, why: Ended) -> ClientError {
+        self.ended = Some(why);
+        self.live = None;
+        self.backlog = VecDeque::new();
+        why.error()
+    }
+
+    fn interrupted(&mut self, interrupt: Interrupt) -> ClientError {
+        match interrupt {
+            Interrupt::Retired => self.end(Ended::OwnerLost),
+            Interrupt::Lagged => self.end(Ended::Lagged),
+            Interrupt::Closed => {
+                self.live = None;
+                self.backlog = VecDeque::new();
+                ClientError::EventStreamClosed
+            }
+        }
+    }
+
     /// The next typed event. On a [`BlueRouteClient::changes`] subscription, invalidations are
     /// skipped; use [`Self::next_change`] there.
     pub async fn next_event(&mut self) -> Result<Event, ClientError> {
@@ -314,104 +476,98 @@ impl EventSubscription {
     /// The next event or invalidation. Ends with [`ClientError::OwnerLost`] when the bound owner
     /// goes away, and every item is accepted only after that same owner's version is rechecked.
     ///
-    /// Delivery decision (FU-02, LC-OWNER, EPOCH-1..3): the period is watched the whole time,
-    /// including while an item's version is checked, so a held reply cannot delay the loss.
-    /// After the check, a final `GetNameOwner` is the decision point: the item is delivered only
-    /// if the bound owner holds the name there *and* no notice received before that reply ended
-    /// the period. Comparing names alone would let an owner that gave the name away and took it
-    /// back (A→B→A) deliver an item of its old period. A retirement seen at any point ends the
-    /// subscription for good, and the pending check (and its late reply) is dropped. A failed
-    /// check is reported as itself unless a period end is already queued, which wins.
+    /// Delivery decision (FU-02, LC-OWNER, EPOCH-1..3, QUEUE-3): the period is watched the whole
+    /// time, including while an item's version is checked, so a held reply cannot delay the loss.
+    /// After the check, every notice already queued is settled (each was received before the
+    /// final check can be answered), then a final `GetNameOwner` is the decision point: the item
+    /// is delivered only if the bound owner holds the name there *and* no notice received before
+    /// that reply ended the period. Comparing names alone would let an owner that gave the name
+    /// away and took it back (A→B→A) deliver an item of its old period. A period end received
+    /// after the reply does not withdraw the delivery; it retires the subscription for the next
+    /// call. A retirement seen at any point ends the subscription for good, and a pending check
+    /// (and its late reply) is dropped. A failed check is reported as itself unless a period end
+    /// is already queued, which wins.
     ///
-    /// Cancelling the returned future never loses a retirement, but an item already taken from
-    /// the signal streams (while its check is pending) is dropped with it: callers that cancel
-    /// should reread state, as the shared watcher does on reconnect.
+    /// Cancelling the returned future loses nothing: the item being checked stays first in the
+    /// backlog for the next call, and a period end already read stays recorded.
     pub async fn next_change(&mut self) -> Result<Change, ClientError> {
-        if self.retired {
-            return Err(ClientError::OwnerLost);
+        if let Some(why) = self.ended {
+            return Err(why.error());
         }
-        let Self {
-            connection,
-            owner,
-            since,
-            stream,
-            state,
-            owner_changes,
-            retired,
-        } = self;
-        let signals = futures_lite::future::or(async { Next::Event(stream.next().await) }, async {
-            match state {
-                Some(state) => Next::State(state.next().await),
-                None => futures_lite::future::pending().await,
-            }
-        });
-        let since = *since;
-        let next = futures_lite::future::or(signals, async {
-            owner_retired(owner_changes, owner, since).await;
-            Next::Retired
-        })
-        .await;
-        let is_state = matches!(next, Next::State(_));
-        let message = match next {
-            Next::Event(Some(message)) | Next::State(Some(message)) => message,
-            Next::Event(None) | Next::State(None) => return Err(ClientError::EventStreamClosed),
-            Next::Retired => {
-                *retired = true;
-                return Err(ClientError::OwnerLost);
-            }
+        if self.period_end.is_some() {
+            return Err(self.end(Ended::OwnerLost));
+        }
+        let Some(live) = self.live.as_mut() else {
+            return Err(ClientError::EventStreamClosed);
         };
+        let (connection, owner, since) = (&self.connection, &self.owner, self.since);
+        let (backlog, period_end) = (&mut self.backlog, &mut self.period_end);
+
+        // Select the next item: the oldest one already received, or the next to arrive.
+        while backlog.is_empty() {
+            match step(live, owner, since, backlog).await {
+                Step::Signal | Step::Notice(None) => {}
+                Step::Notice(Some(_)) | Step::NoticesClosed => {
+                    return Err(self.end(Ended::OwnerLost));
+                }
+                Step::SignalsClosed => return Err(self.interrupted(Interrupt::Closed)),
+            }
+        }
 
         // The streams only carry this owner's signals; recheck that same owner's version, while
-        // still watching for its retirement, so nothing is accepted on another owner's check and
-        // a held reply cannot delay the loss.
+        // still reading, so nothing is accepted on another owner's check, a held reply cannot
+        // delay the loss, and the reply itself can be read.
         let checked = futures_lite::future::or(
-            async { Some(negotiate_version_at(connection, owner).await) },
-            async {
-                owner_retired(owner_changes, owner, since).await;
-                None
-            },
+            async { Ok(negotiate_version_at(connection, owner).await) },
+            async { Err(keep_reading(live, owner, since, backlog, period_end, false).await) },
         )
         .await;
-        match checked {
-            None => {
-                *retired = true;
-                return Err(ClientError::OwnerLost);
-            }
-            Some(Err(error)) => {
-                // A failed check proves nothing by itself, but a loss already queued wins.
-                if ended_before(owner_changes, owner, since, None, retired).await {
-                    *retired = true;
-                    return Err(ClientError::OwnerLost);
-                }
-                return Err(error);
-            }
-            Some(Ok(_)) => {}
-        }
-        // The decision point: the checked owner must still be the current one, in the same period.
-        let decision = match current_owner(connection).await {
-            Ok((current, decision)) if current == *owner => decision,
-            Ok(_) => {
-                *retired = true;
-                return Err(ClientError::OwnerLost);
-            }
-            Err(error) if shows_no_owner(&error) => {
-                *retired = true;
-                return Err(ClientError::OwnerLost);
-            }
-            Err(error) => {
-                if ended_before(owner_changes, owner, since, None, retired).await {
-                    *retired = true;
-                    return Err(ClientError::OwnerLost);
-                }
-                return Err(error);
-            }
+        let checked = match checked {
+            Err(interrupt) => return Err(self.interrupted(interrupt)),
+            Ok(checked) => checked,
         };
-        if ended_before(owner_changes, owner, since, Some(decision), retired).await {
-            *retired = true;
-            return Err(ClientError::OwnerLost);
+        // Everything queued now was received before the final check can be answered.
+        if let Some(interrupt) = settle(live, owner, since, backlog, period_end).await {
+            return Err(self.interrupted(interrupt));
+        }
+        if period_end.is_some() {
+            // A loss already queued wins over the check's own result, failed or not.
+            return Err(self.end(Ended::OwnerLost));
+        }
+        checked?;
+
+        // The decision point: the checked owner must still be the current one, in the same
+        // period. Reading continues meanwhile, recording any period end for the decision.
+        let verified =
+            futures_lite::future::or(async { Ok(current_owner(connection).await) }, async {
+                Err(keep_reading(live, owner, since, backlog, period_end, true).await)
+            })
+            .await;
+        let verified = match verified {
+            Err(interrupt) => return Err(self.interrupted(interrupt)),
+            Ok(verified) => verified,
+        };
+        if let Some(interrupt) = settle(live, owner, since, backlog, period_end).await {
+            return Err(self.interrupted(interrupt));
+        }
+        let decision = match verified {
+            Ok((current, decision)) if current == *owner => decision,
+            Ok(_) => return Err(self.end(Ended::OwnerLost)),
+            Err(error) if shows_no_owner(&error) || period_end.is_some() => {
+                return Err(self.end(Ended::OwnerLost));
+            }
+            Err(error) => return Err(error),
+        };
+        match decide(decision, *period_end) {
+            Decision::Retire => return Err(self.end(Ended::OwnerLost)),
+            // `period_end` stays recorded: the next call ends the subscription.
+            Decision::DeliverThenRetire | Decision::Deliver => {}
         }
 
-        if is_state {
+        let message = backlog
+            .pop_front()
+            .expect("the item being checked is still first in the backlog");
+        if message.header().member().map(|member| member.as_str()) == Some(STATE_CHANGED_SIGNAL) {
             let revision: u64 = message
                 .body()
                 .deserialize()
@@ -552,6 +708,11 @@ pub enum ClientError {
     EventStreamClosed,
     /// The daemon owner this subscription was bound to gave up its name or disappeared.
     OwnerLost,
+    /// The subscription fell more than `limit` items behind the daemon and ended rather than
+    /// stall its connection; reread state and subscribe again (QR-QUEUE).
+    SubscriptionLagged {
+        limit: usize,
+    },
     ReconnectTimeout {
         timeout: Duration,
         last_error: String,
@@ -609,6 +770,10 @@ impl fmt::Display for ClientError {
             }
             Self::EventStreamClosed => formatter.write_str("daemon event stream closed"),
             Self::OwnerLost => formatter.write_str("the daemon went away or was replaced"),
+            Self::SubscriptionLagged { limit } => write!(
+                formatter,
+                "the event subscription fell more than {limit} items behind and ended"
+            ),
             Self::ReconnectTimeout {
                 timeout,
                 last_error,
@@ -628,6 +793,39 @@ pub const PROJECT_NAME: &str = "BlueRoute";
 #[cfg(test)]
 mod error_class_tests {
     use super::*;
+
+    // QR-QUEUE-07 / QUEUE-3: the receive-order rule at the decision point, which a real broker
+    // cannot place deterministically on either side of the final reply. The real-broker tests in
+    // `tests/queue_saturation.rs` and `tests/ownership_period.rs` cover the pre-decision side and
+    // the transport; this is the proof for the post-decision side.
+    #[test]
+    fn qr_queue_a_period_end_before_the_decision_withholds_and_one_after_retires_next() {
+        let decision = 10_u64;
+        assert_eq!(decide(decision, None), Decision::Deliver);
+        assert_eq!(decide(decision, Some(9)), Decision::Retire);
+        assert_eq!(decide(decision, Some(1)), Decision::Retire);
+        // Received after the final reply: the permitted delivery stands, the next call retires.
+        assert_eq!(decide(decision, Some(11)), Decision::DeliverThenRetire);
+        assert_eq!(
+            decide(decision, Some(u64::MAX)),
+            Decision::DeliverThenRetire
+        );
+        // Positions on one connection are unique, so equality cannot occur; were it ever to,
+        // the notice is not before the decision and the delivery is kept.
+        assert_eq!(decide(decision, Some(10)), Decision::DeliverThenRetire);
+    }
+
+    #[test]
+    fn qr_queue_an_overflow_is_typed_operational_and_names_its_limit() {
+        let lagged = Ended::Lagged.error();
+        assert!(matches!(
+            lagged,
+            ClientError::SubscriptionLagged { limit } if limit == SUBSCRIPTION_BACKLOG
+        ));
+        assert_eq!(lagged.kind(), ClientErrorKind::Operational);
+        assert!(lagged.to_string().contains("256"));
+        assert!(matches!(Ended::OwnerLost.error(), ClientError::OwnerLost));
+    }
 
     #[test]
     fn lc_owner_only_a_missing_owner_retires_on_a_failed_final_check() {

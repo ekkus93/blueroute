@@ -25,7 +25,7 @@
 | Task | Outcome | Dependencies | State |
 | --- | --- | --- | --- |
 | QR-BASE | Durable recipes and corrected failing expectations | None | `[x]` |
-| QR-QUEUE | P2 RLC-01: bounded-queue progress with ordered retirement | QR-BASE | `[ ]` |
+| QR-QUEUE | P2 RLC-01: bounded-queue progress with ordered retirement | QR-BASE | `[x]` |
 | QR-RECOVERY | P3 RLC-02: complete targeted manual recovery | QR-BASE | `[ ]` |
 | QR-INTEGRATION | Actual consumer/helper boundaries and sensitive CI tests | QR-QUEUE, QR-RECOVERY | `[ ]` |
 | QR-VALIDATE | Exact-candidate software/package/CI checks | QR-INTEGRATION | `[ ]` |
@@ -58,28 +58,28 @@ the queue control and incomplete-record case explain the failure rather than tim
 
 **Requirements:** QUEUE-1..6. **Earlier tasks:** LC-OWNER-02/05/06, LC-INTEGRATION-01.
 
-- [ ] **QR-QUEUE-01:** Document all subscription-owned queues, capacities, receive-sequence
+- [x] **QR-QUEUE-01:** Document all subscription-owned queues, capacities, receive-sequence
   ordering, terminal/cancellation state and lifetime. Identify how every receiver progresses
   while signal selection, Version and final verification are awaiting results.
-- [ ] **QR-QUEUE-02:** Remove the circular wait between unread owner notices and the final
+- [x] **QR-QUEUE-02:** Remove the circular wait between unread owner notices and the final
   GetNameOwner reply. Handle already queued period ends before another required round trip and
   maintain progress during final verification/error paths with bounded work.
-- [ ] **QR-QUEUE-03:** Preserve pre-decision rejection, post-decision permitted delivery and
+- [x] **QR-QUEUE-03:** Preserve pre-decision rejection, post-decision permitted delivery and
   persistent next-call retirement. Keep returning owners bound only through fresh subscriptions;
   distinguish transient verification failures from confirmed loss.
-- [ ] **QR-QUEUE-04:** Release or safely settle receivers on terminal retirement/drop, including
+- [x] **QR-QUEUE-04:** Release or safely settle receivers on terminal retirement/drop, including
   when the retired handle remains alive. Preserve other active subscriptions and cancellation
   state without unbounded tasks/buffers, detached drainers or busy polling.
-- [ ] **QR-QUEUE-05:** Test below/at/above-capacity finite bursts for Event and StateChanged,
+- [x] **QR-QUEUE-05:** Test below/at/above-capacity finite bursts for Event and StateChanged,
   including 40 release/reacquire cycles after a ready Version reply. Require OwnerLost within
   two seconds of consumer resumption and no obsolete item.
-- [ ] **QR-QUEUE-06:** Assert a second call on the shared connection completes after retirement
+- [x] **QR-QUEUE-06:** Assert a second call on the shared connection completes after retirement
   while the old handle is retained, and after drop. Cover cancellation/resumption, fresh
   subscription, unrelated active subscription preservation and bounded teardown.
-- [ ] **QR-QUEUE-07:** Add direct pre-/post-decision notice coverage, using a focused internal
+- [x] **QR-QUEUE-07:** Add direct pre-/post-decision notice coverage, using a focused internal
   seam/state model where real-broker ordering cannot place the window deterministically. Keep
   the actual transport saturation test and document the boundary of each test/proof.
-- [ ] **QR-QUEUE-08:** Re-run ordinary A→B→A/A→unowned→A, held/late reply, cancellation, healthy
+- [x] **QR-QUEUE-08:** Re-run ordinary A→B→A/A→unowned→A, held/late reply, cancellation, healthy
   owner and transient-error cases. Preserve unique-owner commands, compatibility, zero Requests
   to incompatible successors, no mutation replay and bounded reconnect behavior.
 
@@ -230,7 +230,7 @@ link exact revisions/results; keep software and real environment outcomes separa
 | Task / finding | Fix SHA / source | Regression, control and software evidence | Qualification or remaining gate | State |
 | --- | --- | --- | --- | --- |
 | QR-BASE | `e7720a9` baseline; `queue_saturation.rs`, recovery recipe | RLC-01: 6 of 9 fail at baseline, 64-notice boundary passes, 66 fails; RLC-02 recipe fails with `unresolved_roles: 1` ([evidence](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md#qr-base--findings-preserved-and-corrected-expectations-established-2026-11-14)) | Durable isolated recipes | ACCEPTED |
-| QR-QUEUE / RLC-01 | — | QUEUE-1..6 pending | Saturation, shared progress, post-decision evidence | NOT STARTED |
+| QR-QUEUE / RLC-01 | `crates/blueroute-client/src/lib.rs`; SPEC client paragraph | 13 saturation tests pass (10 runs), `decide` post-decision seam, zbus pin guard; all preserved suites pass ([evidence](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md#qr-queue--bounded-queue-progress-with-ordered-retirement-2026-11-14)) | Saturation, shared progress, post-decision evidence | ACCEPTED |
 | QR-RECOVERY / RLC-02 | — | RECOVER-1..4 pending | Complete targeted manual workflow | NOT STARTED |
 | QR-INTEGRATION | — | ACCEPT-1/2 pending | Actual consumers/helper boundaries and CI scheduling | NOT STARTED |
 | QR-VALIDATE | — | Exact-candidate checks/packages/CI pending | No installed-system/physical claim | NOT STARTED |

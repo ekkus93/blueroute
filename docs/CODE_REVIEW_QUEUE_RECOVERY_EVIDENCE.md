@@ -103,3 +103,99 @@ Read from the pinned zbus 5.19.0 sources:
   bounded by 2 seconds; daemon-side waits poll flags the test sets.
 - Removal tests use the fake `ClientLeaveBackend` and production stores in a `tempfile` directory
   under the ignored workspace `tmp/`, removed on drop.
+
+## QR-QUEUE — Bounded-queue progress with ordered retirement (2026-11-14)
+
+**Source.** `crates/blueroute-client/src/lib.rs` (`EventSubscription`, `step`, `keep_reading`,
+`settle`, `decide`, `ClientError::SubscriptionLagged`, `SUBSCRIPTION_BACKLOG`); contract in
+`docs/SPEC.md` (client paragraph) and the `EventSubscription` documentation.
+
+### Queues, capacities and progress argument (QR-QUEUE-01, QUEUE-1)
+
+| Queue | Owner | Capacity | Read while |
+| --- | --- | --- | --- |
+| `Event` signals of the bound owner | zbus match stream, shared per rule | 64 | every await of `next_change` |
+| `StateChanged` signals (`changes()` only) | zbus match stream, shared per rule | 64 | every await of `next_change` |
+| Ownership notices of the daemon's name | zbus match stream, shared per rule | 64 | every await of `next_change` |
+| Undelivered signals | subscription backlog, receive order | `SUBSCRIPTION_BACKLOG` = 256 | — |
+
+- Every await inside `next_change` (selecting a signal, the item's Version reply, the final
+  `GetNameOwner` reply) is raced against `keep_reading`, which reads all three streams. So no
+  awaited reply can sit behind this subscription's own unread messages: as long as the call is
+  polled, the reader can always reach the reply.
+- Between the Version reply and the final call, `settle` reads everything already queued
+  without waiting. Every notice it finds was received before the final check was sent, so a
+  period end there is pre-decision and withholds the item (no extra round trip is needed to
+  decide it). This is the step that removes the RLC-01 circular wait: a ready Version reply no
+  longer leads straight into an await behind a full ownership queue.
+- While the final reply is pending, a period end does **not** interrupt: its position is kept in
+  `period_end` on the subscription and compared with the reply's position by `decide` (QUEUE-3).
+- Signals read during an await join the backlog; beyond 256 the subscription ends with
+  `SubscriptionLagged { limit: 256 }` (Operational) instead of stalling the connection. The one
+  production consumer, the shared watcher, treats any error as a loss: it reports Disconnected,
+  reconnects with its bounded backoff and rereads.
+- Bounded work: reading is driven only by the caller's own poll (no task is spawned, nothing
+  is detached, nothing busy-polls); each step handles one message; memory is bounded by the
+  backlog.
+- Outside a call nothing is read: a caller that stops polling can stop its connection's reader
+  until it resumes. QUEUE-2 does not require progress while the caller is paused; on resumption
+  the bound applies.
+- **Pinned dependency assumptions.** One reader per connection, replies dispatched before the
+  reader waits for room, 64-entry match channels shared per rule (zbus 5.19.0, async-broadcast
+  0.7.2; see QR-BASE). `qr_queue_the_transport_argument_is_pinned_to_the_verified_zbus` (ordinary
+  test, runs in CI) fails if either version changes in `Cargo.lock`, so an upgrade cannot
+  silently invalidate the argument.
+
+### Delivery decision and terminal state (QR-QUEUE-02/03/04)
+
+- Pre-decision period ends withhold the item (`settle` before the final call, and `decide` for
+  notices read during it); post-decision ones keep the permitted delivery and retire the next call
+  (`Decision::DeliverThenRetire`; `period_end` stays recorded). A failed final check retires only on
+  NameHasNoOwner or an already recorded period end; a transient failure is reported as itself.
+  Returning owners still need a fresh subscription.
+- The item being checked stays first in the backlog until it is delivered, and `period_end` lives
+  on the subscription: cancelling a call loses neither the item nor a recorded loss (this also
+  removes the earlier documented loss of the in-flight item on cancellation).
+- `end()` drops all three streams and the backlog on retirement and on lag, so a retained handle
+  holds nothing back; dropping releases its share of the rules without affecting other
+  subscribers of the same rules.
+
+### Regressions (QR-QUEUE-05/06/07/08)
+
+`dbus-run-session -- cargo test -p blueroute-client --test queue_saturation --locked -- --ignored`:
+13 passed, 10 consecutive runs. Against QR-BASE, 4 tests were added (cancellation, shared-rule
+survival, StateChanged bursts and flood).
+
+| Test | Covers |
+| --- | --- |
+| below/at/just-above capacity, Event and State (20, 32, 33 cycles) | QUEUE-5 boundary matrix |
+| `qr_queue_forty_cycles_after_the_reply_retire_event` / `_state` | the RLC-01 reproduction; OwnerLost within 2 s of resuming, kept for later calls, second call on the connection with the retired handle retained, fresh subscription delivers |
+| `qr_queue_forty_cycles_then_drop_keep_the_connection_working` | second call after drop |
+| `qr_queue_a_call_cancelled_during_the_burst_loses_nothing` | cancellation and resumption |
+| `qr_queue_a_live_subscription_survives_a_retired_one_on_the_same_rules` | unrelated active subscription on shared rules, before and after the retired handle is dropped |
+| `qr_queue_events_` / `state_changes_queued_ahead_of_a_reply_are_all_delivered` (96 signals) | signal selection: every item delivered, each within 2 s |
+| `qr_queue_an_event_flood_` / `a_state_change_flood_ends_the_subscription_without_stalling` (384 signals) | typed overflow, connection keeps working |
+| `qr_queue_the_transport_argument_is_pinned_to_the_verified_zbus` (ordinary test) | QUEUE-6 dependency pin |
+
+Unit tests (`cargo test -p blueroute-client --lib --locked`, 6 passed):
+`qr_queue_a_period_end_before_the_decision_withholds_and_one_after_retires_next` is the
+focused seam for the post-decision window, which no broker places deterministically (QUEUE-6 /
+QR-QUEUE-07): before the reply withholds, after it keeps the delivery and retires the next call.
+`qr_queue_an_overflow_is_typed_operational_and_names_its_limit`.
+
+**Proof boundaries.** The real-broker tests prove transport progress, pre-decision withholding,
+cancellation and shared-rule release on dbus-daemon 1.16.2 with zbus 5.19.0. The post-decision
+ordering is proven by the `decide` seam and the code path that keeps `period_end`; it is not
+observed on a broker.
+
+**Preserved regressions (QR-QUEUE-08)**, at the QR-QUEUE change alone (the uncommitted RLC-02
+recipe set aside):
+- fmt clean; strict Clippy clean.
+- `cargo test --workspace --locked`: 914 passed, 0 failed, 77 ignored.
+- `cargo test -p blueroute-daemon --features experimental-join --locked`: 386 passed.
+- Private broker suites, all passed: `ownership_period` 12 (A→B→A, A→unowned→A, held reply,
+  cancellation, incompatible successor with 0 Requests, healthy owner, transient-error and
+  queued-loss cases), `owner_race` 6, `event_owner_race` 6, `owner_watch` 3, `watcher` 8,
+  `dbus_client` 1, `cli_exit_contract` 1, `dbus_service` 1, `authorization` 1,
+  `state_events` 8, `publisher_progress` 6, `watch_integration` 2, `watch_handover` 4,
+  `bridge_end_to_end` 1, `tui_watcher` 3.
