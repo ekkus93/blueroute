@@ -52,6 +52,11 @@ code-review findings F1–F8 are tracked in [CODE_REVIEW_REMEDIATION_TODO.md](CO
 with evidence in [CODE_REVIEW_REMEDIATION_EVIDENCE.md](CODE_REVIEW_REMEDIATION_EVIDENCE.md). That
 backlog is not a second P0–P19 status table: a remediation fix does not close an original task
 whose physical or product acceptance remains open. Affected tasks carry a "Code review" note.
+A follow-up review (2026-11-13) reproduced four further defects in that remediation (publication
+blocked by slow sampling, owner loss during event validation, phantom segment members, and
+removal cleanup reporting success with a client link unresolved); they are tracked and evidenced
+in [CODE_REVIEW_FOLLOWUP_TODO.md](CODE_REVIEW_FOLLOWUP_TODO.md), which is the current status
+authority for that work. No original checkbox changes because of it.
 
 | Task | Status | Current state |
 | --- | --- | --- |

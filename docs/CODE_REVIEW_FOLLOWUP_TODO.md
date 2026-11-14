@@ -1,6 +1,6 @@
 # Code Review Follow-up TODO
 
-**Status:** IN PROGRESS. **Evidence:** [CODE_REVIEW_FOLLOWUP_EVIDENCE.md](CODE_REVIEW_FOLLOWUP_EVIDENCE.md).  
+**Status:** SOFTWARE COMPLETE / QUALIFICATION DEFERRED (2026-11-13, `4d19a2a`); FU-QUALIFY open. **Evidence:** [CODE_REVIEW_FOLLOWUP_EVIDENCE.md](CODE_REVIEW_FOLLOWUP_EVIDENCE.md).  
 **Baseline:** `6d200d0cda24acd00b1f3a6b8981b1d0bb2d6eec`, reviewed 2026-11-13.  
 **Companion specification:** [CODE_REVIEW_FOLLOWUP_SPEC.md](CODE_REVIEW_FOLLOWUP_SPEC.md).  
 **Earlier backlog and evidence:** [CODE_REVIEW_REMEDIATION_TODO.md](CODE_REVIEW_REMEDIATION_TODO.md),
@@ -45,9 +45,9 @@
 | FU-05 | GAP-01: startup snapshot/publication handoff | FU-01 design; FU-02 for reconnect integration | `[x]` |
 | FU-06 | GAP-02: adapter-free qualification fixture and clear isolation | FU-04 contract; procedure work can start earlier | `[x]` |
 | FU-INTEGRATION | Boundary regressions and negative controls | FU-01..05 | `[x]` |
-| FU-VALIDATE | Exact-candidate software, packages, CI | FU-INTEGRATION; FU-06 software/fixture work | `[ ]` |
-| FU-QUALIFY | Existing installed-system/physical gate evidence | FU-04/06; validated packages; designated equipment | `[ ]` |
-| FU-CLOSEOUT | Consistent status and evidenced closure | Software: FU-01..06, FU-INTEGRATION/VALIDATE; full: FU-QUALIFY | `[ ]` |
+| FU-VALIDATE | Exact-candidate software, packages, CI | FU-INTEGRATION; FU-06 software/fixture work | `[x]` |
+| FU-QUALIFY | Existing installed-system/physical gate evidence | FU-04/06; validated packages; designated equipment | `[!]` |
+| FU-CLOSEOUT | Consistent status and evidenced closure | Software: FU-01..06, FU-INTEGRATION/VALIDATE; full: FU-QUALIFY | `[-]` |
 
 Implement FU-01..04 independently after baseline preparation. Close the startup handoff with
 the publication design, then integrate consumers and lifecycle tests. Equipment is needed for
@@ -214,17 +214,17 @@ No required test silently disappears behind `#[ignore]` or only asserts a fixtur
 
 **Requirements:** ACCEPT-2, preserved security/platform invariants.
 
-- [ ] **FU-VALIDATE-01:** Run locked workspace build/check/tests, formatting, and strict
+- [x] **FU-VALIDATE-01:** Run locked workspace build/check/tests, formatting, and strict
   all-target Clippy using pinned Rust. Record actual test counts, failures, and ignored cases.
-- [ ] **FU-VALIDATE-02:** Run daemon `experimental-join` tests and all existing/new private-bus
+- [x] **FU-VALIDATE-02:** Run daemon `experimental-join` tests and all existing/new private-bus
   suites; run Python socket-tooling tests. Verify ordinary builds keep production join closed.
-- [ ] **FU-VALIDATE-03:** With pinned Node/npm, run frontend install, format/lint/type checks,
+- [x] **FU-VALIDATE-03:** With pinned Node/npm, run frontend install, format/lint/type checks,
   component/StrictMode tests, and production build; retain effect-generation isolation coverage.
-- [ ] **FU-VALIDATE-04:** Build both Debian packages and inspect manifests/dependencies/assets.
+- [x] **FU-VALIDATE-04:** Build both Debian packages and inspect manifests/dependencies/assets.
   Run maintainer lifecycle, state migration, isolated upgrade, failure/retry, remove/purge checks.
-- [ ] **FU-VALIDATE-05:** Recheck authorization, owner binding/no replay, authenticated identity,
+- [x] **FU-VALIDATE-05:** Recheck authorization, owner binding/no replay, authenticated identity,
   revocation, rollback, foreign-resource preservation, stable identity/schema, and disabled sharing.
-- [ ] **FU-VALIDATE-06:** Record candidate SHA, commands/results, toolchains and package hashes;
+- [x] **FU-VALIDATE-06:** Record candidate SHA, commands/results, toolchains and package hashes;
   inspect exact-revision CI through Ralph Bridge. Attribute earlier results to their earlier SHA.
 
 **Command reference (repository root unless stated):**
@@ -258,6 +258,8 @@ isolated harness; installing/removing a package on the host is not a substitute.
 **Acceptance:** All required software checks and exact-candidate CI pass; evidence states actual
 coverage and limitations without claiming installed-system/physical qualification.
 
+**Accepted (2026-11-13, `4d19a2a`):** met; see [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-validate--exact-software-candidate-2026-11-13).
+
 ## FU-QUALIFY — Preserve and satisfy the existing environment gates
 
 **Requirements:** QUAL-2/4, ACCEPT-4. **Authoritative existing criteria:** CR-QUALIFY-01..08.
@@ -269,30 +271,38 @@ coverage and limitations without claiming installed-system/physical qualificatio
 - [ ] **FU-QUALIFY-03:** Store reproducible versioned evidence with exact candidate/package
   identity, hardware/software inventory, commands and independent before/after observations;
   link CR-QUALIFY-08 and the hardware tracker without generalizing support.
-- [ ] **FU-QUALIFY-04:** If equipment remains deferred, record the blocker and leave this task
+- [x] **FU-QUALIFY-04:** If equipment remains deferred, record the blocker and leave this task
   and all unsatisfied original criteria open. Documentation readiness is not qualification.
 
 **Acceptance:** All applicable original CR-QUALIFY criteria are evidenced. A deferral note can
 complete the reporting subtask, but cannot complete this parent or imply physical acceptance.
 
+**Blocked (2026-11-13):** no disposable VM or Bluetooth rig is available to this work. The
+procedure is ready ([CR-QUALIFY-PROCEDURE.md](CR-QUALIFY-PROCEDURE.md)); FU-QUALIFY-01..03 and
+the original CR-QUALIFY criteria stay open.
+
 ## FU-CLOSEOUT — Reconcile completion claims and review the result
 
 **Requirements:** ACCEPT-3/4 and every requirement's evidence mapping.
 
-- [ ] **FU-CLOSEOUT-01:** Review every REV-01..04 fix and GAP-01..02 outcome against the
+- [x] **FU-CLOSEOUT-01:** Review every REV-01..04 fix and GAP-01..02 outcome against the
   specification, baseline reproduction, adverse cases, negative controls, and security boundaries.
-- [ ] **FU-CLOSEOUT-02:** Reconcile earlier CR-F1/F2/F3/F5/F8, integration and closeout claims
+- [x] **FU-CLOSEOUT-02:** Reconcile earlier CR-F1/F2/F3/F5/F8, integration and closeout claims
   with dated corrections and links. Preserve historical evidence and earlier verified behavior.
-- [ ] **FU-CLOSEOUT-03:** Update affected product/current-status summaries, cleanup design and
+- [x] **FU-CLOSEOUT-03:** Update affected product/current-status summaries, cleanup design and
   qualification procedure. Preserve P0–P19 identities and all unsatisfied product/hardware gates.
-- [ ] **FU-CLOSEOUT-04:** Fill the evidence ledger and map every specification requirement to
+- [x] **FU-CLOSEOUT-04:** Fill the evidence ledger and map every specification requirement to
   implementation/tests or qualification evidence; check all links, dependencies and task states.
-- [ ] **FU-CLOSEOUT-05:** Record software closure only when its criteria pass; record full
+- [-] **FU-CLOSEOUT-05:** Record software closure only when its criteria pass; record full
   remediation closure only after FU-QUALIFY and all remaining acceptance gates pass. Otherwise
   use SOFTWARE COMPLETE / QUALIFICATION DEFERRED and keep the parent open.
 
 **Acceptance:** All findings/gaps have evidenced outcomes, current claims are consistent, and
 the overall completion label reflects remaining qualification rather than merely passing CI.
+
+**Progress (2026-11-13):** software closure recorded (01–04 met); 05 records SOFTWARE COMPLETE /
+QUALIFICATION DEFERRED and stays open until FU-QUALIFY passes. See
+[evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-closeout--software-milestone-2026-11-13).
 
 ## Evidence ledger
 
@@ -309,6 +319,6 @@ separately from the unresolved qualification gate.
 | FU-05 / GAP-01 | `c104bea` | 2 forced-order tests (both fail without the handoff); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-05--startup-snapshotpublication-handoff-2026-11-13) | None | COMPLETE |
 | FU-06 / GAP-02 | `f3d875a` | Fixture builds (clippy all-targets); procedure revised; [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-06--honest-adapter-free-qualification-prerequisites-2026-11-13) | Execution remains separate (FU-QUALIFY) | COMPLETE (procedure) |
 | FU-INTEGRATION | `41417a9` | Real watcher/desktop/TUI boundaries; every restored defect fails; [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-integration--production-boundaries-and-regression-sensitivity-2026-11-13) | None | COMPLETE |
-| FU-VALIDATE | — | ACCEPT-2 pending | Exact-candidate checks/packages/CI | NOT STARTED |
-| FU-QUALIFY | — | Software results do not satisfy this row | CR-QUALIFY-01..08; designated equipment | NOT STARTED |
-| FU-CLOSEOUT | — | ACCEPT-3/4 pending | Software milestone; full qualification separately | NOT STARTED |
+| FU-VALIDATE | `4d19a2a` | All checks, 15 bus suites, packages; [CI 43536690676](https://github.com/ekkus93/blueroute/actions/runs/43536690676) | No physical claim | COMPLETE |
+| FU-QUALIFY | — | Software results do not satisfy this row | CR-QUALIFY-01..08; designated equipment (none available) | BLOCKED |
+| FU-CLOSEOUT | `4d19a2a` | Independent review (3 gaps fixed); corrections; requirement map | Full closure after FU-QUALIFY | SOFTWARE COMPLETE / QUALIFICATION DEFERRED |

@@ -1,6 +1,6 @@
 # Code Review Remediation TODO
 
-**Status:** SOFTWARE MILESTONE COMPLETE (2026-11-13, `42ae7ab`); CR-QUALIFY and CR-CLOSEOUT-04 open. **Baseline:** `4ca5042ee28743dd30782379fbcf8fa1ed15df77`.  
+**Status:** SOFTWARE MILESTONE (2026-11-13, `42ae7ab`) **superseded**: a follow-up review reproduced four defects in it; current status is tracked in [CODE_REVIEW_FOLLOWUP_TODO.md](CODE_REVIEW_FOLLOWUP_TODO.md). CR-QUALIFY and CR-CLOSEOUT-04 open. **Baseline:** `4ca5042ee28743dd30782379fbcf8fa1ed15df77`.  
 **Companion specification:** [CODE_REVIEW_REMEDIATION_SPEC.md](CODE_REVIEW_REMEDIATION_SPEC.md).  
 **Original implementation backlog:** [TODO.md](TODO.md). **Evidence:** [CODE_REVIEW_REMEDIATION_EVIDENCE.md](CODE_REVIEW_REMEDIATION_EVIDENCE.md).
 
@@ -81,6 +81,8 @@ handover. Existing CLI/bridge compatibility and authorization tests remain green
 
 **Accepted (2026-11-13, `b3ba0bd`):** met; see [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-f8--owner-bound-operations-2026-11-13).
 
+**Correction (2026-11-13, follow-up review):** command-owner binding stands, but CR-F8-05's event coverage missed that the owner was not watched during an event's own Version check (REV-02). Fixed and requalified by FU-02 (`d2b94c1`); see [CODE_REVIEW_FOLLOWUP_TODO.md](CODE_REVIEW_FOLLOWUP_TODO.md).
+
 ## CR-F2 — Detect owner loss and reconnect observers
 
 **Requirements:** WATCH-1–WATCH-4; OWN-4. **Original tasks:** P5-005; P11-001; P12-002.
@@ -106,6 +108,8 @@ refreshes state on the bounded retry schedule without a synthetic Event or manua
 **Accepted (2026-11-13, `e283b4e`):** met. Both front ends now run the one shared
 `blueroute_client::watch`, which is tested end to end on a private bus; see
 [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-f2--owner-loss-detection-and-watcher-recovery-2026-11-13).
+
+**Correction (2026-11-13, follow-up review):** owner loss during an event's Version check could be missed or delayed past 2 s (REV-02). Requalified by FU-02 (`d2b94c1`); see [CODE_REVIEW_FOLLOWUP_TODO.md](CODE_REVIEW_FOLLOWUP_TODO.md).
 
 ## CR-F1 — Publish actual daemon changes
 
@@ -136,6 +140,8 @@ client or worker changes it. No producer can silently leave the final snapshot u
 **Accepted (2026-11-13, `4de29b1`):** met with the user-chosen `StateChanged` signal (API 1.7);
 see [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-f1--publish-actual-daemon-changes-2026-11-13).
 
+**Correction (2026-11-13, follow-up review):** a pending network read blocked every announcement and shutdown (REV-01), and a change before the startup baseline could be absorbed (GAP-01). Requalified by FU-01 (`19a58a0`) and FU-05 (`c104bea`); see [CODE_REVIEW_FOLLOWUP_TODO.md](CODE_REVIEW_FOLLOWUP_TODO.md).
+
 ## CR-F3 — Preserve graph consistency
 
 **Requirements:** GRAPH-1–GRAPH-4. **Original task:** P2-005; downstream P8/P9 prerequisites.
@@ -157,6 +163,8 @@ see [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-f1--publish-actual-daemon-
 replacement is atomic and deterministic; the original two replacement probes no longer fail.
 
 **Accepted (2026-11-13, `4583c6e`):** met; see [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-f3--graph-consistency-2026-11-13).
+
+**Correction (2026-11-13, follow-up review):** a new segment cloned from another graph kept that graph's link-derived members (REV-03). Requalified by FU-03 (`1f2d48d`); see [CODE_REVIEW_FOLLOWUP_TODO.md](CODE_REVIEW_FOLLOWUP_TODO.md).
 
 ## CR-F4 — Refresh operational hosting capabilities
 
@@ -218,6 +226,8 @@ foreign networking and retained user state remain intact. Full closure requires 
 are met in software and isolated dpkg tests; CR-F5-12 (installed-system and physical
 qualification) remains with CR-QUALIFY. See
 [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-f5--removal-cleanup-software-2026-11-13).
+
+**Correction (2026-11-13, follow-up review):** the skip-and-succeed rule for an unobservable client PANU link removed the retry proof and reported success (REV-04). Withdrawn; requalified in software by FU-04 (`718983c`). Still SOFTWARE COMPLETE / QUALIFICATION DEFERRED; see [CODE_REVIEW_FOLLOWUP_TODO.md](CODE_REVIEW_FOLLOWUP_TODO.md).
 
 ## CR-F6 — Own asynchronous UI resources by effect generation
 
@@ -289,6 +299,8 @@ pass with corrected behavior. Passing helper tests or mock notifications alone a
 **Accepted (2026-11-13, `d1d86a5`):** met; every restored defect fails its tests. See
 [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-integration--corrected-boundaries-end-to-end-2026-11-13).
 
+**Correction (2026-11-13, follow-up review):** the integration suite passed while REV-01..04 were present, so it did not cover those boundaries. FU-INTEGRATION (`41417a9`) adds them with negative controls; see [CODE_REVIEW_FOLLOWUP_TODO.md](CODE_REVIEW_FOLLOWUP_TODO.md).
+
 ## CR-VALIDATE — Qualify the exact software candidate
 
 - [x] **CR-VALIDATE-01:** Run Rust formatting, locked workspace check, strict all-target Clippy,
@@ -353,6 +365,8 @@ the final status does not imply completion of the rest of the product roadmap.
 
 **Progress (2026-11-13):** software milestone recorded; 01–03 met, 04 waits on CR-QUALIFY. See
 [evidence](CODE_REVIEW_REMEDIATION_EVIDENCE.md#cr-closeout--software-milestone-2026-11-13).
+
+**Correction (2026-11-13, follow-up review):** the review behind this milestone missed REV-01..04 and accepted GAP-01 as a limitation. This milestone is superseded by the follow-up's closeout; see [CODE_REVIEW_FOLLOWUP_TODO.md](CODE_REVIEW_FOLLOWUP_TODO.md).
 
 ## Evidence ledger
 

@@ -238,3 +238,86 @@ and verified with `git diff`):
 | GAP-01 | startup announcements removed (FU-05 entry) | `fu_05_a_change_before_the_first_baseline…`; `fu_05_a_replacement_daemons…` |
 
 The REV-01..04 baseline failures at `6d200d0` are in the FU-BASE entry.
+
+
+## FU-CLOSEOUT-01 — independent review of 6d200d0..HEAD (2026-11-13)
+
+An independent review read the whole follow-up diff against the follow-up specification and
+reran the new private-bus suites. It confirmed the publisher (no lost dirty state, bounded
+shutdown, startup announcements), the client (no lost or stale delivery, no deadlock), the graph
+normalization and the fixture's isolation, and found three gaps, fixed in `4d19a2a`:
+
+| Gap | Fix | Evidence |
+| --- | --- | --- |
+| REMOVE-1: with `bluetoothd` running but no object for the recorded host device, "no link observed" was treated as proof of absence | `BluezBackend::panu_device_present`; a missing device is unresolved | `fu_04_a_missing_host_device_is_inconclusive_even_with_bluetooth_running` (fails without the check) |
+| A client record left behind by a leave made a network a "client" and blocked removal without Bluetooth | only the persisted `client` role decides; the record supplies the hint | `fu_04_a_stale_client_record_does_not_block_removal`; REV-04 fixtures now set the role |
+| OWNER-2: a transient `GetNameOwner` failure permanently retired a healthy subscription | only `NameHasNoOwner` retires | existing `event_owner_race` no-successor case exercises `NameHasNoOwner`; a bus `NoReply` cannot be provoked deterministically (limitation) |
+
+Accepted as is: `leave_observed`'s re-observation can fail a user leave on a transient BlueZ
+error after a successful disconnect; membership stays and a retry observes the link absent.
+
+## FU-VALIDATE — exact software candidate (2026-11-13)
+
+**Candidate:** `4d19a2a5bac375fda3e84a7a1bdb83072e8c358d`; exact-head [CI 43536690676](https://github.com/ekkus93/blueroute/actions/runs/43536690676) passed (Rust and
+Desktop frontend jobs, all bus-suite steps). Later commits only add evidence documents.
+Toolchains: rustc 1.95.0, Node 26.13.0, npm 11.20.0. Earlier results belong to their SHAs
+(`8b5eca1`: CI 43535659753; `c104bea`: 43534489978; `eb1975b`: 43533417640).
+
+| Subtask | Commands | Result at the candidate |
+| --- | --- | --- |
+| 01 | `cargo build/check --workspace --locked`; `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --locked -- -D warnings`; `cargo test --workspace --locked` | clean; 901 passed, 0 failed, 49 ignored (the private-bus suites, run in 02) |
+| 02 | `cargo test -p blueroute-daemon --features experimental-join --locked`; every private-bus suite under `dbus-run-session`; `python3 -m unittest discover -s scripts -p 'test_p6_006_*.py'` | 378 passed (default build: `default_builds_cannot_open_the_join_gate` passes); dbus_service 1, authorization 1, dbus_client 1, cli_exit_contract 1, bridge_end_to_end 1, owner_race 6, event_owner_race 6, owner_watch 3, watcher 8, state_events 8, publisher_progress 6, watch_integration 2, watch_handover 2, tui_watcher 2; Python 7 OK |
+| 03 | `npm ci`, `format:check`, `lint`, `typecheck`, `test`, `build` | all pass; 43 tests incl. the 8 StrictMode/effect-generation tests |
+| 04 | `build-package.sh`; packaged-script lifecycle test; `test-package-upgrade.sh` | `blueroute_0.1.0_amd64.deb` sha256 `50cda9057e1f7c4e8ef06c639dca23ddfa884084544e9d1a87bef198119e2dbf`; `blueroute-desktop_0.1.0_amd64.deb` sha256 `dc30172ffb9375d4bd11f00d06dfd489ff09e4d8e3687ec3b5c1f2917132e750`; Depends unchanged; frontend assets embedded (build check); `qualify_fixture` not in the package; lifecycle and isolated upgrade/migration/remove-failure/retry/purge pass. Local builds are not bit-reproducible. |
+| 05 | invariant regressions inside the workspace suite (authorization, owner binding/no replay, pins, exporter, revocation, rollback, foreign preservation, identity, schema migration, disabled sharing) | pass |
+| 06 | this record | candidate, commands, counts, hashes, CI run |
+
+No installed-system or physical claim follows from these results.
+
+### Requirement map (FU-CLOSEOUT-04)
+
+| Requirement | Task | Implementation | Evidence |
+| --- | --- | --- | --- |
+| PUB-1 separate progress | FU-01 | sampler thread; emitter never awaits a sample | `fu_01_a_pending_network_read…`, `fu_integration_…stalled` |
+| PUB-2 preserve dirty state | FU-01 | forced flag re-set on emission failure; sequential samples; failed read ≠ empty list | `fu_01_a_released_read…`, `fu_01_a_failing_sample…`, `state_events` emission-failure and burst tests |
+| PUB-3 bounded lifecycle | FU-01 | `STOP_POLL` cancellation, `SAMPLE_DEADLINE`, join both threads | `fu_01_shutdown_finishes_while_a_sample_is_pending` |
+| PUB-4 observable acceptance | FU-01 | — | `publisher_progress` (6), `fu_integration_…stalled` |
+| OWNER-1 one lifecycle | FU-02 | Version check raced against owner changes | `fu_02_owner_loss_is_reported_while_the_events_version_reply_is_held` |
+| OWNER-2 validate delivery | FU-02 | `GetNameOwner` decision point after the check | `fu_02_an_event_whose_owner_hands_over…` |
+| OWNER-3 terminal retirement | FU-02 | `retired` flag | `fu_02_an_interrupted_wait…`, held-reply test (late reply), incompatible-successor test |
+| OWNER-4 scenarios | FU-02, FU-INTEGRATION | — | `event_owner_race` (6), desktop `watch_handover`, TUI handover test |
+| SEG-1 insertion contract | FU-03 | normalization documented in `add_segment` and SPEC | `fu_03_a_segment_cloned…` |
+| SEG-2 whole-graph invariants | FU-03 | members rebuilt from destination evidence | `assert_consistent` in all `fu_03` tests |
+| SEG-3 atomicity and identity | FU-03 | validation before mutation; changed NAP followed or refused | `fu_03_a_cloned_segment_with_a_changed_nap…`, `fu_03_explicit_members…` |
+| SEG-4 scenarios | FU-03 | — | 4 `fu_03` tests incl. routing consumer |
+| REMOVE-1 explicit observation | FU-04 | `NetworkScope.client`; unresolved without Bluetooth or hint | `fu_04_unresolved_client_teardown…`, role-only client test |
+| REMOVE-2 proof lifetime | FU-04 | NM proof kept until the link is observed gone (`leave_observed` re-observes) | `fu_04_a_disconnect_that_does_not_take…`, without-proof test, reused-name test |
+| REMOVE-3 partial progress/retries | FU-04 | other networks cleaned; retry reobserves | REV-04 regression (host-only cleaned, retry, repeat), absent-link test |
+| REMOVE-4 outcome and lifecycle | FU-04 | `unresolved_links` in `succeeded()`; `cleanup_outcome` exit 1 | `an_unresolved_client_link_makes_the_helper_exit_nonzero`, lifecycle and isolated dpkg tests |
+| REMOVE-5 scenarios | FU-04 | — | 17 removal tests |
+| START-1 initialization ordering | FU-05 | announce at start and at first sample | `fu_05_a_change_before_the_first_baseline…` (sampling free and held) |
+| START-2 client handoff | FU-05 | watcher subscribes then rereads on `Connected` | `fu_05_a_replacement_daemons_pre_baseline_change…` |
+| START-3 regression evidence | FU-05 | — | both FU-05 tests fail with the handoff removed |
+| QUAL-1 adapter-free Part A | FU-06 | `qualify_fixture` | procedure Part A |
+| QUAL-2 evidence layers | FU-06 | layers table; seeded client must fail | procedure |
+| QUAL-3 isolation | FU-06 | `DPKG_ROOT` statement; fixture outside production | procedure; packaged contents checked |
+| QUAL-4 deferred acceptance | FU-06, FU-QUALIFY | — | FU-QUALIFY open |
+| ACCEPT-1 useful regressions | FU-BASE, FU-INTEGRATION | — | baseline failures; negative controls |
+| ACCEPT-2 exact candidate | FU-VALIDATE | — | FU-VALIDATE entry |
+| ACCEPT-3 reconcile status | FU-CLOSEOUT | dated corrections | first backlog, first evidence, `TODO.md` |
+| ACCEPT-4 separate milestones | FU-CLOSEOUT | — | SOFTWARE COMPLETE / QUALIFICATION DEFERRED |
+
+
+## FU-CLOSEOUT — software milestone (2026-11-13)
+
+- **01:** each fix reviewed against its requirements as it was accepted, plus the independent
+  review above; its three gaps are fixed at `4d19a2a`.
+- **02:** dated corrections appended to the first backlog (CR-F8, CR-F2, CR-F1, CR-F3, CR-F5,
+  CR-INTEGRATION, CR-CLOSEOUT; its status line now points here) and to the first evidence record;
+  historical entries kept.
+- **03:** SPEC (§11 publication and startup, client bullet, `blueroute-core` invariants, §31
+  removal), the cleanup design, the qualification procedure and `ADMINISTRATOR.md` describe the
+  current behavior; `TODO.md` points to this backlog; no P0–P19 checkbox changed.
+- **04:** requirement map above; all links checked.
+- **05:** **SOFTWARE COMPLETE / QUALIFICATION DEFERRED.** FU-QUALIFY (CR-QUALIFY-01..08) has not
+  run; full remediation closure waits for it.
