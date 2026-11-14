@@ -440,7 +440,7 @@ change a client could observe in its snapshots: a mutating request (announced wh
 or not, since a failure is recorded in diagnostics), and worker observations of health,
 capabilities, system diagnostics, authenticated control peers and the joined client's link phase.
 One publisher thread owns emission. It is woken by marks from the request path and the workers and
-also rechecks the in-memory snapshots every 250 ms and the network list every second, so a change
+also rechecks the in-memory snapshots every 250 ms; a separate sampler thread reads the network list every second (sooner after a request, each read bounded by 10 s, a timeout counting as a failed read), so a slow membership store or BlueZ never delays an announcement (FU-01). Shutdown cancels a pending read and joins both threads, so a change
 reaches connected observers within one second even from a producer that does not mark. It emits
 outside every state lock; unchanged observations and failed reads emit nothing (a failed read's caller already has the error, and announcing it would make every front end repeat it); bursts coalesce into one pending
 invalidation that is never dropped; a failed emission is logged without payload and retried, and

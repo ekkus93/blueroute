@@ -124,7 +124,8 @@ pub use single_star::{
     SingleStarNetworkOperations, StarHostRuntime, SystemNetworkIdGenerator, current_network,
 };
 pub use state_publisher::{
-    NETWORK_RECHECK, STATE_RECHECK, StatePublisher, StatePublisherWorker, spawn_state_publisher,
+    NETWORK_RECHECK, SAMPLE_DEADLINE, STATE_RECHECK, STOP_POLL, StatePublisher,
+    StatePublisherWorker, spawn_state_publisher,
 };
 use zbus::fdo;
 use zbus::message::Header;
