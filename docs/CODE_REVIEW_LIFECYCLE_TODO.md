@@ -1,6 +1,6 @@
 # Code Review Lifecycle Remediation TODO
 
-**Status:** NOT STARTED; all work below is pending.  
+**Status:** IN PROGRESS (2026-11-14); see the register and evidence ledger.  
 **Baseline:** `75c1a01746557bb13f525a55642b497e3bd5f81d`.  
 **Companion specification:** [CODE_REVIEW_LIFECYCLE_SPEC.md](CODE_REVIEW_LIFECYCLE_SPEC.md).  
 **Earlier work:** [follow-up backlog](CODE_REVIEW_FOLLOWUP_TODO.md),
@@ -34,7 +34,7 @@
 
 | Task | Outcome | Dependencies | State |
 | --- | --- | --- | --- |
-| LC-BASE | Durable reproductions and isolated failing tests | None | `[ ]` |
+| LC-BASE | Durable reproductions and isolated failing tests | None | `[-]` |
 | LC-OWNER | P2 RFU-01: ownership-period retirement | LC-BASE | `[ ]` |
 | LC-CLEANUP | P2 RFU-02: unknown active role and proof retention | LC-BASE | `[ ]` |
 | LC-INTEGRATION | Actual consumer/helper boundaries and CI coverage | LC-OWNER, LC-CLEANUP | `[ ]` |
@@ -50,15 +50,15 @@ software fixes or their deterministic/private-broker regressions.
 
 **Requirements:** VERIFY-1/2, CLOSE-3; RFU-01/02 recipes in the specification.
 
-- [ ] **LC-BASE-01:** Record HEAD, dirty state, toolchains and differences from the reviewed
+- [x] **LC-BASE-01:** Record HEAD, dirty state, toolchains and differences from the reviewed
   baseline. Read applicable guidance and current product/follow-up/lifecycle requirements.
-- [ ] **LC-BASE-02:** Preserve RFU-01/02 triggers, affected paths, observed outcomes and earlier
+- [x] **LC-BASE-02:** Preserve RFU-01/02 triggers, affected paths, observed outcomes and earlier
   task relationships in versioned evidence, including the limited scope of each reproduction.
-- [ ] **LC-BASE-03:** Add a corrected ownership-period test that fails when a ready A→B→A
+- [x] **LC-BASE-03:** Add a corrected ownership-period test that fails when a ready A→B→A
   Version reply delivers the old event before queued OwnerLost. Control the order with barriers.
-- [ ] **LC-BASE-04:** Add a production-store Member/None plus matching client-record test that
+- [-] **LC-BASE-04:** Add a production-store Member/None plus matching client-record test that
   fails when cleanup without Bluetooth deletes proof and reports success. Preserve valid state.
-- [ ] **LC-BASE-05:** Verify fixtures use private buses, fake networking and temporary state /
+- [x] **LC-BASE-05:** Verify fixtures use private buses, fake networking and temporary state /
   package roots. Mock the installed helper where necessary so package tests cannot reach host buses.
 
 **Acceptance:** Both defects have maintained corrected expectations failing on the baseline for
@@ -237,7 +237,7 @@ Keep software outcomes separate from actual installed-system/physical results.
 
 | Task / finding | Fix SHA and source | Regression / negative control / software evidence | Qualification or remaining gate | State |
 | --- | --- | --- | --- | --- |
-| LC-BASE | — | Both corrected baseline failures pending | Isolated reproducible fixtures | NOT STARTED |
+| LC-BASE | `e167198` baseline | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-base--findings-preserved-and-corrected-expectations-established-2026-11-14): RFU-01 2/2 corrected tests fail; RFU-02 test fails, committed with its fix | Isolated reproducible fixtures | IN PROGRESS |
 | LC-OWNER / RFU-01 | — | EPOCH-1..5 pending | Software ownership-period acceptance | NOT STARTED |
 | LC-CLEANUP / RFU-02 | — | SCOPE-1..6 pending | LC-QUALIFY for actual installed/PAN claims | NOT STARTED |
 | LC-INTEGRATION | — | VERIFY-1/2/4 pending | Actual consumer/helper boundaries and CI scheduling | NOT STARTED |
