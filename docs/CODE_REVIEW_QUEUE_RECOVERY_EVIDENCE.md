@@ -327,3 +327,61 @@ controls keep passing where they should.
 - The recovery unit tests and the zbus pin guard are ordinary tests in `cargo test --workspace`;
   the maintainer harness already runs in CI.
 - `CLAUDE.md` lists the new suite.
+
+## QR-VALIDATE — Exact software candidate (2026-11-14)
+
+**Candidate.** `c317716c8878d7b679fb7f516261e961dc6719a6`, clean apart from the never-committed
+`.serena/` and `AGENTS.md`. rustc/cargo 1.95.0, Node 26.13.0, npm 11.20.0, Python 3.13.5,
+dbus-daemon 1.16.2, Debian 13. Temporary files, package extraction and logs under the ignored
+workspace `tmp/` (`TMPDIR` set there; `tmp/validate.sh` runs the whole sequence).
+
+| Check | Result |
+| --- | --- |
+| `cargo fmt --all -- --check`; `cargo build`/`check --workspace --locked` | pass |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings`; same with `--features experimental-join` for the daemon | clean |
+| `cargo test --workspace --locked` | 920 passed, 0 failed, 81 ignored (the ignored ones are the private-bus suites run below) |
+| `cargo test -p blueroute-daemon --features experimental-join --locked` | 392 passed, 0 failed, 16 ignored |
+| `cargo test -p blueroute-daemon --lib --locked removal` | 33 passed |
+| Private brokers (`dbus-run-session`, each suite of `ci.yml`) | `dbus_service` 1, `authorization` 1, `dbus_client` 1, `cli_exit_contract` 1, `bridge_end_to_end` 1, `owner_race` 6, `event_owner_race` 6, `ownership_period` 12, `queue_saturation` 14, `owner_watch` 3, `watcher` 8, `state_events` 8, `publisher_progress` 6, `watch_integration` 2, `watch_handover` 6, `tui_watcher` 4: 80 passed, 0 failed |
+| `python3 -m unittest discover -s scripts -p 'test_p6_006_*.py'` | 7 passed |
+| Frontend (`apps/desktop`): `npm ci`, `format:check`, `lint`, `typecheck`, `test`, `build` | all rc 0; 4 files, 43 tests passed |
+| `bash packaging/debian/build-package.sh` | both packages built |
+| `test-maintainer-lifecycle.sh`, source scripts and the fresh package's extracted control scripts (`BLUEROUTE_MAINTAINER_SCRIPT_DIR`) | passed both (install, upgrade, remove, purge, abort, cleanup failure, unresolved role, manual recovery) |
+| `test-package-upgrade.sh <fresh core .deb> target/release/examples/state_check` | passed: 0.0.1 → 0.1.0 kept identity, migrated v2 membership to v3 roles, restarted the service; failed cleanup aborted removal; removal retained state; purge deleted it. The first attempt failed only because `/usr/sbin` was not on `PATH` (dpkg needs `start-stop-daemon`); rerun with it added |
+| Join closed by default | `default_builds_cannot_open_the_join_gate`, `the_production_runtime_is_closed_by_default_and_never_reaches_bluetooth` pass |
+| Tauri permissions | `apps/desktop/src-tauri` and `apps/desktop/ui` unchanged since `f957d80` |
+| Leftover test files | none in `tmp/` or `/tmp` after the full run |
+
+**Packages** (not bit-reproducible; these hashes identify these files):
+
+- `blueroute_0.1.0_amd64.deb` `3c61cfddbbe27b802e7bdd7fb6b66ccc38cdb372d19567a565d7d0b67b79dfef`:
+  Depends `dbus, bluez, network-manager, polkitd, systemd`; files `usr/bin/blueroute`,
+  `usr/bin/blueroute-tui`, `usr/libexec/blueroute/blueroute-daemon`,
+  `usr/lib/systemd/system/blueroute.service`, the D-Bus policy and the polkit actions.
+- `blueroute-desktop_0.1.0_amd64.deb`
+  `e4ed17c91c8c9cc1b5ffbbfa2c74649e0863486e3653ca2f26529f7bcbc0cdd2`: Depends `blueroute (= 0.1.0)`
+  plus the GTK/WebKit libraries; files `usr/bin/blueroute-desktop`, the desktop entry and icon.
+
+**Preserved invariants (QR-INTEGRATION-05).** The same run covers publisher progress and
+shutdown (`publisher_progress`), startup and graph/state publication (`state_events`), normal
+owner handover (`owner_race`, `event_owner_race`, `watch_handover`), unknown-role proof retention
+and stale-record cleanup (removal tests), UI effect generation (frontend tests), authorization
+(`authorization`), pins/revocation, rollback and no-replay (workspace and experimental-join
+suites), and closed join and hidden sharing (join gate tests; the frontend tests). No historical
+count is treated as a fixed expectation; these are this candidate's results.
+
+**Exact-revision CI.** [Run 43652001563](https://github.com/ekkus93/blueroute/actions/runs/43652001563) on `c317716`: success (Rust and Desktop frontend jobs), read with `gh run view`. Its log shows `queue_saturation` 14 passed, `saturated_loss_scenario`, `tui_watcher_reports_a_saturated_loss_without_the_old_changes`, the recovery tests and the zbus pin guard. Earlier runs are attributed to their own revisions: `e83e3a0` (QR-BASE) 43649272495, `ffce5bd` (QR-QUEUE) 43650421708, `0b58cef` (QR-RECOVERY) 43651245570, all success; `e09f697` and `128d44e` were pushed together with `c317716` and have no run of their own.
+
+## QR-QUALIFY — Environment gates (2026-11-14)
+
+- **QR-QUALIFY-01 (procedure).** `docs/CR-QUALIFY-PROCEDURE.md` A3 "Unknown active role,
+  recovery" deletes both records, says why, and compares the foreign count (valid there because
+  `H` stays known). The Part A kit (`tmp/qualify/part-a.tar.gz`, ignored, not versioned) was
+  rebuilt at `c317716`: core package `3c61cfdd…` (the package validated above), fixture
+  `a6ae47ad763372d500d599eca6bf0d2b9d7eeace39f92038ccee020b52a1f318`, upgrade package
+  `03baad7eb3c83144af47914015d3328cb8ef01673b387366616fb4e4c552ffe3`; its runbook matches the
+  corrected recovery. Procedure readiness is not execution.
+- **QR-QUALIFY-02 (execution): blocked.** It needs a disposable Debian 13 VM with sudo (Part A)
+  and the designated two-machine Bluetooth rig (Part B); neither is available to this work.
+- **QR-QUALIFY-03 (deferral).** Recorded here. QR-QUALIFY, LC-QUALIFY-02/03, FU-QUALIFY-01..03 and
+  CR-QUALIFY-01..08 stay open. No installed-system or physical claim is made.

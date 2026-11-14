@@ -1,6 +1,12 @@
 # Code Review Lifecycle Remediation TODO
 
 **Status:** SOFTWARE COMPLETE / QUALIFICATION DEFERRED (2026-11-14, candidate `f0dc303`); LC-QUALIFY-02/03 blocked on equipment. **Evidence:** [CODE_REVIEW_LIFECYCLE_EVIDENCE.md](CODE_REVIEW_LIFECYCLE_EVIDENCE.md).  
+**Correction (2026-11-14):** a later review found two defects in this work: RLC-01 (P2,
+LC-OWNER/LC-INTEGRATION: above the 64-entry zbus queue, a subscription's final verification
+waited behind its own unread ownership notices and stalled its connection) and RLC-02 (P3,
+LC-CLEANUP-07/LC-CLOSEOUT: the administrator recovery kept the matching client record, so
+removal still failed). The software claims below held only for the cases they tested. The
+current authority for both is [CODE_REVIEW_QUEUE_RECOVERY_TODO.md](CODE_REVIEW_QUEUE_RECOVERY_TODO.md).  
 **Baseline:** `75c1a01746557bb13f525a55642b497e3bd5f81d`.  
 **Companion specification:** [CODE_REVIEW_LIFECYCLE_SPEC.md](CODE_REVIEW_LIFECYCLE_SPEC.md).  
 **Earlier work:** [follow-up backlog](CODE_REVIEW_FOLLOWUP_TODO.md),
@@ -87,6 +93,12 @@ the intended reason; setup and teardown are isolated and bounded.
 **Acceptance:** RFU-01 fails at the baseline and passes with all required ordering scenarios.
 Current-name equality cannot revive an old subscription; healthy delivery and command safety work.
 
+**Correction (2026-11-14, RLC-01):** accepted with at most four ownership notices. With more than
+64 queued (one zbus match stream), the final `GetNameOwner` waited behind notices nothing read,
+so no OwnerLost arrived and other calls on the connection stalled; the notice-after-decision
+window was also only reasoned about. Resolved in software by QR-QUEUE (`ffce5bd`); the ordering
+rule accepted here is kept.
+
 ## LC-CLEANUP — Keep ambiguous active membership unresolved
 
 **Requirements:** SCOPE-1..6. **Earlier tasks:** FU-04-01/02/03/06/07/09, FU-INTEGRATION-03.
@@ -117,6 +129,12 @@ Current-name equality cannot revive an old subscription; healthy delivery and co
 **Acceptance:** RFU-02 cannot succeed by treating an unknown active role as host-only. The proof
 survives unresolved cleanup; independent safe work, valid recovery and prior stale-record fixes pass.
 
+**Correction (2026-11-14, RLC-02):** the classification and proof retention accepted here stand.
+The administrator recovery written for LC-CLEANUP-07 deleted only the membership lines for
+Member/None with a matching client record; the record then became an OrphanClientRecord and
+removal kept failing. Its step 5 count check was also blind once no network is known. Resolved
+by QR-RECOVERY (`0b58cef`, guide and tests only).
+
 ## LC-INTEGRATION — Exercise actual boundaries and sensitivity
 
 **Requirements:** VERIFY-1/2/4, EPOCH-4, SCOPE-6.
@@ -137,6 +155,10 @@ survives unresolved cleanup; independent safe work, valid recovery and prior sta
 
 **Acceptance:** Both fixes work through real production boundaries and have sensitive maintained
 regressions. Passing a mock helper or a direct scope constructor alone is insufficient evidence.
+
+**Correction (2026-11-14, RLC-01):** the consumer tests stayed below queue capacity, so they could
+not expose RLC-01. QR-INTEGRATION adds saturated-loss tests at the shared watcher, TUI and desktop
+boundaries (`e09f697`, `128d44e`).
 
 ## LC-VALIDATE — Check the exact software candidate
 
@@ -232,6 +254,10 @@ can complete its reporting leaf, but cannot complete this parent or establish ph
 
 **Acceptance:** Every finding and applicable criterion has an evidenced outcome. Current status
 reflects actual software and qualification results without erasing historical acceptance records.
+
+**Correction (2026-11-14):** the LC-CLOSEOUT-01 review and the software milestone missed RLC-01
+and RLC-02. Their outcomes are recorded under QR-CLOSEOUT in
+[CODE_REVIEW_QUEUE_RECOVERY_TODO.md](CODE_REVIEW_QUEUE_RECOVERY_TODO.md).
 
 ## Evidence ledger
 

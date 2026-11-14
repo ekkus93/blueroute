@@ -5,7 +5,8 @@
 returning owner bypassed retirement) and RFU-02 (FU-04, an unknown active role bypassed client
 cleanup). The FU-02, FU-04, FU-INTEGRATION and FU-CLOSEOUT software claims below held only for
 the cases they tested. The current authority for both defects is
-[CODE_REVIEW_LIFECYCLE_TODO.md](CODE_REVIEW_LIFECYCLE_TODO.md). **Evidence:** [CODE_REVIEW_FOLLOWUP_EVIDENCE.md](CODE_REVIEW_FOLLOWUP_EVIDENCE.md).  
+[CODE_REVIEW_LIFECYCLE_TODO.md](CODE_REVIEW_LIFECYCLE_TODO.md), and for the later queue/recovery
+findings RLC-01/02 [CODE_REVIEW_QUEUE_RECOVERY_TODO.md](CODE_REVIEW_QUEUE_RECOVERY_TODO.md). **Evidence:** [CODE_REVIEW_FOLLOWUP_EVIDENCE.md](CODE_REVIEW_FOLLOWUP_EVIDENCE.md).  
 **Baseline:** `6d200d0cda24acd00b1f3a6b8981b1d0bb2d6eec`, reviewed 2026-11-13.  
 **Companion specification:** [CODE_REVIEW_FOLLOWUP_SPEC.md](CODE_REVIEW_FOLLOWUP_SPEC.md).  
 **Earlier backlog and evidence:** [CODE_REVIEW_REMEDIATION_TODO.md](CODE_REVIEW_REMEDIATION_TODO.md),

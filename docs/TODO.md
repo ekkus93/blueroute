@@ -61,7 +61,10 @@ authority for that work. No original checkbox changes because of it. A lifecycle
 took it back could deliver an obsolete event, and removal cleanup treated an active membership
 with an unknown role as host-only. They are tracked in
 [CODE_REVIEW_LIFECYCLE_TODO.md](CODE_REVIEW_LIFECYCLE_TODO.md), again without changing original
-checkboxes.
+checkboxes. A further review (2026-11-14) found that subscriptions could stall behind their own
+full queues and that the documented manual recovery of an unknown role left a client record
+behind; [CODE_REVIEW_QUEUE_RECOVERY_TODO.md](CODE_REVIEW_QUEUE_RECOVERY_TODO.md) is the current
+authority for those (RLC-01/02).
 
 | Task | Status | Current state |
 | --- | --- | --- |

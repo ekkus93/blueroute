@@ -61,6 +61,8 @@ VM, no Bluetooth needed) and the Bluetooth-rig teardown and recovery checks are 
 [CR-QUALIFY-PROCEDURE.md](CR-QUALIFY-PROCEDURE.md), with its evidence checklist. Since 2026-11-14
 Part A also includes an active membership with an unknown role, which must fail removal and keep its
 proof (LC-QUALIFY-01, [CODE_REVIEW_LIFECYCLE_TODO.md](CODE_REVIEW_LIFECYCLE_TODO.md)).
+Its manual recovery deletes both the membership and the matching client record (QR-QUALIFY-01,
+[CODE_REVIEW_QUEUE_RECOVERY_TODO.md](CODE_REVIEW_QUEUE_RECOVERY_TODO.md)).
 
 ## P6-009 joined-client restart checklist (S6, NOT STARTED)
 

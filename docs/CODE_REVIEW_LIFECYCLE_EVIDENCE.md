@@ -413,3 +413,21 @@ LC-QUALIFY-02/03, FU-QUALIFY and CR-QUALIFY-01..08 on designated equipment.
   is.
 - The packaged path uses a mocked helper.
 - The fixture's NetworkManager path is unexecuted.
+
+## Correction — RLC-01 and RLC-02 (2026-11-14)
+
+A later review reproduced two defects in the work recorded above. The results above stay valid
+for the cases they tested; the current authority is
+[CODE_REVIEW_QUEUE_RECOVERY_TODO.md](CODE_REVIEW_QUEUE_RECOVERY_TODO.md) with evidence in
+[CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md).
+
+- **RLC-01 (P2), LC-OWNER / LC-INTEGRATION.** The LC-OWNER tests used at most four ownership
+  notices. Above 64 (one zbus match stream) a consumer resuming with a ready Version reply waited
+  in its final `GetNameOwner` behind its own unread notices: no OwnerLost, and other calls on the
+  connection stalled. The same applied to signals queued ahead of a check. Fixed by QR-QUEUE.
+- **RLC-02 (P3), LC-CLEANUP-07 / LC-CLOSEOUT.** The administrator recovery for Member/None with a
+  matching client record deleted only the membership lines; the record became an
+  OrphanClientRecord and removal kept failing. Review row 5 above ("requires
+  `unresolved_foreign_resources` to be unchanged") also held only while another network is
+  known: with none left, cleanup reports all zeros without inventorying NetworkManager. Fixed in
+  the guide by QR-RECOVERY; the classification is unchanged.
