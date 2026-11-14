@@ -321,3 +321,18 @@ No installed-system or physical claim follows from these results.
 - **04:** requirement map above; all links checked.
 - **05:** **SOFTWARE COMPLETE / QUALIFICATION DEFERRED.** FU-QUALIFY (CR-QUALIFY-01..08) has not
   run; full remediation closure waits for it.
+
+## Correction — lifecycle review findings (2026-11-14)
+
+A review of `75c1a01` found two P2 defects that the entries above did not cover. The entries
+are kept as recorded; their results hold for the cases they tested.
+
+- **RFU-01 (FU-02, FU-INTEGRATION-02):** the FU-02 decision point compared `GetNameOwner`'s unique
+  name with the bound owner. An A→B→A or A→unowned→A transfer therefore passed it, and the old
+  period's item was delivered. Fixed by LC-OWNER (`0fdb68f`).
+- **RFU-02 (FU-04, FU-INTEGRATION-03):** `removal_scope` derived host-only safety from
+  `role != Some(Client)`. A `member` network with no role, and a client record with no
+  membership, were cleaned as host-only. Fixed by LC-CLEANUP (`0106e3a`).
+
+Evidence, negative controls and the corrected software state are in
+[CODE_REVIEW_LIFECYCLE_EVIDENCE.md](CODE_REVIEW_LIFECYCLE_EVIDENCE.md).

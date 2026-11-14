@@ -56,7 +56,12 @@ A follow-up review (2026-11-13) reproduced four further defects in that remediat
 blocked by slow sampling, owner loss during event validation, phantom segment members, and
 removal cleanup reporting success with a client link unresolved); they are tracked and evidenced
 in [CODE_REVIEW_FOLLOWUP_TODO.md](CODE_REVIEW_FOLLOWUP_TODO.md), which is the current status
-authority for that work. No original checkbox changes because of it.
+authority for that work. No original checkbox changes because of it. A lifecycle review
+(2026-11-14) then found two more defects in the follow-up: a daemon that gave its name away and
+took it back could deliver an obsolete event, and removal cleanup treated an active membership
+with an unknown role as host-only. They are tracked in
+[CODE_REVIEW_LIFECYCLE_TODO.md](CODE_REVIEW_LIFECYCLE_TODO.md), again without changing original
+checkboxes.
 
 | Task | Status | Current state |
 | --- | --- | --- |

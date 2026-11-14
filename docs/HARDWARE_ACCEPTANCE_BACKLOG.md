@@ -58,7 +58,9 @@ Check `blueroute diagnostics show` reports a daemon version ending in `+experime
 Removing the package now removes the networking BlueRoute owns, or fails visibly (CR-F5). This is
 tested only with fakes and an isolated dpkg database. The installed-system procedure (a disposable
 VM, no Bluetooth needed) and the Bluetooth-rig teardown and recovery checks are in
-[CR-QUALIFY-PROCEDURE.md](CR-QUALIFY-PROCEDURE.md), with its evidence checklist.
+[CR-QUALIFY-PROCEDURE.md](CR-QUALIFY-PROCEDURE.md), with its evidence checklist. Since 2026-11-14
+Part A also includes an active membership with an unknown role, which must fail removal and keep its
+proof (LC-QUALIFY-01, [CODE_REVIEW_LIFECYCLE_TODO.md](CODE_REVIEW_LIFECYCLE_TODO.md)).
 
 ## P6-009 joined-client restart checklist (S6, NOT STARTED)
 

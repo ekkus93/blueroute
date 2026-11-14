@@ -321,3 +321,95 @@ It raised nine items. All were resolved in the LC-CLOSEOUT review-fix commit:
 
 After the fixes, the ownership suite has 12 tests and all pass. Against the baseline `75c1a01`
 subscription code (isolated target), 8 of the 12 fail, including both new tests.
+
+## LC-VALIDATE — Exact software candidate (2026-11-14)
+
+**Candidate.** `f0dc3030c049d8379c15e58c8d8249ab0a0aa592`. The working tree differed only by
+uncommitted closeout documentation and the never-committed `.serena/` and `AGENTS.md`; no
+source, build or test file differed.
+
+**Toolchains.** rustc/cargo 1.95.0, Node v26.13.0, npm 11.20.0, Python 3.13.5. Debian 13
+(kernel 6.12), private brokers via `dbus-run-session`.
+
+| Check | Result |
+| --- | --- |
+| `cargo fmt --all -- --check`, `cargo build --workspace --locked`, `cargo check --workspace --locked` | pass |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | pass |
+| `cargo test --workspace --locked` | 911 passed, 0 failed, 64 ignored |
+| `cargo test -p blueroute-daemon --features experimental-join --locked` | 386 passed, 0 failed, 16 ignored |
+| `cargo test -p blueroute-daemon --lib --locked removal` | 27 passed |
+| All 15 CI broker suites (`dbus-run-session … -- --ignored`) | 63 passed, 0 failed (`ownership_period` 12) |
+| `python3 -m unittest discover -s scripts -p 'test_p6_006_*.py' -v` | 7 passed |
+| `bash packaging/debian/test-maintainer-lifecycle.sh` (source scripts) | pass, including the unresolved-role scenario |
+| Frontend: `npm ci`, `format:check`, `lint`, `typecheck`, `npm test`, `build` | pass; 43 tests in 4 files |
+| `bash packaging/debian/build-package.sh` | both packages built |
+| Packaged scripts: `dpkg-deb -e` + `BLUEROUTE_MAINTAINER_SCRIPT_DIR=… test-maintainer-lifecycle.sh` | pass |
+| `cargo build --release --locked -p blueroute-linux --example state_check`; `test-package-upgrade.sh <core .deb> target/release/examples/state_check` | pass (0.0.1 → 0.1.0: identity kept, v2→v3 roles migrated, failed cleanup aborts, remove retains state, purge deletes). Needs `/usr/sbin` on `PATH` for dpkg |
+
+**Packages.**
+
+- `blueroute_0.1.0_amd64.deb`, SHA-256
+  `d322037841ac6a5614428a4ce6398bf1f9d97bd3eae5eade64fc605e538c8c2c`. It contains the CLI,
+  the TUI, the daemon, the unit, the D-Bus policy and the polkit policy. It depends on dbus,
+  bluez, network-manager, polkitd and systemd. It does not contain `qualify_fixture`, and the
+  daemon binary has no `experimental-join` string (the join gate is closed).
+- `blueroute-desktop_0.1.0_amd64.deb`, SHA-256
+  `ce859b0238588fea8dd7db0b359037a6c23abe466a0d89c2d7c160a7f575039b`. Its desktop binary
+  embeds the UI (`/index.html`).
+
+**Invariants (LC-VALIDATE-05).**
+
+- The authorization suite passes, as do the workspace's identity, pin, revocation and rollback
+  tests.
+- Foreign state is preserved: removal tests and the lifecycle scenario.
+- Identity and schema are stable: API 1.7 and membership schema v3 are unchanged, the upgrade
+  harness migrates v2 to v3, and there is no wire epoch field.
+- Mutations are not replayed: `owner_race` and event_owner_race.
+- Internet sharing is untouched, and the Tauri command set is unchanged (no frontend or bridge
+  change).
+
+**CI.** Exact revision `f0dc303`: [run 43606107137](https://github.com/ekkus93/blueroute/actions/runs/43606107137), success (Rust and Desktop frontend jobs), checked with `gh run view`. Earlier runs, each for its own SHA: 43597668355 (`e167198`, docs), 43603822509 (`0fdb68f`, cancelled by the next push), 43604335276 (`0106e3a`, success), 43605172484 (`c0a266b`, success).
+
+**Limitations.** No installed-system or physical claim: LC-QUALIFY-02/03 are open.
+
+## LC-CLOSEOUT — Requirement map and software milestone (2026-11-14)
+
+| Requirement | Tasks | Source | Regressions / evidence |
+| --- | --- | --- | --- |
+| EPOCH-1 continuous ownership | LC-OWNER-01/02 | `0fdb68f` (`since`, `ends_period`) | returning-owner Event/State, A→unowned→A paused and queued |
+| EPOCH-2 delivery ordering | LC-OWNER-02 | `0fdb68f`, `f0dc303` (`ended_before`) | final-verification ×2, queued loss over a failed check |
+| EPOCH-3 terminal, cancellation-safe, transient errors | LC-OWNER-03 | `0fdb68f`, `f0dc303` | cancellation, held reply, later waits retired, `lc_owner_only_a_missing_owner_retires_on_a_failed_final_check` |
+| EPOCH-4 watcher behavior and progress | LC-OWNER-06, LC-INTEGRATION-01 | `0fdb68f` | shared watcher (blocked executor), desktop, TUI; held reply within 2 s |
+| EPOCH-5 compatibility and resources | LC-OWNER-06/07 | `0fdb68f` | revalidation of returning A, incompatible refused with 0 Requests, healthy period, `owner_race` |
+| SCOPE-1 explicit state model | LC-CLEANUP-01/06 | `0106e3a` (`ScopeClass`) | `lc_cleanup_scope_classifies_every_stored_combination` |
+| SCOPE-2 honest outcome, proof lifetime | LC-CLEANUP-02/03 | `0106e3a` | every-combination, zero remaining, LC-BASE-04 test |
+| SCOPE-3 ownership boundaries | LC-CLEANUP-04/05 | `0106e3a` | conflicting proof, orphan record (no disconnect), foreign preserved |
+| SCOPE-4 independent progress | LC-CLEANUP-04 | `0106e3a` | confirmed host network cleaned beside the unknown role |
+| SCOPE-5 evidence-based recovery | LC-CLEANUP-07 | `0106e3a`, ADMINISTRATOR.md | recovered Client and Host, repeats |
+| SCOPE-6 helper and package outcome | LC-CLEANUP-08, LC-INTEGRATION-02 | `0106e3a` | `cleanup_outcome` exit 1; lifecycle harness (mocked helper) |
+| VERIFY-1 sensitive regressions | LC-BASE, LC-INTEGRATION-04 | — | baseline failures, controls O1–O3, C1–C3 |
+| VERIFY-2 real boundaries | LC-INTEGRATION-01/02 | `fc02933` | broker watchers, production stores, packaged scripts, adapter UnknownObject test |
+| VERIFY-3 exact candidate | LC-VALIDATE | `f0dc303` | LC-VALIDATE entry and CI |
+| VERIFY-4 preserve existing fixes | LC-INTEGRATION-05, LC-VALIDATE | — | all 15 broker suites, 911 workspace tests |
+| CLOSE-1 reconcile claims | LC-CLOSEOUT-02/03 | closeout commit | dated corrections in the follow-up TODO and evidence, SPEC, TODO.md, remediation TODO, hardware tracker |
+| CLOSE-2 separate acceptance layers | LC-QUALIFY-01/04, LC-CLOSEOUT-05 | `c0a266b` | procedure revised, execution deferred |
+| CLOSE-3 durable traceability | LC-CLOSEOUT-04 | this record | this map and the ledger |
+
+**Outcomes.**
+
+- **Correctness:** both P2 defects are fixed in software, reviewed, and have sensitive
+  regressions.
+- **Procedure readiness:** Part A covers the unknown-role and completed-leave cases.
+- **Executed qualification:** none.
+
+The milestone is **SOFTWARE COMPLETE / QUALIFICATION DEFERRED**. Full closure needs
+LC-QUALIFY-02/03, FU-QUALIFY and CR-QUALIFY-01..08 on designated equipment.
+
+**Remaining limitations.**
+
+- The after-decision branch is reasoned, not exercised.
+- The ordering argument depends on zbus's single socket reader.
+- The desktop and TUI returning-owner tests are not baseline-sensitive; the shared-watcher test
+  is.
+- The packaged path uses a mocked helper.
+- The fixture's NetworkManager path is unexecuted.

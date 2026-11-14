@@ -1,6 +1,6 @@
 # Code Review Remediation TODO
 
-**Status:** SOFTWARE MILESTONE (2026-11-13, `42ae7ab`) **superseded**: a follow-up review reproduced four defects in it; current status is tracked in [CODE_REVIEW_FOLLOWUP_TODO.md](CODE_REVIEW_FOLLOWUP_TODO.md). CR-QUALIFY and CR-CLOSEOUT-04 open. **Baseline:** `4ca5042ee28743dd30782379fbcf8fa1ed15df77`.  
+**Status:** SOFTWARE MILESTONE (2026-11-13, `42ae7ab`) **superseded**: a follow-up review reproduced four defects in it; current status is tracked in [CODE_REVIEW_FOLLOWUP_TODO.md](CODE_REVIEW_FOLLOWUP_TODO.md), and for two later lifecycle findings (2026-11-14) in [CODE_REVIEW_LIFECYCLE_TODO.md](CODE_REVIEW_LIFECYCLE_TODO.md). CR-QUALIFY and CR-CLOSEOUT-04 open. **Baseline:** `4ca5042ee28743dd30782379fbcf8fa1ed15df77`.  
 **Companion specification:** [CODE_REVIEW_REMEDIATION_SPEC.md](CODE_REVIEW_REMEDIATION_SPEC.md).  
 **Original implementation backlog:** [TODO.md](TODO.md). **Evidence:** [CODE_REVIEW_REMEDIATION_EVIDENCE.md](CODE_REVIEW_REMEDIATION_EVIDENCE.md).
 

@@ -1,6 +1,6 @@
 # Code Review Lifecycle Remediation TODO
 
-**Status:** IN PROGRESS (2026-11-14); see the register and evidence ledger.  
+**Status:** SOFTWARE COMPLETE / QUALIFICATION DEFERRED (2026-11-14, candidate `f0dc303`); LC-QUALIFY-02/03 blocked on equipment. **Evidence:** [CODE_REVIEW_LIFECYCLE_EVIDENCE.md](CODE_REVIEW_LIFECYCLE_EVIDENCE.md).  
 **Baseline:** `75c1a01746557bb13f525a55642b497e3bd5f81d`.  
 **Companion specification:** [CODE_REVIEW_LIFECYCLE_SPEC.md](CODE_REVIEW_LIFECYCLE_SPEC.md).  
 **Earlier work:** [follow-up backlog](CODE_REVIEW_FOLLOWUP_TODO.md),
@@ -38,9 +38,9 @@
 | LC-OWNER | P2 RFU-01: ownership-period retirement | LC-BASE | `[x]` |
 | LC-CLEANUP | P2 RFU-02: unknown active role and proof retention | LC-BASE | `[x]` |
 | LC-INTEGRATION | Actual consumer/helper boundaries and CI coverage | LC-OWNER, LC-CLEANUP | `[x]` |
-| LC-VALIDATE | Exact-candidate software/package/CI checks | LC-INTEGRATION | `[ ]` |
-| LC-QUALIFY | Existing installed-system/physical evidence gates | Procedure: LC-CLEANUP design; execution: validated packages and designated equipment | `[ ]` |
-| LC-CLOSEOUT | Documentation reconciliation and reviewed closure | Software: LC-OWNER/CLEANUP/INTEGRATION/VALIDATE; full: LC-QUALIFY | `[ ]` |
+| LC-VALIDATE | Exact-candidate software/package/CI checks | LC-INTEGRATION | `[x]` |
+| LC-QUALIFY | Existing installed-system/physical evidence gates | Procedure: LC-CLEANUP design; execution: validated packages and designated equipment | `[!]` no designated equipment |
+| LC-CLOSEOUT | Documentation reconciliation and reviewed closure | Software: LC-OWNER/CLEANUP/INTEGRATION/VALIDATE; full: LC-QUALIFY | `[-]` software closed |
 
 LC-OWNER and LC-CLEANUP can proceed independently after baseline preparation. Documentation and
 procedure corrections can start with their designs. Equipment is not a dependency for the two
@@ -142,17 +142,17 @@ regressions. Passing a mock helper or a direct scope constructor alone is insuff
 
 **Requirements:** VERIFY-3/4; preserved platform and security invariants.
 
-- [ ] **LC-VALIDATE-01:** Run pinned Rust formatting, locked workspace build/check/tests and
+- [x] **LC-VALIDATE-01:** Run pinned Rust formatting, locked workspace build/check/tests and
   strict all-target Clippy; record actual passed/failed/ignored counts and source revision.
-- [ ] **LC-VALIDATE-02:** Run all existing/new private-broker suites, experimental-join software
+- [x] **LC-VALIDATE-02:** Run all existing/new private-broker suites, experimental-join software
   tests and Python socket tooling. Verify default package builds retain the closed join gate.
-- [ ] **LC-VALIDATE-03:** With pinned Node/npm, run clean frontend install, format/lint/type
+- [x] **LC-VALIDATE-03:** With pinned Node/npm, run clean frontend install, format/lint/type
   checks, component/StrictMode tests and production build; retain narrow Tauri permissions.
-- [ ] **LC-VALIDATE-04:** Build both Debian packages; inspect manifests, dependencies and embedded
+- [x] **LC-VALIDATE-04:** Build both Debian packages; inspect manifests, dependencies and embedded
   UI. Run source/packaged lifecycle tests, state migration, isolated upgrade and remove/purge/retry.
-- [ ] **LC-VALIDATE-05:** Verify authorization, authenticated identities/pins/revocation, rollback,
+- [x] **LC-VALIDATE-05:** Verify authorization, authenticated identities/pins/revocation, rollback,
   foreign preservation, stable identity/schema, no replay and disabled sharing remain intact.
-- [ ] **LC-VALIDATE-06:** Record candidate SHA, toolchains, commands/results, package hashes and
+- [x] **LC-VALIDATE-06:** Record candidate SHA, toolchains, commands/results, package hashes and
   limitations. Check exact-revision CI with `gh run`; attribute historical runs to their SHAs.
 
 **Command reference:** run Rust/Python/package commands at the repository root.
@@ -199,13 +199,16 @@ scope and limitations are recorded without installed-system/physical claims.
 - [x] **LC-QUALIFY-01:** Extend adapter-free Part A fixtures/procedure with active unknown role
   plus client record, retained proof and failed removal/purge; retain confirmed completed-leave
   and recovery cases. State clearly that procedure readiness is separate from execution.
-- [ ] **LC-QUALIFY-02:** On designated disposable equipment, execute the revised installed-system
+- [!] **LC-QUALIFY-02:** On designated disposable equipment, execute the revised installed-system
   procedure and record actual NetworkManager/kernel/systemd/dpkg outcomes and foreign comparisons.
-- [ ] **LC-QUALIFY-03:** For physical PAN claims, execute existing Part B on the designated rig;
+- [!] **LC-QUALIFY-03:** For physical PAN claims, execute existing Part B on the designated rig;
   record machines/controllers/software, candidate/package identity and independent observations.
   Link evidence to existing FU/CR qualification and hardware gates rather than duplicating closure.
-- [ ] **LC-QUALIFY-04:** If equipment remains unavailable, record the deferral and keep unmet
+- [x] **LC-QUALIFY-04:** If equipment remains unavailable, record the deferral and keep unmet
   installed-system/physical criteria and this parent open. Continue independent software work.
+
+**Deferral (2026-11-14, LC-QUALIFY-04):** no disposable VM with sudo and no Bluetooth rig is
+available to this work. LC-QUALIFY-02/03 and this parent stay blocked; software work did not wait.
 
 **Acceptance:** Existing required environment criteria have actual evidence. Recording deferral
 can complete its reporting leaf, but cannot complete this parent or establish physical support.
@@ -214,16 +217,16 @@ can complete its reporting leaf, but cannot complete this parent or establish ph
 
 **Requirements:** CLOSE-1..3 and every requirement's evidence mapping.
 
-- [ ] **LC-CLOSEOUT-01:** Review RFU-01/02 fixes against baseline recipes, all EPOCH/SCOPE
+- [x] **LC-CLOSEOUT-01:** Review RFU-01/02 fixes against baseline recipes, all EPOCH/SCOPE
   criteria, additional adverse cases, negative controls and preserved security/ownership boundaries.
-- [ ] **LC-CLOSEOUT-02:** Append dated corrections to FU-02/FU-04/FU-INTEGRATION/FU-CLOSEOUT
+- [x] **LC-CLOSEOUT-02:** Append dated corrections to FU-02/FU-04/FU-INTEGRATION/FU-CLOSEOUT
   claims and the follow-up evidence. Preserve earlier successful behavior, historical results,
   and original task IDs; link this backlog as the current RFU-01/02 authority.
-- [ ] **LC-CLOSEOUT-03:** Update affected product/current summaries, client lifecycle contract,
+- [x] **LC-CLOSEOUT-03:** Update affected product/current summaries, client lifecycle contract,
   cleanup classification/design and qualification procedure. Preserve unsatisfied original gates.
-- [ ] **LC-CLOSEOUT-04:** Complete versioned evidence and map all 18 specification requirements
+- [x] **LC-CLOSEOUT-04:** Complete versioned evidence and map all 18 specification requirements
   to tasks, source, regressions or qualification records. Verify links, source SHAs and task states.
-- [ ] **LC-CLOSEOUT-05:** Record software closure only after both defects, integration, validation
+- [-] **LC-CLOSEOUT-05:** Record software closure only after both defects, integration, validation
   and documentation pass. Keep full closure open until LC-QUALIFY and existing required gates pass;
   use SOFTWARE COMPLETE / QUALIFICATION DEFERRED when appropriate.
 
@@ -238,9 +241,9 @@ Keep software outcomes separate from actual installed-system/physical results.
 | Task / finding | Fix SHA and source | Regression / negative control / software evidence | Qualification or remaining gate | State |
 | --- | --- | --- | --- | --- |
 | LC-BASE | `e167198` baseline | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-base--findings-preserved-and-corrected-expectations-established-2026-11-14): RFU-01 2/2 corrected tests fail; RFU-02 test fails, committed with its fix | Isolated reproducible fixtures | ACCEPTED |
-| LC-OWNER / RFU-01 | LC-OWNER commit, `crates/blueroute-client/src/lib.rs` | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-owner--subscriptions-retire-when-their-ownership-period-ends-2026-11-14): EPOCH-1..5, 9 broker tests and 1 unit test; 5/9 fail on both negative controls | Software ownership-period acceptance | ACCEPTED (software) |
-| LC-CLEANUP / RFU-02 | LC-CLEANUP commit, `apps/daemon/src/removal.rs` | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-cleanup--ambiguous-active-membership-stays-unresolved-2026-11-14): SCOPE-1..6, 8 new removal tests, lifecycle harness scenario; 2 negative controls | LC-QUALIFY for actual installed/PAN claims | ACCEPTED (software) |
-| LC-INTEGRATION | LC-INTEGRATION commit | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-integration--real-boundaries-ci-scheduling-and-sensitivity-2026-11-14): watcher/desktop/TUI returning-owner tests, helper/package path, adapter test, 5 negative controls, 61 broker + 911 workspace passes | Actual consumer/helper boundaries and CI scheduling | ACCEPTED |
-| LC-VALIDATE | — | VERIFY-3/4 pending | Exact-candidate checks/packages/CI | NOT STARTED |
-| LC-QUALIFY | — | Procedure revision pending | FU-QUALIFY, CR-QUALIFY-01..08, hardware tracker | NOT STARTED |
-| LC-CLOSEOUT | — | CLOSE-1..3 pending | Software milestone; full qualification separately | NOT STARTED |
+| LC-OWNER / RFU-01 | `0fdb68f`, review fix `f0dc303`; `crates/blueroute-client/src/lib.rs` | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-owner--subscriptions-retire-when-their-ownership-period-ends-2026-11-14): EPOCH-1..5; 12 `ownership_period` tests (8 fail on the baseline) and 1 unit test | Software ownership-period acceptance | ACCEPTED (software) |
+| LC-CLEANUP / RFU-02 | `0106e3a`; `apps/daemon/src/removal.rs` | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-cleanup--ambiguous-active-membership-stays-unresolved-2026-11-14): SCOPE-1..6, 8 new removal tests, lifecycle harness scenario; 2 negative controls | LC-QUALIFY for actual installed/PAN claims | ACCEPTED (software) |
+| LC-INTEGRATION | `fc02933` | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-integration--real-boundaries-ci-scheduling-and-sensitivity-2026-11-14): watcher/desktop/TUI returning-owner tests, helper/package path, adapter test, 5 negative controls, 61 broker + 911 workspace passes | Actual consumer/helper boundaries and CI scheduling | ACCEPTED |
+| LC-VALIDATE | `f0dc303` | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-validate--exact-software-candidate-2026-11-14): 911 workspace, 386 join, 63 broker, 7 Python, 43 frontend; both packages, upgrade and packaged scripts; [CI 43606107137](https://github.com/ekkus93/blueroute/actions/runs/43606107137) | Exact-candidate checks/packages/CI | COMPLETE |
+| LC-QUALIFY | `c0a266b` (procedure, fixture) | [Procedure revised](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-qualify-01--procedure-revised-execution-deferred-2026-11-14); software results do not satisfy execution | FU-QUALIFY, CR-QUALIFY-01..08, hardware tracker; no designated equipment | BLOCKED (execution) |
+| LC-CLOSEOUT | `f0dc303` + closeout docs | [Review](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-closeout-01--independent-review-of-75c1a01c0a266b-2026-11-14) (9 items resolved), corrections, [requirement map](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-closeout--requirement-map-and-software-milestone-2026-11-14) | Full closure after LC-QUALIFY | SOFTWARE COMPLETE / QUALIFICATION DEFERRED |

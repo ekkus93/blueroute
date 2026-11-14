@@ -1,6 +1,11 @@
 # Code Review Follow-up TODO
 
-**Status:** SOFTWARE COMPLETE / QUALIFICATION DEFERRED (2026-11-13, `4d19a2a`); FU-QUALIFY open. **Evidence:** [CODE_REVIEW_FOLLOWUP_EVIDENCE.md](CODE_REVIEW_FOLLOWUP_EVIDENCE.md).  
+**Status:** SOFTWARE COMPLETE / QUALIFICATION DEFERRED (2026-11-13, `4d19a2a`); FU-QUALIFY open.
+**Correction (2026-11-14):** a later review found two P2 defects in this work: RFU-01 (FU-02, a
+returning owner bypassed retirement) and RFU-02 (FU-04, an unknown active role bypassed client
+cleanup). The FU-02, FU-04, FU-INTEGRATION and FU-CLOSEOUT software claims below held only for
+the cases they tested. The current authority for both defects is
+[CODE_REVIEW_LIFECYCLE_TODO.md](CODE_REVIEW_LIFECYCLE_TODO.md). **Evidence:** [CODE_REVIEW_FOLLOWUP_EVIDENCE.md](CODE_REVIEW_FOLLOWUP_EVIDENCE.md).  
 **Baseline:** `6d200d0cda24acd00b1f3a6b8981b1d0bb2d6eec`, reviewed 2026-11-13.  
 **Companion specification:** [CODE_REVIEW_FOLLOWUP_SPEC.md](CODE_REVIEW_FOLLOWUP_SPEC.md).  
 **Earlier backlog and evidence:** [CODE_REVIEW_REMEDIATION_TODO.md](CODE_REVIEW_REMEDIATION_TODO.md),
@@ -113,6 +118,11 @@ all four PUB requirements hold without sacrificing bounded work or committed-ope
 **Acceptance:** Both REV-02 manifestations fail against the baseline and pass with the fix.
 Command-owner safety and existing idle owner-loss behavior remain intact.
 
+**Correction (2026-11-14, RFU-01):** the A→B handover was retired correctly, but an owner that
+gave the name away and took it back (A→B→A, A→unowned→A) could still deliver its old item,
+because the final check compared unique names only. The fix binds each subscription to one
+ownership period (LC-OWNER, `0fdb68f`). The FU-02 tests remain valid and still pass.
+
 ## FU-03 — Validate every accepted segment representation
 
 **Requirements:** SEG-1..4. **Earlier tasks:** CR-F3-04/05/06, CR-INTEGRATION-05.
@@ -157,6 +167,12 @@ The clone reproduction fails on the baseline and passes under the documented imp
 
 **Acceptance:** The unavailable-Bluetooth reproduction cannot report success or destroy the last
 retry proof. A recovered retry resolves the owned attachment without broadening ownership scope.
+
+**Correction (2026-11-14, RFU-02):** FU-04 covered only the persisted `client` role. A `member`
+network with no stored role (which the store accepts as unknown) was classified as host-only, so
+without Bluetooth its proof was deleted and cleanup succeeded. A client record without a
+membership was cleaned host-only too. The fix classifies every network explicitly and leaves
+both cases unresolved (LC-CLEANUP, `0106e3a`). The FU-04 tests remain valid and still pass.
 
 ## FU-05 — Remove the startup baseline notification gap
 
@@ -301,7 +317,13 @@ the original CR-QUALIFY criteria stay open.
 the overall completion label reflects remaining qualification rather than merely passing CI.
 
 **Progress (2026-11-13):** software closure recorded (01–04 met); 05 records SOFTWARE COMPLETE /
-QUALIFICATION DEFERRED and stays open until FU-QUALIFY passes. See
+QUALIFICATION DEFERRED and stays open until FU-QUALIFY passes.
+
+**Correction (2026-11-14):** that software milestone and the FU-CLOSEOUT-01 review missed RFU-01
+and RFU-02 (see the status correction above). It is requalified as SOFTWARE COMPLETE for the
+cases FU tested. The corrected software state is recorded by the
+[lifecycle backlog](CODE_REVIEW_LIFECYCLE_TODO.md), and FU-QUALIFY-01 must also run the
+unknown-role cases added to Part A by LC-QUALIFY-01. See
 [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-closeout--software-milestone-2026-11-13).
 
 ## Evidence ledger
