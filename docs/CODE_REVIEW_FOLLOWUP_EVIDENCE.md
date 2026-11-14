@@ -132,3 +132,43 @@ pass):
 
 Property-only link updates, multi-link removal and the forwarding consumer remain covered by the
 CR-F3 tests, which pass unchanged.
+
+## FU-04 — unresolved client cleanup fails and stays retryable (2026-11-13)
+
+**Fix:** `718983c` (`apps/daemon/src/removal.rs`, `client_leave.rs`, `main.rs`; design
+[CR-F5-REMOVAL-CLEANUP.md](CR-F5-REMOVAL-CLEANUP.md) revised; SPEC §31; `ADMINISTRATOR.md`).
+
+- **FU-04-01 outcomes:** for a joined-client network (persisted role `client`, or named by the
+  client record), *observed absent* = Bluetooth up, recorded host device, and no live PANU link to
+  it (or the proven-owned one disconnected and then observed gone). Everything else is
+  *unresolved*: counted in `RemovalReport::unresolved_links` / log field
+  `unresolved_client_links`, and `succeeded()` is false.
+- **FU-04-02 proof:** maintainer decision — keep the existing NetworkManager ownership proof (owned
+  profile and address carrying the NetworkId); no new record, no storage or schema change. A host
+  hint alone never authorizes a disconnect: the live link must be to that device *and* on an
+  interface carrying this network's ownership.
+- **FU-04-03:** an unresolved client network is left untouched; other networks are cleaned.
+  `leave_observed` re-observes after `disconnect_panu` and fails (proof kept) if the link is still
+  there — this also hardens user-initiated client leave.
+- **FU-04-07:** `cleanup_outcome()` maps the report to exit status and log line (unresolved → 1);
+  `prerm` propagates it (lifecycle test: failure fails `prerm`, `abort-remove` restores the
+  service; the isolated dpkg test covers real remove failure/retry/purge). Upgrades are untouched.
+- **FU-04-08:** instance lock, removal marker, 60 s bound and payload-free logging unchanged; no
+  shell networking added.
+
+**Regressions** (`cargo test -p blueroute-daemon --lib removal`, 17 tests, all pass):
+
+| Test | Covers |
+| --- | --- |
+| `fu_04_unresolved_client_teardown_fails_and_keeps_its_proof_for_the_retry` | REV-04: without Bluetooth fails, keeps proof and link, host-only network still cleaned; with Bluetooth disconnects and succeeds; repeat succeeds. **Failed at 6d200d0** |
+| `a_proven_owned_panu_link_is_disconnected_with_bluetooth_and_unresolved_without` | the corrected former fixture (FU-04-04) |
+| `fu_04_an_already_absent_link_with_bluetooth_up_is_proven_gone` | absent link; also the state after an interruption between disconnect and proof removal |
+| `fu_04_a_disconnect_that_does_not_take_keeps_the_proof` | interrupted/failed disconnect: failure, nothing removed, retry succeeds |
+| `fu_04_a_link_to_another_device_on_a_reused_interface_name_is_left_alone` | reused interface name |
+| `fu_04_without_proof_a_live_link_is_never_disconnected` | vanished and conflicting proof: link untouched |
+| `fu_04_a_client_network_known_only_by_role_is_unresolved_without_a_host_device` | client record missing: unresolved even with Bluetooth |
+| `an_unresolved_client_link_makes_the_helper_exit_nonzero` | the helper's exit status and log line |
+| existing: foreign preserved, partial failure/retry, repeat, unreachable/blind backend, timeout, running daemon, marker, bad registry, no known network | unchanged, pass |
+
+Client leave tests (10) pass with the new re-observation; lifecycle test and `maintenance_mode`
+(4) pass. Installed-system and physical qualification stay with FU-QUALIFY / CR-QUALIFY.

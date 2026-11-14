@@ -41,7 +41,7 @@
 | FU-01 | P2 REV-01: independent publication and bounded shutdown | FU-BASE | `[x]` |
 | FU-02 | P2 REV-02: ownership monitored through validation | FU-BASE | `[x]` |
 | FU-03 | P2 REV-03: safe segment cloning/import | FU-BASE | `[x]` |
-| FU-04 | P2 REV-04: unresolved cleanup and durable retry proof | FU-BASE | `[ ]` |
+| FU-04 | P2 REV-04: unresolved cleanup and durable retry proof | FU-BASE | `[x]` |
 | FU-05 | GAP-01: startup snapshot/publication handoff | FU-01 design; FU-02 for reconnect integration | `[ ]` |
 | FU-06 | GAP-02: adapter-free qualification fixture and clear isolation | FU-04 contract; procedure work can start earlier | `[ ]` |
 | FU-INTEGRATION | Boundary regressions and negative controls | FU-01..05 | `[ ]` |
@@ -135,24 +135,24 @@ The clone reproduction fails on the baseline and passes under the documented imp
 
 **Requirements:** REMOVE-1..5. **Earlier tasks:** CR-F5-04/06/09, CR-INTEGRATION-06.
 
-- [ ] **FU-04-01:** Define observed-absent versus unresolved PANU outcomes and their ownership
+- [x] **FU-04-01:** Define observed-absent versus unresolved PANU outcomes and their ownership
   requirements; include unresolved work in cleanup success/reporting.
-- [ ] **FU-04-02:** Choose proof retention or a durable verified cleanup record. Document
+- [x] **FU-04-02:** Choose proof retention or a durable verified cleanup record. Document
   provenance, lifetime, recovery, foreign-state checks, and any required storage migration.
-- [ ] **FU-04-03:** Preserve dependent proof until client teardown is verified; continue safe
+- [x] **FU-04-03:** Preserve dependent proof until client teardown is verified; continue safe
   independent NetworkManager work and cleanup of other known networks after partial failure.
-- [ ] **FU-04-04:** Correct the fixture that accepts success without Bluetooth. Require
+- [x] **FU-04-04:** Correct the fixture that accepts success without Bluetooth. Require
   failure, unresolved work reporting, retained proof, and preserved unrelated foreign state.
-- [ ] **FU-04-05:** Restore Bluetooth in the same scenario and prove the retry disconnects the
+- [x] **FU-04-05:** Restore Bluetooth in the same scenario and prove the retry disconnects the
   owned link or verifies absence; repeat to prove idempotence after complete cleanup.
-- [ ] **FU-04-06:** Test missing/conflicting proof, reused interface names, foreign attachments,
+- [x] **FU-04-06:** Test missing/conflicting proof, reused interface names, foreign attachments,
   already absent links, interrupted steps, backend failure, timeout, and host-only/empty state.
-- [ ] **FU-04-07:** Exercise the actual helper/report and maintainer/isolated-dpkg paths:
+- [x] **FU-04-07:** Exercise the actual helper/report and maintainer/isolated-dpkg paths:
   unresolved cleanup fails remove/deconfigure/purge, preserves retry evidence, and recovers.
   Confirm upgrades and abort paths still follow their distinct lifecycle contract.
-- [ ] **FU-04-08:** Preserve instance locking, removal-marker quiescence, bounded non-secret
+- [x] **FU-04-08:** Preserve instance locking, removal-marker quiescence, bounded non-secret
   diagnostics, and the 60-second run limit. Do not add production shell networking commands.
-- [ ] **FU-04-09:** Revise the skip-and-succeed cleanup design and associated software evidence;
+- [x] **FU-04-09:** Revise the skip-and-succeed cleanup design and associated software evidence;
   explicitly retain CR-QUALIFY and original installed-system/physical acceptance gates.
 
 **Acceptance:** The unavailable-Bluetooth reproduction cannot report success or destroy the last
@@ -305,7 +305,7 @@ separately from the unresolved qualification gate.
 | FU-01 / REV-01 | `19a58a0` | 5 `publisher_progress` tests (REV-01 failed at baseline); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-01--independent-publication-and-bounded-shutdown-2026-11-13) | None | COMPLETE |
 | FU-02 / REV-02 | `d2b94c1` | 6 `event_owner_race` tests (both REV-02 cases failed at baseline); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-02--ownership-monitored-through-validation-2026-11-13) | None | COMPLETE |
 | FU-03 / REV-03 | `1f2d48d` | 4 `fu_03` tests (REV-03 failed at baseline); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-03--safe-segment-cloningimport-2026-11-13) | None | COMPLETE |
-| FU-04 / REV-04 | — | REMOVE-1..5 pending | FU-QUALIFY for actual installed/PAN claims | NOT STARTED |
+| FU-04 / REV-04 | `718983c` | 17 removal tests (REV-04 failed at baseline); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-04--unresolved-client-cleanup-fails-and-stays-retryable-2026-11-13) | FU-QUALIFY for actual installed/PAN claims | SOFTWARE COMPLETE / QUALIFICATION DEFERRED |
 | FU-05 / GAP-01 | — | START-1..3 pending | Startup/reconnect ordering evidence | NOT STARTED |
 | FU-06 / GAP-02 | — | QUAL-1..4 procedure/fixture pending | Execution remains separate | NOT STARTED |
 | FU-INTEGRATION | — | ACCEPT-1 pending | Boundary sensitivity and CI scheduling | NOT STARTED |
