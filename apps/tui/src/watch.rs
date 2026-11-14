@@ -84,6 +84,14 @@ mod tests {
     /// `dbus-run-session -- cargo test -p blueroute-tui --locked -- --ignored tui_watcher`
     struct FakeDaemon;
 
+    /// The bus tests share the daemon's well-known name, so they run one at a time.
+    static BUS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn bus() -> std::sync::MutexGuard<'static, ()> {
+        BUS.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     #[zbus::interface(name = "org.blueroute.Service1")]
     impl FakeDaemon {
         fn version(&self) -> (u16, u16) {
@@ -115,6 +123,7 @@ mod tests {
     #[test]
     #[ignore = "needs a private bus: run with dbus-run-session"]
     fn tui_watcher_follows_changes_idle_loss_return_and_quit() {
+        let _bus = bus();
         futures_lite::future::block_on(async {
             let first = daemon().await.unwrap();
             let receive = spawn_with(|| async {
@@ -193,6 +202,122 @@ mod tests {
             assert!(
                 released,
                 "the watcher kept its bus connection after the TUI quit"
+            );
+        });
+    }
+
+    /// Hands the name to `successor` inside its third Version call: the check of its first change
+    /// signal (calls 1 and 2 are the watcher's connect and subscribe).
+    struct HandoverDaemon {
+        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        own: std::sync::Arc<std::sync::OnceLock<zbus::Connection>>,
+        successor: Option<zbus::Connection>,
+    }
+
+    #[zbus::interface(name = "org.blueroute.Service1")]
+    impl HandoverDaemon {
+        async fn version(&self) -> (u16, u16) {
+            let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            if call == 3
+                && let Some(successor) = &self.successor
+            {
+                let own = self.own.get().expect("own connection");
+                own.release_name(blueroute_protocol::DBUS_SERVICE_NAME)
+                    .await
+                    .unwrap();
+                successor
+                    .request_name(blueroute_protocol::DBUS_SERVICE_NAME)
+                    .await
+                    .unwrap();
+            }
+            (
+                blueroute_protocol::ApiVersion::CURRENT.major,
+                blueroute_protocol::ApiVersion::CURRENT.minor,
+            )
+        }
+
+        #[zbus(signal)]
+        async fn state_changed(
+            emitter: &zbus::object_server::SignalEmitter<'_>,
+            revision: u64,
+        ) -> zbus::Result<()>;
+    }
+
+    async fn announce(connection: &zbus::Connection) {
+        let interface = connection
+            .object_server()
+            .interface::<_, HandoverDaemon>(blueroute_protocol::DBUS_OBJECT_PATH)
+            .await
+            .unwrap();
+        HandoverDaemon::state_changed(interface.signal_emitter(), 1)
+            .await
+            .unwrap();
+    }
+
+    /// FU-INTEGRATION-02: an event-time handover through the TUI's real watcher thread.
+    #[test]
+    #[ignore = "needs a private bus: run with dbus-run-session"]
+    fn tui_watcher_follows_an_event_time_handover_to_the_successor() {
+        let _bus = bus();
+        futures_lite::future::block_on(async {
+            let b = zbus::connection::Builder::session()
+                .unwrap()
+                .serve_at(
+                    blueroute_protocol::DBUS_OBJECT_PATH,
+                    HandoverDaemon {
+                        calls: Default::default(),
+                        own: Default::default(),
+                        successor: None,
+                    },
+                )
+                .unwrap()
+                .build()
+                .await
+                .unwrap();
+            let own: std::sync::Arc<std::sync::OnceLock<zbus::Connection>> = Default::default();
+            let a = zbus::connection::Builder::session()
+                .unwrap()
+                .name(blueroute_protocol::DBUS_SERVICE_NAME)
+                .unwrap()
+                .serve_at(
+                    blueroute_protocol::DBUS_OBJECT_PATH,
+                    HandoverDaemon {
+                        calls: Default::default(),
+                        own: own.clone(),
+                        successor: Some(b.clone()),
+                    },
+                )
+                .unwrap()
+                .build()
+                .await
+                .unwrap();
+            let _ = own.set(a.clone());
+
+            let receive = spawn_with(|| async {
+                let connection = zbus::Connection::session()
+                    .await
+                    .map_err(blueroute_client::ClientError::Bus)?;
+                BlueRouteClient::from_connection(connection).await
+            })
+            .unwrap();
+            assert_eq!(
+                next(&receive, Duration::from_secs(3)),
+                Some(Signal::Connected)
+            );
+            announce(&a).await;
+            // A's obsolete change never shows; the loss does, then B on the production backoff.
+            assert_eq!(
+                next(&receive, Duration::from_secs(2)),
+                Some(Signal::Disconnected)
+            );
+            assert_eq!(
+                next(&receive, Duration::from_secs(5)),
+                Some(Signal::Connected)
+            );
+            announce(&b).await;
+            assert_eq!(
+                next(&receive, Duration::from_secs(1)),
+                Some(Signal::Changed)
             );
         });
     }

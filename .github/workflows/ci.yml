@@ -101,6 +101,7 @@ jobs:
       - name: Run the real desktop and TUI watchers on a private bus (CR-INTEGRATION)
         run: |
           dbus-run-session -- cargo test -p blueroute-desktop --test watch_integration --locked -- --ignored
+          dbus-run-session -- cargo test -p blueroute-desktop --test watch_handover --locked -- --ignored
           dbus-run-session -- cargo test -p blueroute-tui --locked -- --ignored tui_watcher
 
       - name: Validate CLI typed broker error exits

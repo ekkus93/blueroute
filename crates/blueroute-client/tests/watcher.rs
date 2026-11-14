@@ -447,3 +447,124 @@ fn fu_05_a_replacement_daemons_pre_baseline_change_reaches_the_watcher()
         .await
     })
 }
+
+/// A network list that stays pending while `held` is set.
+struct StalledNetworks {
+    held: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl blueroute_daemon::NetworkOperations for StalledNetworks {
+    fn create_network(
+        &self,
+        _name: blueroute_core::DisplayName,
+    ) -> blueroute_daemon::NetworkOperationFuture<'_, blueroute_core::NetworkId> {
+        Box::pin(async { Ok(blueroute_core::NetworkId::from_bytes([0x5d; 16])) })
+    }
+    fn leave_network(&self) -> blueroute_daemon::NetworkOperationFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+    fn list_networks(
+        &self,
+    ) -> blueroute_daemon::NetworkOperationFuture<'_, Vec<blueroute_protocol::NetworkSummary>> {
+        Box::pin(async move {
+            while self.held.load(std::sync::atomic::Ordering::SeqCst) {
+                Timer::after(Duration::from_millis(5)).await;
+            }
+            Ok(Vec::new())
+        })
+    }
+    fn start_discovery(&self) -> blueroute_daemon::NetworkOperationFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+    fn stop_discovery(&self) -> blueroute_daemon::NetworkOperationFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn fu_integration_the_watcher_hears_real_changes_while_network_sampling_is_stalled()
+-> Result<(), Box<dyn Error>> {
+    use blueroute_core::{NodeCapabilities, NodeId};
+    use blueroute_daemon::{DaemonService, spawn_state_publisher};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let _bus = BUS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    future::block_on(async {
+        // Cold start with the network backend stalled from the outset, and a change made before
+        // the publisher exists (FU-01 + FU-05 together).
+        let held = Arc::new(AtomicBool::new(true));
+        struct Release(Arc<AtomicBool>);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
+        let service = DaemonService::with_network_operations(
+            blueroute_protocol::DaemonStatus {
+                api_version: ApiVersion::CURRENT,
+                local_node: Some(NodeId::from_bytes([0xc7; 16])),
+                current_network: None,
+                health: HealthLevel::Healthy,
+                capabilities: NodeCapabilities::default(),
+            },
+            Arc::new(StalledNetworks { held: held.clone() }),
+        );
+        let connection = Builder::session()?
+            .name(DBUS_SERVICE_NAME)?
+            .serve_at(DBUS_OBJECT_PATH, service.clone())?
+            .build()
+            .await?;
+        let log = Log::default();
+        let signals = log.signals.clone();
+        let watcher = watch(
+            connect,
+            |_| Timer::after(Duration::from_millis(10)).map(|_| ()),
+            move |signal| {
+                signals.lock().unwrap().push(signal);
+                ControlFlow::Continue(())
+            },
+        );
+        let scenario = async {
+            log.until(LOSS_BOUND, |log| log.count(Connected) == 1)
+                .await
+                .ok_or("never connected")?;
+            // The watcher has read; now a change, then the publisher, with sampling stalled.
+            let before = log.count(Changed);
+            service.update_runtime_observation(
+                HealthLevel::Degraded,
+                NodeCapabilities::default(),
+                None,
+            )?;
+            let publisher = spawn_state_publisher(connection.clone(), service.clone())?;
+            let _release = Release(held.clone()); // dropped before the publisher
+            log.until(Duration::from_secs(1), |log| log.count(Changed) > before)
+                .await
+                .ok_or("cold-start change not announced while sampling was stalled")?;
+            // A later change is announced promptly too, still with sampling stalled.
+            Timer::after(Duration::from_millis(300)).await;
+            let before = log.count(Changed);
+            service.update_runtime_observation(
+                HealthLevel::Error,
+                NodeCapabilities::default(),
+                None,
+            )?;
+            log.until(Duration::from_secs(1), |log| log.count(Changed) > before)
+                .await
+                .ok_or("a change was held back by the stalled network sample")?;
+            drop(_release);
+            drop(publisher);
+            Ok::<(), Box<dyn Error>>(())
+        };
+        future::or(
+            async {
+                watcher.await;
+                Err::<(), Box<dyn Error>>("the watcher stopped on its own".into())
+            },
+            scenario,
+        )
+        .await
+    })
+}
