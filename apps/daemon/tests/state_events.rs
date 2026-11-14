@@ -320,7 +320,7 @@ fn cr_f1_another_clients_committed_create_and_leave_reach_every_observer()
 fn cr_f1_a_rename_is_announced() -> Result<(), Box<dyn Error>> {
     let _bus = lock();
     future::block_on(async {
-        let state = tempfile_dir()?;
+        let (_temp, state) = tempfile_dir()?;
         let store = Arc::new(blueroute_daemon::DeviceNameStore::new(state.join("name")));
         let _daemon =
             daemon_with(|service| service.with_device_name_store(store, name("Before"))).await?;
@@ -338,7 +338,6 @@ fn cr_f1_a_rename_is_announced() -> Result<(), Box<dyn Error>> {
             panic!("nodes expected");
         };
         assert_eq!(nodes[0].name.as_str(), "After");
-        std::fs::remove_dir_all(state).ok();
         Ok(())
     })
 }
@@ -458,17 +457,15 @@ fn cr_f1_an_emission_failure_keeps_the_change_pending_and_never_fails_the_mutati
     })
 }
 
-/// A unique temporary directory, without a tempfile dependency.
-fn tempfile_dir() -> Result<std::path::PathBuf, Box<dyn Error>> {
-    let path = std::env::temp_dir().join(format!(
-        "blueroute-state-events-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_nanos()
-    ));
+/// A fresh state directory inside a private temporary directory. The guard removes it on drop,
+/// so it must outlive the daemon that uses the path.
+fn tempfile_dir() -> Result<(tempfile::TempDir, std::path::PathBuf), Box<dyn Error>> {
+    let temp = tempfile::Builder::new()
+        .prefix("blueroute-state-events-")
+        .tempdir()?;
+    let path = temp.path().join("state");
     std::fs::create_dir_all(&path)?;
-    Ok(path)
+    Ok((temp, path))
 }
 
 #[test]

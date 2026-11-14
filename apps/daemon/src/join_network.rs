@@ -1062,11 +1062,9 @@ fn combine_rollback(
 mod tests {
     use std::fs;
     use std::sync::Mutex;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::Ordering;
 
     use super::*;
-
-    static NEXT_TEST: AtomicUsize = AtomicUsize::new(0);
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum Step {
@@ -1268,22 +1266,28 @@ mod tests {
         }
     }
 
-    fn temp_store(label: &str) -> (std::path::PathBuf, NetworkMembershipStore) {
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-p6-004-{label}-{}-{}",
-            std::process::id(),
-            NEXT_TEST.fetch_add(1, Ordering::Relaxed)
-        ));
+    /// A store in a private temporary directory. The returned guard removes the directory when
+    /// dropped, even if the test panics, so callers keep it alive for the whole test.
+    fn temp_store(
+        label: &str,
+    ) -> (
+        tempfile::TempDir,
+        std::path::PathBuf,
+        NetworkMembershipStore,
+    ) {
+        let temp = tempfile::Builder::new()
+            .prefix(&format!("blueroute-p6-004-{label}-"))
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("root");
         fs::create_dir_all(&root).unwrap();
-        (
-            root.clone(),
-            NetworkMembershipStore::new(root.join("memberships-v1")),
-        )
+        let store = NetworkMembershipStore::new(root.join("memberships-v1"));
+        (temp, root, store)
     }
 
     #[test]
     fn invalid_zero_network_never_uses_runtime_or_persists_membership() {
-        let (root, store) = temp_store("zero-network");
+        let (_temp, _, store) = temp_store("zero-network");
         let operations =
             TransactionalJoinNetworkOperations::with_runtime(store, FakeRuntime::successful());
         let error =
@@ -1308,14 +1312,13 @@ mod tests {
                 .state,
             MembershipState::Member
         );
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn overlapping_joins_fail_before_runtime_mutation_and_cancel_releases_guard() {
         use std::task::{Context, Waker};
 
-        let (root, store) = temp_store("overlapping-joins");
+        let (_temp, _, store) = temp_store("overlapping-joins");
         let network = NetworkId::from_bytes([0x7a; 16]);
         let other = NetworkId::from_bytes([0x7b; 16]);
         let operations = TransactionalJoinNetworkOperations::with_runtime(
@@ -1355,7 +1358,6 @@ mod tests {
         );
         drop(restarted);
         assert!(operations.store.load().unwrap().is_empty());
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1363,7 +1365,7 @@ mod tests {
         use std::sync::Arc;
         use std::task::{Context, Poll, Waker};
 
-        let (root, store) = temp_store("pending-rollback");
+        let (_temp, _, store) = temp_store("pending-rollback");
         let network = NetworkId::from_bytes([0x8a; 16]);
         let competitor = NetworkId::from_bytes([0x8b; 16]);
         let release = Arc::new(AtomicBool::new(false));
@@ -1427,7 +1429,6 @@ mod tests {
         );
         assert_eq!(operations.runtime.steps().len(), 6);
         assert!(operations.store.load().unwrap().is_empty());
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1435,7 +1436,7 @@ mod tests {
         use std::sync::Arc;
         use std::task::{Context, Waker};
 
-        let (root, store) = temp_store("canceled-rollback");
+        let (_temp, _, store) = temp_store("canceled-rollback");
         let network = NetworkId::from_bytes([0x8c; 16]);
         let competitor = NetworkId::from_bytes([0x8d; 16]);
         let release = Arc::new(AtomicBool::new(false));
@@ -1478,13 +1479,12 @@ mod tests {
             ]
         );
         assert!(operations.store.load().unwrap().is_empty());
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn membership_is_committed_only_after_all_runtime_steps_succeed() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("success");
+            let (_temp, _, store) = temp_store("success");
             let network = NetworkId::from_bytes([0x44; 16]);
             let runtime = FakeRuntime::successful();
             let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime);
@@ -1499,14 +1499,13 @@ mod tests {
                 registry.network(&network).unwrap().state,
                 MembershipState::Member
             );
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
     #[test]
     fn address_failure_disconnects_panu_and_does_not_persist_membership() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("address-failure");
+            let (_temp, _, store) = temp_store("address-failure");
             let network = NetworkId::from_bytes([0x45; 16]);
             let runtime = FakeRuntime {
                 steps: Mutex::new(Vec::new()),
@@ -1550,7 +1549,6 @@ mod tests {
                     Step::DisconnectPanu,
                 ]
             );
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
@@ -1558,7 +1556,7 @@ mod tests {
     fn foreign_ip_lease_never_authorizes_membership_or_foreign_cleanup() {
         futures_lite::future::block_on(async {
             for scenario in 0..2 {
-                let (root, store) = temp_store(&format!("lease-mismatch-{scenario}"));
+                let (_temp, _, store) = temp_store(&format!("lease-mismatch-{scenario}"));
                 let network = NetworkId::from_bytes([0x69; 16]);
                 let mut runtime = FakeRuntime::successful();
                 if scenario == 0 {
@@ -1588,7 +1586,6 @@ mod tests {
                 assert_eq!(error.kind(), ErrorKind::InvalidState);
                 assert!(error.message().contains("reconciliation"));
                 assert_eq!(operations.runtime.steps().len(), 4);
-                fs::remove_dir_all(root).unwrap();
             }
         });
     }
@@ -1601,7 +1598,7 @@ mod tests {
                 ("loopback", "127.0.0.1", 8),
                 ("ipv6", "2001:db8::2", 64),
             ] {
-                let (root, store) = temp_store(label);
+                let (_temp, _, store) = temp_store(label);
                 let network = NetworkId::from_bytes([0x69; 16]);
                 let mut runtime = FakeRuntime::successful();
                 runtime.lease_prefix_override = Some(
@@ -1624,7 +1621,6 @@ mod tests {
                 assert_eq!(retry.kind(), ErrorKind::InvalidState);
                 assert!(retry.message().contains("reconciliation"));
                 assert_eq!(operations.runtime.steps().len(), 4);
-                fs::remove_dir_all(root).unwrap();
             }
         });
     }
@@ -1646,7 +1642,7 @@ mod tests {
                 ("wrong-prefix", wrong_prefix),
             ] {
                 assert_ne!(unexpected, planned);
-                let (root, store) = temp_store(label);
+                let (_temp, _, store) = temp_store(label);
                 let mut runtime = FakeRuntime::successful();
                 runtime.lease_prefix_override = Some(unexpected);
                 let operations = TransactionalJoinNetworkOperations::with_runtime(store, runtime);
@@ -1665,7 +1661,6 @@ mod tests {
                 let retry = operations.join_network(network).await.unwrap_err();
                 assert_eq!(retry.kind(), ErrorKind::InvalidState);
                 assert!(retry.message().contains("reconciliation"));
-                fs::remove_dir_all(root).unwrap();
             }
         });
     }
@@ -1673,7 +1668,7 @@ mod tests {
     #[test]
     fn control_failure_removes_ip_then_disconnects_panu() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("control-failure");
+            let (_temp, _, store) = temp_store("control-failure");
             let network = NetworkId::from_bytes([0x46; 16]);
             let runtime = FakeRuntime {
                 steps: Mutex::new(Vec::new()),
@@ -1709,14 +1704,13 @@ mod tests {
             assert_eq!(denied.kind(), ErrorKind::InvalidState);
             assert!(denied.message().contains("reconciliation"));
             assert_eq!(operations.runtime.steps().len(), 6);
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
     #[test]
     fn mismatched_control_network_rolls_back_without_committing_membership() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("wrong-control-network");
+            let (_temp, _, store) = temp_store("wrong-control-network");
             let network = NetworkId::from_bytes([0x46; 16]);
             let mut runtime = FakeRuntime::successful();
             runtime.session_network_override = Some(NetworkId::from_bytes([0x77; 16]));
@@ -1743,13 +1737,12 @@ mod tests {
             let repeated_error = operations.join_network(network).await.unwrap_err();
             assert_eq!(repeated_error.kind(), ErrorKind::AuthenticationFailed);
             assert!(operations.store.load().unwrap().is_empty());
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
     #[test]
     fn the_join_gate_opens_only_in_a_feature_build_with_everything_wired() {
-        let (root, store) = temp_store("gate-open");
+        let (_temp, root, store) = temp_store("gate-open");
         let pool = Ipv4AddressPool::default();
         let pending = Arc::new(PendingJoinOperations::new(
             NetworkMembershipStore::new(root.join("pj-memberships")),
@@ -1820,7 +1813,6 @@ mod tests {
         assert!(open.runtime.hardware_verified);
         // Restart reconnection shares the same opened gate.
         assert!(open.client_runtime().is_some());
-        fs::remove_dir_all(root).unwrap();
     }
 
     /// Guards against the feature ever becoming a default: CI and the Debian package build
@@ -1843,7 +1835,7 @@ mod tests {
 
     #[test]
     fn configured_ipv4_pool_is_retained_by_production_join_coordinator() {
-        let (root, store) = temp_store("custom-pool");
+        let (_temp, root, store) = temp_store("custom-pool");
         let pool = Ipv4AddressPool::new("192.168.200.0".parse().unwrap(), 24, 24).unwrap();
         let pending = Arc::new(PendingJoinOperations::new(
             NetworkMembershipStore::new(root.join("pj-memberships")),
@@ -1870,12 +1862,11 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
         assert!(operations.store.load().unwrap().is_empty());
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn production_preflight_blocks_before_unsafe_partial_join() {
-        let (root, store) = temp_store("blocked");
+        let (_temp, _, store) = temp_store("blocked");
         let operations = TransactionalJoinNetworkOperations::new(store);
         let error = futures_lite::future::block_on(
             operations.join_network(NetworkId::from_bytes([0x47; 16])),
@@ -1884,13 +1875,12 @@ mod tests {
         assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
         assert!(error.message().contains("requires P7"));
         assert!(operations.store.load().unwrap().is_empty());
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn concurrent_durable_membership_change_rolls_everything_back() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("concurrent-membership");
+            let (_temp, _, store) = temp_store("concurrent-membership");
             let network = NetworkId::from_bytes([0x49; 16]);
             let concurrent_network = NetworkId::from_bytes([0x59; 16]);
             let runtime = FakeRuntime {
@@ -1929,7 +1919,6 @@ mod tests {
                 registry.network(&concurrent_network).unwrap().state,
                 MembershipState::Member
             );
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
@@ -1954,7 +1943,7 @@ mod tests {
     #[test]
     fn durable_member_without_runtime_does_not_fake_join_success() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("idempotent");
+            let (_temp, _, store) = temp_store("idempotent");
             let network = NetworkId::from_bytes([0x48; 16]);
             let mut membership =
                 NetworkMembership::new(network, DisplayName::new("Already joined").unwrap());
@@ -1969,7 +1958,6 @@ mod tests {
             assert_eq!(error.kind(), ErrorKind::InvalidState);
             assert!(error.message().contains("P6-009"));
             assert!(operations.runtime.steps().is_empty());
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
@@ -1998,11 +1986,12 @@ mod tests {
             label: &str,
             runtime: FakeRuntime,
         ) -> (
+            tempfile::TempDir,
             std::path::PathBuf,
             TransactionalJoinNetworkOperations<FakeRuntime>,
             std::sync::Arc<PendingJoinOperations>,
         ) {
-            let (root, store) = temp_store(label);
+            let (temp, root, store) = temp_store(label);
             let pending = std::sync::Arc::new(PendingJoinOperations::new(
                 NetworkMembershipStore::new(root.join("memberships-v1")),
                 PendingJoinStore::new(root.join("pending")),
@@ -2012,7 +2001,7 @@ mod tests {
                     pending.clone(),
                     PeerPinStore::new(root.join("pins")),
                 )));
-            (root, operations, pending)
+            (temp, root, operations, pending)
         }
 
         fn record(pending: &PendingJoinOperations) {
@@ -2023,7 +2012,8 @@ mod tests {
 
         #[test]
         fn success_commits_member_with_trusted_pinned_host_and_clears_the_record() {
-            let (root, operations, pending) = operations("auth-ok", FakeRuntime::successful());
+            let (_temp, root, operations, pending) =
+                operations("auth-ok", FakeRuntime::successful());
             record(&pending);
             futures_lite::future::block_on(operations.join_network(network())).unwrap();
             let registry = NetworkMembershipStore::new(root.join("memberships-v1"))
@@ -2041,21 +2031,22 @@ mod tests {
                     .is_ok()
             );
             assert_eq!(pending.pending_host().unwrap(), None);
-            let _ = fs::remove_dir_all(root);
         }
 
         fn with_records(
             label: &str,
             runtime: FakeRuntime,
         ) -> (
+            tempfile::TempDir,
             std::path::PathBuf,
             TransactionalJoinNetworkOperations<FakeRuntime>,
             std::sync::Arc<PendingJoinOperations>,
             std::sync::Arc<crate::ClientRecordStore>,
         ) {
-            let (root, operations, pending) = operations(label, runtime);
+            let (temp, root, operations, pending) = operations(label, runtime);
             let records = std::sync::Arc::new(crate::ClientRecordStore::new(root.join("client")));
             (
+                temp,
                 root,
                 operations.with_client_records(records.clone()),
                 pending,
@@ -2065,30 +2056,28 @@ mod tests {
 
         #[test]
         fn a_committed_join_records_the_host_and_the_device_hint() {
-            let (root, operations, pending, records) =
+            let (_temp, _, operations, pending, records) =
                 with_records("hint-write", FakeRuntime::successful());
             record(&pending);
             futures_lite::future::block_on(operations.join_network(network())).unwrap();
             let stored = records.load_for(network()).unwrap().unwrap();
             assert_eq!(stored.host(), host());
             assert!(stored.device_hint().is_some());
-            let _ = fs::remove_dir_all(root);
         }
 
         #[test]
         fn a_failed_join_leaves_no_client_record() {
-            let (root, operations, pending, records) =
+            let (_temp, _, operations, pending, records) =
                 with_records("hint-failed", FakeRuntime::successful());
             // No pending host recorded, so the commit is refused.
             let _ = futures_lite::future::block_on(operations.join_network(network())).unwrap_err();
             assert_eq!(records.load().unwrap(), None);
             drop(pending);
-            let _ = fs::remove_dir_all(root);
         }
 
         #[test]
         fn leave_clears_the_record_and_a_failed_leave_keeps_it() {
-            let (root, operations, pending, records) =
+            let (_temp, _, operations, pending, records) =
                 with_records("hint-leave", FakeRuntime::successful());
             record(&pending);
             futures_lite::future::block_on(operations.join_network(network())).unwrap();
@@ -2104,7 +2093,6 @@ mod tests {
                 .store(false, Ordering::SeqCst);
             assert!(futures_lite::future::block_on(operations.leave_joined()).unwrap());
             assert_eq!(records.load().unwrap(), None);
-            let _ = fs::remove_dir_all(root);
         }
 
         struct FailingFinalize(PendingHostCommitAuthorization);
@@ -2139,7 +2127,7 @@ mod tests {
 
         #[test]
         fn a_failed_finalize_reverts_membership_and_pin_so_no_stale_record_survives_a_join() {
-            let (root, store) = temp_store("auth-finalize");
+            let (_temp, root, store) = temp_store("auth-finalize");
             let pending = std::sync::Arc::new(PendingJoinOperations::new(
                 NetworkMembershipStore::new(root.join("memberships-v1")),
                 PendingJoinStore::new(root.join("pending")),
@@ -2173,12 +2161,12 @@ mod tests {
             ]));
             // The wrapper then forgets the operator's intent after the failed attempt.
             assert_eq!(pending.pending_host().unwrap(), None);
-            let _ = fs::remove_dir_all(root);
         }
 
         #[test]
         fn a_missing_host_record_rolls_back_everything_and_commits_no_membership() {
-            let (root, operations, _pending) = operations("auth-none", FakeRuntime::successful());
+            let (_temp, root, operations, _pending) =
+                operations("auth-none", FakeRuntime::successful());
             let error =
                 futures_lite::future::block_on(operations.join_network(network())).unwrap_err();
             assert_eq!(error.kind(), ErrorKind::AuthenticationFailed);
@@ -2204,14 +2192,13 @@ mod tests {
                     .unwrap()
                     .is_empty()
             );
-            let _ = fs::remove_dir_all(root);
         }
 
         #[test]
         fn a_failed_attempt_after_runtime_mutation_forgets_the_pending_host() {
             let mut runtime = FakeRuntime::successful();
             runtime.fail_control = true;
-            let (root, operations, pending) = operations("auth-fail", runtime);
+            let (_temp, root, operations, pending) = operations("auth-fail", runtime);
             record(&pending);
             assert!(futures_lite::future::block_on(operations.join_network(network())).is_err());
             assert_eq!(pending.pending_host().unwrap(), None);
@@ -2221,12 +2208,12 @@ mod tests {
                     .unwrap()
                     .is_empty()
             );
-            let _ = fs::remove_dir_all(root);
         }
 
         #[test]
         fn a_refusal_before_any_runtime_mutation_keeps_the_pending_host() {
-            let (root, operations, pending) = operations("auth-early", FakeRuntime::successful());
+            let (_temp, root, operations, pending) =
+                operations("auth-early", FakeRuntime::successful());
             record(&pending);
             // Becomes a member of a different network after the host was recorded.
             let store = NetworkMembershipStore::new(root.join("memberships-v1"));
@@ -2246,7 +2233,6 @@ mod tests {
                     .unwrap()
                     .is_some()
             );
-            let _ = fs::remove_dir_all(root);
         }
     }
 
@@ -2283,13 +2269,19 @@ mod tests {
             }
         }
 
-        fn pending(label: &str) -> (std::path::PathBuf, Arc<PendingJoinOperations>) {
-            let (root, _) = temp_store(label);
+        fn pending(
+            label: &str,
+        ) -> (
+            tempfile::TempDir,
+            std::path::PathBuf,
+            Arc<PendingJoinOperations>,
+        ) {
+            let (temp, root, _) = temp_store(label);
             let pending = Arc::new(PendingJoinOperations::new(
                 NetworkMembershipStore::new(root.join("memberships-v1")),
                 PendingJoinStore::new(root.join("pending")),
             ));
-            (root, pending)
+            (temp, root, pending)
         }
 
         #[test]
@@ -2327,7 +2319,7 @@ mod tests {
 
         #[test]
         fn even_when_open_preflight_needs_the_confirmed_host() {
-            let (root, pending) = pending("rt-preflight");
+            let (_temp, _, pending) = pending("rt-preflight");
             let without_store = LinuxJoinRuntime::default().hardware_verified_for_tests();
             assert_eq!(
                 futures_lite::future::block_on(without_store.preflight(net()))
@@ -2359,7 +2351,6 @@ mod tests {
                 )
                 .is_err()
             );
-            let _ = fs::remove_dir_all(root);
         }
 
         #[test]
@@ -2449,15 +2440,16 @@ mod tests {
         fn joined(
             label: &str,
         ) -> (
+            tempfile::TempDir,
             std::path::PathBuf,
             TransactionalJoinNetworkOperations<FakeRuntime>,
         ) {
-            let (root, store) = temp_store(label);
+            let (temp, root, store) = temp_store(label);
             let operations =
                 TransactionalJoinNetworkOperations::with_runtime(store, FakeRuntime::successful());
             futures_lite::future::block_on(operations.join_network(net())).unwrap();
             operations.runtime.steps.lock().unwrap().clear();
-            (root, operations)
+            (temp, root, operations)
         }
 
         fn state(root: &std::path::Path) -> Option<MembershipState> {
@@ -2470,7 +2462,7 @@ mod tests {
 
         #[test]
         fn leaving_reverses_the_join_in_order_and_clears_membership() {
-            let (root, operations) = joined("leave-ok");
+            let (_temp, root, operations) = joined("leave-ok");
             assert_eq!(state(&root), Some(MembershipState::Member));
             assert!(futures_lite::future::block_on(operations.leave_joined()).unwrap());
             assert_eq!(
@@ -2481,12 +2473,11 @@ mod tests {
             assert!(!operations.runtime.joined_client(net()));
             // Nothing left to leave: a second call is a clean "not a joined client".
             assert!(!futures_lite::future::block_on(operations.leave_joined()).unwrap());
-            let _ = fs::remove_dir_all(root);
         }
 
         #[test]
         fn a_teardown_failure_keeps_member_and_can_be_retried() {
-            let (root, operations) = joined("leave-retry");
+            let (_temp, root, operations) = joined("leave-retry");
             operations
                 .runtime
                 .fail_leave_address
@@ -2501,13 +2492,12 @@ mod tests {
                 .store(false, Ordering::SeqCst);
             assert!(futures_lite::future::block_on(operations.leave_joined()).unwrap());
             assert_eq!(state(&root), Some(MembershipState::NotMember));
-            let _ = fs::remove_dir_all(root);
         }
 
         #[test]
         fn a_node_that_is_not_a_joined_client_is_left_to_host_leave() {
             // No network at all.
-            let (root, store) = temp_store("leave-none");
+            let (_temp, root, store) = temp_store("leave-none");
             let operations =
                 TransactionalJoinNetworkOperations::with_runtime(store, FakeRuntime::successful());
             assert!(!futures_lite::future::block_on(operations.leave_joined()).unwrap());
@@ -2521,12 +2511,11 @@ mod tests {
             assert!(!futures_lite::future::block_on(operations.leave_joined()).unwrap());
             assert!(operations.runtime.steps().is_empty());
             assert_eq!(state(&root), Some(MembershipState::Member));
-            let _ = fs::remove_dir_all(root);
         }
 
         #[test]
         fn a_restarted_client_with_a_persisted_client_role_can_leave_without_retained_state() {
-            let (root, store) = temp_store("leave-restarted");
+            let (_temp, root, store) = temp_store("leave-restarted");
             let operations =
                 TransactionalJoinNetworkOperations::with_runtime(store, FakeRuntime::successful());
             let mut membership = NetworkMembership::new(net(), DisplayName::new("Joined").unwrap());
@@ -2545,18 +2534,16 @@ mod tests {
             assert_eq!(state(&root), Some(MembershipState::NotMember));
             let membership = operations.store.load().unwrap();
             assert_eq!(membership.network(&net()).unwrap().role, None);
-            let _ = fs::remove_dir_all(root);
         }
 
         #[test]
         fn leave_is_refused_while_a_join_is_in_progress() {
-            let (root, store) = temp_store("leave-busy");
+            let (_temp, _, store) = temp_store("leave-busy");
             let operations =
                 TransactionalJoinNetworkOperations::with_runtime(store, FakeRuntime::successful());
             let _busy = JoinTransitionGuard::claim(&operations.join_in_progress).unwrap();
             let error = futures_lite::future::block_on(operations.leave_joined()).unwrap_err();
             assert_eq!(error.kind(), ErrorKind::InvalidState);
-            let _ = fs::remove_dir_all(root);
         }
     }
 }

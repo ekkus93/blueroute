@@ -93,10 +93,11 @@ fn save_host(path: &std::path::Path) {
 
 #[test]
 fn malformed_durable_host_retires_listener_and_requires_explicit_repair() {
-    let path = std::env::temp_dir().join(format!(
-        "blueroute-worker-corrupt-integration-{}",
-        std::process::id()
-    ));
+    let temp = tempfile::Builder::new()
+        .prefix("blueroute-worker-corrupt-integration-")
+        .tempdir()
+        .unwrap();
+    let path = temp.path().join("memberships");
     save_host(&path);
     let backend = Arc::new(StaleNap::default());
     let trust = Arc::new(DurablePeerTrustOperations::new(

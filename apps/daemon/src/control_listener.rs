@@ -1200,8 +1200,6 @@ mod tests {
             ConnectionDeadline, ConnectionStage, ControlSessionRegistry, PeerSessionKey,
         };
 
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-
         fn approved_trust(path: &Path, peer: PinnedControlTlsPeer) -> DurablePeerTrustOperations {
             fs::create_dir_all(path).unwrap();
             let membership_store = NetworkMembershipStore::new(path.join("membership"));
@@ -1330,11 +1328,11 @@ mod tests {
             };
             let mut owner = ObservedControlListener::new(listener_network, addr, listener).unwrap();
             let client_socket = TcpStream::connect(addr).unwrap();
-            let root = std::env::temp_dir().join(format!(
-                "blueroute-listener-post-auth-{}-{}",
-                std::process::id(),
-                NEXT.fetch_add(1, Ordering::Relaxed),
-            ));
+            let temp = tempfile::Builder::new()
+                .prefix("blueroute-listener-post-auth-")
+                .tempdir()
+                .unwrap();
+            let root = temp.path().join("root");
             fs::create_dir_all(&root).unwrap();
             let server_dir = root.join("server");
             let client_dir = root.join("client");
@@ -1580,7 +1578,6 @@ mod tests {
             .unwrap();
             drop(session);
             server_thread.join().unwrap();
-            fs::remove_dir_all(root).unwrap();
         }
     }
 }

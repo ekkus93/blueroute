@@ -1158,11 +1158,11 @@ mod local_node_tests {
     #[test]
     fn renaming_persists_changes_only_the_label_and_survives_a_new_service() {
         futures_lite::future::block_on(async {
-            let dir = std::env::temp_dir().join(format!(
-                "blueroute-rename-{}-{}",
-                std::process::id(),
-                line!()
-            ));
+            let temp = tempfile::Builder::new()
+                .prefix("blueroute-rename-")
+                .tempdir()
+                .unwrap();
+            let dir = temp.path().join("state");
             let local = NodeId::from_bytes([0x71; 16]);
             let service =
                 || DaemonService::new(local, HealthLevel::Healthy, NodeCapabilities::default());
@@ -1197,7 +1197,6 @@ mod local_node_tests {
                 .await
                 .unwrap_err();
             assert!(matches!(refused.fdo(), Some(fdo::Error::NotSupported(_))));
-            let _ = std::fs::remove_dir_all(dir);
         });
     }
 

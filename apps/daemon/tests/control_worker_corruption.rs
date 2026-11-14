@@ -102,10 +102,11 @@ fn wait_for(mut condition: impl FnMut() -> bool, why: &str) {
 
 #[test]
 fn corrupt_membership_blocks_worker_startup_and_rebind_until_repair() {
-    let path = std::env::temp_dir().join(format!(
-        "blueroute-worker-corrupt-durable-{}",
-        std::process::id()
-    ));
+    let temp = tempfile::Builder::new()
+        .prefix("blueroute-worker-corrupt-durable-")
+        .tempdir()
+        .unwrap();
+    let path = temp.path().join("memberships");
     save_host(&path);
     std::fs::write(&path, b"invalid durable membership").unwrap();
     assert!(NetworkMembershipStore::new(path.clone()).load().is_err());

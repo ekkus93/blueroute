@@ -14,13 +14,16 @@ fn daemon(state: &PathBuf, arguments: &[&str]) -> Output {
         .expect("the daemon binary runs")
 }
 
-fn state(label: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!(
-        "blueroute-maintenance-{label}-{}",
-        std::process::id()
-    ));
+/// A fresh state directory inside a private temporary directory. The guard removes it on drop,
+/// so it must outlive every daemon child process the test runs against the path.
+fn state(label: &str) -> (tempfile::TempDir, PathBuf) {
+    let temp = tempfile::Builder::new()
+        .prefix(&format!("blueroute-maintenance-{label}-"))
+        .tempdir()
+        .unwrap();
+    let path = temp.path().join("state");
     std::fs::create_dir_all(&path).unwrap();
-    path
+    (temp, path)
 }
 
 fn stderr(output: &Output) -> String {
@@ -29,7 +32,7 @@ fn stderr(output: &Output) -> String {
 
 #[test]
 fn only_the_fixed_maintenance_flag_is_accepted() {
-    let state = state("arguments");
+    let (_temp, state) = state("arguments");
     for arguments in [
         &["--help"][..],
         &["--remove-owned-networking", "extra"],
@@ -39,7 +42,6 @@ fn only_the_fixed_maintenance_flag_is_accepted() {
         assert_eq!(output.status.code(), Some(2), "{arguments:?}");
         assert!(stderr(&output).contains("usage"), "{arguments:?}");
     }
-    std::fs::remove_dir_all(state).unwrap();
 }
 
 #[test]
@@ -47,18 +49,17 @@ fn removal_cleanup_is_refused_to_anyone_but_root() {
     if std::fs::metadata("/proc/self").unwrap().uid() == 0 {
         return; // Only meaningful for an unprivileged test run.
     }
-    let state = state("non-root");
+    let (_temp, state) = state("non-root");
     let output = daemon(&state, &["--remove-owned-networking"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(stderr(&output).contains("must run as root"));
     // Refused before touching the state directory.
     assert!(!state.join(REMOVAL_PENDING_FILE).exists());
-    std::fs::remove_dir_all(state).unwrap();
 }
 
 #[test]
 fn a_pending_removal_keeps_the_daemon_from_starting() {
-    let state = state("pending");
+    let (_temp, state) = state("pending");
     std::fs::write(state.join(REMOVAL_PENDING_FILE), b"removing\n").unwrap();
     let output = daemon(&state, &[]);
     assert_eq!(output.status.code(), Some(1));
@@ -67,12 +68,11 @@ fn a_pending_removal_keeps_the_daemon_from_starting() {
         "{}",
         stderr(&output)
     );
-    std::fs::remove_dir_all(state).unwrap();
 }
 
 #[test]
 fn a_held_instance_lock_keeps_a_second_daemon_from_starting() {
-    let state = state("locked");
+    let (_temp, state) = state("locked");
     let _running = acquire_instance_lock(&state).unwrap();
     let output = daemon(&state, &[]);
     assert_eq!(output.status.code(), Some(1));
@@ -81,5 +81,4 @@ fn a_held_instance_lock_keeps_a_second_daemon_from_starting() {
         "{}",
         stderr(&output)
     );
-    std::fs::remove_dir_all(state).unwrap();
 }

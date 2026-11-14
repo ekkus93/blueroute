@@ -62,19 +62,20 @@ fn invalid(message: &'static str) -> CoreError {
 mod tests {
     use super::*;
 
-    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-    fn directory() -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "blueroute-device-name-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ))
+    /// A not-yet-existing directory inside a private temporary directory that the returned
+    /// guard removes when dropped, even if the test panics.
+    fn directory() -> (tempfile::TempDir, PathBuf) {
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-device-name-")
+            .tempdir()
+            .unwrap();
+        let dir = temp.path().join("state");
+        (temp, dir)
     }
 
     #[test]
     fn names_round_trip_and_unset_is_none() {
-        let dir = directory();
+        let (_temp, dir) = directory();
         let store = DeviceNameStore::new(&dir);
         assert_eq!(store.load().unwrap(), None);
         let name = DisplayName::new("Kitchen laptop ☕").unwrap();
@@ -83,7 +84,6 @@ mod tests {
         let renamed = DisplayName::new("Workshop").unwrap();
         store.save(&renamed).unwrap();
         assert_eq!(store.load().unwrap(), Some(renamed));
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -94,7 +94,7 @@ mod tests {
             "BLUEROUTE_DEVICE_NAME_V1\none\ntwo\n",
             "BLUEROUTE_DEVICE_NAME_V1\n\u{202e}evil\n",
         ] {
-            let dir = directory();
+            let (_temp, dir) = directory();
             let store = DeviceNameStore::new(&dir);
             store
                 .secrets
@@ -105,7 +105,6 @@ mod tests {
                 ErrorKind::InvalidState,
                 "{body:?}"
             );
-            let _ = std::fs::remove_dir_all(dir);
         }
     }
 }

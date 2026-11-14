@@ -14,11 +14,11 @@ use blueroute_daemon::ControlTlsIdentityStore;
 
 #[test]
 fn simultaneous_initializations_converge_to_one_persisted_tls_identity() {
-    let root = std::env::temp_dir().join(format!(
-        "blueroute-concurrent-control-identity-{}-{:?}",
-        std::process::id(),
-        thread::current().id()
-    ));
+    let temp = tempfile::Builder::new()
+        .prefix("blueroute-concurrent-control-identity-")
+        .tempdir()
+        .unwrap();
+    let root = temp.path().join("state");
     fs::create_dir(&root).unwrap();
     let identity_dir = root.join("control-tls");
     let node = NodeId::from_bytes([0x41; 16]);
@@ -79,19 +79,18 @@ fn simultaneous_initializations_converge_to_one_persisted_tls_identity() {
         fs::metadata(&identity_dir).unwrap().permissions().mode() & 0o777,
         0o700
     );
-    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
 fn conflicting_node_id_first_start_never_creates_two_local_tls_owners() {
     // Two independent daemon processes can accidentally target the same
     // state directory. Precisely one NodeId may claim the persisted key.
-    for trial in 0..4 {
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-conflicting-control-identity-{}-{:?}-{trial}",
-            std::process::id(),
-            thread::current().id()
-        ));
+    for _ in 0..4 {
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-conflicting-control-identity-")
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("state");
         fs::create_dir(&root).unwrap();
         let identity_dir = root.join("control-tls");
         let gate = Arc::new(Barrier::new(2));
@@ -140,6 +139,5 @@ fn conflicting_node_id_first_start_never_creates_two_local_tls_owners() {
             .load_or_create(*winner)
             .unwrap();
         assert_eq!(&reopened.fingerprint(), fingerprint);
-        fs::remove_dir_all(root).unwrap();
     }
 }

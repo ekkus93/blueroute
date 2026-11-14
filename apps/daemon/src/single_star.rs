@@ -1538,18 +1538,24 @@ mod tests {
         }
     }
 
-    fn temp_store(label: &str) -> (std::path::PathBuf, NetworkMembershipStore) {
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-p6-001-{label}-{}-{}",
-            std::process::id(),
-            NEXT_TEST.fetch_add(1, Ordering::Relaxed)
-        ));
+    /// A store in a private temporary directory. The returned guard removes the directory when
+    /// dropped, even if the test panics, so callers keep it alive for the whole test.
+    fn temp_store(
+        label: &str,
+    ) -> (
+        tempfile::TempDir,
+        std::path::PathBuf,
+        NetworkMembershipStore,
+    ) {
+        let temp = tempfile::Builder::new()
+            .prefix(&format!("blueroute-p6-001-{label}-"))
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("root");
         fs::create_dir_all(&root).unwrap();
         let path = root.join("memberships-v1");
-        (root, NetworkMembershipStore::new(path))
+        (temp, root, NetworkMembershipStore::new(path))
     }
-
-    static NEXT_TEST: AtomicUsize = AtomicUsize::new(0);
 
     #[test]
     fn repeated_host_start_requires_exact_network_bridge_and_address_ownership() {
@@ -1658,7 +1664,7 @@ mod tests {
                     .is_none()
             );
 
-            let (root, store) = temp_store("idle-control-listener");
+            let (_temp, _, store) = temp_store("idle-control-listener");
             let operations = SingleStarNetworkOperations::with_runtime_and_generator(
                 store,
                 DaemonConfig::default(),
@@ -1687,7 +1693,6 @@ mod tests {
                     .unwrap()
                     .is_none()
             );
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
@@ -1800,7 +1805,7 @@ mod tests {
     #[test]
     fn create_network_commits_membership_only_after_runtime_setup() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("commit");
+            let (_temp, _, store) = temp_store("commit");
             let network = NetworkId::from_bytes([7; 16]);
             let runtime = FakeRuntime::default();
             let operations = SingleStarNetworkOperations::with_runtime_and_generator(
@@ -1822,15 +1827,13 @@ mod tests {
             assert_eq!(networks[0].id, network);
             assert_eq!(networks[0].name.as_str(), "Workshop");
             assert_eq!(networks[0].member_count, 1);
-
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
     #[test]
     fn leave_stops_owned_host_clears_membership_and_retains_peer_trust() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("leave");
+            let (_temp, _, store) = temp_store("leave");
             let network = NetworkId::from_bytes([0x31; 16]);
             let peer = blueroute_core::NodeId::from_bytes([0x32; 16]);
             let runtime = FakeRuntime::default();
@@ -1862,14 +1865,13 @@ mod tests {
             assert_eq!(current_network(&restored).unwrap(), None);
             assert_eq!(runtime.state.stops.load(Ordering::SeqCst), 1);
             assert!(!runtime.state.active.load(Ordering::SeqCst));
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
     #[test]
     fn leave_refuses_to_clear_membership_when_runtime_is_not_owned() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("leave-not-owned");
+            let (_temp, _, store) = temp_store("leave-not-owned");
             let network = NetworkId::from_bytes([0x41; 16]);
             let runtime = FakeRuntime::default();
             let mut registry = MembershipRegistry::default();
@@ -1895,14 +1897,13 @@ mod tests {
                 current_network(&operations.store.load().unwrap()).unwrap(),
                 Some(network)
             );
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
     #[test]
     fn startup_reconciliation_restores_host_from_durable_membership() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("startup-reconcile");
+            let (_temp, _, store) = temp_store("startup-reconcile");
             let network = NetworkId::from_bytes([0x71; 16]);
             let mut registry = MembershipRegistry::default();
             let mut membership =
@@ -1930,14 +1931,13 @@ mod tests {
                 current_network(&operations.store.load().unwrap()).unwrap(),
                 Some(network)
             );
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
     #[test]
     fn startup_reconciliation_keeps_membership_when_runtime_restore_fails() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("startup-reconcile-failure");
+            let (_temp, _, store) = temp_store("startup-reconcile-failure");
             let network = NetworkId::from_bytes([0x72; 16]);
             let mut registry = MembershipRegistry::default();
             let mut membership =
@@ -1967,14 +1967,13 @@ mod tests {
                 current_network(&operations.store.load().unwrap()).unwrap(),
                 Some(network)
             );
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
     #[test]
     fn failed_host_cleanup_keeps_membership_for_retry() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("leave-cleanup-failure");
+            let (_temp, _, store) = temp_store("leave-cleanup-failure");
             let network = NetworkId::from_bytes([0x51; 16]);
             let runtime = FakeRuntime::default();
             let operations = SingleStarNetworkOperations::with_runtime_and_generator(
@@ -1999,14 +1998,13 @@ mod tests {
                 Some(network)
             );
             assert!(runtime.state.active.load(Ordering::SeqCst));
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
     #[test]
     fn unavailable_nap_fails_before_runtime_mutation() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("no-nap");
+            let (_temp, _, store) = temp_store("no-nap");
             let runtime = FakeRuntime::default();
             let operations = SingleStarNetworkOperations::with_runtime_and_generator(
                 store,
@@ -2022,14 +2020,13 @@ mod tests {
                 .unwrap_err();
             assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
             assert_eq!(runtime.starts(), 0);
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
     #[test]
     fn runtime_failure_does_not_persist_membership() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("runtime-fail");
+            let (_temp, _, store) = temp_store("runtime-fail");
             let runtime = FakeRuntime::default();
             runtime.state.fail_start.store(true, Ordering::SeqCst);
             let operations = SingleStarNetworkOperations::with_runtime_and_generator(
@@ -2047,14 +2044,13 @@ mod tests {
             assert_eq!(error.kind(), ErrorKind::PanFailure);
             assert_eq!(runtime.starts(), 1);
             assert!(operations.list_networks().await.unwrap().is_empty());
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
     #[test]
     fn second_create_is_rejected_without_a_second_runtime_start() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("duplicate");
+            let (_temp, _, store) = temp_store("duplicate");
             let runtime = FakeRuntime::default();
             let operations = SingleStarNetworkOperations::with_runtime_and_generator(
                 store,
@@ -2077,14 +2073,13 @@ mod tests {
                 .unwrap_err();
             assert_eq!(error.kind(), ErrorKind::InvalidState);
             assert_eq!(runtime.starts(), 1);
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
     #[test]
     fn address_conflict_retries_with_a_fresh_network_identity_before_commit() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("address-retry");
+            let (_temp, _, store) = temp_store("address-retry");
             let runtime = FakeRuntime::default();
             runtime
                 .state
@@ -2112,7 +2107,6 @@ mod tests {
                 registry.network(&second).unwrap().state,
                 MembershipState::Member
             );
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
@@ -2201,7 +2195,7 @@ mod tests {
             let network = NetworkId::from_bytes([0x91; 16]);
             let other = NetworkId::from_bytes([0x92; 16]);
             for scenario in 0..4 {
-                let (root, store) = temp_store("guarded-durable-membership");
+                let (_temp, root, store) = temp_store("guarded-durable-membership");
                 if scenario != 0 {
                     let mut registry = MembershipRegistry::default();
                     let mut member =
@@ -2246,7 +2240,6 @@ mod tests {
                         "mismatched or changed membership must close listener"
                     );
                 }
-                fs::remove_dir_all(root).unwrap();
             }
         });
     }
@@ -2315,7 +2308,7 @@ mod tests {
             };
             let expected = SocketAddrV4::new(ip, crate::CONTROL_TCP_PORT);
             for scenario in 0..4 {
-                let (root, store) = temp_store("observed-durable-endpoint");
+                let (_temp, root, store) = temp_store("observed-durable-endpoint");
                 if scenario != 0 {
                     let mut registry = MembershipRegistry::default();
                     let mut member =
@@ -2358,7 +2351,6 @@ mod tests {
                         assert_eq!(observations.load(Ordering::SeqCst), 1);
                     }
                 }
-                fs::remove_dir_all(root).unwrap();
             }
         });
     }
@@ -2427,7 +2419,7 @@ mod tests {
             let network = NetworkId::from_bytes([0x91; 16]);
             let other = NetworkId::from_bytes([0x92; 16]);
             for scenario in 0..3 {
-                let (root, store) = temp_store("raw-control-durable-membership");
+                let (_temp, root, store) = temp_store("raw-control-durable-membership");
                 if scenario != 0 {
                     let mut registry = MembershipRegistry::default();
                     let mut member =
@@ -2465,7 +2457,6 @@ mod tests {
                         "raw listener must close after endpoint or membership mismatch"
                     );
                 }
-                fs::remove_dir_all(root).unwrap();
             }
         });
     }
@@ -2540,7 +2531,7 @@ mod tests {
                 )
             };
             // No network: nothing to do.
-            let (root, store) = temp_store("running-none");
+            let (_temp, _, store) = temp_store("running-none");
             let runtime = FakeRuntime::default();
             assert!(
                 !operations_for(store, &runtime)
@@ -2549,11 +2540,10 @@ mod tests {
                     .unwrap()
             );
             assert_eq!(runtime.starts(), 0);
-            fs::remove_dir_all(root).unwrap();
 
             // A joined client or an unknown role is never hosted.
             for (label, role) in [("client", Some(MembershipRole::Client)), ("unknown", None)] {
-                let (root, store) = temp_store(&format!("running-{label}"));
+                let (_temp, _, store) = temp_store(&format!("running-{label}"));
                 store
                     .save(&registry_with_role(NetworkId::from_bytes([0x75; 16]), role))
                     .unwrap();
@@ -2565,11 +2555,10 @@ mod tests {
                         .unwrap()
                 );
                 assert_eq!(runtime.starts(), 0, "{label}");
-                fs::remove_dir_all(root).unwrap();
             }
 
             // A host is re-asserted every time, and a failure is reported, not hidden.
-            let (root, store) = temp_store("running-host");
+            let (_temp, _, store) = temp_store("running-host");
             let network = NetworkId::from_bytes([0x76; 16]);
             store
                 .save(&registry_with_role(network, Some(MembershipRole::Host)))
@@ -2595,7 +2584,6 @@ mod tests {
             let _busy = TransitionGuard::claim(&operations.creating).unwrap();
             assert!(!operations.reconcile_running().await.unwrap());
             assert_eq!(runtime.starts(), 3);
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
@@ -2603,7 +2591,7 @@ mod tests {
     fn startup_never_restores_a_joined_client_or_an_unknown_role_as_a_host() {
         futures_lite::future::block_on(async {
             for (label, role) in [("client", Some(MembershipRole::Client)), ("unknown", None)] {
-                let (root, store) = temp_store(&format!("startup-role-{label}"));
+                let (_temp, _, store) = temp_store(&format!("startup-role-{label}"));
                 let network = NetworkId::from_bytes([0x73; 16]);
                 store.save(&registry_with_role(network, role)).unwrap();
                 let runtime = FakeRuntime::default();
@@ -2622,7 +2610,6 @@ mod tests {
                     current_network(&operations.store.load().unwrap()).unwrap(),
                     Some(network)
                 );
-                fs::remove_dir_all(root).unwrap();
             }
         });
     }
@@ -2631,7 +2618,7 @@ mod tests {
     fn host_leave_refuses_a_joined_client_or_an_unknown_role_and_touches_nothing() {
         futures_lite::future::block_on(async {
             for (label, role) in [("client", Some(MembershipRole::Client)), ("unknown", None)] {
-                let (root, store) = temp_store(&format!("leave-role-{label}"));
+                let (_temp, _, store) = temp_store(&format!("leave-role-{label}"));
                 let network = NetworkId::from_bytes([0x74; 16]);
                 store.save(&registry_with_role(network, role)).unwrap();
                 let runtime = FakeRuntime::default();
@@ -2651,7 +2638,6 @@ mod tests {
                     registry.network(&network).unwrap().state,
                     MembershipState::Member
                 );
-                fs::remove_dir_all(root).unwrap();
             }
         });
     }
@@ -2659,7 +2645,7 @@ mod tests {
     #[test]
     fn creating_records_the_host_role_and_host_leave_clears_it() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("create-role");
+            let (_temp, _, store) = temp_store("create-role");
             let network = NetworkId::from_bytes([0x75; 16]);
             let operations = SingleStarNetworkOperations::with_runtime_and_generator(
                 store,
@@ -2684,7 +2670,6 @@ mod tests {
                 registry.network(&network).unwrap().state,
                 MembershipState::NotMember
             );
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
@@ -2693,7 +2678,7 @@ mod tests {
     #[test]
     fn cr_f4_recovered_hosting_capability_unblocks_create_without_restart() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("cr-f4-recovery");
+            let (_temp, root, store) = temp_store("cr-f4-recovery");
             let runtime = FakeRuntime::default();
             let network = NetworkId::from_bytes([0xf4; 16]);
             let operations = Arc::new(SingleStarNetworkOperations::with_runtime_and_generator(
@@ -2752,28 +2737,20 @@ mod tests {
                 .await
                 .expect("eligible creation proceeds on fresh capabilities");
             assert_eq!(runtime.starts(), 1);
-
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
     /// One daemon service over one operations instance with a fake runtime, starting from
     /// `startup` hosting capability on both.
     struct CapabilityFixture {
-        root: std::path::PathBuf,
+        _temp: tempfile::TempDir,
         runtime: FakeRuntime,
         service: crate::DaemonService,
     }
 
-    impl Drop for CapabilityFixture {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
-    }
-
     impl CapabilityFixture {
         fn new(label: &str, startup: Option<bool>) -> Self {
-            let (root, store) = temp_store(label);
+            let (temp, root, store) = temp_store(label);
             let runtime = FakeRuntime::default();
             let operations = Arc::new(SingleStarNetworkOperations::with_runtime_and_generator(
                 store,
@@ -2799,7 +2776,7 @@ mod tests {
                 )),
             );
             Self {
-                root,
+                _temp: temp,
                 runtime,
                 service,
             }

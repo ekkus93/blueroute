@@ -104,7 +104,6 @@ mod tests {
     use std::fs;
     use std::io::Read;
     use std::net::TcpListener;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
     use std::time::Duration;
 
@@ -119,8 +118,6 @@ mod tests {
         PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer, accept_pinned_control_tls,
         exchange_control_tls_candidate,
     };
-
-    static NEXT_TEST: AtomicUsize = AtomicUsize::new(0);
 
     fn network() -> NetworkId {
         NetworkId::from_bytes([17; 16])
@@ -141,11 +138,11 @@ mod tests {
 
     #[test]
     fn first_key_is_persisted_only_after_approval_confirmation_tls_and_hello() {
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-enrollment-bootstrap-{}-{}",
-            std::process::id(),
-            NEXT_TEST.fetch_add(1, Ordering::Relaxed),
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-enrollment-bootstrap-")
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("root");
         fs::create_dir_all(&root).unwrap();
         let store = NetworkMembershipStore::new(root.join("membership"));
         let mut membership =
@@ -303,18 +300,17 @@ mod tests {
             trust.approved_control_pins(network()).unwrap(),
             vec![PinnedControlTlsPeer::new(network(), node(3), expected_key).unwrap()]
         );
-        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn revoked_approval_after_candidate_discovery_prevents_enrollment() {
         // Certificate discovery is not a durable authorization snapshot.
         // Revoke P6 membership approval between discovery and confirmed
         // enrollment; the second TCP socket must close before TLS.
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-enrollment-revoked-before-tls-{}-{}",
-            std::process::id(),
-            NEXT_TEST.fetch_add(1, Ordering::Relaxed),
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-enrollment-revoked-before-tls-")
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("root");
         fs::create_dir_all(&root).unwrap();
         let store = NetworkMembershipStore::new(root.join("membership"));
         let mut membership =
@@ -375,18 +371,17 @@ mod tests {
         );
         server_thread.join().unwrap();
         assert!(trust.approved_control_pins(network()).unwrap().is_empty());
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn mutually_authenticated_tls_without_hello_cannot_persist_first_key() {
         // A completed certificate proof is not sufficient. A peer that
         // immediately closes before Hello/HelloAck must remain unenrolled.
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-enrollment-no-hello-{}-{}",
-            std::process::id(),
-            NEXT_TEST.fetch_add(1, Ordering::Relaxed),
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-enrollment-no-hello-")
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("root");
         fs::create_dir_all(&root).unwrap();
         let store = NetworkMembershipStore::new(root.join("membership"));
         let mut membership =
@@ -456,7 +451,6 @@ mod tests {
         );
         server_thread.join().unwrap();
         assert!(trust.approved_control_pins(network()).unwrap().is_empty());
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -464,11 +458,11 @@ mod tests {
         // Two distinct certificates can claim the same canonical NodeId.
         // The independently confirmed first certificate is not proof that
         // the second socket still possesses that same private key.
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-enrollment-key-rotation-{}-{}",
-            std::process::id(),
-            NEXT_TEST.fetch_add(1, Ordering::Relaxed),
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-enrollment-key-rotation-")
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("root");
         fs::create_dir_all(&root).unwrap();
         let store = NetworkMembershipStore::new(root.join("membership"));
         let mut membership =
@@ -541,18 +535,17 @@ mod tests {
         );
         server_thread.join().unwrap();
         assert!(trust.approved_control_pins(network()).unwrap().is_empty());
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn authenticated_new_key_cannot_silently_replace_an_existing_pin() {
         // A verified new key still must not overwrite a different durable
         // pin for the same peer. Explicit rotation needs a separate ceremony.
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-enrollment-pin-conflict-{}-{}",
-            std::process::id(),
-            NEXT_TEST.fetch_add(1, Ordering::Relaxed),
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-enrollment-pin-conflict-")
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("root");
         fs::create_dir_all(&root).unwrap();
         let store = NetworkMembershipStore::new(root.join("membership"));
         let mut membership =
@@ -647,18 +640,17 @@ mod tests {
             trust.approved_control_pins(network()).unwrap(),
             vec![original_pin]
         );
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn revocation_after_mutual_tls_before_hello_prevents_first_key_enrollment() {
         // An approval snapshot taken before TLS cannot authorize a durable
         // pin after the operator revokes that peer during the handshake.
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-enrollment-revoked-after-tls-{}-{}",
-            std::process::id(),
-            NEXT_TEST.fetch_add(1, Ordering::Relaxed),
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-enrollment-revoked-after-tls-")
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("root");
         fs::create_dir_all(&root).unwrap();
         let store = NetworkMembershipStore::new(root.join("membership"));
         let mut membership =
@@ -758,6 +750,5 @@ mod tests {
                 .count(),
             0,
         );
-        fs::remove_dir_all(root).unwrap();
     }
 }

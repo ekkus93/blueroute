@@ -110,10 +110,11 @@ fn wait_for(mut ready: impl FnMut() -> bool, context: &str) {
 
 #[test]
 fn durable_network_switch_during_bind_rejects_stale_listener_then_recovers() {
-    let path = std::env::temp_dir().join(format!(
-        "blueroute-worker-bind-network-switch-{}",
-        std::process::id()
-    ));
+    let temp = tempfile::Builder::new()
+        .prefix("blueroute-worker-bind-network-switch-")
+        .tempdir()
+        .unwrap();
+    let path = temp.path().join("memberships");
     let original = NetworkId::from_bytes([7; 16]);
     let replaced = NetworkId::from_bytes([9; 16]);
     save_host(&path, original);

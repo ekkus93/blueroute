@@ -18,27 +18,24 @@ use blueroute_daemon::{NetworkOperationFuture, NetworkOperations, ObservedContro
 use blueroute_linux::NetworkMembershipStore;
 use blueroute_protocol::NetworkSummary;
 
-static NEXT_TEST: AtomicUsize = AtomicUsize::new(0);
-
 fn network(value: u8) -> NetworkId {
     NetworkId::from_bytes([value; 16])
 }
 
-fn member_store(label: &str) -> (PathBuf, NetworkMembershipStore) {
-    let root = std::env::temp_dir().join(format!(
-        "blueroute-durable-listener-{label}-{}-{}",
-        std::process::id(),
-        NEXT_TEST.fetch_add(1, Ordering::Relaxed),
-    ));
-    fs::create_dir_all(&root).unwrap();
-    let store = NetworkMembershipStore::new(root.join("membership"));
+/// A durable member store inside a private temporary directory; the guard removes it on drop.
+fn member_store(label: &str) -> (tempfile::TempDir, NetworkMembershipStore) {
+    let temp = tempfile::Builder::new()
+        .prefix(&format!("blueroute-durable-listener-{label}-"))
+        .tempdir()
+        .unwrap();
+    let store = NetworkMembershipStore::new(temp.path().join("membership"));
     let mut membership =
         NetworkMembership::new(network(7), DisplayName::new("NAP poll test").unwrap());
     membership.state = MembershipState::Member;
     let mut registry = MembershipRegistry::default();
     registry.remember_network(membership);
     store.save(&registry).unwrap();
-    (root, store)
+    (temp, store)
 }
 
 fn listener() -> (ObservedControlListener, SocketAddrV4) {
@@ -154,7 +151,7 @@ fn assert_closed(mut stream: TcpStream) {
 
 #[test]
 fn durable_poll_checks_idle_once_and_accepted_candidate_twice() {
-    let (root, store) = member_store("stable");
+    let (_temp, store) = member_store("stable");
     let (mut owner, endpoint) = listener();
     let backend = probe(&store, endpoint, ObservationMode::Stable);
     assert!(
@@ -180,12 +177,11 @@ fn durable_poll_checks_idle_once_and_accepted_candidate_twice() {
     drop(accepted);
     drop(client);
     drop(owner);
-    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
 fn membership_revocation_during_post_accept_backend_observation_retires_listener() {
-    let (root, store) = member_store("revoked");
+    let (_temp, store) = member_store("revoked");
     let (mut owner, endpoint) = listener();
     let backend = probe(
         &store,
@@ -212,7 +208,6 @@ fn membership_revocation_during_post_accept_backend_observation_retires_listener
         ErrorKind::InvalidState
     );
     assert_eq!(backend.calls.load(Ordering::SeqCst), 2);
-    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -227,7 +222,7 @@ fn post_accept_durable_network_replacement_and_endpoint_drift_fail_closed() {
             ObservationMode::EndpointDriftDuringSecondObservation,
         ),
     ] {
-        let (root, store) = member_store(label);
+        let (_temp, store) = member_store(label);
         let (mut owner, endpoint) = listener();
         let backend = probe(&store, endpoint, mode);
         let mut queued = TcpStream::connect(endpoint).unwrap();
@@ -259,13 +254,12 @@ fn post_accept_durable_network_replacement_and_endpoint_drift_fail_closed() {
         } else {
             assert!(registry.network(&network(7)).is_some());
         }
-        fs::remove_dir_all(root).unwrap();
     }
 }
 
 #[test]
 fn already_revoked_durable_membership_retires_without_backend_query() {
-    let (root, store) = member_store("already-revoked");
+    let (_temp, store) = member_store("already-revoked");
     store.save(&MembershipRegistry::default()).unwrap();
     let (mut owner, endpoint) = listener();
     // If this backend is invoked it returns an error; no query is justified
@@ -289,12 +283,11 @@ fn already_revoked_durable_membership_retires_without_backend_query() {
         ErrorKind::InvalidState
     );
     assert_eq!(backend.calls.load(Ordering::SeqCst), 0);
-    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
 fn endpoint_backend_failure_retires_queued_candidates_without_tls() {
-    let (root, store) = member_store("backend");
+    let (_temp, store) = member_store("backend");
     let (mut owner, endpoint) = listener();
     let backend = probe(&store, endpoint, ObservationMode::BackendFailure);
     let queued = TcpStream::connect(endpoint).unwrap();
@@ -306,12 +299,11 @@ fn endpoint_backend_failure_retires_queued_candidates_without_tls() {
     assert_eq!(backend.calls.load(Ordering::SeqCst), 1);
     assert_closed(queued);
     assert!(TcpStream::connect(endpoint).is_err());
-    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
 fn corruption_during_post_accept_durable_observation_closes_candidate_without_repair() {
-    let (root, store) = member_store("post-accept-corrupt");
+    let (_temp, store) = member_store("post-accept-corrupt");
     let (mut owner, endpoint) = listener();
     let backend = probe(
         &store,
@@ -341,7 +333,6 @@ fn corruption_during_post_accept_durable_observation_closes_candidate_without_re
         ErrorKind::InvalidState,
     );
     assert_eq!(backend.calls.load(Ordering::SeqCst), 2);
-    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -354,7 +345,7 @@ fn corrupt_durable_membership_retires_queued_listener_without_backend_or_repair(
         ),
         ("invalid-utf8", b"\xff\xfe".as_slice()),
     ] {
-        let (root, store) = member_store(label);
+        let (_temp, store) = member_store(label);
         fs::write(store.path(), corrupt).unwrap();
         let original = fs::read(store.path()).unwrap();
         let (mut owner, endpoint) = listener();
@@ -381,6 +372,5 @@ fn corrupt_durable_membership_retires_queued_listener_without_backend_or_repair(
             "{label}",
         );
         assert_eq!(backend.calls.load(Ordering::SeqCst), 0, "{label}");
-        fs::remove_dir_all(root).unwrap();
     }
 }

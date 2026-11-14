@@ -436,6 +436,7 @@ dependencies = [
  "rustls",
  "serde_json",
  "sha2",
+ "tempfile",
  "x509-parser",
  "zbus",
  "zeroize",
@@ -474,6 +475,7 @@ dependencies = [
  "futures-lite",
  "rustix 1.1.4",
  "socket2",
+ "tempfile",
  "zbus",
 ]
 

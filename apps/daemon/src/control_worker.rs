@@ -591,10 +591,11 @@ mod tests {
     fn worker_does_not_bind_stale_nap_without_durable_host_membership() {
         use blueroute_core::NodeId;
 
-        let path = std::env::temp_dir().join(format!(
-            "blueroute-control-unowned-prebind-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-control-unowned-prebind-")
+            .tempdir()
+            .unwrap();
+        let path = temp.path().join("membership");
         let operations = Arc::new(NoNapOperations::default());
         let trust = Arc::new(DurablePeerTrustOperations::new(
             NetworkMembershipStore::new(path.clone()),
@@ -636,8 +637,11 @@ mod tests {
             DisplayName, MembershipRegistry, MembershipState, NetworkMembership, NodeId,
         };
 
-        let path =
-            std::env::temp_dir().join(format!("blueroute-control-hosted-{}", std::process::id()));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-control-hosted-")
+            .tempdir()
+            .unwrap();
+        let path = temp.path().join("membership");
         let store = NetworkMembershipStore::new(path.clone());
         let network = NetworkId::from_bytes([7; 16]);
         let mut membership =
@@ -689,10 +693,11 @@ mod tests {
         use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
         use blueroute_core::NodeId;
 
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-control-worker-auth-revoked-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-control-worker-auth-revoked-")
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("state");
         let host_path = root.join("host-membership");
         let client_path = root.join("client-membership");
         save_host_membership(&host_path);
@@ -799,7 +804,6 @@ mod tests {
         );
         worker.shutdown().unwrap();
         assert!(std::net::TcpListener::bind(endpoint).is_ok());
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -807,10 +811,11 @@ mod tests {
         use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
         use blueroute_core::NodeId;
 
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-control-worker-two-peers-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-control-worker-two-peers-")
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("state");
         let host_path = root.join("host-membership");
         let first_path = root.join("first-membership");
         let second_path = root.join("second-membership");
@@ -973,7 +978,6 @@ mod tests {
         assert!(std::net::TcpListener::bind(endpoint).is_ok());
         // Nothing is supervised after shutdown.
         assert!(peers.snapshot().is_empty());
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     fn assert_authenticated_malformed_peer_isolation(
@@ -983,10 +987,13 @@ mod tests {
         use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
         use blueroute_core::NodeId;
 
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-control-worker-malformed-two-peers-{case}-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix(&format!(
+                "blueroute-control-worker-malformed-two-peers-{case}-"
+            ))
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("state");
         let host_path = root.join("host-membership");
         let first_path = root.join("first-membership");
         let second_path = root.join("second-membership");
@@ -1149,7 +1156,6 @@ mod tests {
         assert!(std::net::TcpListener::bind(endpoint).is_ok());
         drop(recovered);
         drop(hostile);
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1202,10 +1208,11 @@ mod tests {
         use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
         use blueroute_core::NodeId;
 
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-control-worker-auth-nap-loss-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-control-worker-auth-nap-loss-")
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("state");
         let host_path = root.join("host-membership");
         let client_path = root.join("client-membership");
         save_host_membership(&host_path);
@@ -1307,7 +1314,6 @@ mod tests {
         );
         worker.shutdown().unwrap();
         assert!(std::net::TcpListener::bind(endpoint).is_ok());
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1315,10 +1321,11 @@ mod tests {
         use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
         use blueroute_core::NodeId;
 
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-control-worker-auth-leave-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-control-worker-auth-leave-")
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("state");
         let host_path = root.join("host-membership");
         let client_path = root.join("client-membership");
         save_host_membership(&host_path);
@@ -1429,7 +1436,6 @@ mod tests {
         );
         worker.shutdown().unwrap();
         assert!(std::net::TcpListener::bind(endpoint).is_ok());
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1437,10 +1443,11 @@ mod tests {
         use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
         use blueroute_core::NodeId;
 
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-worker-auth-goodbye-reconnect-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-worker-auth-goodbye-reconnect-")
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("state");
         let host_path = root.join("host-membership");
         let client_path = root.join("client-membership");
         save_host_membership(&host_path);
@@ -1576,7 +1583,6 @@ mod tests {
         worker.shutdown().unwrap();
         drop(recovered);
         assert!(std::net::TcpListener::bind(endpoint).is_ok());
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1585,10 +1591,11 @@ mod tests {
         use blueroute_core::NodeId;
         use std::io::Write;
 
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-worker-auth-hostile-frame-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-worker-auth-hostile-frame-")
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("state");
         let host_path = root.join("host-membership");
         let client_path = root.join("client-membership");
         save_host_membership(&host_path);
@@ -1701,7 +1708,6 @@ mod tests {
         drop(recovered);
         drop(hostile);
         assert!(std::net::TcpListener::bind(endpoint).is_ok());
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1711,10 +1717,11 @@ mod tests {
         use blueroute_protocol::control::encode_control_frame;
         use std::io::Write;
 
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-worker-auth-frame-scope-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-worker-auth-frame-scope-")
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("state");
         let host_path = root.join("host-membership");
         let client_path = root.join("client-membership");
         save_host_membership(&host_path);
@@ -1934,7 +1941,6 @@ mod tests {
 
         worker.shutdown().unwrap();
         assert!(std::net::TcpListener::bind(endpoint).is_ok());
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1942,10 +1948,11 @@ mod tests {
         use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
         use blueroute_core::NodeId;
 
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-control-worker-auth-shutdown-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-control-worker-auth-shutdown-")
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("state");
         let host_path = root.join("host-membership");
         let client_path = root.join("client-membership");
         save_host_membership(&host_path);
@@ -2070,7 +2077,6 @@ mod tests {
             std::net::TcpListener::bind(endpoint).is_ok(),
             "shutdown must release the host listener"
         );
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -2080,10 +2086,11 @@ mod tests {
         };
         use std::io::Read;
 
-        let path = std::env::temp_dir().join(format!(
-            "blueroute-control-unauthorized-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-control-unauthorized-")
+            .tempdir()
+            .unwrap();
+        let path = temp.path().join("membership");
         let store = NetworkMembershipStore::new(path.clone());
         let network = NetworkId::from_bytes([7; 16]);
         let mut membership =
@@ -2148,10 +2155,11 @@ mod tests {
             DisplayName, MembershipRegistry, MembershipState, NetworkMembership, NodeId,
         };
 
-        let path = std::env::temp_dir().join(format!(
-            "blueroute-control-ownership-loss-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-control-ownership-loss-")
+            .tempdir()
+            .unwrap();
+        let path = temp.path().join("membership");
         let store = NetworkMembershipStore::new(path.clone());
         let network = NetworkId::from_bytes([7; 16]);
         let mut membership =
@@ -2230,10 +2238,11 @@ mod tests {
     #[test]
     fn durable_leave_retires_stale_nap_listener() {
         use blueroute_core::NodeId;
-        let path = std::env::temp_dir().join(format!(
-            "blueroute-control-durable-leave-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-control-durable-leave-")
+            .tempdir()
+            .unwrap();
+        let path = temp.path().join("membership");
         save_host_membership(&path);
         let operations = Arc::new(HostedNapOperations::default());
         let trust = Arc::new(DurablePeerTrustOperations::new(
@@ -2287,10 +2296,11 @@ mod tests {
         use blueroute_core::NodeId;
         use std::sync::mpsc;
 
-        let path = std::env::temp_dir().join(format!(
-            "blueroute-worker-cancel-during-bind-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-worker-cancel-during-bind-")
+            .tempdir()
+            .unwrap();
+        let path = temp.path().join("membership");
         save_host_membership(&path);
         let operations = Arc::new(HostedNapOperations::default());
         let (entered_tx, entered_rx) = mpsc::channel();
@@ -2335,8 +2345,11 @@ mod tests {
     fn running_worker_without_nap_stops_during_long_rebind_park() {
         use blueroute_core::NodeId;
 
-        let path =
-            std::env::temp_dir().join(format!("blueroute-control-idle-{}", std::process::id()));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-control-idle-")
+            .tempdir()
+            .unwrap();
+        let path = temp.path().join("membership");
         save_host_membership(&path);
         let operations = Arc::new(NoNapOperations::default());
         let trust = Arc::new(DurablePeerTrustOperations::new(
@@ -2368,10 +2381,11 @@ mod tests {
     fn worker_retries_transient_bind_failure_and_shutdown_wakes_rebind_park() {
         use blueroute_core::NodeId;
 
-        let path = std::env::temp_dir().join(format!(
-            "blueroute-control-bind-error-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-control-bind-error-")
+            .tempdir()
+            .unwrap();
+        let path = temp.path().join("membership");
         save_host_membership(&path);
         let operations = Arc::new(NoNapOperations::default());
         operations.fail_bind.store(true, Ordering::SeqCst);
@@ -2462,10 +2476,11 @@ mod tests {
         use crate::{PeerPinStore, PeerTrustOperations, PinnedControlTlsPeer};
         use blueroute_core::{CapabilitySource, NodeId};
 
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-control-worker-ceiling-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-control-worker-ceiling-")
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("state");
         let host_path = root.join("host-membership");
         let first_path = root.join("first-membership");
         let second_path = root.join("second-membership");
@@ -2606,7 +2621,6 @@ mod tests {
         );
 
         worker.shutdown().unwrap();
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -229,14 +229,17 @@ mod tests {
         ControlTlsIdentityStore, DurablePeerTrustOperations, LinuxJoinRuntime, PeerPinStore,
     };
 
-    fn control(label: &str) -> JoinControlConfig {
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-client-runtime-{label}-{}",
-            std::process::id()
-        ));
+    /// The configuration plus the guard of its private temporary directory, which the caller
+    /// keeps alive for the whole test so the directory is removed even if the test panics.
+    fn control(label: &str) -> (tempfile::TempDir, JoinControlConfig) {
+        let temp = tempfile::Builder::new()
+            .prefix(&format!("blueroute-client-runtime-{label}-"))
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("root");
         std::fs::create_dir_all(&root).unwrap();
         let local = NodeId::from_bytes([0x71; 16]);
-        JoinControlConfig {
+        let config = JoinControlConfig {
             local: Arc::new(
                 ControlTlsIdentityStore::new(root.join("identity"))
                     .load_or_create(local)
@@ -248,7 +251,8 @@ mod tests {
             )),
             registry: Arc::new(Mutex::new(ControlSessionRegistry::new())),
             capabilities: NodeCapabilities::default(),
-        }
+        };
+        (temp, config)
     }
 
     fn link() -> JoinPanLink {
@@ -271,8 +275,9 @@ mod tests {
 
     #[test]
     fn every_mutating_call_is_refused_while_the_gate_is_closed_and_touches_nothing() {
+        let (_temp, control) = control("closed");
         let runtime = LinuxJoinRuntime::default()
-            .with_control(control("closed"))
+            .with_control(control)
             .client_runtime()
             .expect("control configured");
         let network = NetworkId::from_bytes([0x72; 16]);

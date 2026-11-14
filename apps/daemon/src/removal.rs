@@ -346,15 +346,12 @@ fn io_error(message: &'static str, error: &std::io::Error) -> CoreError {
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use blueroute_core::{DisplayName, IpPrefix, MembershipRegistry, NetworkMembership};
     use blueroute_linux::{InterfaceAddress, NetworkInterfaceHandle, PanAttachment, PanRole};
 
     use super::*;
     use crate::client_record::ClientRecord;
-
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
 
     fn net(byte: u8) -> NetworkId {
         NetworkId::from_bytes([byte; 16])
@@ -505,12 +502,15 @@ mod tests {
 
     /// A state directory with `networks` in its membership registry and, optionally, a client
     /// record for the first one.
-    fn state(networks: &[NetworkId], client: bool) -> RemovalPaths {
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-removal-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
+    ///
+    /// The returned guard owns the private temporary directory and removes it when dropped,
+    /// even if the test panics, so callers keep it alive for the whole test.
+    fn state(networks: &[NetworkId], client: bool) -> (tempfile::TempDir, RemovalPaths) {
+        let temp = tempfile::Builder::new()
+            .prefix("blueroute-removal-")
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("state");
         std::fs::create_dir_all(&root).unwrap();
         let paths = RemovalPaths {
             state_directory: root.clone(),
@@ -542,7 +542,7 @@ mod tests {
                 ))
                 .unwrap();
         }
-        paths
+        (temp, paths)
     }
 
     fn run(
@@ -605,7 +605,7 @@ mod tests {
 
     #[test]
     fn owned_state_of_known_networks_goes_and_everything_else_stays() {
-        let paths = state(&[net(1), net(2)], false);
+        let (_temp, paths) = state(&[net(1), net(2)], false);
         let fake = Fake::with(|world| {
             world.addresses = vec![
                 address(net(1), "br-a"),
@@ -631,13 +631,12 @@ mod tests {
             assert_eq!(world.profiles, vec![(net(9), iface("br-foreign"))]);
         });
         assert!(removal_pending(&paths.state_directory));
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     #[test]
     fn a_proven_owned_panu_link_is_disconnected_with_bluetooth_and_unresolved_without() {
         for bluetooth in [true, false] {
-            let paths = state(&[net(1)], true);
+            let (_temp, paths) = state(&[net(1)], true);
             let fake = Fake::with(|world| {
                 world.addresses = vec![address(net(1), "bnep0")];
                 world.profiles = vec![(net(1), iface("bnep0"))];
@@ -662,13 +661,12 @@ mod tests {
                 assert_eq!(fake.world(|world| world.disconnected), 0);
                 assert_eq!(fake.world(|world| world.profiles.len()), 1);
             }
-            std::fs::remove_dir_all(&paths.state_directory).unwrap();
         }
     }
 
     #[test]
     fn a_foreign_panu_link_is_left_alone() {
-        let paths = state(&[net(1)], true);
+        let (_temp, paths) = state(&[net(1)], true);
         let foreign = PanAttachment {
             role: PanRole::Panu,
             interface: iface("bnep7"),
@@ -681,12 +679,11 @@ mod tests {
         let (outcome, fake) = run(&paths, fake, true);
         assert!(outcome.unwrap().succeeded());
         assert_eq!(fake.world(|world| world.panu.clone()), Some(foreign));
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     #[test]
     fn a_partial_failure_reports_what_remains_and_keeps_going() {
-        let paths = state(&[net(1), net(2)], false);
+        let (_temp, paths) = state(&[net(1), net(2)], false);
         let fake = Fake::with(|world| {
             world.profiles = vec![(net(1), iface("br-a")), (net(2), iface("br-b"))];
             world.unremovable = vec![iface("br-a")];
@@ -713,23 +710,21 @@ mod tests {
         let retry = Fake::with(|world| world.profiles = vec![(net(1), iface("br-a"))]);
         let (outcome, _) = run(&paths, retry, true);
         assert!(outcome.unwrap().succeeded());
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     #[test]
     fn repeated_cleanup_is_a_successful_no_op() {
-        let paths = state(&[net(1)], false);
+        let (_temp, paths) = state(&[net(1)], false);
         let fake = Fake::with(|world| world.profiles = vec![(net(1), iface("br-a"))]);
         let (first, fake) = run(&paths, fake, true);
         assert!(first.unwrap().succeeded());
         let (second, _) = run(&paths, fake, true);
         assert_eq!(second.unwrap().remaining, 0);
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     #[test]
     fn an_unreachable_or_failing_backend_is_a_failure_not_a_success() {
-        let paths = state(&[net(1)], false);
+        let (_temp, paths) = state(&[net(1)], false);
         let unreachable = future::block_on(run_removal_cleanup(
             &paths,
             || async {
@@ -744,12 +739,11 @@ mod tests {
             outcome.is_err(),
             "an unverifiable result must not count as success"
         );
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     #[test]
     fn with_no_known_network_nothing_is_contacted() {
-        let paths = state(&[], false);
+        let (_temp, paths) = state(&[], false);
         let outcome = future::block_on(run_removal_cleanup(
             &paths,
             || async {
@@ -758,12 +752,11 @@ mod tests {
             CLEANUP_BOUND,
         ));
         assert_eq!(outcome.unwrap(), RemovalReport::default());
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     #[test]
     fn cleanup_times_out_instead_of_hanging() {
-        let paths = state(&[net(1)], false);
+        let (_temp, paths) = state(&[net(1)], false);
         let outcome = future::block_on(run_removal_cleanup(
             &paths,
             || async {
@@ -776,12 +769,11 @@ mod tests {
             outcome.unwrap_err().kind(),
             ErrorKind::NetworkBackendUnavailable
         );
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     #[test]
     fn a_running_daemon_blocks_cleanup_and_a_pending_removal_blocks_the_daemon() {
-        let paths = state(&[net(1)], false);
+        let (_temp, paths) = state(&[net(1)], false);
         // A daemon holds the instance lock: cleanup refuses and changes nothing.
         let daemon = acquire_instance_lock(&paths.state_directory).unwrap();
         let fake = Fake::with(|world| world.profiles = vec![(net(1), iface("br-a"))]);
@@ -795,18 +787,16 @@ mod tests {
         let (outcome, _) = run(&paths, fake, true);
         assert!(outcome.unwrap().succeeded());
         assert!(removal_pending(&paths.state_directory));
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     #[test]
     fn an_unreadable_registry_fails_before_anything_is_removed() {
-        let paths = state(&[net(1)], false);
+        let (_temp, paths) = state(&[net(1)], false);
         std::fs::write(&paths.memberships, b"not a registry").unwrap();
         let fake = Fake::with(|world| world.profiles = vec![(net(1), iface("br-a"))]);
         let (outcome, fake) = run(&paths, fake, true);
         assert!(outcome.is_err());
         assert_eq!(fake.world(|world| world.profiles.len()), 1);
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     // FU-04 regression (docs/CODE_REVIEW_FOLLOWUP_TODO.md, REV-04, REMOVE-1..3). It fails on
@@ -820,7 +810,7 @@ mod tests {
             peer: Some(host_device()),
         };
         // Network 1: a joined client with a live owned PANU; network 2: a host-only network.
-        let paths = state(&[net(1), net(2)], true);
+        let (_temp, paths) = state(&[net(1), net(2)], true);
         let fake = Fake::with(|world| {
             world.addresses = vec![address(net(1), "bnep0"), address(net(2), "br-b")];
             world.profiles = vec![(net(1), iface("bnep0")), (net(2), iface("br-b"))];
@@ -859,7 +849,6 @@ mod tests {
             outcome.unwrap().succeeded(),
             "a repeat after full cleanup must succeed"
         );
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     fn owned_link(interface: &str) -> PanAttachment {
@@ -881,16 +870,15 @@ mod tests {
     #[test]
     fn fu_04_an_already_absent_link_with_bluetooth_up_is_proven_gone() {
         // Also the state after an interruption between disconnecting and removing the proof.
-        let paths = state(&[net(1)], true);
+        let (_temp, paths) = state(&[net(1)], true);
         let (outcome, fake) = run(&paths, client_world(None), true);
         assert!(outcome.unwrap().succeeded());
         assert!(fake.world(|world| world.profiles.is_empty() && world.addresses.is_empty()));
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     #[test]
     fn fu_04_a_disconnect_that_does_not_take_keeps_the_proof() {
-        let paths = state(&[net(1)], true);
+        let (_temp, paths) = state(&[net(1)], true);
         let fake = client_world(Some(owned_link("bnep0")));
         fake.0.lock().unwrap().sticky_link = true;
         let (outcome, fake) = run(&paths, fake, true);
@@ -903,12 +891,11 @@ mod tests {
         fake.0.lock().unwrap().sticky_link = false;
         let (outcome, _) = run(&paths, fake, true);
         assert!(outcome.unwrap().succeeded());
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     #[test]
     fn fu_04_a_link_to_another_device_on_a_reused_interface_name_is_left_alone() {
-        let paths = state(&[net(1)], true);
+        let (_temp, paths) = state(&[net(1)], true);
         let other = PanAttachment {
             role: PanRole::Panu,
             interface: iface("bnep0"),
@@ -919,7 +906,6 @@ mod tests {
         // Only the recorded host's link could be ours; this one was not touched.
         assert_eq!(fake.world(|world| world.panu.clone()), Some(other));
         assert_eq!(fake.world(|world| world.disconnected), 0);
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     #[test]
@@ -927,7 +913,7 @@ mod tests {
         // The owned profile and address are already gone (vanished proof), or name a different
         // interface (conflicting proof): the live link cannot be proven ours.
         for profiles in [Vec::new(), vec![(net(1), iface("bnep3"))]] {
-            let paths = state(&[net(1)], true);
+            let (_temp, paths) = state(&[net(1)], true);
             let fake = Fake::with(|world| {
                 world.profiles = profiles.clone();
                 world.panu = Some(owned_link("bnep0"));
@@ -936,14 +922,13 @@ mod tests {
             assert!(outcome.unwrap().succeeded());
             assert_eq!(fake.world(|world| world.disconnected), 0);
             assert!(fake.world(|world| world.panu.is_some()));
-            std::fs::remove_dir_all(&paths.state_directory).unwrap();
         }
     }
 
     #[test]
     fn fu_04_a_client_network_known_only_by_role_is_unresolved_without_a_host_device() {
         // A joined client whose client record could not be written: the role still says client.
-        let paths = state(&[], false);
+        let (_temp, paths) = state(&[], false);
         let mut registry = MembershipRegistry::default();
         let mut membership = NetworkMembership::new(net(1), DisplayName::new("Joined").unwrap());
         membership.state = blueroute_core::MembershipState::Member;
@@ -957,7 +942,6 @@ mod tests {
         assert!(!report.succeeded());
         assert_eq!(report.unresolved_links, 1);
         assert_eq!(fake.world(|world| world.profiles.len()), 1);
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     #[test]
@@ -979,7 +963,7 @@ mod tests {
     fn fu_04_a_missing_host_device_is_inconclusive_even_with_bluetooth_running() {
         // bluetoothd answers but has no object for the recorded host (no adapter, or a stale
         // path): "no link observed" proves nothing, so the proof stays and cleanup fails.
-        let paths = state(&[net(1), net(2)], true);
+        let (_temp, paths) = state(&[net(1), net(2)], true);
         let fake = Fake::with(|world| {
             world.profiles = vec![(net(1), iface("bnep0")), (net(2), iface("br-b"))];
             world.device_absent = true;
@@ -993,13 +977,12 @@ mod tests {
             vec![(net(1), iface("bnep0"))],
             "the client proof must stay; the host network is still cleaned"
         );
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     #[test]
     fn fu_04_a_stale_client_record_does_not_block_removal() {
         // A leave succeeded but clearing the record failed: the registry no longer says client.
-        let paths = state(&[net(1)], false);
+        let (_temp, paths) = state(&[net(1)], false);
         ClientRecordStore::new(paths.client_record.clone())
             .save(Some(
                 &ClientRecord::new(
@@ -1015,7 +998,6 @@ mod tests {
         let report = outcome.unwrap();
         assert!(report.succeeded(), "{report:?}");
         assert!(fake.world(|world| world.profiles.is_empty()));
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     /// Saves `memberships` (network, state, role) and optionally a client record for `record`
@@ -1027,8 +1009,8 @@ mod tests {
             Option<MembershipRole>,
         )],
         record: Option<NetworkId>,
-    ) -> RemovalPaths {
-        let paths = state(&[], false);
+    ) -> (tempfile::TempDir, RemovalPaths) {
+        let (temp, paths) = state(&[], false);
         let mut registry = MembershipRegistry::default();
         for (network, state, role) in memberships {
             let mut membership =
@@ -1052,7 +1034,7 @@ mod tests {
                 ))
                 .unwrap();
         }
-        paths
+        (temp, paths)
     }
 
     // RFU-02 / LC-BASE-04 regression (docs/CODE_REVIEW_LIFECYCLE_TODO.md, SCOPE-1/2). On 75c1a01
@@ -1061,7 +1043,7 @@ mod tests {
     #[test]
     fn lc_cleanup_an_unknown_active_role_with_a_client_record_stays_unresolved() {
         use blueroute_core::MembershipState::Member;
-        let paths = seeded(&[(net(1), Member, None)], Some(net(1)));
+        let (_temp, paths) = seeded(&[(net(1), Member, None)], Some(net(1)));
         let fake = client_world(Some(owned_link("bnep0")));
         let (outcome, fake) = run(&paths, fake, false);
         let report = outcome.expect("cleanup ran");
@@ -1086,7 +1068,6 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     fn record_for(paths: &RemovalPaths, network: NetworkId, hint: Option<PeerHandle>) {
@@ -1123,7 +1104,7 @@ mod tests {
         for bluetooth in [false, true] {
             for record in [Some(Some(host_device())), Some(None), None] {
                 let label = format!("bluetooth {bluetooth}, record {record:?}");
-                let paths = seeded(
+                let (_temp, paths) = seeded(
                     &[
                         (net(1), Member, None),
                         (net(2), Member, Some(MembershipRole::Host)),
@@ -1181,7 +1162,6 @@ mod tests {
                     "{label}: the unknown role is not rewritten"
                 );
                 assert_eq!(after.1, before.1, "{label}: the client record is kept");
-                std::fs::remove_dir_all(&paths.state_directory).unwrap();
             }
         }
     }
@@ -1189,12 +1169,11 @@ mod tests {
     #[test]
     fn lc_cleanup_an_unknown_role_fails_even_with_no_owned_state_left() {
         use blueroute_core::MembershipState::Member;
-        let paths = seeded(&[(net(1), Member, None)], Some(net(1)));
+        let (_temp, paths) = seeded(&[(net(1), Member, None)], Some(net(1)));
         let (outcome, _) = run(&paths, Fake::default(), true);
         let report = outcome.unwrap();
         assert!(!report.succeeded(), "{report:?}");
         assert_eq!((report.remaining, report.unresolved_roles), (0, 1));
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     #[test]
@@ -1202,7 +1181,7 @@ mod tests {
         use blueroute_core::MembershipState::Member;
         // The owned profile names another interface than the live link: nothing proves it, and
         // nothing is touched either way.
-        let paths = seeded(&[(net(1), Member, None)], Some(net(1)));
+        let (_temp, paths) = seeded(&[(net(1), Member, None)], Some(net(1)));
         let fake = Fake::with(|world| {
             world.profiles = vec![(net(1), iface("bnep3"))];
             world.panu = Some(owned_link("bnep0"));
@@ -1211,7 +1190,6 @@ mod tests {
         assert_eq!(outcome.unwrap().unresolved_roles, 1);
         assert_eq!(fake.world(|world| world.profiles.len()), 1);
         assert_eq!(fake.world(|world| world.disconnected), 0);
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     /// A persisted membership state and role.
@@ -1292,7 +1270,7 @@ mod tests {
                 .into_iter()
                 .map(|(state, role)| (net(1), state, role))
                 .collect();
-            let paths = seeded(&memberships, record.then_some(net(1)));
+            let (_temp, paths) = seeded(&memberships, record.then_some(net(1)));
             let scope = removal_scope(&paths).unwrap();
             let entry = scope.get(&net(1)).expect(label);
             assert_eq!(entry.class, class, "{label}");
@@ -1307,13 +1285,12 @@ mod tests {
                 ),
                 "{label}"
             );
-            std::fs::remove_dir_all(&paths.state_directory).unwrap();
         }
     }
 
     #[test]
     fn lc_cleanup_a_client_record_without_a_membership_is_unresolved() {
-        let paths = seeded(&[], Some(net(1)));
+        let (_temp, paths) = seeded(&[], Some(net(1)));
         let fake = client_world(Some(owned_link("bnep0")));
         let (outcome, fake) = run(&paths, fake, true);
         let report = outcome.unwrap();
@@ -1327,7 +1304,6 @@ mod tests {
             );
         });
         assert!(stored(&paths).1.is_some(), "the record is not cleared");
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     // LC-CLEANUP-07: evidence-based recovery. A retry rereads the stores; Bluetooth coming back
@@ -1336,7 +1312,7 @@ mod tests {
     #[test]
     fn lc_cleanup_recovery_needs_the_role_established_and_then_completes() {
         use blueroute_core::MembershipState::Member;
-        let paths = seeded(&[(net(1), Member, None)], Some(net(1)));
+        let (_temp, paths) = seeded(&[(net(1), Member, None)], Some(net(1)));
         let fake = client_world(Some(owned_link("bnep0")));
         let (outcome, fake) = run(&paths, fake, false);
         assert_eq!(outcome.unwrap().unresolved_roles, 1);
@@ -1345,12 +1321,11 @@ mod tests {
         assert_eq!(outcome.unwrap().unresolved_roles, 1);
         assert_eq!(fake.world(|world| world.disconnected), 0);
         // The role is established independently and stored; the retry rereads it.
-        let paths_recovered = seeded(
+        let (_recovered_temp, paths_recovered) = seeded(
             &[(net(1), Member, Some(MembershipRole::Client))],
             Some(net(1)),
         );
         std::fs::rename(&paths_recovered.memberships, &paths.memberships).unwrap();
-        std::fs::remove_dir_all(&paths_recovered.state_directory).unwrap();
         let (outcome, fake) = run(&paths, fake, true);
         let report = outcome.unwrap();
         assert!(report.succeeded(), "{report:?}");
@@ -1360,13 +1335,12 @@ mod tests {
         });
         let (outcome, _) = run(&paths, fake, true);
         assert!(outcome.unwrap().succeeded(), "a repeat must succeed");
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 
     #[test]
     fn lc_cleanup_a_recovered_host_role_finishes_with_host_cleanup() {
         use blueroute_core::MembershipState::Member;
-        let paths = seeded(&[(net(1), Member, None)], None);
+        let (_temp, paths) = seeded(&[(net(1), Member, None)], None);
         let fake = Fake::with(|world| {
             world.addresses = vec![address(net(1), "br-a")];
             world.profiles = vec![(net(1), iface("br-a"))];
@@ -1374,12 +1348,11 @@ mod tests {
         let (outcome, fake) = run(&paths, fake, false);
         assert_eq!(outcome.unwrap().unresolved_roles, 1);
         assert_eq!(fake.world(|world| world.profiles.len()), 1);
-        let recovered = seeded(&[(net(1), Member, Some(MembershipRole::Host))], None);
+        let (_recovered_temp, recovered) =
+            seeded(&[(net(1), Member, Some(MembershipRole::Host))], None);
         std::fs::rename(&recovered.memberships, &paths.memberships).unwrap();
-        std::fs::remove_dir_all(&recovered.state_directory).unwrap();
         let (outcome, fake) = run(&paths, fake, false);
         assert!(outcome.unwrap().succeeded());
         assert!(fake.world(|world| world.profiles.is_empty() && world.addresses.is_empty()));
-        std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 }

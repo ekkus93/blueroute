@@ -437,26 +437,29 @@ fn no_current_network() -> CoreError {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use blueroute_core::{DisplayName, MembershipRegistry, MembershipState, NetworkMembership};
     use blueroute_protocol::peer_pin::PeerKeyPins;
 
     use super::*;
 
-    static NEXT_TEST: AtomicUsize = AtomicUsize::new(0);
-
-    fn temp_store(label: &str) -> (std::path::PathBuf, NetworkMembershipStore) {
-        let root = std::env::temp_dir().join(format!(
-            "blueroute-p6-003-{label}-{}-{}",
-            std::process::id(),
-            NEXT_TEST.fetch_add(1, Ordering::Relaxed)
-        ));
+    /// A store in a private temporary directory. The returned guard removes the directory when
+    /// dropped, even if the test panics, so callers keep it alive for the whole test.
+    fn temp_store(
+        label: &str,
+    ) -> (
+        tempfile::TempDir,
+        std::path::PathBuf,
+        NetworkMembershipStore,
+    ) {
+        let temp = tempfile::Builder::new()
+            .prefix(&format!("blueroute-p6-003-{label}-"))
+            .tempdir()
+            .unwrap();
+        let root = temp.path().join("root");
         fs::create_dir_all(&root).unwrap();
-        (
-            root.clone(),
-            NetworkMembershipStore::new(root.join("memberships-v1")),
-        )
+        let store = NetworkMembershipStore::new(root.join("memberships-v1"));
+        (temp, root, store)
     }
 
     fn seed_current_network(store: &NetworkMembershipStore, network: NetworkId) {
@@ -471,7 +474,7 @@ mod tests {
     #[test]
     fn approval_persists_without_marking_peer_member() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("approve");
+            let (_temp, _, store) = temp_store("approve");
             let network = NetworkId::from_bytes([0x31; 16]);
             let peer = NodeId::from_bytes([0x42; 16]);
             seed_current_network(&store, network);
@@ -484,13 +487,12 @@ mod tests {
             let membership = registry.network(&network).unwrap();
             assert!(membership.is_peer_trusted(&peer));
             assert!(!membership.is_peer_member(&peer));
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
     #[test]
     fn zero_peer_identity_is_rejected_before_any_durable_trust_mutation() {
-        let (root, store) = temp_store("zero-peer-identity");
+        let (_temp, root, store) = temp_store("zero-peer-identity");
         let network = NetworkId::from_bytes([0x51; 16]);
         let zero = NodeId::from_bytes([0; 16]);
         let valid = NodeId::from_bytes([0x52; 16]);
@@ -514,13 +516,12 @@ mod tests {
         futures_lite::future::block_on(trust.trust_peer(valid)).unwrap();
         trust.require_peer_approved(network, valid).unwrap();
         futures_lite::future::block_on(trust.forget_peer(valid)).unwrap();
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn unapproved_peer_fails_closed_and_forget_revokes_approval() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("revoke");
+            let (_temp, _, store) = temp_store("revoke");
             let network = NetworkId::from_bytes([0x51; 16]);
             let peer = NodeId::from_bytes([0x62; 16]);
             seed_current_network(&store, network);
@@ -533,14 +534,13 @@ mod tests {
             operations.forget_peer(peer).await.unwrap();
             let error = operations.require_peer_approved(network, peer).unwrap_err();
             assert_eq!(error.kind(), ErrorKind::AuthenticationFailed);
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
     #[test]
     fn key_pin_is_required_in_addition_to_durable_node_approval() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("p7-key-enrollment");
+            let (_temp, root, store) = temp_store("p7-key-enrollment");
             let network = NetworkId::from_bytes([0x11; 16]);
             let node = NodeId::from_bytes([0x22; 16]);
             let fingerprint = SpkiSha256::from_verified_certificate_digest([0x33; 32]).unwrap();
@@ -580,14 +580,13 @@ mod tests {
                 check(fingerprint).unwrap_err().kind(),
                 ErrorKind::AuthenticationFailed,
             );
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
     #[test]
     fn operator_typed_enrollment_trusts_and_pins_exactly_that_key() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("p7-typed-enrollment");
+            let (_temp, root, store) = temp_store("p7-typed-enrollment");
             let network = NetworkId::from_bytes([0x61; 16]);
             let node = NodeId::from_bytes([0x62; 16]);
             let key = SpkiSha256::from_verified_certificate_digest([0x63; 32]).unwrap();
@@ -638,13 +637,12 @@ mod tests {
             // Forget removes both the trust and the pin.
             trust.forget_peer(node).await.unwrap();
             assert!(check(key).is_err());
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
     #[test]
     fn legacy_trust_only_runtime_cannot_accept_cryptographic_membership() {
-        let (root, store) = temp_store("p7-no-store");
+        let (_temp, _, store) = temp_store("p7-no-store");
         let network = NetworkId::from_bytes([0x51; 16]);
         let node = NodeId::from_bytes([0x61; 16]);
         let digest = SpkiSha256::from_verified_certificate_digest([0x71; 32]).unwrap();
@@ -658,13 +656,12 @@ mod tests {
                 .kind(),
             ErrorKind::AuthenticationFailed,
         );
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn enrollment_requires_durable_approval_and_independent_matching_key() {
         futures_lite::future::block_on(async {
-            let (root, store) = temp_store("p7-manual-confirmation");
+            let (_temp, root, store) = temp_store("p7-manual-confirmation");
             let network = NetworkId::from_bytes([0x31; 16]);
             let node = NodeId::from_bytes([0x32; 16]);
             let other = NodeId::from_bytes([0x33; 16]);
@@ -706,13 +703,12 @@ mod tests {
             assert_eq!(trust.pin_store.as_ref().unwrap().load().unwrap().len(), 1);
             trust.forget_peer(node).await.unwrap();
             assert!(trust.pin_store.as_ref().unwrap().load().unwrap().is_empty());
-            fs::remove_dir_all(root).unwrap();
         });
     }
 
     #[test]
     fn key_pin_approval_is_scoped_to_active_network() {
-        let (root, store) = temp_store("p7-network-scope");
+        let (_temp, root, store) = temp_store("p7-network-scope");
         let network = NetworkId::from_bytes([0x51; 16]);
         let other = NetworkId::from_bytes([0x61; 16]);
         let node = NodeId::from_bytes([0x72; 16]);
@@ -730,7 +726,6 @@ mod tests {
                 .kind(),
             ErrorKind::InvalidState
         );
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -738,7 +733,7 @@ mod tests {
         use std::sync::{Arc, Barrier};
         use std::thread;
 
-        let (root, store) = temp_store("concurrent-enroll");
+        let (_temp, root, store) = temp_store("concurrent-enroll");
         let network = NetworkId::from_bytes([0x18; 16]);
         seed_current_network(&store, network);
         let trust = Arc::new(DurablePeerTrustOperations::with_peer_pin_store(
@@ -792,12 +787,11 @@ mod tests {
             trust.pin_store.as_ref().unwrap().load().unwrap().len(),
             count - 1
         );
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn inbound_pin_snapshot_ignores_unapproved_and_foreign_network_enrollments() {
-        let (root, store) = temp_store("inbound-allowlist");
+        let (_temp, root, store) = temp_store("inbound-allowlist");
         let network = NetworkId::from_bytes([0x81; 16]);
         let foreign_network = NetworkId::from_bytes([0x82; 16]);
         let approved = NodeId::from_bytes([0x83; 16]);
@@ -849,12 +843,11 @@ mod tests {
         )
         .unwrap();
         assert!(trust.approved_control_pins(network).is_err());
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn approval_for_wrong_network_is_rejected() {
-        let (root, store) = temp_store("wrong-network");
+        let (_temp, _, store) = temp_store("wrong-network");
         let network = NetworkId::from_bytes([0x71; 16]);
         seed_current_network(&store, network);
         let operations = DurablePeerTrustOperations::new(store);
@@ -865,12 +858,11 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidState);
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn durable_trust_mutations_fail_closed_while_another_process_holds_lock() {
-        let (root, store) = temp_store("process-lock");
+        let (_temp, root, store) = temp_store("process-lock");
         let network = NetworkId::from_bytes([0x21; 16]);
         let node = NodeId::from_bytes([0x22; 16]);
         seed_current_network(&store, network);
@@ -895,7 +887,6 @@ mod tests {
         drop(guard);
         futures_lite::future::block_on(trust.trust_peer(node)).unwrap();
         trust.require_peer_approved(network, node).unwrap();
-        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn confirmed_enrollment_expiring_while_waiting_for_state_lock_writes_no_pin() {
@@ -903,7 +894,7 @@ mod tests {
         use std::thread;
         use std::time::Duration;
 
-        let (root, store) = temp_store("expired-lock-wait");
+        let (_temp, root, store) = temp_store("expired-lock-wait");
         let network = NetworkId::from_bytes([0x91; 16]);
         let node = NodeId::from_bytes([0x92; 16]);
         let key = SpkiSha256::from_verified_certificate_digest([0x93; 32]).unwrap();
@@ -945,7 +936,6 @@ mod tests {
             Ok(true)
         );
         assert_eq!(trust.pin_store.as_ref().unwrap().load().unwrap().len(), 1);
-        fs::remove_dir_all(root).unwrap();
     }
 
     mod joiner {
@@ -957,6 +947,7 @@ mod tests {
         }
 
         struct Fixture {
+            _temp: tempfile::TempDir,
             root: std::path::PathBuf,
             pending: Arc<PendingJoinOperations>,
             trust: DurablePeerTrustOperations,
@@ -965,7 +956,7 @@ mod tests {
         }
 
         fn fixture(label: &str, with_pending: bool) -> Fixture {
-            let (root, store) = temp_store(label);
+            let (temp, root, store) = temp_store(label);
             let pending = Arc::new(PendingJoinOperations::new(
                 NetworkMembershipStore::new(root.join("memberships-v1")),
                 PendingJoinStore::new(root.join("pending")),
@@ -978,6 +969,7 @@ mod tests {
                 trust = trust.with_pending_join(pending.clone());
             }
             Fixture {
+                _temp: temp,
                 root,
                 pending,
                 trust,
@@ -1011,7 +1003,6 @@ mod tests {
                     ErrorKind::AuthenticationFailed
                 );
             }
-            let _ = fs::remove_dir_all(f.root);
         }
 
         #[test]
@@ -1034,8 +1025,6 @@ mod tests {
                     .require_approved_pinned_tls_peer(disabled.network, disabled.host, pin(7))
                     .is_err()
             );
-            let _ = fs::remove_dir_all(none.root);
-            let _ = fs::remove_dir_all(disabled.root);
         }
 
         #[test]
@@ -1054,7 +1043,6 @@ mod tests {
                     .require_approved_pinned_tls_peer(f.network, f.host, pin(7))
                     .is_err()
             );
-            let _ = fs::remove_dir_all(f.root);
         }
     }
 }
