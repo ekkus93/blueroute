@@ -40,7 +40,7 @@
 | FU-BASE | Durable baseline, corrected regressions, isolation | None | `[x]` |
 | FU-01 | P2 REV-01: independent publication and bounded shutdown | FU-BASE | `[x]` |
 | FU-02 | P2 REV-02: ownership monitored through validation | FU-BASE | `[x]` |
-| FU-03 | P2 REV-03: safe segment cloning/import | FU-BASE | `[ ]` |
+| FU-03 | P2 REV-03: safe segment cloning/import | FU-BASE | `[x]` |
 | FU-04 | P2 REV-04: unresolved cleanup and durable retry proof | FU-BASE | `[ ]` |
 | FU-05 | GAP-01: startup snapshot/publication handoff | FU-01 design; FU-02 for reconnect integration | `[ ]` |
 | FU-06 | GAP-02: adapter-free qualification fixture and clear isolation | FU-04 contract; procedure work can start earlier | `[ ]` |
@@ -117,15 +117,15 @@ Command-owner safety and existing idle owner-loss behavior remain intact.
 
 **Requirements:** SEG-1..4. **Earlier tasks:** CR-F3-04/05/06, CR-INTEGRATION-05.
 
-- [ ] **FU-03-01:** Choose/document normalization or rejection for cloned/imported derived
+- [x] **FU-03-01:** Choose/document normalization or rejection for cloned/imported derived
   membership; preserve explicit membership and existing boolean/identity contracts.
-- [ ] **FU-03-02:** Validate NAP/explicit nodes and derive stored membership only from valid
+- [x] **FU-03-02:** Validate NAP/explicit nodes and derive stored membership only from valid
   destination-graph evidence. Handle mutation of a cloned segment's public NAP field.
-- [ ] **FU-03-03:** Add cross-graph clone tests with a missing client and with the client
+- [x] **FU-03-03:** Add cross-graph clone tests with a missing client and with the client
   present but no corresponding destination link. Check the entire graph after insertion.
-- [ ] **FU-03-04:** Test changed/unknown NAP, unknown explicit member, identical reinsertion,
+- [x] **FU-03-04:** Test changed/unknown NAP, unknown explicit member, identical reinsertion,
   explicit non-link membership, property-only updates, and multiple-link removal.
-- [ ] **FU-03-05:** Assert whole-graph equality after rejection and run a downstream topology/
+- [x] **FU-03-05:** Assert whole-graph equality after rejection and run a downstream topology/
   forwarding calculation proving imported phantom membership cannot affect its result.
 
 **Acceptance:** No successful public insertion can violate SEG-2; rejected operations are atomic.
@@ -304,7 +304,7 @@ separately from the unresolved qualification gate.
 | FU-BASE | Tests at this commit | 5 failing corrected expectations ([evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-base--baseline-and-failing-expectations-2026-11-13)) | None | COMPLETE |
 | FU-01 / REV-01 | `19a58a0` | 5 `publisher_progress` tests (REV-01 failed at baseline); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-01--independent-publication-and-bounded-shutdown-2026-11-13) | None | COMPLETE |
 | FU-02 / REV-02 | `d2b94c1` | 6 `event_owner_race` tests (both REV-02 cases failed at baseline); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-02--ownership-monitored-through-validation-2026-11-13) | None | COMPLETE |
-| FU-03 / REV-03 | — | SEG-1..4 pending | Import/invariant/consumer evidence | NOT STARTED |
+| FU-03 / REV-03 | `1f2d48d` | 4 `fu_03` tests (REV-03 failed at baseline); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-03--safe-segment-cloningimport-2026-11-13) | None | COMPLETE |
 | FU-04 / REV-04 | — | REMOVE-1..5 pending | FU-QUALIFY for actual installed/PAN claims | NOT STARTED |
 | FU-05 / GAP-01 | — | START-1..3 pending | Startup/reconnect ordering evidence | NOT STARTED |
 | FU-06 / GAP-02 | — | QUAL-1..4 procedure/fixture pending | Execution remains separate | NOT STARTED |

@@ -106,3 +106,29 @@ consecutive runs green):
 The desktop and TUI run the same `watch` (their adapters are covered by `watch_integration` and
 `tui_watcher`, both green). Existing `owner_race` (6), `owner_watch` (3), `watcher` (6) and
 `dbus_client` (1) pass unchanged, so command-owner safety and idle owner loss are intact.
+
+## FU-03 — safe segment cloning/import (2026-11-13)
+
+**Fix:** `1f2d48d` (`crates/blueroute-core/src/topology.rs`; SPEC
+`blueroute-core` invariants).
+
+**FU-03-01 policy: normalize.** `add_segment` of a new SegmentId rebuilds the stored member set
+from the destination graph: the segment's current NAP, its explicit members (validated as nodes
+before any mutation), and the PANU of every link in this graph that belongs to the segment with
+the same NAP. Members the input carried from another graph's links are discarded. A changed public
+`nap` on a clone is simply the NAP used. Reinsertion of an existing SegmentId keeps the stored
+segment (and merges new explicit members), a different NAP is refused, and link semantics are as
+before. No caller changes were needed: all graph callers are tests.
+
+**Regressions** (`cargo test -p blueroute-core --lib fu_03`, 4 tests, all pass; 148 core tests
+pass):
+
+| Test | Covers |
+| --- | --- |
+| `fu_03_a_segment_cloned_from_another_graph_brings_no_phantom_members` | REV-03: clone with the client missing and with it present but unlinked; whole-graph consistency; **failed at 6d200d0** |
+| `fu_03_a_cloned_segment_with_a_changed_nap_is_rebuilt_or_refused_atomically` | changed NAP rebuilt in a fresh graph, refused (graph equal) where segment 1 exists; unknown NAP and unknown explicit member refused atomically |
+| `fu_03_explicit_members_and_same_graph_reinsertion_still_work` | identical reinsertion keeps link members; explicit non-link member kept |
+| `fu_03_phantom_membership_cannot_reach_routing` | downstream: no path or neighbor from phantom membership; the real link makes the node a member and reachable |
+
+Property-only link updates, multi-link removal and the forwarding consumer remain covered by the
+CR-F3 tests, which pass unchanged.
