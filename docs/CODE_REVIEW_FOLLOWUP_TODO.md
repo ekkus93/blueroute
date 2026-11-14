@@ -42,7 +42,7 @@
 | FU-02 | P2 REV-02: ownership monitored through validation | FU-BASE | `[x]` |
 | FU-03 | P2 REV-03: safe segment cloning/import | FU-BASE | `[x]` |
 | FU-04 | P2 REV-04: unresolved cleanup and durable retry proof | FU-BASE | `[x]` |
-| FU-05 | GAP-01: startup snapshot/publication handoff | FU-01 design; FU-02 for reconnect integration | `[ ]` |
+| FU-05 | GAP-01: startup snapshot/publication handoff | FU-01 design; FU-02 for reconnect integration | `[x]` |
 | FU-06 | GAP-02: adapter-free qualification fixture and clear isolation | FU-04 contract; procedure work can start earlier | `[ ]` |
 | FU-INTEGRATION | Boundary regressions and negative controls | FU-01..05 | `[ ]` |
 | FU-VALIDATE | Exact-candidate software, packages, CI | FU-INTEGRATION; FU-06 software/fixture work | `[ ]` |
@@ -162,13 +162,13 @@ retry proof. A recovered retry resolves the owned attachment without broadening 
 
 **Requirements:** START-1..3, PUB-4. **Earlier tasks:** CR-F1, CR-INTEGRATION; EVENT-5.
 
-- [ ] **FU-05-01:** Define service availability, baseline capture, dirty revision, initial
+- [x] **FU-05-01:** Define service availability, baseline capture, dirty revision, initial
   subscription, and snapshot ordering; implement a handoff that cannot silently absorb a change.
-- [ ] **FU-05-02:** Force a change between a client's initial read and baseline initialization
+- [x] **FU-05-02:** Force a change between a client's initial read and baseline initialization
   with barriers; require the latest snapshot or a timely invalidation without manual emission.
-- [ ] **FU-05-03:** Repeat while initial network sampling is pending and during compatible
+- [x] **FU-05-03:** Repeat while initial network sampling is pending and during compatible
   owner replacement, preserving subscribe/read reconciliation and bounded notification work.
-- [ ] **FU-05-04:** Update the earlier documented startup limitation with the fix and evidence;
+- [x] **FU-05-04:** Update the earlier documented startup limitation with the fix and evidence;
   do not claim exactly-once delivery or faster physical observation intervals.
 
 **Acceptance:** Deterministic tests demonstrate the formerly missed ordering and verify that
@@ -306,7 +306,7 @@ separately from the unresolved qualification gate.
 | FU-02 / REV-02 | `d2b94c1` | 6 `event_owner_race` tests (both REV-02 cases failed at baseline); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-02--ownership-monitored-through-validation-2026-11-13) | None | COMPLETE |
 | FU-03 / REV-03 | `1f2d48d` | 4 `fu_03` tests (REV-03 failed at baseline); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-03--safe-segment-cloningimport-2026-11-13) | None | COMPLETE |
 | FU-04 / REV-04 | `718983c` | 17 removal tests (REV-04 failed at baseline); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-04--unresolved-client-cleanup-fails-and-stays-retryable-2026-11-13) | FU-QUALIFY for actual installed/PAN claims | SOFTWARE COMPLETE / QUALIFICATION DEFERRED |
-| FU-05 / GAP-01 | — | START-1..3 pending | Startup/reconnect ordering evidence | NOT STARTED |
+| FU-05 / GAP-01 | `c104bea` | 2 forced-order tests (both fail without the handoff); [evidence](CODE_REVIEW_FOLLOWUP_EVIDENCE.md#fu-05--startup-snapshotpublication-handoff-2026-11-13) | None | COMPLETE |
 | FU-06 / GAP-02 | — | QUAL-1..4 procedure/fixture pending | Execution remains separate | NOT STARTED |
 | FU-INTEGRATION | — | ACCEPT-1 pending | Boundary sensitivity and CI scheduling | NOT STARTED |
 | FU-VALIDATE | — | ACCEPT-2 pending | Exact-candidate checks/packages/CI | NOT STARTED |

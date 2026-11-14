@@ -172,3 +172,29 @@ CR-F3 tests, which pass unchanged.
 
 Client leave tests (10) pass with the new re-observation; lifecycle test and `maintenance_mode`
 (4) pass. Installed-system and physical qualification stay with FU-QUALIFY / CR-QUALIFY.
+
+## FU-05 — startup snapshot/publication handoff (2026-11-13)
+
+**Fix:** `c104bea` (`apps/daemon/src/state_publisher.rs`; SPEC §11; dated correction appended to
+the earlier remediation evidence, FU-05-04).
+
+**FU-05-01 ordering:** the service may be available (name owned, snapshots readable) before the
+publisher's baselines exist. Instead of relying on startup being faster than any client, the
+publisher announces once as soon as the emitter runs (the forced flag is set at spawn) and once
+when the first network sample lands, regardless of differences. Clients subscribe and then read
+(the shared watcher reads on `Connected`), so any snapshot read before a baseline is followed by an
+invalidation. A change after the baseline is detected normally. No exactly-once delivery is
+claimed; at most two extra startup signals occur.
+
+**Regressions** (private bus, in CI):
+
+| Test | Covers | With the fix | Handoff removed (negative control) |
+| --- | --- | --- | --- |
+| `publisher_progress::fu_05_a_change_before_the_first_baseline_still_reaches_a_client` | START-1/3: subscribe → read (healthy) → change → start publisher; repeated with the network read held | pass | **fail** ("absorbed into the startup baseline") |
+| `watcher::fu_05_a_replacement_daemons_pre_baseline_change_reaches_the_watcher` | START-2/3: shared watcher reconnects to compatible B and rereads; B changes before its publisher starts | pass | **fail** |
+
+Test adjustments, not weakenings: observers and fixtures now consume the startup announcements
+before measuring, so a test only counts signals it caused; the failing-read test first lets the
+sampler's single "store failing" announcement (a legitimate change, FU-01) pass, then requires zero
+signals from five failing client reads. `publisher_progress` (6), `state_events` (8) and `watcher`
+(7) passed three consecutive runs.
