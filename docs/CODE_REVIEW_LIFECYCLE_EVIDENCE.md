@@ -139,3 +139,61 @@ regressions rather than detect RFU-01.
   there deterministically.
 - The queue-ordering argument relies on zbus 5.19's single socket reader, which is documented
   for `MessageStream::poll_next_before`. A zbus upgrade must keep that property.
+
+## LC-CLEANUP — Ambiguous active membership stays unresolved (2026-11-14)
+
+**Source.** The LC-CLEANUP commit on top of `0fdb68f`: `apps/daemon/src/removal.rs`,
+`apps/daemon/src/lib.rs` and `packaging/debian/test-maintainer-lifecycle.sh`. Docs updated:
+`docs/SPEC.md`, `docs/CR-F5-REMOVAL-CLEANUP.md` ("Classification") and `docs/ADMINISTRATOR.md`
+("Removal with an unresolved role").
+
+### Design (LC-CLEANUP-01..04, 07, 08)
+
+- **Explicit classes.** `NetworkScope { class: ScopeClass, recorded, host_hint }` replaces the
+  `client: bool`. The classes are `Host` (member/host), `Client` (member/client), `UnknownRole`
+  (member/none, and fail-closed for anything the store should never yield), `CompletedLeave`
+  (not-member/none) and `OrphanClientRecord` (a record with no membership row). The persisted
+  role decides; a record only supplies a `Client` network's host hint and its provenance
+  (`recorded`). Unreadable or invalid stores still fail before anything is removed.
+- **Outcome.** An unresolved class is skipped: nothing is removed or disconnected, and the
+  membership and record are not rewritten. It counts in the new `RemovalReport::unresolved_roles`,
+  which fails `succeeded()` even when no owned resource remains. The helper log line gains
+  `"unresolved_roles"` (a count; no device path or record content), and the exit status is 1.
+- **Independent progress.** Other networks are still cleaned. The instance lock, removal marker,
+  60-second bound, reobservation and existing client rules are unchanged.
+- **Recovery.** Each run re-reads both stores. Bluetooth alone resolves nothing. After the role
+  is established and stored, normal Client or Host cleanup finishes and repeats successfully.
+  No role-editing API was added, and storage schema v3 and API 1.7 are unchanged. The documented
+  manual recovery is the maintainer decision of 2026-11-14: confirm no PANU link, delete the
+  owned profiles, then remove the stale record or membership lines by hand.
+- **Packaged path.** The lifecycle harness gains an unresolved-role scenario. The **helper is
+  mocked** (exit 1, as `cleanup_outcome` returns for this report). Remove, deconfigure and
+  direct purge all stop at `prerm`; abort-remove/abort-deconfigure restart the service; the
+  membership and client record survive; after a successful retry, purge deletes them.
+
+### Regressions (LC-CLEANUP-05..07)
+
+In `apps/daemon/src/removal.rs`; all 27 removal tests pass (20 earlier, 7 new):
+
+| Test | Covers |
+| --- | --- |
+| `lc_cleanup_an_unknown_active_role_with_a_client_record_stays_unresolved` | The RFU-02 recipe through the production stores (LC-BASE-04) |
+| `lc_cleanup_an_unknown_role_is_unresolved_in_every_combination` | Bluetooth off/on × record with hint, without hint, none. A confirmed host network beside it is cleaned and a foreign network is preserved. Helper exit 1 and the log field are asserted |
+| `lc_cleanup_an_unknown_role_fails_even_with_no_owned_state_left` | Zero remaining resources is not success |
+| `lc_cleanup_an_unknown_role_with_conflicting_proof_is_left_alone` | The owned profile names another interface; nothing is touched |
+| `lc_cleanup_scope_classifies_every_stored_combination` | All 9 table rows through the production stores |
+| `lc_cleanup_a_client_record_without_a_membership_is_unresolved` | Orphan record; a hint alone never disconnects |
+| `lc_cleanup_recovery_needs_the_role_established_and_then_completes` / `lc_cleanup_a_recovered_host_role_finishes_with_host_cleanup` | Retry rereads; Bluetooth alone does not resolve; recovered Client and Host finish and repeat |
+
+These earlier tests still pass: explicit host, explicit client, the NotMember stale-record case
+(`fu_04_a_stale_client_record_does_not_block_removal`) and the unreadable-registry case.
+Daemon workspace tests pass with no failures. The lifecycle harness passes with the
+unresolved-role scenario.
+
+### Negative controls (isolated worktree)
+
+| Control | Result |
+| --- | --- |
+| RFU-02 baseline (`e167198`) | LC-BASE-04 test fails (see LC-BASE) |
+| Fix with `member`/`none` classified as `CompletedLeave` | 7 of 27 fail: every unknown-role test, recovery and the table |
+| Fix with an orphan record classified as `CompletedLeave` | 2 of 27 fail: the orphan test and the table |

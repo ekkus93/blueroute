@@ -125,6 +125,30 @@ CLEANUP_EXIT=1 step prerm remove
 [[ $status -ne 0 ]] || fail 'prerm must fail'
 [[ -e "$state/node-id" ]] || fail 'a failed cleanup must not lose the state needed to retry'
 
+# LC-CLEANUP (RFU-02): an unresolved role makes the helper exit 1. Remove, deconfigure and a
+# direct purge all stop at prerm, and the membership and client record survive for the
+# evidence-based retry. Once the retry's cleanup succeeds, purge deletes them.
+fresh_state
+printf 'network\tunknown-role\n' > "$state/memberships-v1"
+mkdir -p "$state/client-record"
+printf 'record\n' > "$state/client-record/record"
+for action in remove deconfigure; do
+    : > "$BLUEROUTE_MAINTAINER_LOG"
+    CLEANUP_EXIT=1 step prerm "$action"
+    [[ $status -ne 0 ]] || fail "prerm $action must fail while a role is unresolved"
+    check postinst "abort-$action" 'invoke start blueroute.service'
+done
+CLEANUP_EXIT=1 step prerm remove
+[[ $status -ne 0 ]] || fail 'a direct purge must stop at prerm while a role is unresolved'
+[[ -s "$state/memberships-v1" && -s "$state/client-record/record" ]] \
+    || fail 'an unresolved cleanup must keep the membership and client record'
+for script_action in 'prerm remove' 'postrm remove' 'postrm purge'; do
+    read -r script action <<< "$script_action"
+    step "$script" "$action"
+    [[ $status -eq 0 ]] || fail "$script_action failed after recovery"
+done
+[[ ! -e "$state" ]] || fail 'purge after a successful retry must delete the state directory'
+
 # Remove, then later purge of the removed package: only postrm purge runs then.
 fresh_state
 step prerm remove
@@ -133,4 +157,4 @@ step postrm remove
 check postrm purge ''
 [[ ! -e "$state" ]] || fail 'purge of a removed package must delete the state directory'
 
-printf 'Maintainer lifecycle contract passed (install, upgrade, remove, purge, abort, cleanup failure).\n'
+printf 'Maintainer lifecycle contract passed (install, upgrade, remove, purge, abort, cleanup failure, unresolved role).\n'

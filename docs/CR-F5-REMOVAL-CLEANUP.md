@@ -48,6 +48,31 @@ of `/proc/self`, without `unsafe`). The state directory is the daemon's (`BLUERO
   because they are not this installation's.
 - Anything without BlueRoute ownership metadata is never touched.
 
+### Classification (LC-CLEANUP, SCOPE-1..3)
+
+Every known network is classified from its persisted membership and the client record before
+anything is removed (`removal_scope`, `ScopeClass`). The membership store accepts exactly four
+combinations; a client record never overrides a known role.
+
+| Persisted membership | Client record | Class | Cleanup |
+| --- | --- | --- | --- |
+| `member`/`host` | Absent, or a stale record | `Host` | Host-only cleanup (NetworkManager only) |
+| `member`/`client` | With or without a host hint | `Client` | Joined-client rules below |
+| `member`/`none` | Present or absent | `UnknownRole` | Untouched; `unresolved_roles`; cleanup fails |
+| `not-member`/`none` | Absent, or a stale record | `CompletedLeave` | Host-only cleanup; a stale record adds no client obligation |
+| No membership row | Record names the network | `OrphanClientRecord` | Untouched; `unresolved_roles`; cleanup fails |
+| Unreadable, invalid or unsupported store | Any | — | Cleanup fails before anything is removed |
+
+An unresolved role is not proven-absent client work, even when no owned NetworkManager state
+is left and even with Bluetooth up: a host hint alone never resolves it and never authorizes a
+disconnect. Its owned profile and address, membership and client record all stay, and other
+networks are still cleaned. Each run re-reads the stores. Cleanup can finish only once the
+role is established from evidence and stored by the daemon, or once an administrator has
+resolved it by hand ([ADMINISTRATOR.md](ADMINISTRATOR.md#removal-with-an-unresolved-role)).
+Bluetooth becoming available proves nothing about the role. The current daemon never writes
+`member`/`none` (leave stores `not-member`/`none`), so it comes only from damaged,
+hand-edited or otherwise unexpected state.
+
 ### Joined-client networks (FU-04, REMOVE-1..3)
 
 A network is a joined-client network when its persisted membership role is `client`; the client
@@ -80,11 +105,11 @@ No new durable cleanup record exists: the NetworkManager ownership metadata stay
 4. Per known network: PANU first (while the owned profile still proves it, then observed gone),
    then addresses, then profiles. One network's failure does not stop the others.
 5. Reobserve. Success only if no address or profile owned by a known network remains, no step
-   failed, and no joined-client link is unresolved.
+   failed, no joined-client link is unresolved, and no network's role is unresolved.
 6. The whole run is bounded by 60 seconds; a timeout is a failure.
 
 Logs are JSON lines with categories, counts and coarse failure classes only. Exit status 0 is
-success, 1 is failure (resources remain, a client link is unresolved, a backend was unreachable, timeout, a
+success, 1 is failure (resources remain, a client link or a role is unresolved, a backend was unreachable, timeout, a
 running daemon),
 2 is a refused invocation. A retry reobserves and resumes; every step is idempotent. Membership is
 never cleared to hide a failure.

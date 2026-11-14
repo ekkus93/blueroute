@@ -86,9 +86,36 @@ Request records never include payloads, peer-supplied labels, addresses or key m
 
 ## Removing the package
 
-`apt remove blueroute` stops the service, then runs `blueroute-daemon --remove-owned-networking` (root only, no other arguments). It removes the NetworkManager addresses and profiles owned by the networks this computer knows, then checks that none are left. On a computer that joined a network as a client it must also see its Bluetooth link: it disconnects the link only when it can prove it is BlueRoute's, and removes that network's profile and address only once the link is gone. If Bluetooth is not running, that network is left alone (`unresolved_client_links`) and the removal fails; start `bluetooth.service` and remove again. NetworkManager state of networks this computer does not know is left alone and counted as unresolved. Identity and membership in `/var/lib/blueroute` are kept; `apt purge` deletes them.
+`apt remove blueroute` stops the service, then runs `blueroute-daemon --remove-owned-networking` (root only, no other arguments). It removes the NetworkManager addresses and profiles owned by the networks this computer knows, then checks that none are left. On a computer that joined a network as a client it must also see its Bluetooth link: it disconnects the link only when it can prove it is BlueRoute's, and removes that network's profile and address only once the link is gone. If Bluetooth is not running, that network is left alone (`unresolved_client_links`) and the removal fails; start `bluetooth.service` and remove again. NetworkManager state of networks this computer does not know is left alone and counted as unresolved. A network whose role cannot be established is also left alone (`unresolved_roles`) and fails the removal; see [below](#removal-with-an-unresolved-role). Identity and membership in `/var/lib/blueroute` are kept; `apt purge` deletes them.
 
 If cleanup cannot finish (NetworkManager unreachable, a profile that cannot be deleted, a 60-second timeout), the removal fails and the package stays installed with the service restarted. The cleanup prints one `"component":"removal_cleanup"` line with counts and a failure class to the apt/dpkg output (also kept in `/var/log/apt/term.log`), not to the journal. Fix the cause and run the removal again. Forcing the removal skips this guarantee. While a removal is pending the daemon refuses to start; reinstalling the package clears that. Upgrades do not tear networking down. This is tested with fakes and an isolated dpkg database; it has not yet been qualified on an installed system.
+
+### Removal with an unresolved role
+
+The cleanup line reports `unresolved_roles` when the removal fails because this computer knows a network
+whose role it cannot establish. This happens when the membership is `member` with no stored role, or
+when a client record names a network with no membership. The current daemon never writes either,
+so they come from damaged or hand-edited state in `/var/lib/blueroute`. Cleanup then touches nothing
+for that network: it cannot tell whether a Bluetooth PAN link of a joined client is still up, and
+that network's NetworkManager profile and address are the proof that such a link is BlueRoute's.
+Starting Bluetooth does not change this. The removal keeps failing until the role question is
+settled; do not guess it.
+
+Recovery is manual and outside the cleanup's success guarantee. With the service stopped
+(`systemctl stop blueroute.service`):
+
+1. Find the network's NetworkId (`network` lines of `memberships-v1`, or the client record in
+   `client-record/client-record-v1`).
+2. Confirm that no Bluetooth PAN link of that network is up. Check for a `bnep` interface carrying
+   a NetworkManager profile whose `user.data` has `org.blueroute.owner` set to that NetworkId,
+   and check the Bluetooth device it connects to. If a link is up and is BlueRoute's, disconnect it.
+3. Delete the NetworkManager profiles (and with them their addresses) whose `org.blueroute.owner`
+   is that NetworkId. Never delete a profile without that ownership.
+4. Remove what made the role unresolved. For a client record with no membership, delete
+   `client-record/client-record-v1`. For a `member` network with no role, delete that network's
+   `network` line and every `peer` line for the same NetworkId from `memberships-v1`.
+5. Run the removal again. Any owned state you did not delete is still listed, as another
+   installation's state, under `unresolved_foreign_resources`.
 
 ## Join on a test rig
 

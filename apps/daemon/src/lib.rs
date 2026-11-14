@@ -112,8 +112,8 @@ pub use registered_transport::{
 };
 pub use removal::{
     CLEANUP_BOUND, DAEMON_LOCK_FILE, InstanceLock, NetworkScope, OwnedInventory, OwnedKind,
-    REMOVAL_PENDING_FILE, RemovalPaths, RemovalReport, acquire_instance_lock, cleanup_outcome,
-    removal_pending, removal_scope, remove_known_networks, run_removal_cleanup,
+    REMOVAL_PENDING_FILE, RemovalPaths, RemovalReport, ScopeClass, acquire_instance_lock,
+    cleanup_outcome, removal_pending, removal_scope, remove_known_networks, run_removal_cleanup,
 };
 pub use runtime_health::{
     DaemonHealthWorker, spawn_daemon_capability_health_worker, spawn_daemon_runtime_worker,

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use async_io::Timer;
-use blueroute_core::{CoreError, ErrorKind, MembershipRole, NetworkId};
+use blueroute_core::{CoreError, ErrorKind, MembershipRole, MembershipState, NetworkId};
 use blueroute_linux::{BackendFuture, NetworkMembershipStore, PeerHandle};
 use futures_lite::future;
 
@@ -60,13 +60,20 @@ pub struct RemovalReport {
     /// no recorded host device). Their owned state is kept as proof for a retry, and cleanup
     /// fails (FU-04, REMOVE-1).
     pub unresolved_links: usize,
+    /// Networks whose role cleanup cannot establish: an active membership with an unknown role,
+    /// or a client record with no membership. Nothing of theirs is touched (their owned state is
+    /// the proof for a later, evidence-based retry), and cleanup fails (LC-CLEANUP, SCOPE-2).
+    pub unresolved_roles: usize,
     /// Whether Bluetooth was reachable, so a proven-owned PANU link could be disconnected.
     pub bluetooth: bool,
 }
 
 impl RemovalReport {
     pub fn succeeded(&self) -> bool {
-        self.failed_networks == 0 && self.remaining == 0 && self.unresolved_links == 0
+        self.failed_networks == 0
+            && self.remaining == 0
+            && self.unresolved_links == 0
+            && self.unresolved_roles == 0
     }
 }
 
@@ -126,39 +133,83 @@ fn mark_removal_pending(state_directory: &Path) -> Result<(), CoreError> {
         .map_err(|error| io_error("BlueRoute removal marker could not be written", &error))
 }
 
+/// How cleanup classifies one known network, from its persisted membership and the client
+/// record (LC-CLEANUP, SCOPE-1). See `docs/CR-F5-REMOVAL-CLEANUP.md` for the table.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ScopeClass {
+    /// `Member`/`Host`: a hosted network. Only NetworkManager state can be ours. A client record
+    /// naming it does not override the known role.
+    Host,
+    /// `NotMember`/none: a completed leave. Whatever owned state is left is NetworkManager state,
+    /// and a client record left behind by that leave creates no client obligation.
+    CompletedLeave,
+    /// `Member`/`Client`: a joined client. A PANU link may exist and must be observed gone before
+    /// its proof (the owned profile and address) is removed.
+    Client,
+    /// `Member` with no role: the store accepts it as "unknown". Cleanup cannot prove there is no
+    /// client work, so it touches nothing and fails, with or without a client record or
+    /// Bluetooth.
+    UnknownRole,
+    /// A client record for a network the registry does not hold: neither a completed leave nor a
+    /// known role, so it is unresolved too.
+    OrphanClientRecord,
+}
+
 /// What cleanup must do for one known network.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NetworkScope {
-    /// This node joined the network as a client (persisted membership role), so a PANU link may
-    /// exist and must be observed before the proof of ownership goes.
-    pub client: bool,
-    /// The recorded host device: an untrusted hint, used only to find a PANU link to prove.
+    pub class: ScopeClass,
+    /// Whether the client record names this network (provenance, for the log and tests).
+    pub recorded: bool,
+    /// The recorded host device, for a `Client` network only: an untrusted hint, used only to
+    /// find a PANU link to prove. It never authorizes a disconnect on its own.
     pub host_hint: Option<PeerHandle>,
 }
 
-/// The networks this installation owns state for.
+impl NetworkScope {
+    /// Whether cleanup must leave this network untouched and fail.
+    pub fn role_unresolved(&self) -> bool {
+        matches!(
+            self.class,
+            ScopeClass::UnknownRole | ScopeClass::OrphanClientRecord
+        )
+    }
+}
+
+/// Classify every network this installation knows. Fails only when a store cannot be read or
+/// validated: ownership could not be proven, so nothing is removed.
 pub fn removal_scope(paths: &RemovalPaths) -> Result<BTreeMap<NetworkId, NetworkScope>, CoreError> {
-    // An unreadable registry fails: ownership could not be proven.
     let registry = NetworkMembershipStore::new(paths.memberships.clone()).load()?;
     let mut known: BTreeMap<NetworkId, NetworkScope> = registry
         .networks()
         .map(|membership| {
-            let client = membership.role == Some(MembershipRole::Client);
+            let class = match (membership.state, membership.role) {
+                (MembershipState::Member, Some(MembershipRole::Host)) => ScopeClass::Host,
+                (MembershipState::Member, Some(MembershipRole::Client)) => ScopeClass::Client,
+                (MembershipState::NotMember, None) => ScopeClass::CompletedLeave,
+                // `Member` without a role, and anything the store should never yield.
+                _ => ScopeClass::UnknownRole,
+            };
             (
                 membership.network_id,
                 NetworkScope {
-                    client,
+                    class,
+                    recorded: false,
                     host_hint: None,
                 },
             )
         })
         .collect();
-    // The persisted role alone decides whether a network is a joined client. The client record
-    // only supplies the host hint; a record left behind by a leave whose clear failed names a
-    // network that is no longer a client, which must not block removal (FU-04 review).
+    // The persisted role decides the class. The client record only supplies the host hint of a
+    // client network, and a record for a network with no membership is unresolved.
     if let Some(record) = ClientRecordStore::new(paths.client_record.clone()).load()? {
-        let scope = known.entry(record.network()).or_default();
-        if scope.client {
+        let scope = known.entry(record.network()).or_insert(NetworkScope {
+            class: ScopeClass::OrphanClientRecord,
+            recorded: false,
+            host_hint: None,
+        });
+        scope.recorded = true;
+        if scope.class == ScopeClass::Client {
             scope.host_hint = record.device_hint().cloned();
         }
     }
@@ -183,7 +234,12 @@ pub async fn remove_known_networks(
         ..RemovalReport::default()
     };
     for (network, scope) in known {
-        let hint = match (scope.client, bluetooth, scope.host_hint.as_ref()) {
+        if scope.role_unresolved() {
+            report.unresolved_roles += 1;
+            continue;
+        }
+        let client = scope.class == ScopeClass::Client;
+        let hint = match (client, bluetooth, scope.host_hint.as_ref()) {
             (false, _, _) => None,
             (true, true, Some(hint)) => {
                 // "No link observed" only counts if BlueZ actually has the host device: a
@@ -268,6 +324,7 @@ pub fn cleanup_outcome(outcome: &Result<RemovalReport, CoreError>) -> (i32, serd
                 "remaining_owned_resources": report.remaining,
                 "unresolved_foreign_resources": report.unresolved,
                 "unresolved_client_links": report.unresolved_links,
+                "unresolved_roles": report.unresolved_roles,
                 "bluetooth_available": report.bluetooth,
             }),
         ),
@@ -958,6 +1015,371 @@ mod tests {
         let report = outcome.unwrap();
         assert!(report.succeeded(), "{report:?}");
         assert!(fake.world(|world| world.profiles.is_empty()));
+        std::fs::remove_dir_all(&paths.state_directory).unwrap();
+    }
+
+    /// Saves `memberships` (network, state, role) and optionally a client record for `record`
+    /// through the production stores.
+    fn seeded(
+        memberships: &[(
+            NetworkId,
+            blueroute_core::MembershipState,
+            Option<MembershipRole>,
+        )],
+        record: Option<NetworkId>,
+    ) -> RemovalPaths {
+        let paths = state(&[], false);
+        let mut registry = MembershipRegistry::default();
+        for (network, state, role) in memberships {
+            let mut membership =
+                NetworkMembership::new(*network, DisplayName::new("Seen").unwrap());
+            membership.state = *state;
+            membership.role = *role;
+            registry.remember_network(membership);
+        }
+        NetworkMembershipStore::new(paths.memberships.clone())
+            .save(&registry)
+            .unwrap();
+        if let Some(network) = record {
+            ClientRecordStore::new(paths.client_record.clone())
+                .save(Some(
+                    &ClientRecord::new(
+                        network,
+                        blueroute_core::NodeId::from_bytes([0x33; 16]),
+                        Some(host_device()),
+                    )
+                    .unwrap(),
+                ))
+                .unwrap();
+        }
+        paths
+    }
+
+    // RFU-02 / LC-BASE-04 regression (docs/CODE_REVIEW_LIFECYCLE_TODO.md, SCOPE-1/2). On 75c1a01
+    // a Member/None network with a matching client record is cleaned as host-only: without
+    // Bluetooth its owned proof is deleted and cleanup reports success.
+    #[test]
+    fn lc_cleanup_an_unknown_active_role_with_a_client_record_stays_unresolved() {
+        use blueroute_core::MembershipState::Member;
+        let paths = seeded(&[(net(1), Member, None)], Some(net(1)));
+        let fake = client_world(Some(owned_link("bnep0")));
+        let (outcome, fake) = run(&paths, fake, false);
+        let report = outcome.expect("cleanup ran");
+        assert!(
+            !report.succeeded(),
+            "an unknown active role was cleaned as host-only: {report:?}"
+        );
+        fake.world(|world| {
+            assert_eq!(world.profiles, vec![(net(1), iface("bnep0"))]);
+            assert_eq!(world.addresses, vec![address(net(1), "bnep0")]);
+            assert_eq!(world.disconnected, 0);
+        });
+        // Membership and client record are kept for a later, evidence-based retry.
+        let registry = NetworkMembershipStore::new(paths.memberships.clone())
+            .load()
+            .unwrap();
+        let kept = registry.network(&net(1)).expect("membership kept");
+        assert_eq!((kept.state, kept.role), (Member, None));
+        assert!(
+            ClientRecordStore::new(paths.client_record.clone())
+                .load()
+                .unwrap()
+                .is_some()
+        );
+        std::fs::remove_dir_all(&paths.state_directory).unwrap();
+    }
+
+    fn record_for(paths: &RemovalPaths, network: NetworkId, hint: Option<PeerHandle>) {
+        ClientRecordStore::new(paths.client_record.clone())
+            .save(Some(
+                &ClientRecord::new(
+                    network,
+                    blueroute_core::NodeId::from_bytes([0x33; 16]),
+                    hint,
+                )
+                .unwrap(),
+            ))
+            .unwrap();
+    }
+
+    fn stored(paths: &RemovalPaths) -> (MembershipRegistry, Option<ClientRecord>) {
+        (
+            NetworkMembershipStore::new(paths.memberships.clone())
+                .load()
+                .unwrap(),
+            ClientRecordStore::new(paths.client_record.clone())
+                .load()
+                .unwrap(),
+        )
+    }
+
+    // LC-CLEANUP-05: Member/None stays unresolved through the production stores and scope, with
+    // Bluetooth absent or present and with a record carrying a hint, one without, or none. A
+    // confirmed host network beside it is still cleaned and a foreign network is preserved.
+    #[test]
+    fn lc_cleanup_an_unknown_role_is_unresolved_in_every_combination() {
+        use blueroute_core::MembershipState::Member;
+        let foreign = net(9);
+        for bluetooth in [false, true] {
+            for record in [Some(Some(host_device())), Some(None), None] {
+                let label = format!("bluetooth {bluetooth}, record {record:?}");
+                let paths = seeded(
+                    &[
+                        (net(1), Member, None),
+                        (net(2), Member, Some(MembershipRole::Host)),
+                    ],
+                    None,
+                );
+                if let Some(hint) = record.clone() {
+                    record_for(&paths, net(1), hint);
+                }
+                let before = stored(&paths);
+                let fake = Fake::with(|world| {
+                    world.addresses = vec![
+                        address(net(1), "bnep0"),
+                        address(net(2), "br-b"),
+                        address(foreign, "br-f"),
+                    ];
+                    world.profiles = vec![
+                        (net(1), iface("bnep0")),
+                        (net(2), iface("br-b")),
+                        (foreign, iface("br-f")),
+                    ];
+                    world.panu = Some(owned_link("bnep0"));
+                });
+                let (outcome, fake) = run(&paths, fake, bluetooth);
+                let report = outcome.expect("cleanup ran");
+                assert!(!report.succeeded(), "{label}: {report:?}");
+                assert_eq!(report.unresolved_roles, 1, "{label}");
+                assert_eq!(
+                    report.unresolved, 2,
+                    "{label}: the foreign state is reported"
+                );
+                let (code, line) = cleanup_outcome(&Ok(report));
+                assert_eq!(
+                    (code, &line["unresolved_roles"]),
+                    (1, &serde_json::json!(1))
+                );
+                fake.world(|world| {
+                    assert_eq!(
+                        world.profiles,
+                        vec![(net(1), iface("bnep0")), (foreign, iface("br-f"))],
+                        "{label}: only the confirmed host network is cleaned"
+                    );
+                    assert_eq!(
+                        world.addresses,
+                        vec![address(net(1), "bnep0"), address(foreign, "br-f")],
+                        "{label}"
+                    );
+                    assert_eq!(world.disconnected, 0, "{label}: no link is disconnected");
+                    assert_eq!(world.panu, Some(owned_link("bnep0")), "{label}");
+                });
+                let after = stored(&paths);
+                assert_eq!(
+                    after.0.network(&net(1)).map(|m| (m.state, m.role)),
+                    Some((Member, None)),
+                    "{label}: the unknown role is not rewritten"
+                );
+                assert_eq!(after.1, before.1, "{label}: the client record is kept");
+                std::fs::remove_dir_all(&paths.state_directory).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn lc_cleanup_an_unknown_role_fails_even_with_no_owned_state_left() {
+        use blueroute_core::MembershipState::Member;
+        let paths = seeded(&[(net(1), Member, None)], Some(net(1)));
+        let (outcome, _) = run(&paths, Fake::default(), true);
+        let report = outcome.unwrap();
+        assert!(!report.succeeded(), "{report:?}");
+        assert_eq!((report.remaining, report.unresolved_roles), (0, 1));
+        std::fs::remove_dir_all(&paths.state_directory).unwrap();
+    }
+
+    #[test]
+    fn lc_cleanup_an_unknown_role_with_conflicting_proof_is_left_alone() {
+        use blueroute_core::MembershipState::Member;
+        // The owned profile names another interface than the live link: nothing proves it, and
+        // nothing is touched either way.
+        let paths = seeded(&[(net(1), Member, None)], Some(net(1)));
+        let fake = Fake::with(|world| {
+            world.profiles = vec![(net(1), iface("bnep3"))];
+            world.panu = Some(owned_link("bnep0"));
+        });
+        let (outcome, fake) = run(&paths, fake, true);
+        assert_eq!(outcome.unwrap().unresolved_roles, 1);
+        assert_eq!(fake.world(|world| world.profiles.len()), 1);
+        assert_eq!(fake.world(|world| world.disconnected), 0);
+        std::fs::remove_dir_all(&paths.state_directory).unwrap();
+    }
+
+    /// A persisted membership state and role.
+    type Stored = (blueroute_core::MembershipState, Option<MembershipRole>);
+
+    // LC-CLEANUP-01/06: every row of the classification table, through the production stores.
+    #[test]
+    fn lc_cleanup_scope_classifies_every_stored_combination() {
+        use blueroute_core::MembershipState::{Member, NotMember};
+        // (label, stored membership, client record present, expected class, takes the hint)
+        let rows: [(&str, Option<Stored>, bool, ScopeClass, bool); 9] = [
+            (
+                "host",
+                Some((Member, Some(MembershipRole::Host))),
+                false,
+                ScopeClass::Host,
+                false,
+            ),
+            (
+                "host, stale record",
+                Some((Member, Some(MembershipRole::Host))),
+                true,
+                ScopeClass::Host,
+                false,
+            ),
+            (
+                "client",
+                Some((Member, Some(MembershipRole::Client))),
+                true,
+                ScopeClass::Client,
+                true,
+            ),
+            (
+                "client, no record",
+                Some((Member, Some(MembershipRole::Client))),
+                false,
+                ScopeClass::Client,
+                false,
+            ),
+            (
+                "unknown",
+                Some((Member, None)),
+                false,
+                ScopeClass::UnknownRole,
+                false,
+            ),
+            (
+                "unknown, record",
+                Some((Member, None)),
+                true,
+                ScopeClass::UnknownRole,
+                false,
+            ),
+            (
+                "left",
+                Some((NotMember, None)),
+                false,
+                ScopeClass::CompletedLeave,
+                false,
+            ),
+            (
+                "left, stale record",
+                Some((NotMember, None)),
+                true,
+                ScopeClass::CompletedLeave,
+                false,
+            ),
+            (
+                "record only",
+                None,
+                true,
+                ScopeClass::OrphanClientRecord,
+                false,
+            ),
+        ];
+        for (label, membership, record, class, hinted) in rows {
+            let memberships: Vec<_> = membership
+                .into_iter()
+                .map(|(state, role)| (net(1), state, role))
+                .collect();
+            let paths = seeded(&memberships, record.then_some(net(1)));
+            let scope = removal_scope(&paths).unwrap();
+            let entry = scope.get(&net(1)).expect(label);
+            assert_eq!(entry.class, class, "{label}");
+            assert_eq!(entry.recorded, record, "{label}");
+            // Only a client network takes the record's host hint.
+            assert_eq!(entry.host_hint.is_some(), hinted, "{label}");
+            assert_eq!(
+                entry.role_unresolved(),
+                matches!(
+                    class,
+                    ScopeClass::UnknownRole | ScopeClass::OrphanClientRecord
+                ),
+                "{label}"
+            );
+            std::fs::remove_dir_all(&paths.state_directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn lc_cleanup_a_client_record_without_a_membership_is_unresolved() {
+        let paths = seeded(&[], Some(net(1)));
+        let fake = client_world(Some(owned_link("bnep0")));
+        let (outcome, fake) = run(&paths, fake, true);
+        let report = outcome.unwrap();
+        assert!(!report.succeeded(), "{report:?}");
+        assert_eq!(report.unresolved_roles, 1);
+        fake.world(|world| {
+            assert_eq!(world.profiles.len(), 1);
+            assert_eq!(
+                world.disconnected, 0,
+                "a hint alone never authorizes a disconnect"
+            );
+        });
+        assert!(stored(&paths).1.is_some(), "the record is not cleared");
+        std::fs::remove_dir_all(&paths.state_directory).unwrap();
+    }
+
+    // LC-CLEANUP-07: evidence-based recovery. A retry rereads the stores; Bluetooth coming back
+    // proves nothing on its own. Once the verified role is in the production store (seeded here
+    // as the recovered fact), normal client cleanup finishes and repeats idempotently.
+    #[test]
+    fn lc_cleanup_recovery_needs_the_role_established_and_then_completes() {
+        use blueroute_core::MembershipState::Member;
+        let paths = seeded(&[(net(1), Member, None)], Some(net(1)));
+        let fake = client_world(Some(owned_link("bnep0")));
+        let (outcome, fake) = run(&paths, fake, false);
+        assert_eq!(outcome.unwrap().unresolved_roles, 1);
+        // Bluetooth back, role still unknown: still unresolved, still untouched.
+        let (outcome, fake) = run(&paths, fake, true);
+        assert_eq!(outcome.unwrap().unresolved_roles, 1);
+        assert_eq!(fake.world(|world| world.disconnected), 0);
+        // The role is established independently and stored; the retry rereads it.
+        let paths_recovered = seeded(
+            &[(net(1), Member, Some(MembershipRole::Client))],
+            Some(net(1)),
+        );
+        std::fs::rename(&paths_recovered.memberships, &paths.memberships).unwrap();
+        std::fs::remove_dir_all(&paths_recovered.state_directory).unwrap();
+        let (outcome, fake) = run(&paths, fake, true);
+        let report = outcome.unwrap();
+        assert!(report.succeeded(), "{report:?}");
+        fake.world(|world| {
+            assert_eq!(world.disconnected, 1);
+            assert!(world.profiles.is_empty() && world.addresses.is_empty());
+        });
+        let (outcome, _) = run(&paths, fake, true);
+        assert!(outcome.unwrap().succeeded(), "a repeat must succeed");
+        std::fs::remove_dir_all(&paths.state_directory).unwrap();
+    }
+
+    #[test]
+    fn lc_cleanup_a_recovered_host_role_finishes_with_host_cleanup() {
+        use blueroute_core::MembershipState::Member;
+        let paths = seeded(&[(net(1), Member, None)], None);
+        let fake = Fake::with(|world| {
+            world.addresses = vec![address(net(1), "br-a")];
+            world.profiles = vec![(net(1), iface("br-a"))];
+        });
+        let (outcome, fake) = run(&paths, fake, false);
+        assert_eq!(outcome.unwrap().unresolved_roles, 1);
+        assert_eq!(fake.world(|world| world.profiles.len()), 1);
+        let recovered = seeded(&[(net(1), Member, Some(MembershipRole::Host))], None);
+        std::fs::rename(&recovered.memberships, &paths.memberships).unwrap();
+        std::fs::remove_dir_all(&recovered.state_directory).unwrap();
+        let (outcome, fake) = run(&paths, fake, false);
+        assert!(outcome.unwrap().succeeded());
+        assert!(fake.world(|world| world.profiles.is_empty() && world.addresses.is_empty()));
         std::fs::remove_dir_all(&paths.state_directory).unwrap();
     }
 }

@@ -34,9 +34,9 @@
 
 | Task | Outcome | Dependencies | State |
 | --- | --- | --- | --- |
-| LC-BASE | Durable reproductions and isolated failing tests | None | `[-]` |
+| LC-BASE | Durable reproductions and isolated failing tests | None | `[x]` |
 | LC-OWNER | P2 RFU-01: ownership-period retirement | LC-BASE | `[x]` |
-| LC-CLEANUP | P2 RFU-02: unknown active role and proof retention | LC-BASE | `[ ]` |
+| LC-CLEANUP | P2 RFU-02: unknown active role and proof retention | LC-BASE | `[x]` |
 | LC-INTEGRATION | Actual consumer/helper boundaries and CI coverage | LC-OWNER, LC-CLEANUP | `[ ]` |
 | LC-VALIDATE | Exact-candidate software/package/CI checks | LC-INTEGRATION | `[ ]` |
 | LC-QUALIFY | Existing installed-system/physical evidence gates | Procedure: LC-CLEANUP design; execution: validated packages and designated equipment | `[ ]` |
@@ -56,7 +56,7 @@ software fixes or their deterministic/private-broker regressions.
   task relationships in versioned evidence, including the limited scope of each reproduction.
 - [x] **LC-BASE-03:** Add a corrected ownership-period test that fails when a ready A→B→A
   Version reply delivers the old event before queued OwnerLost. Control the order with barriers.
-- [-] **LC-BASE-04:** Add a production-store Member/None plus matching client-record test that
+- [x] **LC-BASE-04:** Add a production-store Member/None plus matching client-record test that
   fails when cleanup without Bluetooth deletes proof and reports success. Preserve valid state.
 - [x] **LC-BASE-05:** Verify fixtures use private buses, fake networking and temporary state /
   package roots. Mock the installed helper where necessary so package tests cannot reach host buses.
@@ -91,26 +91,26 @@ Current-name equality cannot revive an old subscription; healthy delivery and co
 
 **Requirements:** SCOPE-1..6. **Earlier tasks:** FU-04-01/02/03/06/07/09, FU-INTEGRATION-03.
 
-- [ ] **LC-CLEANUP-01:** Define cleanup classification for every specification table row,
+- [x] **LC-CLEANUP-01:** Define cleanup classification for every specification table row,
   preserving membership state, role uncertainty and record provenance instead of a host/client
   boolean alone. Update scope/report callers and fixtures; document how an orphan client record
   differs from a confirmed completed leave.
-- [ ] **LC-CLEANUP-02:** Keep Member/None unresolved with or without a client hint, with either
+- [x] **LC-CLEANUP-02:** Keep Member/None unresolved with or without a client hint, with either
   Bluetooth availability. Preserve dependent profile/address proof, membership and client records.
-- [ ] **LC-CLEANUP-03:** Include ambiguity in the actual cleanup report/helper failure outcome,
+- [x] **LC-CLEANUP-03:** Include ambiguity in the actual cleanup report/helper failure outcome,
   even when remaining-resource inventory alone is zero; use bounded non-secret diagnostics.
-- [ ] **LC-CLEANUP-04:** Continue safe work for other confirmed networks without touching foreign
+- [x] **LC-CLEANUP-04:** Continue safe work for other confirmed networks without touching foreign
   resources. Preserve instance locking, removal-marker quiescence, run bounds and typed adapters.
-- [ ] **LC-CLEANUP-05:** Test Member/None through production stores and scope construction:
+- [x] **LC-CLEANUP-05:** Test Member/None through production stores and scope construction:
   Bluetooth absent/present, hint absent/present, owned/foreign fixtures, no remaining profile,
   conflicting proof and unrelated-network progress. Assert records as well as resource counts.
-- [ ] **LC-CLEANUP-06:** Retain explicit Host, explicit Client, NotMember/stale-record and invalid
+- [x] **LC-CLEANUP-06:** Retain explicit Host, explicit Client, NotMember/stale-record and invalid
   storage behavior. Test missing membership rows with client records; no hint alone authorizes
   disconnect and no unknown role is silently rewritten into a confirmed role.
-- [ ] **LC-CLEANUP-07:** Document evidence-based recovery; test authoritative recovered state,
+- [x] **LC-CLEANUP-07:** Document evidence-based recovery; test authoritative recovered state,
   reobservation, interruption/retry and repeat success. Keep existing proof retention and schema;
   do not add a production role-editing command or infer a role from Bluetooth availability.
-- [ ] **LC-CLEANUP-08:** Propagate unresolved scope through actual helper outcome and packaged
+- [x] **LC-CLEANUP-08:** Propagate unresolved scope through actual helper outcome and packaged
   remove/deconfigure/direct-purge failure/retry paths. Retain evidence on failure and preserve
   upgrade/abort behavior and successful confirmed completed-leave cleanup.
 
@@ -237,9 +237,9 @@ Keep software outcomes separate from actual installed-system/physical results.
 
 | Task / finding | Fix SHA and source | Regression / negative control / software evidence | Qualification or remaining gate | State |
 | --- | --- | --- | --- | --- |
-| LC-BASE | `e167198` baseline | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-base--findings-preserved-and-corrected-expectations-established-2026-11-14): RFU-01 2/2 corrected tests fail; RFU-02 test fails, committed with its fix | Isolated reproducible fixtures | IN PROGRESS |
+| LC-BASE | `e167198` baseline | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-base--findings-preserved-and-corrected-expectations-established-2026-11-14): RFU-01 2/2 corrected tests fail; RFU-02 test fails, committed with its fix | Isolated reproducible fixtures | ACCEPTED |
 | LC-OWNER / RFU-01 | LC-OWNER commit, `crates/blueroute-client/src/lib.rs` | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-owner--subscriptions-retire-when-their-ownership-period-ends-2026-11-14): EPOCH-1..5, 9 broker tests and 1 unit test; 5/9 fail on both negative controls | Software ownership-period acceptance | ACCEPTED (software) |
-| LC-CLEANUP / RFU-02 | — | SCOPE-1..6 pending | LC-QUALIFY for actual installed/PAN claims | NOT STARTED |
+| LC-CLEANUP / RFU-02 | LC-CLEANUP commit, `apps/daemon/src/removal.rs` | [Evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md#lc-cleanup--ambiguous-active-membership-stays-unresolved-2026-11-14): SCOPE-1..6, 8 new removal tests, lifecycle harness scenario; 2 negative controls | LC-QUALIFY for actual installed/PAN claims | ACCEPTED (software) |
 | LC-INTEGRATION | — | VERIFY-1/2/4 pending | Actual consumer/helper boundaries and CI scheduling | NOT STARTED |
 | LC-VALIDATE | — | VERIFY-3/4 pending | Exact-candidate checks/packages/CI | NOT STARTED |
 | LC-QUALIFY | — | Procedure revision pending | FU-QUALIFY, CR-QUALIFY-01..08, hardware tracker | NOT STARTED |
