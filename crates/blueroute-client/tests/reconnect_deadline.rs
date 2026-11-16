@@ -776,3 +776,229 @@ fn rc_a_cancelled_reconnect_leaves_the_connection_and_subscriptions_working()
         Ok(())
     })
 }
+
+/// Every method call the client sends, seen through a bus monitor in the broker's routing
+/// order: lookups, Version and Request calls counted one by one (RRC-01, TEST-1).
+struct Dispatches {
+    _monitor: Connection,
+    calls: MessageStream,
+    lookups: Vec<u32>,
+    versions: usize,
+    requests: usize,
+}
+
+impl Dispatches {
+    async fn watch(client: &Connection) -> Result<Self, Box<dyn Error>> {
+        let sender = client
+            .unique_name()
+            .ok_or("a bus connection has a unique name")?
+            .to_owned();
+        let monitor = Connection::session().await?;
+        let rule = zbus::MatchRule::builder()
+            .msg_type(Type::MethodCall)
+            .sender(sender.as_str())?
+            .build();
+        zbus::fdo::MonitoringProxy::new(&monitor)
+            .await?
+            .become_monitor(&[rule], 0)
+            .await?;
+        let calls = MessageStream::from(&monitor);
+        Ok(Self {
+            _monitor: monitor,
+            calls,
+            lookups: Vec::new(),
+            versions: 0,
+            requests: 0,
+        })
+    }
+
+    fn record(&mut self, call: &zbus::Message) {
+        let header = call.header();
+        match header.member().map(|member| member.as_str()) {
+            Some("GetNameOwner") => self.lookups.push(header.primary().serial_num().get()),
+            Some("Version") => self.versions += 1,
+            Some("Request") => self.requests += 1,
+            _ => {}
+        }
+    }
+
+    /// Waits up to `bound` for the next lookup and returns its serial.
+    async fn next_lookup(&mut self, bound: Duration) -> Result<Option<u32>, Box<dyn Error>> {
+        let before = self.lookups.len();
+        let deadline = Instant::now() + bound;
+        while self.lookups.len() == before {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match within(left, self.calls.next()).await {
+                Some(Some(call)) => self.record(&call?),
+                Some(None) => return Err("the monitor stream ended".into()),
+                None => return Ok(None),
+            }
+        }
+        Ok(self.lookups.last().copied())
+    }
+
+    /// Every call seen so far, after `quiet` passes with no new one.
+    async fn settle(&mut self, quiet: Duration) -> Result<(), Box<dyn Error>> {
+        while let Some(Some(call)) = within(quiet, self.calls.next()).await {
+            self.record(&call?);
+        }
+        Ok(())
+    }
+}
+
+/// Drives `operation` until its owner lookup has been sent and that lookup's reply has been
+/// dispatched on the client connection, without letting the operation see the reply. Each poll
+/// is followed by an unpolled wait on the monitor, so the operation is never polled while the
+/// reply is available; the reply is matched to the lookup by its reply serial. Fails clearly if
+/// any phase is not reached, never silently skipping the boundary.
+async fn owner_reply_ready_unpolled<T: std::fmt::Debug>(
+    dispatches: &mut Dispatches,
+    replies: &mut MessageStream,
+    mut operation: std::pin::Pin<&mut impl Future<Output = T>>,
+) -> Result<(), Box<dyn Error>> {
+    let mut lookup = None;
+    for _ in 0..50 {
+        if let Some(early) = future::poll_once(operation.as_mut()).await {
+            return Err(format!("finished before its owner lookup: {early:?}").into());
+        }
+        lookup = dispatches.next_lookup(Duration::from_millis(20)).await?;
+        if lookup.is_some() {
+            break;
+        }
+    }
+    let lookup = lookup.ok_or("the reconnect never sent its owner lookup")?;
+    let matched = within(WATCHDOG, async {
+        while let Some(message) = replies.next().await {
+            let Ok(message) = message else { continue };
+            let header = message.header();
+            if message.message_type() == Type::MethodReturn
+                && header.reply_serial().map(|serial| serial.get()) == Some(lookup)
+            {
+                return true;
+            }
+        }
+        false
+    })
+    .await;
+    if matched != Some(true) {
+        return Err("the owner lookup's reply never reached the client".into());
+    }
+    if dispatches.versions != 0 {
+        return Err("Version was sent before the owner reply was handed to reconnect".into());
+    }
+    Ok(())
+}
+
+/// RRC-01 / RCD-BASE-03 / RCD-TEST-01: the review's reproduction. Reconnect's owner lookup is
+/// answered while the operation is not being polled; the operation is then resumed after its
+/// 50 ms deadline. The one resumed poll must return the typed timeout without sending a new
+/// Version (or anything else), and leave the client unchanged and its connection working.
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn rcd_an_expired_resumption_with_a_ready_owner_reply_sends_no_version()
+-> Result<(), Box<dyn Error>> {
+    scenario(|_a, script, mut client, connection| async move {
+        script.reply_with(NEWER);
+        let mut dispatches = Dispatches::watch(&connection).await?;
+        let mut replies = MessageStream::from(&connection);
+        // Version call 1 was construction; nothing of reconnect's yet.
+        assert_eq!(script.version_calls(), 1);
+        let outcome = {
+            let mut operation = pin!(client.reconnect(BUDGET));
+            let first_poll = Instant::now();
+            owner_reply_ready_unpolled(&mut dispatches, &mut replies, operation.as_mut()).await?;
+            drop(replies);
+            let ready_at = first_poll.elapsed();
+            if ready_at >= BUDGET {
+                return Err(format!("the owner reply took {ready_at:?}, past the budget").into());
+            }
+            // Unpolled past the deadline with the owner reply ready.
+            Timer::at(first_poll + BUDGET * 2).await;
+            let versions_before = script.version_calls();
+            let resumed_at = first_poll.elapsed();
+            let outcome = future::poll_once(operation.as_mut()).await;
+            eprintln!(
+                "owner reply ready at {ready_at:?}; resumed at {resumed_at:?}; result on that \
+                 poll: {}; daemon Version calls before resuming: {versions_before}",
+                outcome.is_some()
+            );
+            outcome
+        };
+        match outcome {
+            Some(Err(ClientError::ReconnectTimeout { timeout, .. })) if timeout == BUDGET => {}
+            other => {
+                return Err(format!("the resumed poll must time out: {other:?}").into());
+            }
+        }
+        // Everything the client sent has been routed before this round trip's reply.
+        round_trip(&connection).await?;
+        dispatches.settle(Duration::from_millis(100)).await?;
+        let sent = (
+            dispatches.lookups.len(),
+            dispatches.versions,
+            dispatches.requests,
+        );
+        if sent != (1, 0, 0) {
+            return Err(format!(
+                "reconnect sent (lookups, Version, Request) = {sent:?} after expiry; expected \
+                 (1, 0, 0)"
+            )
+            .into());
+        }
+        if script.version_calls() != 1 {
+            return Err(format!(
+                "the daemon received {} Version calls; expected only construction's",
+                script.version_calls()
+            )
+            .into());
+        }
+        assert_eq!(client.server_version(), INITIAL);
+        // The connection works and a fresh reconnect negotiates normally.
+        match within(WATCHDOG, client.reconnect(Duration::from_secs(1))).await {
+            Some(Ok(())) => {}
+            other => return Err(format!("a fresh reconnect failed: {other:?}").into()),
+        }
+        assert_eq!(client.server_version(), NEWER);
+        Ok(())
+    })
+}
+
+/// RCD-BASE-03 control / RCD-TEST-02: the same observable owner stage, resumed before the
+/// deadline: exactly one reconnect Version, success with the distinct version, no Request.
+#[test]
+#[ignore = "needs a private bus: run with dbus-run-session"]
+fn rcd_a_timely_resumption_with_a_ready_owner_reply_negotiates_once() -> Result<(), Box<dyn Error>>
+{
+    scenario(|_a, script, mut client, connection| async move {
+        script.reply_with(NEWER);
+        let mut dispatches = Dispatches::watch(&connection).await?;
+        let mut replies = MessageStream::from(&connection);
+        let budget = Duration::from_secs(2);
+        let outcome = {
+            let mut operation = pin!(client.reconnect(budget));
+            owner_reply_ready_unpolled(&mut dispatches, &mut replies, operation.as_mut()).await?;
+            drop(replies);
+            within(WATCHDOG, operation).await
+        };
+        match outcome {
+            Some(Ok(())) => {}
+            other => return Err(format!("a timely resumption must succeed: {other:?}").into()),
+        }
+        assert_eq!(client.server_version(), NEWER);
+        round_trip(&connection).await?;
+        dispatches.settle(Duration::from_millis(100)).await?;
+        let sent = (
+            dispatches.lookups.len(),
+            dispatches.versions,
+            dispatches.requests,
+        );
+        assert_eq!(
+            sent,
+            (1, 1, 0),
+            "(lookups, Version, Request) sent by reconnect"
+        );
+        assert_eq!(script.version_calls(), 2);
+        assert_eq!(script.request_calls(), 0);
+        Ok(())
+    })
+}

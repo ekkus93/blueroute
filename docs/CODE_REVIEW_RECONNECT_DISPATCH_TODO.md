@@ -1,10 +1,10 @@
 # Code Review Reconnect Dispatch TODO
 
-**Status:** NOT STARTED; planning only, no implementation accepted.  
+**Status:** IN PROGRESS; RCD-BASE accepted.  
 **Finding / priority:** RRC-01 / P2.  
 **Baseline:** `0257bcbf11f37276771a477e612529fc3e10f155` (reviewed 2026-11-16).  
 **Companion specification:** [CODE_REVIEW_RECONNECT_DISPATCH_SPEC.md](CODE_REVIEW_RECONNECT_DISPATCH_SPEC.md).  
-**Planned implementation evidence:** `CODE_REVIEW_RECONNECT_DISPATCH_EVIDENCE.md` (not created yet).  
+**Implementation evidence:** [CODE_REVIEW_RECONNECT_DISPATCH_EVIDENCE.md](CODE_REVIEW_RECONNECT_DISPATCH_EVIDENCE.md).  
 **Related work:** [previous reconnect backlog](CODE_REVIEW_RECONNECT_TODO.md),
 [previous evidence](CODE_REVIEW_RECONNECT_EVIDENCE.md), [previous specification](CODE_REVIEW_RECONNECT_SPEC.md),
 and [original backlog](TODO.md), P5-005.
@@ -26,7 +26,7 @@ and [original backlog](TODO.md), P5-005.
 
 | Task | Outcome | Dependencies | State |
 | --- | --- | --- | --- |
-| RCD-BASE | Durable reproduction, scope and corrected failing expectation | None | `[ ]` |
+| RCD-BASE | Durable reproduction, scope and corrected failing expectation | None | `[x]` |
 | RCD-GUARD | Expiry guards before resumed work and new dispatch | RCD-BASE; design may proceed concurrently | `[ ]` |
 | RCD-TEST | Public and internal boundary matrix with sensitive controls | RCD-GUARD design; tests may precede code | `[ ]` |
 | RCD-VALIDATE | Exact-candidate software/package checks and CI | RCD-GUARD, RCD-TEST | `[ ]` |
@@ -36,17 +36,17 @@ and [original backlog](TODO.md), P5-005.
 
 **Requirements:** TEST-1/2/3, EVIDENCE-2/3.
 
-- [ ] **RCD-BASE-01:** Record current HEAD, dirty state, toolchains and differences from the
+- [x] **RCD-BASE-01:** Record current HEAD, dirty state, toolchains and differences from the
   reviewed baseline. Read contributor guidance, product/P5-005 requirements and both reconnect
   plans/evidence. Separate this remaining dispatch bug from the already-fixed RQR-01 failures.
-- [ ] **RCD-BASE-02:** Preserve the public 50 ms reproduction in versioned evidence: lookup
+- [x] **RCD-BASE-02:** Preserve the public 50 ms reproduction in versioned evidence: lookup
   dispatched, owner reply ready, future left unpolled past expiry, Version count one before
   resumption and two afterwards, despite typed timeout. Record three review failures/timely
   controls as historical evidence and distinguish resume time from post-result observation.
-- [ ] **RCD-BASE-03:** Add a maintained corrected public-method regression to
+- [x] **RCD-BASE-03:** Add a maintained corrected public-method regression to
   `crates/blueroute-client/tests/reconnect_deadline.rs`: timeout on the resumed poll and zero
   reconnect Version calls. Run against the reviewed behavior and retain a timely-owner control.
-- [ ] **RCD-BASE-04:** Establish fixture phases through matched replies/acknowledgements and
+- [x] **RCD-BASE-04:** Establish fixture phases through matched replies/acknowledgements and
   observable dispatch counts. Bound failure waits, release held work on error/panic, serialize
   name ownership where needed and use private brokers/ignored workspace `tmp/`. Do not silently
   skip a setup race or allow the fixture watchdog to stand in for the client deadline.
