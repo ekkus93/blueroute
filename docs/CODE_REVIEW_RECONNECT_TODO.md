@@ -1,6 +1,6 @@
 # Code Review Reconnect Deadline TODO
 
-**Status:** IN PROGRESS; RC-BASE, RC-DEADLINE and RC-TEST accepted. Evidence:
+**Status:** COMPLETE (2026-11-16, candidate `a7abc60`, CI 43940470468); software-only acceptance. Evidence:
 [CODE_REVIEW_RECONNECT_EVIDENCE.md](CODE_REVIEW_RECONNECT_EVIDENCE.md).  
 **Finding / priority:** RQR-01 / P2.  
 **Baseline:** `bd58ce2355816d7c7b956b9ed7dceedb4925044a`.  
@@ -29,8 +29,8 @@ and [queue/recovery evidence](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md).
 | RC-BASE | Durable reproduction and corrected failing expectations | None | `[x]` |
 | RC-DEADLINE | One deadline across lookup, Version and backoff | RC-BASE | `[x]` |
 | RC-TEST | Timing boundaries, cancellation and compatibility regressions | RC-DEADLINE design; tests may precede implementation | `[x]` |
-| RC-VALIDATE | Exact-candidate checks, packages and CI scheduling | RC-DEADLINE, RC-TEST | `[ ]` |
-| RC-CLOSEOUT | Public contract, P5-005 reconciliation and reviewed software closure | RC-DEADLINE, RC-TEST, RC-VALIDATE | `[ ]` |
+| RC-VALIDATE | Exact-candidate checks, packages and CI scheduling | RC-DEADLINE, RC-TEST | `[x]` |
+| RC-CLOSEOUT | Public contract, P5-005 reconciliation and reviewed software closure | RC-DEADLINE, RC-TEST, RC-VALIDATE | `[x]` |
 
 Tests and public-contract updates can start with the deadline design. Keep implementation local
 to the shared client; continue independent work without waiting for existing hardware gates.
@@ -110,18 +110,18 @@ negative control restoring retry-only deadline checks and record the intended fa
 
 **Requirements:** EVIDENCE-2, COMPAT-1..3.
 
-- [ ] **RC-VALIDATE-01:** Run pinned Rust formatting, locked workspace build/check/tests and
+- [x] **RC-VALIDATE-01:** Run pinned Rust formatting, locked workspace build/check/tests and
   strict all-target Clippy, plus experimental-join software tests. Record counts/ignored cases
   and verify default builds keep join closed.
-- [ ] **RC-VALIDATE-02:** Run all existing/new private-broker suites and Python socket-tooling
+- [x] **RC-VALIDATE-02:** Run all existing/new private-broker suites and Python socket-tooling
   checks. Explicitly schedule every new ignored deadline suite in CI; retain queue saturation,
   owner binding/watchers, error classification and no-replay coverage.
-- [ ] **RC-VALIDATE-03:** With pinned Node/npm, run clean frontend install, format/lint/type
+- [x] **RC-VALIDATE-03:** With pinned Node/npm, run clean frontend install, format/lint/type
   checks, component/StrictMode tests and production build; retain narrow Tauri permissions.
-- [ ] **RC-VALIDATE-04:** Build both Debian packages and inspect manifests/dependencies/assets.
+- [x] **RC-VALIDATE-04:** Build both Debian packages and inspect manifests/dependencies/assets.
   Run source and extracted packaged-script lifecycle, state migration and isolated upgrade /
   cleanup failure/retry/remove/purge checks against the fresh candidate.
-- [ ] **RC-VALIDATE-05:** Record exact source SHA, toolchains, commands/results, package hashes,
+- [x] **RC-VALIDATE-05:** Record exact source SHA, toolchains, commands/results, package hashes,
   preserved-invariant evidence and limitations; inspect exact-revision CI with repository-approved
   tooling. Attribute earlier runs to their own revisions and do not sum overlapping test suites.
 
@@ -163,15 +163,15 @@ actually run and evidence identifies mocked layers, ignored cases and remaining 
 
 **Requirements:** EVIDENCE-3 and every requirement-to-evidence mapping.
 
-- [ ] **RC-CLOSEOUT-01:** Review the full deadline path and timing matrix, negative control,
+- [x] **RC-CLOSEOUT-01:** Review the full deadline path and timing matrix, negative control,
   cancellation/late-reply behavior, typed errors, client-state updates and owner/no-replay safety.
-- [ ] **RC-CLOSEOUT-02:** Document public timeout semantics and update relevant specification /
+- [x] **RC-CLOSEOUT-02:** Document public timeout semantics and update relevant specification /
   client guidance. Append a dated P5-005 correction/evidence link for bounded reconnect, preserving
   its working request/event/version-gating behavior and earlier QR/LC/FU/CR history.
-- [ ] **RC-CLOSEOUT-03:** Complete versioned evidence mapping all 12 requirements to tasks,
+- [x] **RC-CLOSEOUT-03:** Complete versioned evidence mapping all 12 requirements to tasks,
   source, corrected baseline failures, final results and limits; verify links, candidate identity
   and states. Link this backlog as the current RQR-01 authority.
-- [ ] **RC-CLOSEOUT-04:** Close this software deadline remediation only after implementation,
+- [x] **RC-CLOSEOUT-04:** Close this software deadline remediation only after implementation,
   tests, validation, documentation and review pass. Report existing installed-system/physical /
   product/release gates separately and preserve their open status without adding an unrelated
   equipment dependency to this fix or making a hardware-support claim.
@@ -189,5 +189,5 @@ Preserve exact revisions and separate new results from historical acceptance.
 | RC-BASE / RQR-01 | `bd58ce2` (baseline) + `tests/reconnect_deadline.rs` | 5 corrected expectations fail at the baseline on 3 repeats; 5 controls pass ([evidence](CODE_REVIEW_RECONNECT_EVIDENCE.md#rc-base--finding-preserved-and-corrected-expectations-established-2026-11-16)) | None | ACCEPTED |
 | RC-DEADLINE / RQR-01 | `3e05d98`, `crates/blueroute-client/src/lib.rs` (`negotiate_within`) | DEADLINE-1..6, COMPAT-1..3 mapped ([evidence](CODE_REVIEW_RECONNECT_EVIDENCE.md#rc-deadline--one-whole-operation-budget-2026-11-16)); existing client suites pass | None | ACCEPTED |
 | RC-TEST | `tests/reconnect_deadline.rs` (10), `deadline_tests` (6) | Full matrix passes 3/3; controls X1–X4 each caught ([evidence](CODE_REVIEW_RECONNECT_EVIDENCE.md#rc-test--timing-outcome-and-cancellation-matrix-2026-11-16)) | None | ACCEPTED |
-| RC-VALIDATE | — | EVIDENCE-2 checks/packages/CI pending | Exact-candidate software evidence | NOT STARTED |
-| RC-CLOSEOUT | — | EVIDENCE-3 and requirement map pending | Reviewed software closure; existing environment gates separate | NOT STARTED |
+| RC-VALIDATE | `a7abc60` | All Rust/broker/Python/frontend/package checks pass; CI 43940470468 success ([evidence](CODE_REVIEW_RECONNECT_EVIDENCE.md#rc-validate--exact-candidate-2026-11-16)) | None | ACCEPTED |
+| RC-CLOSEOUT | `af58349` (review fixes), `a7abc60` | Independent review resolved; 12 requirements mapped ([evidence](CODE_REVIEW_RECONNECT_EVIDENCE.md#rc-closeout--requirement-map-and-closure-2026-11-16)) | None for RQR-01; existing QR/LC/FU/CR gates stay open separately | ACCEPTED |

@@ -3,6 +3,8 @@
 **Status:** SOFTWARE COMPLETE / QUALIFICATION DEFERRED (2026-11-14, candidate `b700577`); QR-QUALIFY-02 blocked on equipment. **Evidence:** [CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md).  
 **Baseline:** `f957d80207930ccb481bec8f23cefd8bb2506cde`.  
 **Companion specification:** [CODE_REVIEW_QUEUE_RECOVERY_SPEC.md](CODE_REVIEW_QUEUE_RECOVERY_SPEC.md).  
+**Later work:** RQR-01 (bounded `reconnect` timeout, outside the QR scope) is tracked in
+[CODE_REVIEW_RECONNECT_TODO.md](CODE_REVIEW_RECONNECT_TODO.md).  
 **Earlier work:** [lifecycle backlog](CODE_REVIEW_LIFECYCLE_TODO.md),
 [lifecycle evidence](CODE_REVIEW_LIFECYCLE_EVIDENCE.md), and [original backlog](TODO.md).
 

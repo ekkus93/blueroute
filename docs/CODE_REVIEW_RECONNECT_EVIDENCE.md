@@ -175,3 +175,63 @@ apply, after a stale X2 anchor silently ran unmodified code once):
 
 Results at `af58349`: seam 8/8, broker 10/10 on three repeats (held Version 50.11–50.23 ms,
 absent service with 20 ms budget 20.15–20.19 ms, zero budget ≤ 11 µs).
+
+## RC-VALIDATE — Exact candidate (2026-11-16)
+
+**Candidate** `a7abc6004054e4c2bcc922fa3b22c103d532a810` (code identical to `af58349`; `a7abc60`
+adds only this record). Clean tree apart from `.serena/` and `AGENTS.md`. rustc/cargo 1.95.0,
+Node 26.13.0, npm 11.20.0, Python 3.13.5, dbus-daemon 1.16.2, Debian 13 kernel 6.12.115.
+Run with the repository's command reference (`tmp/validate.sh`, a git-ignored helper whose
+steps are the TODO's command list plus every `ci.yml` broker suite).
+
+| Check | Result |
+| --- | --- |
+| `cargo fmt --all -- --check`; locked build, check; strict all-target Clippy | all rc=0 |
+| `cargo test --workspace --locked` | 928 passed, 0 failed, 95 ignored (broker suites run below) |
+| `cargo test -p blueroute-daemon --features experimental-join --locked`; its Clippy | 392 passed, 0 failed, 16 ignored; clean |
+| Default build keeps join closed | 61 join tests pass, including the closed-gate cases |
+| Private brokers (`dbus-run-session`) | `dbus_service` 1, `authorization` 1, `dbus_client` 1, `cli_exit_contract` 1, `bridge_end_to_end` 1, `owner_race` 6, `event_owner_race` 6, `ownership_period` 12, `queue_saturation` 18, **`reconnect_deadline` 10**, `owner_watch` 3, `watcher` 8, `state_events` 8, `publisher_progress` 6, `watch_integration` 2, `watch_handover` 6, `tui_watcher` 4; all passed |
+| Python socket tooling (`test_p6_006_*.py`) | 7 passed |
+| Frontend (`npm ci`, format, lint, typecheck, test, build) | all rc=0; 4 files, 43 tests passed |
+| Debian packages | built; `blueroute_0.1.0_amd64.deb` `e7fbd733cbfba7879abdb15e501b098561106ec853a6d407019da5e4c2b6973b` (19 entries; Depends dbus, bluez, network-manager, polkitd, systemd); `blueroute-desktop_0.1.0_amd64.deb` `5ee1430afeab6c4576452b165e77752f0cf11bb4b9896f231c0b70cb972ce148` (12 entries; Depends blueroute (= 0.1.0) and the GTK/WebKit runtime) |
+| Maintainer lifecycle, source and extracted packaged scripts | both passed (install, upgrade, remove, purge, abort, cleanup failure, unresolved role, manual recovery) |
+| Isolated upgrade with `state_check` | 0.0.1 → 0.1.0 kept identity, migrated v2 membership to v3 roles, restarted; failed cleanup aborted removal; remove retained state; purge deleted it |
+
+The workspace count rose from 920 (QR, `b700577`) to 928 by the eight seam tests; the broker
+total rose by the ten `reconnect_deadline` tests. Counts are per suite and not summed across
+overlapping runs. Package hashes differ from the QR candidate because the client library changed.
+
+**Exact-revision CI.** [Run 43940470468](https://github.com/ekkus93/blueroute/actions/runs/43940470468)
+on `a7abc60`: success (Rust, Desktop frontend), read with `gh run view`; its "Run client reconnect
+deadline tests (RQR-01)" step reports `10 passed`. Earlier: [43938985666](https://github.com/ekkus93/blueroute/actions/runs/43938985666)
+on `bd6608f` (first scheduled run, 10 passed), success. `7872774`, `3e05d98` and `af58349` were
+pushed together with a later head and have no run of their own.
+
+**Mocked layers and limits.** Daemons in the broker suites are scripted fakes on private session
+buses; package tests mock the helper and systemd (`DPKG_ROOT` relocates files, not D-Bus). Timing
+results are from one Debian 13 development machine and CI's runner, not installed systems. A
+reconnect cancelled while zbus is partway through writing a message to the socket shares every
+cancelled zbus call's exposure to a partial frame (review finding 2). The desktop/TUI shared
+watcher does not use `reconnect` and is unchanged.
+
+## RC-CLOSEOUT — Requirement map and closure (2026-11-16)
+
+| Requirement | Task | Source | Baseline failure (`bd58ce2`) | Final evidence |
+| --- | --- | --- | --- | --- |
+| DEADLINE-1 one budget | RC-DEADLINE-01 | `negotiate_within` deadline on first poll, `checked_add` | unrepresentable budget panicked (X1) | `rc_the_budget_starts_at_the_first_poll`, broker unpolled-future check, `rc_an_unrepresentable_budget_does_not_overflow`; X5 |
+| DEADLINE-2 bound every await | RC-DEADLINE-02 | attempt raced against `Timer::at(deadline)` | held Version pending at 2 s | `rc_a_held_version_reply_times_out_within_the_budget`, `rc_a_delayed_owner_lookup_is_bounded_by_the_whole_budget`; X4 |
+| DEADLINE-3 bounded delays | RC-DEADLINE-03 | `Timer::at(min(deadline, now+100 ms))`, expiry check per attempt | absent service took ~101 ms for a 30 ms budget | `rc_an_absent_service_with_a_short_budget_caps_the_wait`, `rc_retry_delays_are_capped_and_stop_at_the_deadline`; X3 |
+| DEADLINE-4 outcome decision | RC-DEADLINE-01/05 | expiry checked before the outcome | late 1.8 accepted, late 2.0 reported incompatible | `rc_expiry_wins_over_a_late_{compatible,incompatible}_reply`, `rc_an_outcome_decided_after_the_deadline_loses_to_it`; X2 |
+| DEADLINE-5 typed timeout | RC-DEADLINE-04 | existing `ReconnectTimeout`, kind-specific `last_error` | n/a (pending forever) | Unavailable + text checks in every timeout test, `rc_a_failure_after_the_deadline_keeps_its_diagnostic` |
+| DEADLINE-6 zero/short | RC-DEADLINE-05 | expiry check before the first attempt | zero budget returned `Ok(())` | `rc_a_zero_budget_times_out_without_negotiating` (monitor: 0 lookups), `rc_a_zero_budget_makes_no_attempt` |
+| COMPAT-1 owner/command safety | RC-DEADLINE-07 | attempt is unchanged `validated_owner` | controls passed | timely/incompatible/restart/no-replay tests; 0 Requests; `dbus_client`, `owner_race` |
+| COMPAT-2 state and lifetime | RC-DEADLINE-06 | `server_version` set only after `Ok`; nothing spawned | late reply updated the version | cancellation test; version unchanged in every timeout test |
+| COMPAT-3 boundaries | RC-DEADLINE-07 | no change outside `reconnect` | — | all QR/watcher/daemon/desktop/TUI suites, packages and frontend pass at `a7abc60` |
+| EVIDENCE-1 sensitive tests | RC-BASE, RC-TEST | `tests/reconnect_deadline.rs`, `deadline_tests` | 5 corrected expectations failed 3/3 | full matrix passes; X1–X5 each caught |
+| EVIDENCE-2 exact candidate | RC-VALIDATE | `ci.yml` schedules the suite | — | RC-VALIDATE above; CI 43940470468 |
+| EVIDENCE-3 scope and closure | RC-CLOSEOUT | rustdoc, `docs/SPEC.md`, `docs/P5-005-CLIENT.md`, `docs/TODO.md` P5-005 | — | dated P5-005 correction; this map; independent review |
+
+**Closure.** RQR-01 is **COMPLETE** as a software correction: its acceptance is software-only
+(specification §4). The existing QR, LC, FU and CR installed-system, physical and
+product/release gates are unchanged and remain open in their own backlogs; this correction neither
+satisfies them nor depends on them, and it makes no hardware-support claim.
