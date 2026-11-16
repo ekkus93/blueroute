@@ -1,9 +1,9 @@
 # Module Split TODO
 
-**Status:** NOT STARTED; planning only.  
+**Status:** IN PROGRESS; MS-BASE accepted.  
 **Baseline:** `1870e406836174c0e0433f42d026f71e497b73f5`.  
 **Companion specification:** [MODULE_SPLIT_SPEC.md](MODULE_SPLIT_SPEC.md).  
-**Implementation evidence:** `MODULE_SPLIT_EVIDENCE.md` (created by MS-BASE).
+**Implementation evidence:** [MODULE_SPLIT_EVIDENCE.md](MODULE_SPLIT_EVIDENCE.md).
 
 ## Tracking
 
@@ -20,7 +20,7 @@
 
 | Task | Outcome | Dependencies | State |
 | --- | --- | --- | --- |
-| MS-BASE | Baseline listings, help text and public-surface snapshots | None | `[ ]` |
+| MS-BASE | Baseline listings, CLI behavior and public-surface snapshots | None | `[x]` |
 | MS-CLI | `apps/cli/src/main.rs` split into args, format, local_key, failure, run | MS-BASE | `[ ]` |
 | MS-NM | `networkmanager.rs` split into dbus, inventory, ownership, profile, addresses, routes | MS-BASE | `[ ]` |
 | MS-TLS | `control_tls.rs` split into identity, certificate, enrollment, transport, session | MS-BASE | `[ ]` |
@@ -36,16 +36,17 @@ but do them one at a time so each diff stays reviewable.
 
 **Requirements:** SPLIT-2, SPLIT-4, VERIFY-1/2.
 
-- [ ] **MS-BASE-01:** Record HEAD, dirty state and toolchain. Confirm the four files' production
+- [x] **MS-BASE-01:** Record HEAD, dirty state and toolchain. Confirm the four files' production
   line counts and responsibilities against the specification table.
-- [ ] **MS-BASE-02:** Capture sorted test-name listings: `cargo test -p blueroute --bins --locked
+- [x] **MS-BASE-02:** Capture sorted test-name listings: `cargo test -p blueroute --bins --locked
   -- --list`, `cargo test -p blueroute-linux --lib --locked -- --list` and `cargo test -p
   blueroute-daemon --lib --locked -- --list`. Expected totals 22, 153 and 343 (14
   `networkmanager::`, 15 `bluez::`, 22 `control_tls::`).
-- [ ] **MS-BASE-03:** Capture `blueroute --help` and `--help` for every subcommand and nested
-  subcommand, and the `all.html` item lists from `cargo doc --no-deps --locked -p blueroute-linux
-  -p blueroute-daemon`.
-- [ ] **MS-BASE-04:** Create `docs/MODULE_SPLIT_EVIDENCE.md` with the baseline counts, and record
+- [x] **MS-BASE-03:** Capture the CLI behavior matrix (stdout, stderr and exit status of every
+  command with and without `--json`, invalid arguments, help and version, with no reachable
+  daemon) and the `all.html` item lists from `cargo doc --no-deps --locked -p blueroute-linux -p
+  blueroute-daemon`. Confirm the capture is deterministic by taking it twice.
+- [x] **MS-BASE-04:** Create `docs/MODULE_SPLIT_EVIDENCE.md` with the baseline counts, and record
   how each later comparison is made so it can be repeated without the `tmp/` captures.
 
 **Acceptance:** Baseline names, help text and public items are captured and their totals recorded.
@@ -60,7 +61,7 @@ but do them one at a time so each diff stays reviewable.
 - [ ] **MS-CLI-02:** Move each of the 22 tests next to the code it exercises; no test changes
   beyond its module path.
 - [ ] **MS-CLI-03:** Verify: fmt, Clippy, workspace tests, `cli_exit_contract` broker test, the 22
-  test names, and every help text byte-identical to MS-BASE. Check moved blocks with
+  test names, and the CLI behavior matrix byte-identical to MS-BASE. Check moved blocks with
   `--color-moved` and account for every non-moved line.
 
 **Acceptance:** CLI behavior, help and output are unchanged; `main.rs` holds only `main`; each new
@@ -173,7 +174,7 @@ evidence complete.
 | Requirement | Tasks | Required evidence | State |
 | --- | --- | --- | --- |
 | SPLIT-1 move only | MS-CLI/NM/TLS/BLUEZ, MS-CLOSEOUT-01 | moved-block checks; review | PENDING |
-| SPLIT-2 public surface | MS-BASE-03, each split, MS-VALIDATE | identical `all.html` items and help text; dependents unedited | PENDING |
+| SPLIT-2 public surface | MS-BASE-03, each split, MS-VALIDATE | identical `all.html` items and CLI behavior matrix; dependents unedited | PENDING |
 | SPLIT-3 minimal visibility | each split, MS-CLOSEOUT-01 | review of every visibility change | PENDING |
 | SPLIT-4 tests travel | MS-BASE-02, each split | identical test-name multisets and totals | PENDING |
 | SPLIT-5 invariants | MS-NM-02, MS-TLS-02, MS-VALIDATE | review; full validation | PENDING |

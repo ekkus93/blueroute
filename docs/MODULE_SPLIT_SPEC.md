@@ -87,7 +87,7 @@ A change that turns out to be needed is a separate, reviewed commit with its own
 **SPLIT-2 — Public surface unchanged:** Every crate's public API stays identical, including the
 `blueroute_linux` re-exports (`NetworkManagerBackend`, `BluezBackend`) and the daemon's
 `pub use control_tls::{…}` list. Dependent crates compile without edits. The CLI's command tree,
-help text, JSON and human output and exit statuses are unchanged.
+help text, JSON and human output, error guidance and exit statuses are unchanged.
 
 **SPLIT-3 — Minimal visibility:** New submodules are private. Items get the narrowest visibility
 that compiles, preferring `pub(super)`. Nothing becomes `pub` that was not, and nothing is widened
@@ -122,8 +122,10 @@ block check), and every non-moved line in the diff is accounted for.
 **VERIFY-1 — Per split:** `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets
 --locked -- -D warnings`; `cargo test --workspace --locked`; the split crate's test listing
 compared with the baseline names (SPLIT-4); and for daemon/Linux splits the private-broker suites
-in `ci.yml`. The CLI split also compares `blueroute --help` and every subcommand's `--help` with the
-baseline, byte for byte.
+in `ci.yml`. The CLI split also compares, byte for byte, the stdout, stderr and exit status of
+every command in the tree (with and without `--json`), of invalid arguments and of help/version,
+run with the system bus pointed at a socket that does not exist. (This CLI deliberately prints one
+top-level help screen for every help request, so per-subcommand help adds nothing.)
 
 **VERIFY-2 — Public surface:** Compare the item lists in `cargo doc --no-deps` output
 (`target/doc/<crate>/all.html`) for `blueroute_linux` and `blueroute_daemon` before and after;
