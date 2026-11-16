@@ -5,6 +5,8 @@ pub use watch::{WatchSignal, reconnect_delay, watch};
 
 use std::collections::VecDeque;
 use std::fmt;
+use std::pin::Pin;
+use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use async_io::Timer;
@@ -74,13 +76,19 @@ impl BlueRouteClient {
     /// Normal commands are never replayed automatically because retrying a mutation after a lost
     /// reply could duplicate side effects. An incompatible daemon fails at once, without retries.
     ///
-    /// `timeout` bounds the whole operation (RQR-01, DEADLINE-1..6). One deadline, taken when the
+    /// `timeout` bounds the whole operation (RQR-01, RRC-01). One deadline, taken when the
     /// returned future is first polled, covers every owner lookup, Version negotiation and retry
-    /// delay; delays are cut to the time left and nothing new is sent once it has passed. An
-    /// outcome counts only if it is decided before the deadline: when a reply and the deadline
-    /// are both ready, including a reply that arrived while the future was not being polled, the
-    /// deadline wins and the result is [`ClientError::ReconnectTimeout`], whether that reply was
-    /// compatible or not. A zero `timeout` returns that error without contacting the bus.
+    /// delay; delays are cut to the time left.
+    ///
+    /// - **Dispatch:** every poll checks the deadline before it advances the pending negotiation,
+    ///   and the deadline is checked again just before each new owner lookup or Version call is
+    ///   started. Once it has passed nothing new is sent, even if a reply that arrived while the
+    ///   future was not being polled would let the negotiation move on. A call started before
+    ///   the deadline may still be answered by the daemon afterwards.
+    /// - **Outcome:** a result counts only if it is decided before the deadline. A reply or
+    ///   failure that comes later, compatible or not, loses and the result is
+    ///   [`ClientError::ReconnectTimeout`].
+    /// - A zero `timeout` returns that error without contacting the bus.
     ///
     /// [`server_version`](Self::server_version) changes only on a timely compatible reply. An
     /// expired or dropped reconnect leaves it unchanged and abandons its pending read-only call
@@ -89,10 +97,8 @@ impl BlueRouteClient {
     /// the middle of writing its message to the socket, which zbus does not guard against.
     pub async fn reconnect(&mut self, timeout: Duration) -> Result<(), ClientError> {
         let connection = &self.connection;
-        let version = negotiate_within(timeout, || async {
-            validated_owner(connection).await.map(|owner| owner.version)
-        })
-        .await?;
+        let version =
+            negotiate_within(timeout, |budget| validated_owner_within(connection, budget)).await?;
         self.server_version = version;
         Ok(())
     }
@@ -608,24 +614,76 @@ impl EventSubscription {
     }
 }
 
-/// Runs `attempt` (one owner lookup and Version negotiation) until it decides, retrying only after
-/// a bus failure, all within one `timeout` budget (RQR-01, DEADLINE-1..6).
+/// One reconnect's time budget, shared by the operation and every dispatch decision inside it
+/// (RQR-01, RRC-01). Taken once, on the operation's first poll; a budget too large to represent
+/// as an instant never expires.
+#[derive(Clone, Copy, Debug)]
+struct Budget {
+    deadline: Option<Instant>,
+}
+
+impl Budget {
+    fn starting_now(timeout: Duration) -> Self {
+        Self {
+            deadline: Instant::now().checked_add(timeout),
+        }
+    }
+
+    fn expired(self) -> bool {
+        self.deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+    }
+
+    /// The dispatch decision before starting a new owner lookup or Version call (DISPATCH-3):
+    /// allowed only while the budget lasts. A call allowed here may still finish remotely after
+    /// the deadline; its outcome then loses to expiry.
+    fn admit(self) -> Result<(), Halted> {
+        if self.expired() {
+            Err(Halted::Expired)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Why one reconnect attempt stopped without a version.
+#[derive(Debug)]
+enum Halted {
+    /// The budget ran out at a dispatch decision; the next stage was not started.
+    Expired,
+    Failed(ClientError),
+}
+
+impl From<ClientError> for Halted {
+    fn from(error: ClientError) -> Self {
+        Self::Failed(error)
+    }
+}
+
+/// Runs `attempt` (one owner lookup and Version negotiation, given the operation's budget) until
+/// it decides, retrying only after a bus failure, all within one `timeout` budget (RQR-01,
+/// DEADLINE-1..6; RRC-01, DISPATCH-1..5).
 ///
-/// The deadline is taken on the first poll. Every attempt races it, and every retry delay is cut
-/// to the time left. After each attempt the deadline is checked before the attempt's outcome is
-/// looked at, so an expired budget wins over a reply that became ready with it, compatible or
-/// not; branch polling order never decides the result. A budget too large to represent as an
-/// instant never expires.
-async fn negotiate_within<Attempt, Negotiation>(
+/// - The budget starts on the first poll and is never restarted.
+/// - No new attempt starts after expiry, and every retry delay is cut to the time left.
+/// - Every poll of a pending attempt first checks the deadline: an expired attempt is never
+///   polled onward, so a stage result that became ready while the caller was away cannot carry
+///   it into its next lookup or Version call (DISPATCH-2). The attempt checks the same budget
+///   again before each dispatch (`Budget::admit`, DISPATCH-3).
+/// - After each attempt the deadline is checked before its outcome is looked at, so an outcome
+///   decided after expiry, compatible or not, loses to it (DISPATCH-4).
+async fn negotiate_within<Attempt, Negotiation, Failure>(
     timeout: Duration,
     mut attempt: Attempt,
 ) -> Result<ApiVersion, ClientError>
 where
-    Attempt: FnMut() -> Negotiation,
-    Negotiation: Future<Output = Result<ApiVersion, ClientError>>,
+    Attempt: FnMut(Budget) -> Negotiation,
+    Negotiation: Future<Output = Result<ApiVersion, Failure>>,
+    Failure: Into<Halted>,
 {
-    let deadline = Instant::now().checked_add(timeout);
-    let expired = || deadline.is_some_and(|deadline| Instant::now() >= deadline);
+    const PENDING: &str =
+        "the owner lookup or Version negotiation was still pending at the deadline";
+    let budget = Budget::starting_now(timeout);
     let timed_out = |last_error: String| ClientError::ReconnectTimeout {
         timeout,
         last_error,
@@ -633,33 +691,42 @@ where
     // The most recent bus failure, kept as context for a timeout.
     let mut failure: Option<String> = None;
     loop {
-        if expired() {
+        if budget.expired() {
             // Before the first attempt (a zero budget) or after a capped retry delay.
             return Err(timed_out(failure.unwrap_or_else(|| {
                 "the budget ran out before the daemon was contacted".to_owned()
             })));
         }
-        let outcome = match deadline {
-            Some(deadline) => {
-                futures_lite::future::or(async { Some(attempt().await) }, async {
-                    Timer::at(deadline).await;
-                    None
-                })
-                .await
-            }
-            None => Some(attempt().await),
+        let outcome = {
+            let mut negotiation = std::pin::pin!(attempt(budget));
+            let mut timer = budget.deadline.map(Timer::at);
+            std::future::poll_fn(|context| {
+                // DISPATCH-2: checked before the attempt is polled onward, on every poll.
+                if budget.expired() {
+                    return Poll::Ready(None);
+                }
+                if let Poll::Ready(outcome) = negotiation.as_mut().poll(context) {
+                    return Poll::Ready(Some(outcome.map_err(Into::into)));
+                }
+                // Only a wake-up at the deadline: the check above decides on that poll.
+                match timer.as_mut() {
+                    Some(timer) => Pin::new(timer).poll(context).map(|_| None),
+                    None => Poll::Pending,
+                }
+            })
+            .await
         };
-        if expired() {
+        if budget.expired() {
             let what = match &outcome {
-                None => {
-                    "the owner lookup or Version negotiation did not answer before the deadline"
-                        .to_owned()
+                None => PENDING.to_owned(),
+                Some(Err(Halted::Expired)) => {
+                    "the deadline passed before the next owner lookup or Version call".to_owned()
                 }
                 Some(Ok(_)) => "the daemon answered only after the deadline".to_owned(),
-                Some(Err(ClientError::Bus(error))) => {
+                Some(Err(Halted::Failed(ClientError::Bus(error)))) => {
                     format!("the last attempt failed only after the deadline: {error}")
                 }
-                Some(Err(error)) => {
+                Some(Err(Halted::Failed(error))) => {
                     format!("the last attempt ended only after the deadline: {error}")
                 }
             };
@@ -670,22 +737,51 @@ where
         }
         match outcome {
             Some(Ok(version)) => return Ok(version),
-            Some(Err(ClientError::Bus(error))) => {
+            Some(Err(Halted::Failed(ClientError::Bus(error)))) => {
                 failure = Some(error.to_string());
                 let retry = Instant::now() + RECONNECT_POLL_INTERVAL;
-                Timer::at(deadline.map_or(retry, |deadline| deadline.min(retry))).await;
+                let wake = budget
+                    .deadline
+                    .map_or(retry, |deadline| deadline.min(retry));
+                Timer::at(wake).await;
             }
             // Incompatibility and every other typed failure decide at once.
-            Some(Err(error)) => return Err(error),
-            // The deadline's timer fired, so the check above has already returned.
-            None => {
-                return Err(timed_out(
-                    "the owner lookup or Version negotiation did not answer before the deadline"
-                        .to_owned(),
-                ));
-            }
+            Some(Err(Halted::Failed(error))) => return Err(error),
+            // Both arise only once the budget has expired, which the check above returned on.
+            Some(Err(Halted::Expired)) | None => return Err(timed_out(PENDING.to_owned())),
         }
     }
+}
+
+/// Reconnect's owner lookup and Version negotiation: `validated_owner`'s two stages, each started
+/// only while `budget` lasts (RRC-01, DISPATCH-3). Ordinary requests and subscriptions keep using
+/// `validated_owner`, which has no budget.
+async fn validated_owner_within(
+    connection: &Connection,
+    budget: Budget,
+) -> Result<ApiVersion, Halted> {
+    in_stages(
+        budget,
+        || current_owner(connection),
+        |(name, _since)| async move { negotiate_version_at(connection, &name).await },
+    )
+    .await
+}
+
+/// Runs a lookup and then a negotiation on its result, admitting each through `budget` first.
+async fn in_stages<Owner, Lookup, Negotiation>(
+    budget: Budget,
+    lookup: impl FnOnce() -> Lookup,
+    negotiate: impl FnOnce(Owner) -> Negotiation,
+) -> Result<ApiVersion, Halted>
+where
+    Lookup: Future<Output = Result<Owner, ClientError>>,
+    Negotiation: Future<Output = Result<ApiVersion, ClientError>>,
+{
+    budget.admit()?;
+    let owner = lookup().await?;
+    budget.admit()?;
+    Ok(negotiate(owner).await?)
 }
 
 /// Resolve the well-known name to its current unique owner and check that owner's version there.
@@ -1057,7 +1153,7 @@ mod deadline_tests {
         let lookups = Rc::new(Cell::new(0));
         let versions = Rc::new(Cell::new(0));
         let started = Instant::now();
-        let outcome = futures_lite::future::block_on(negotiate_within(budget, || {
+        let outcome = futures_lite::future::block_on(negotiate_within(budget, |_| {
             let (lookups, versions) = (lookups.clone(), versions.clone());
             async move {
                 lookups.set(lookups.get() + 1);
@@ -1070,7 +1166,7 @@ mod deadline_tests {
         let elapsed = started.elapsed();
         let last_error = timeout_of(outcome, budget);
         assert!(elapsed < budget + TOLERANCE, "took {elapsed:?}");
-        assert!(last_error.contains("did not answer"), "{last_error}");
+        assert!(last_error.contains("still pending"), "{last_error}");
         assert!(
             !last_error.contains("D-Bus operation failed"),
             "{last_error}"
@@ -1082,7 +1178,7 @@ mod deadline_tests {
     #[test]
     fn rc_a_zero_budget_makes_no_attempt() {
         let attempts = Cell::new(0);
-        let outcome = futures_lite::future::block_on(negotiate_within(Duration::ZERO, || {
+        let outcome = futures_lite::future::block_on(negotiate_within(Duration::ZERO, |_| {
             attempts.set(attempts.get() + 1);
             async { checked(ApiVersion::CURRENT) }
         }));
@@ -1104,7 +1200,7 @@ mod deadline_tests {
             let started = Instant::now();
             let late = Cell::new(0);
             let attempts = Cell::new(0);
-            let outcome = futures_lite::future::block_on(negotiate_within(budget, || {
+            let outcome = futures_lite::future::block_on(negotiate_within(budget, |_| {
                 attempts.set(attempts.get() + 1);
                 if started.elapsed() >= budget {
                     late.set(late.get() + 1);
@@ -1134,12 +1230,13 @@ mod deadline_tests {
     fn rc_an_outcome_decided_after_the_deadline_loses_to_it() {
         let budget = Duration::from_millis(20);
         for server in [NEWER, INCOMPATIBLE] {
-            let outcome = futures_lite::future::block_on(negotiate_within(budget, || async move {
-                // Blocks the executor past the deadline, so the reply and the timer are both
-                // ready when the operation is next looked at.
-                std::thread::sleep(budget * 3);
-                checked(server)
-            }));
+            let outcome =
+                futures_lite::future::block_on(negotiate_within(budget, |_| async move {
+                    // Blocks the executor past the deadline, so the reply and the timer are both
+                    // ready when the operation is next looked at.
+                    std::thread::sleep(budget * 3);
+                    checked(server)
+                }));
             let last_error = timeout_of(outcome, budget);
             assert!(
                 last_error.contains("only after the deadline"),
@@ -1153,7 +1250,7 @@ mod deadline_tests {
     fn rc_timely_outcomes_decide_at_once() {
         let budget = Duration::from_secs(5);
         let attempts = Cell::new(0);
-        let outcome = futures_lite::future::block_on(negotiate_within(budget, || {
+        let outcome = futures_lite::future::block_on(negotiate_within(budget, |_| {
             attempts.set(attempts.get() + 1);
             async { checked(INCOMPATIBLE) }
         }));
@@ -1165,7 +1262,7 @@ mod deadline_tests {
 
         // A bus failure then a compatible reply: retried once, accepted in time.
         let attempts = Cell::new(0);
-        let outcome = futures_lite::future::block_on(negotiate_within(budget, || {
+        let outcome = futures_lite::future::block_on(negotiate_within(budget, |_| {
             attempts.set(attempts.get() + 1);
             let first = attempts.get() == 1;
             async move { if first { Err(absent()) } else { checked(NEWER) } }
@@ -1174,7 +1271,7 @@ mod deadline_tests {
         assert_eq!(attempts.get(), 2);
 
         // Other typed failures are not retried either.
-        let outcome = futures_lite::future::block_on(negotiate_within(budget, || async {
+        let outcome = futures_lite::future::block_on(negotiate_within(budget, |_| async {
             Err(ClientError::OwnerLost)
         }));
         assert!(matches!(outcome, Err(ClientError::OwnerLost)));
@@ -1183,7 +1280,7 @@ mod deadline_tests {
     /// DEADLINE-1: a budget too large to represent as an instant never expires.
     #[test]
     fn rc_an_unrepresentable_budget_does_not_overflow() {
-        let outcome = futures_lite::future::block_on(negotiate_within(Duration::MAX, || async {
+        let outcome = futures_lite::future::block_on(negotiate_within(Duration::MAX, |_| async {
             checked(NEWER)
         }));
         assert!(matches!(outcome, Ok(version) if version == NEWER));
@@ -1194,7 +1291,7 @@ mod deadline_tests {
     #[test]
     fn rc_a_failure_after_the_deadline_keeps_its_diagnostic() {
         let budget = Duration::from_millis(20);
-        let outcome = futures_lite::future::block_on(negotiate_within(budget, || async move {
+        let outcome = futures_lite::future::block_on(negotiate_within(budget, |_| async move {
             std::thread::sleep(budget * 3);
             Err(absent())
         }));
@@ -1212,12 +1309,193 @@ mod deadline_tests {
     #[test]
     fn rc_the_budget_starts_at_the_first_poll() {
         let budget = Duration::from_millis(50);
-        let operation = negotiate_within(budget, || async { checked(NEWER) });
+        let operation = negotiate_within(budget, |_| async { checked(NEWER) });
         std::thread::sleep(budget * 2);
         let outcome = futures_lite::future::block_on(operation);
         assert!(
             matches!(outcome, Ok(version) if version == NEWER),
             "{outcome:?}"
         );
+    }
+
+    /// RRC-01 / RCD-TEST-03 (DISPATCH-3): the deadline passes inside an active poll, while the
+    /// lookup stage is finishing. The production stage guard (`in_stages`, as reconnect uses it)
+    /// must not start the Version stage, and the result is the typed timeout.
+    #[test]
+    fn rcd_expiry_inside_a_poll_does_not_start_the_next_stage() {
+        let budget = Duration::from_millis(20);
+        let lookups = Cell::new(0);
+        let negotiations = Cell::new(0);
+        let outcome = futures_lite::future::block_on(negotiate_within(budget, |budget| {
+            in_stages(
+                budget,
+                || {
+                    lookups.set(lookups.get() + 1);
+                    async move {
+                        // The lookup's reply is handled while the deadline passes.
+                        std::thread::sleep(budget_overrun());
+                        Ok::<_, ClientError>("owner")
+                    }
+                },
+                |_owner| {
+                    negotiations.set(negotiations.get() + 1);
+                    async { checked(NEWER) }
+                },
+            )
+        }));
+        let last_error = timeout_of(outcome, budget);
+        assert!(
+            last_error.contains("before the next owner lookup or Version"),
+            "{last_error}"
+        );
+        assert_eq!((lookups.get(), negotiations.get()), (1, 0));
+    }
+
+    /// Longer than every budget used with it.
+    fn budget_overrun() -> Duration {
+        Duration::from_millis(60)
+    }
+
+    /// A lookup stage whose reply is withheld until `ready` is set: a stand-in for a reply that
+    /// arrives while the caller is not polling.
+    fn withheld_until(
+        ready: &Cell<bool>,
+    ) -> impl Future<Output = Result<&'static str, ClientError>> {
+        std::future::poll_fn(move |_| {
+            if ready.get() {
+                Poll::Ready(Ok("owner"))
+            } else {
+                Poll::Pending
+            }
+        })
+    }
+
+    /// RRC-01 / RCD-TEST-01 at the seam (DISPATCH-2): the attempt's pending work becomes ready
+    /// while the operation is not polled, and it is resumed only after expiry. The resumed poll
+    /// must time out without polling the attempt at all. The attempt here has no stage guard of
+    /// its own, so this isolates the resumed-poll check from `Budget::admit`.
+    #[test]
+    fn rcd_an_expired_resumption_does_not_poll_the_attempt_onward() {
+        let budget = Duration::from_millis(20);
+        let ready = Cell::new(false);
+        let polls_once_ready = Cell::new(0);
+        let mut operation = std::pin::pin!(negotiate_within(budget, |_| {
+            std::future::poll_fn(|_| {
+                if ready.get() {
+                    // Here a real attempt would move on and send Version.
+                    polls_once_ready.set(polls_once_ready.get() + 1);
+                    Poll::Ready(checked(NEWER))
+                } else {
+                    Poll::Pending
+                }
+            })
+        }));
+        // First poll: the attempt is started and pending.
+        assert!(
+            futures_lite::future::block_on(futures_lite::future::poll_once(operation.as_mut()))
+                .is_none()
+        );
+        // Its reply arrives while nobody polls; the caller comes back after the deadline.
+        ready.set(true);
+        std::thread::sleep(budget_overrun());
+        let outcome =
+            futures_lite::future::block_on(futures_lite::future::poll_once(operation.as_mut()))
+                .expect("the resumed poll decides");
+        let last_error = timeout_of(outcome, budget);
+        assert!(last_error.contains("still pending"), "{last_error}");
+        assert_eq!(polls_once_ready.get(), 0, "expired work was polled onward");
+    }
+
+    /// DISPATCH-2/4 control: the same withheld lookup resumed in time negotiates once.
+    #[test]
+    fn rcd_a_timely_resumption_negotiates_once() {
+        let ready = Cell::new(false);
+        let negotiations = Cell::new(0);
+        let mut operation = std::pin::pin!(negotiate_within(Duration::from_secs(5), |budget| {
+            in_stages(
+                budget,
+                || withheld_until(&ready),
+                |_owner| {
+                    negotiations.set(negotiations.get() + 1);
+                    async { checked(NEWER) }
+                },
+            )
+        }));
+        assert!(
+            futures_lite::future::block_on(futures_lite::future::poll_once(operation.as_mut()))
+                .is_none()
+        );
+        ready.set(true);
+        let outcome = futures_lite::future::block_on(operation);
+        assert!(
+            matches!(outcome, Ok(version) if version == NEWER),
+            "{outcome:?}"
+        );
+        assert_eq!(negotiations.get(), 1);
+    }
+
+    /// RCD-TEST-04 (DISPATCH-3/5): a retry delay that ends at the deadline starts no further
+    /// lookup, and the earlier bus failure stays the timeout's context.
+    #[test]
+    fn rcd_a_retry_delay_ending_at_expiry_starts_no_lookup() {
+        let budget = Duration::from_millis(30);
+        let lookups = Cell::new(0);
+        let outcome = futures_lite::future::block_on(negotiate_within(budget, |budget| {
+            in_stages(
+                budget,
+                || {
+                    lookups.set(lookups.get() + 1);
+                    async { Err::<&str, _>(absent()) }
+                },
+                |_owner| async { checked(NEWER) },
+            )
+        }));
+        let last_error = timeout_of(outcome, budget);
+        assert!(last_error.contains("NameHasNoOwner"), "{last_error}");
+        // Expiry was found at the loop's own check after the delay, so the context is the
+        // observed failure itself, not a pending or late stage.
+        assert!(!last_error.contains("pending"), "{last_error}");
+        assert!(!last_error.contains("after the deadline"), "{last_error}");
+        assert_eq!(
+            lookups.get(),
+            1,
+            "a lookup started after the capped delay expired"
+        );
+    }
+
+    /// DISPATCH-4 through the stage guards: a Version stage started in time whose outcome comes
+    /// after expiry loses to it, compatible or not, and a late failure keeps its diagnostic.
+    #[test]
+    fn rcd_a_stage_started_in_time_that_decides_late_loses() {
+        let budget = Duration::from_millis(20);
+        for late in [Ok(NEWER), Ok(INCOMPATIBLE), Err(())] {
+            let outcome = futures_lite::future::block_on(negotiate_within(budget, |budget| {
+                in_stages(
+                    budget,
+                    || async { Ok::<_, ClientError>("owner") },
+                    move |_owner| async move {
+                        std::thread::sleep(budget_overrun());
+                        match late {
+                            Ok(server) => checked(server),
+                            Err(()) => Err(absent()),
+                        }
+                    },
+                )
+            }));
+            let last_error = timeout_of(outcome, budget);
+            match late {
+                Ok(server) if server == NEWER => {
+                    assert!(last_error.contains("answered only after"), "{last_error}");
+                }
+                Ok(_) => {
+                    assert!(last_error.contains("ended only after"), "{last_error}");
+                    assert!(last_error.contains("incompatible"), "{last_error}");
+                }
+                Err(()) => {
+                    assert!(last_error.contains("failed only after"), "{last_error}");
+                    assert!(last_error.contains("NameHasNoOwner"), "{last_error}");
+                }
+            }
+        }
     }
 }
