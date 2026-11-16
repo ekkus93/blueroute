@@ -846,27 +846,68 @@ impl Dispatches {
     }
 }
 
-/// Drives `operation` until its owner lookup has been sent and that lookup's reply has been
-/// dispatched on the client connection, without letting the operation see the reply. Each poll
-/// is followed by an unpolled wait on the monitor, so the operation is never polled while the
-/// reply is available; the reply is matched to the lookup by its reply serial. Fails clearly if
-/// any phase is not reached, never silently skipping the boundary.
+/// The budget for the ready-owner tests: long enough that a loaded machine still sets up the
+/// boundary (lookup sent, reply dispatched, counts checked) well before the deadline.
+const OWNER_STAGE_BUDGET: Duration = Duration::from_millis(200);
+
+/// Calls observed so far: the client's (lookups, Version, Request) seen by the monitor, and the
+/// daemon's own Version count.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Counts {
+    sent: (usize, usize, usize),
+    daemon_versions: usize,
+}
+
+async fn counts(
+    script: &Script,
+    connection: &Connection,
+    dispatches: &mut Dispatches,
+) -> Result<Counts, Box<dyn Error>> {
+    // Everything the client has sent so far is routed before this round trip's reply; the
+    // monitor then shows it all.
+    round_trip(connection).await?;
+    dispatches.settle(Duration::from_millis(20)).await?;
+    Ok(Counts {
+        sent: (
+            dispatches.lookups.len(),
+            dispatches.versions,
+            dispatches.requests,
+        ),
+        daemon_versions: script.version_calls(),
+    })
+}
+
+/// How the attempt to set up the ready-owner boundary went.
+enum Boundary {
+    /// The lookup's reply is dispatched on the client connection, the operation has not seen
+    /// it, and nothing after the lookup was sent. The counts at that moment.
+    Ready(Counts),
+    /// The reply arrived while the operation was still inside its first poll (the client's
+    /// reader thread runs independently), so that poll legitimately went on to Version. This
+    /// operation cannot test the boundary and must be discarded.
+    Raced,
+}
+
+/// Polls `operation` exactly once, which sends its owner lookup, then establishes without
+/// polling it again that the lookup's reply has been dispatched on the client connection and
+/// that nothing after the lookup has been sent. The reply is matched to the lookup by its reply
+/// serial. Never re-polls (a second poll could find the reply and move on); a phase that cannot
+/// be reached fails the test, and a raced first poll is reported, never silently accepted.
 async fn owner_reply_ready_unpolled<T: std::fmt::Debug>(
+    script: &Script,
+    connection: &Connection,
     dispatches: &mut Dispatches,
     replies: &mut MessageStream,
     mut operation: std::pin::Pin<&mut impl Future<Output = T>>,
-) -> Result<(), Box<dyn Error>> {
-    let mut lookup = None;
-    for _ in 0..50 {
-        if let Some(early) = future::poll_once(operation.as_mut()).await {
-            return Err(format!("finished before its owner lookup: {early:?}").into());
-        }
-        lookup = dispatches.next_lookup(Duration::from_millis(20)).await?;
-        if lookup.is_some() {
-            break;
-        }
+) -> Result<Boundary, Box<dyn Error>> {
+    let start = counts(script, connection, dispatches).await?;
+    if let Some(early) = future::poll_once(operation.as_mut()).await {
+        return Err(format!("finished within its first poll: {early:?}").into());
     }
-    let lookup = lookup.ok_or("the reconnect never sent its owner lookup")?;
+    let lookup = dispatches
+        .next_lookup(WATCHDOG)
+        .await?
+        .ok_or("the first poll did not send the owner lookup; the boundary cannot be set up")?;
     let matched = within(WATCHDOG, async {
         while let Some(message) = replies.next().await {
             let Ok(message) = message else { continue };
@@ -883,16 +924,32 @@ async fn owner_reply_ready_unpolled<T: std::fmt::Debug>(
     if matched != Some(true) {
         return Err("the owner lookup's reply never reached the client".into());
     }
-    if dispatches.versions != 0 {
-        return Err("Version was sent before the owner reply was handed to reconnect".into());
+    let now = counts(script, connection, dispatches).await?;
+    let (lookups, versions, requests) = (
+        now.sent.0 - start.sent.0,
+        now.sent.1 - start.sent.1,
+        now.sent.2 - start.sent.2,
+    );
+    match (lookups, versions, requests) {
+        (1, 0, 0) if now.daemon_versions == start.daemon_versions => Ok(Boundary::Ready(now)),
+        (1, 1, 0) => Ok(Boundary::Raced),
+        other => Err(format!(
+            "unexpected calls during setup (lookups, Version, Request) = {other:?}; daemon \
+             Version calls {} -> {}",
+            start.daemon_versions, now.daemon_versions
+        )
+        .into()),
     }
-    Ok(())
 }
+
+/// Discarded raced setups allowed before a test gives up.
+const MAX_RACED: usize = 20;
 
 /// RRC-01 / RCD-BASE-03 / RCD-TEST-01: the review's reproduction. Reconnect's owner lookup is
 /// answered while the operation is not being polled; the operation is then resumed after its
-/// 50 ms deadline. The one resumed poll must return the typed timeout without sending a new
-/// Version (or anything else), and leave the client unchanged and its connection working.
+/// deadline (200 ms here, so setup completes well inside it under load; the review used 50 ms).
+/// The one resumed poll must return the typed timeout without sending a new Version (or anything
+/// else), and leave the client unchanged and its connection working.
 #[test]
 #[ignore = "needs a private bus: run with dbus-run-session"]
 fn rcd_an_expired_resumption_with_a_ready_owner_reply_sends_no_version()
@@ -901,54 +958,68 @@ fn rcd_an_expired_resumption_with_a_ready_owner_reply_sends_no_version()
         script.reply_with(NEWER);
         let mut dispatches = Dispatches::watch(&connection).await?;
         let mut replies = MessageStream::from(&connection);
-        // Version call 1 was construction; nothing of reconnect's yet.
-        assert_eq!(script.version_calls(), 1);
-        let outcome = {
-            let mut operation = pin!(client.reconnect(BUDGET));
+        let mut raced = 0;
+        let (before, outcome) = loop {
+            let mut operation = pin!(client.reconnect(OWNER_STAGE_BUDGET));
             let first_poll = Instant::now();
-            owner_reply_ready_unpolled(&mut dispatches, &mut replies, operation.as_mut()).await?;
-            drop(replies);
+            let boundary = owner_reply_ready_unpolled(
+                &script,
+                &connection,
+                &mut dispatches,
+                &mut replies,
+                operation.as_mut(),
+            )
+            .await?;
+            let Boundary::Ready(before) = boundary else {
+                raced += 1;
+                if raced >= MAX_RACED {
+                    return Err(
+                        format!("{raced} setups raced; the boundary was never set up").into(),
+                    );
+                }
+                continue;
+            };
             let ready_at = first_poll.elapsed();
-            if ready_at >= BUDGET {
+            if ready_at >= OWNER_STAGE_BUDGET {
                 return Err(format!("the owner reply took {ready_at:?}, past the budget").into());
             }
             // Unpolled past the deadline with the owner reply ready.
-            Timer::at(first_poll + BUDGET * 2).await;
-            let versions_before = script.version_calls();
+            Timer::at(first_poll + OWNER_STAGE_BUDGET * 2).await;
             let resumed_at = first_poll.elapsed();
             let outcome = future::poll_once(operation.as_mut()).await;
             eprintln!(
                 "owner reply ready at {ready_at:?}; resumed at {resumed_at:?}; result on that \
-                 poll: {}; daemon Version calls before resuming: {versions_before}",
+                 poll: {}; before resuming {before:?}; raced setups discarded: {raced}",
                 outcome.is_some()
             );
-            outcome
+            break (before, outcome);
         };
+        drop(replies);
+        assert_eq!(
+            client.server_version(),
+            INITIAL,
+            "a discarded setup changed the version"
+        );
         match outcome {
-            Some(Err(ClientError::ReconnectTimeout { timeout, .. })) if timeout == BUDGET => {}
+            Some(Err(ClientError::ReconnectTimeout { timeout, .. }))
+                if timeout == OWNER_STAGE_BUDGET => {}
             other => {
                 return Err(format!("the resumed poll must time out: {other:?}").into());
             }
         }
-        // Everything the client sent has been routed before this round trip's reply.
-        round_trip(&connection).await?;
+        let after = counts(&script, &connection, &mut dispatches).await?;
         dispatches.settle(Duration::from_millis(100)).await?;
-        let sent = (
-            dispatches.lookups.len(),
-            dispatches.versions,
-            dispatches.requests,
-        );
-        if sent != (1, 0, 0) {
+        let after = Counts {
+            sent: (
+                dispatches.lookups.len(),
+                dispatches.versions,
+                dispatches.requests,
+            ),
+            ..after
+        };
+        if after != before {
             return Err(format!(
-                "reconnect sent (lookups, Version, Request) = {sent:?} after expiry; expected \
-                 (1, 0, 0)"
-            )
-            .into());
-        }
-        if script.version_calls() != 1 {
-            return Err(format!(
-                "the daemon received {} Version calls; expected only construction's",
-                script.version_calls()
+                "the resumed poll after expiry sent work: before {before:?}, after {after:?}"
             )
             .into());
         }
@@ -973,31 +1044,47 @@ fn rcd_a_timely_resumption_with_a_ready_owner_reply_negotiates_once() -> Result<
         script.reply_with(NEWER);
         let mut dispatches = Dispatches::watch(&connection).await?;
         let mut replies = MessageStream::from(&connection);
-        let budget = Duration::from_secs(2);
-        let outcome = {
-            let mut operation = pin!(client.reconnect(budget));
-            owner_reply_ready_unpolled(&mut dispatches, &mut replies, operation.as_mut()).await?;
-            drop(replies);
-            within(WATCHDOG, operation).await
+        let mut raced = 0;
+        let (before, outcome) = loop {
+            let mut operation = pin!(client.reconnect(Duration::from_secs(2)));
+            let boundary = owner_reply_ready_unpolled(
+                &script,
+                &connection,
+                &mut dispatches,
+                &mut replies,
+                operation.as_mut(),
+            )
+            .await?;
+            let Boundary::Ready(before) = boundary else {
+                raced += 1;
+                if raced >= MAX_RACED {
+                    return Err(
+                        format!("{raced} setups raced; the boundary was never set up").into(),
+                    );
+                }
+                continue;
+            };
+            break (before, within(WATCHDOG, operation).await);
         };
+        drop(replies);
         match outcome {
             Some(Ok(())) => {}
             other => return Err(format!("a timely resumption must succeed: {other:?}").into()),
         }
         assert_eq!(client.server_version(), NEWER);
-        round_trip(&connection).await?;
+        let after = counts(&script, &connection, &mut dispatches).await?;
         dispatches.settle(Duration::from_millis(100)).await?;
         let sent = (
-            dispatches.lookups.len(),
-            dispatches.versions,
-            dispatches.requests,
+            dispatches.lookups.len() - before.sent.0,
+            dispatches.versions - before.sent.1,
+            dispatches.requests - before.sent.2,
         );
         assert_eq!(
             sent,
-            (1, 1, 0),
-            "(lookups, Version, Request) sent by reconnect"
+            (0, 1, 0),
+            "(lookups, Version, Request) sent after resuming"
         );
-        assert_eq!(script.version_calls(), 2);
+        assert_eq!(after.daemon_versions, before.daemon_versions + 1);
         assert_eq!(script.request_calls(), 0);
         Ok(())
     })

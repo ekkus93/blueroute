@@ -748,7 +748,12 @@ where
             // Incompatibility and every other typed failure decide at once.
             Some(Err(Halted::Failed(error))) => return Err(error),
             // Both arise only once the budget has expired, which the check above returned on.
-            Some(Err(Halted::Expired)) | None => return Err(timed_out(PENDING.to_owned())),
+            Some(Err(Halted::Expired)) | None => {
+                return Err(timed_out(match failure {
+                    Some(failure) => format!("{PENDING}; the previous attempt failed: {failure}"),
+                    None => PENDING.to_owned(),
+                }));
+            }
         }
     }
 }
