@@ -142,3 +142,36 @@ detached worktree with its own `CARGO_TARGET_DIR`, applies one old behavior to
 
 Each restored behavior is detected by both layers, and the late-reply tests fail only under the
 controls that change the outcome decision, so they are not confirming the old bug.
+
+## RC-CLOSEOUT-01 — Independent review (2026-11-16)
+
+An independent reviewer read the specification and the code (not this record) at `bd6608f`,
+ran both suites (6/6 seam, 10/10 broker) and checked zbus 5.19 internals. It found no correctness
+defect against DEADLINE-1..6 or COMPAT-1..3, and confirmed: the deadline is taken on first poll;
+`Proxy::new_owned` (lazy property caching) awaits no setup and spawns nothing; a dropped
+`PendingMethodCall` removes its serial, so a late reply reaches only broadcast streams; the
+post-attempt expiry check makes `future::or`'s attempt-first polling harmless; nothing is spawned
+and the connection is never closed. Its six findings, all resolved in `af58349`:
+
+| # | Finding | Resolution |
+| --- | --- | --- |
+| 1 | DEADLINE-5 text: an attempt *failing* after the deadline was described as "the daemon answered", dropping its bus error | The late outcome is now worded by kind; a late bus failure keeps its diagnostic. Test `rc_a_failure_after_the_deadline_keeps_its_diagnostic` |
+| 2 | A call cancelled mid-write could leave a partial frame on the shared connection (zbus property, every cancelled zbus call) | Documented on `reconnect` and below as a limitation |
+| 3 | The broker late-reply test relies on zbus completing a reply before broadcasting it | Assumption pinned in a comment; the seam test covers the precedence independently; `queue_saturation` pins zbus 5.19.0 |
+| 4 | 60 ms slack on the short-budget timings could flake under load | Budget 20 ms with a bound of 95 ms (75 ms slack), still below one 100 ms retry interval so X3 stays detected; 150 ms slack for the 250 ms seam case |
+| 5 | A panicking broker scenario skipped `release_name`, so later scenarios could cascade | `scenario` catches the unwind, releases the name, then resumes the panic |
+| 6 | Nothing tested that the budget starts on first poll | Seam `rc_the_budget_starts_at_the_first_poll`; broker: a `reconnect(50 ms)` future left unpolled for 100 ms still succeeds |
+
+**Controls at `af58349`** (`tmp/rc-neg-controls.sh`, now aborting loudly if an edit does not
+apply, after a stale X2 anchor silently ran unmodified code once):
+
+| Control | Seam FAILED | Broker FAILED |
+| --- | --- | --- |
+| X1 `bd58ce2` loop | 6 of 8 (all but timely outcomes and first poll) | 5 (held Version, zero, absent, both late replies) |
+| X2 no expiry check before the outcome | late outcome, late failure diagnostic | both late replies |
+| X3 uncapped retry delay | capped delays | absent service |
+| X4 attempt not raced | delayed lookup | held Version |
+| X5 deadline taken at creation | first poll | none: `reconnect` is itself `async`, so its inner future is only created on first poll; the broker check guards a regression in `reconnect` itself |
+
+Results at `af58349`: seam 8/8, broker 10/10 on three repeats (held Version 50.11–50.23 ms,
+absent service with 20 ms budget 20.15–20.19 ms, zero budget ≤ 11 µs).
