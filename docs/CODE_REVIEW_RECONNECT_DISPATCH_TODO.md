@@ -1,6 +1,8 @@
 # Code Review Reconnect Dispatch TODO
 
 **Status:** COMPLETE (2026-11-16, candidate `a1702ad`, CI 43963097981); software-only acceptance.  
+**Correction (2026-11-16):** RCD-VALIDATE-05 and RCD-CLOSEOUT-04/05 carried one documentary error
+(a client test-count comparison), corrected under [RCD-REVIEW-01](CODE_REVIEW_RECONNECT_COUNTS_TODO.md); no runtime change.  
 **Finding / priority:** RRC-01 / P2.  
 **Baseline:** `0257bcbf11f37276771a477e612529fc3e10f155` (reviewed 2026-11-16).  
 **Companion specification:** [CODE_REVIEW_RECONNECT_DISPATCH_SPEC.md](CODE_REVIEW_RECONNECT_DISPATCH_SPEC.md).  
@@ -141,6 +143,8 @@ all prior regressions remain valid. A passing timeout assertion alone is insuffi
   broker timings/counts, control edits, fresh package hashes and limitations in versioned evidence.
   Read exact-candidate CI through Ralph Bridge. Attribute earlier CI/results to their own
   revisions; do not reuse historical hashes or sum overlapping test runs as a new total.
+  *Correction (2026-11-16):* partial at `3a9a631` only because of the wrong 12 → 19 client
+  unit-test comparison (actual 14 → 19); corrected and proved under [RCD-REVIEW-01](CODE_REVIEW_RECONNECT_COUNTS_TODO.md). Runtime acceptance stands.
 
 **Command reference:** repository root, Rust 1.95.0:
 
@@ -189,9 +193,13 @@ actually execute. Counts and artifacts identify the candidate, mocked layers and
   requirements to tasks, source, regressions, baseline/control failures, final results and limits.
   Verify document links, exact revision identity, parent/leaf states and consistent acceptance
   rows. Reconcile earlier DEADLINE-3, EVIDENCE-1/3 mappings using the new evidence.
+  *Correction (2026-11-16):* partial at `3a9a631` only because of the wrong 12 → 19 client
+  unit-test comparison (actual 14 → 19); corrected and proved under [RCD-REVIEW-01](CODE_REVIEW_RECONNECT_COUNTS_TODO.md). Runtime acceptance stands.
 - [x] **RCD-CLOSEOUT-05:** Close this scoped software correction only after all acceptance
   criteria pass. Report existing installed-system/physical/product/release gates separately and
   preserve their open status. Record no hardware-support claim or new equipment dependency.
+  *Correction (2026-11-16):* partial at `3a9a631` only because of the wrong 12 → 19 client
+  unit-test comparison (actual 14 → 19); corrected and proved under [RCD-REVIEW-01](CODE_REVIEW_RECONNECT_COUNTS_TODO.md). Runtime acceptance stands.
 
 **Acceptance:** RRC-01 and its coverage/documentation gaps have a reviewed, reproducible software
 resolution; current states and evidence agree. Creation of a plan or success of a temporary
@@ -214,6 +222,6 @@ Fix `3fd226a` with review fixes `4df1339`; candidate `a1702ad`. Full map: [evide
 | TEST-1 | RCD-BASE-03/04, RCD-TEST-01 | Maintained production-path call-count regression, not temporary-only probe | ACCEPTED |
 | TEST-2 | RCD-BASE-04, RCD-TEST-02..06 | Complete boundary matrix and isolated, bounded fixtures | ACCEPTED |
 | TEST-3 | RCD-BASE-03, RCD-TEST-07 | Baseline/final repeats and sensitive isolated negative controls | ACCEPTED |
-| EVIDENCE-1 | RCD-VALIDATE-01..05 | Exact-candidate validation, package hashes and scheduled CI | ACCEPTED |
-| EVIDENCE-2 | RCD-CLOSEOUT-01/03/04 | Dated corrections, public contract and complete requirement map | ACCEPTED |
-| EVIDENCE-3 | RCD-CLOSEOUT-02/05 | Reviewed software-only closure; other qualification stays separate | ACCEPTED |
+| EVIDENCE-1 | RCD-VALIDATE-01..05 | Exact-candidate validation, package hashes and scheduled CI | ACCEPTED (count text corrected 2026-11-16, [RCD-REVIEW-01](CODE_REVIEW_RECONNECT_COUNTS_TODO.md)) |
+| EVIDENCE-2 | RCD-CLOSEOUT-01/03/04 | Dated corrections, public contract and complete requirement map | ACCEPTED (count text corrected 2026-11-16, [RCD-REVIEW-01](CODE_REVIEW_RECONNECT_COUNTS_TODO.md)) |
+| EVIDENCE-3 | RCD-CLOSEOUT-02/05 | Reviewed software-only closure; other qualification stays separate | ACCEPTED (count text corrected 2026-11-16, [RCD-REVIEW-01](CODE_REVIEW_RECONNECT_COUNTS_TODO.md)) |

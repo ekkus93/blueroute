@@ -1,6 +1,6 @@
 # Code Review Reconnect Evidence Counts TODO
 
-**Status:** IN PROGRESS; RCN-BASE accepted.  
+**Status:** IN PROGRESS; RCN-BASE and RCN-CORRECT accepted.  
 **Finding / priority:** RCD-REVIEW-01 / P3.  
 **Reviewed revision:** `3a9a63114d369dd1eec1702f143272ac8d704aa9`.  
 **Companion specification:** [CODE_REVIEW_RECONNECT_COUNTS_SPEC.md](CODE_REVIEW_RECONNECT_COUNTS_SPEC.md).  
@@ -27,7 +27,7 @@
 | Task | Outcome | Dependencies | State |
 | --- | --- | --- | --- |
 | RCN-BASE | Confirm exact revisions, suite names and count proof | None | `[x]` |
-| RCN-CORRECT | Correct the evidence and reconcile affected claims | RCN-BASE | `[ ]` |
+| RCN-CORRECT | Correct the evidence and reconcile affected claims | RCN-BASE | `[x]` |
 | RCN-CLOSEOUT | Validate documents, complete traceability and close the correction | RCN-CORRECT | `[ ]` |
 
 ## RCN-BASE — Establish the count comparison
@@ -54,15 +54,15 @@ The baseline is not inferred from a current listing or a count of attributes in 
 
 **Requirements:** COUNT-1/3/4/6.
 
-- [ ] **RCN-CORRECT-01:** Replace the incorrect 12-to-19 parenthetical with the verified
+- [x] **RCN-CORRECT-01:** Replace the incorrect 12-to-19 parenthetical with the verified
   14-to-19 client-library comparison. Remove the misleading “in-file” label; identify 8-to-13
   filtered deadline tests when useful. Check nearby “seam” terminology and qualify whether it
   means all library tests or only `deadline_tests`, without inventing unrecorded past commands.
-- [ ] **RCN-CORRECT-02:** Add a dated RCD-REVIEW-01 correction and reproducible count-proof
+- [x] **RCN-CORRECT-02:** Add a dated RCD-REVIEW-01 correction and reproducible count-proof
   section to the existing dispatch evidence. Include resolved SHAs, toolchain, commands and
   names/counts. Preserve valid results at their original revisions, including workspace 928/933,
   the 12-case broker suite, package hashes, CI and controls; do not perform a blanket replacement.
-- [ ] **RCN-CORRECT-03:** Reconcile RCD-VALIDATE-05 and RCD-CLOSEOUT-04/05, their parent
+- [x] **RCN-CORRECT-03:** Reconcile RCD-VALIDATE-05 and RCD-CLOSEOUT-04/05, their parent
   acceptance and EVIDENCE-1/2/3 mapping claims through dated backlog/evidence references to this
   correction. State that the three Partial review verdicts share one documentation root cause;
   retain stable IDs/history and verified runtime acceptance. Do not reopen unrelated code or

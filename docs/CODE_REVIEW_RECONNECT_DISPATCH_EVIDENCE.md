@@ -144,7 +144,8 @@ the resumed-poll check is isolated), `rcd_a_timely_resumption_negotiates_once`,
 | Restart, incompatible replacement, lost reply | broker `rc_a_restarted…`, `rc_a_timely_incompatible…`, `rc_a_command_whose_reply_was_lost…`, `dbus_client` | unchanged, pass |
 | QR queues, owner binding, watchers | `owner_race` 6, `event_owner_race` 6, `ownership_period` 12, `queue_saturation` 18, `owner_watch` 3, `watcher` 8; desktop/TUI watcher suites in RCD-VALIDATE | pass |
 
-Seam 19/19; broker `reconnect_deadline` 12/12 on three repeats at `3fd226a`.
+Client library unit tests 19/19 (13 of them `deadline_tests`, the seam tests); broker
+`reconnect_deadline` 12/12 on three repeats at `3fd226a`.
 
 ### Negative controls (RCD-TEST-07)
 
@@ -191,7 +192,7 @@ nothing is spawned; `server_version` is set only on `Ok`.
 | 3 | Nit: the unreachable `Halted::Expired`/`None` arm dropped the observed bus failure | It now appends the previous failure like the other arms |
 | 4 | `versions_before` only printed | Asserted (finding 1) |
 
-**After the fixes** (`4df1339`): seam 19/19; broker `reconnect_deadline` 12/12 on 10 idle runs and
+**After the fixes** (`4df1339`): client library unit tests 19/19 (13 `deadline_tests`); broker `reconnect_deadline` 12/12 on 10 idle runs and
 15 runs under 16 busy loops (3 of those discarded one raced setup each and then tested the
 boundary). Against the `0257bcb` client with the reworked test, three runs: the regression
 FAILED each time with `before Counts { sent: (1, 0, 0), daemon_versions: 1 }, after Counts {
@@ -219,8 +220,10 @@ git-ignored helper `tmp/validate.sh`; the commands are the ones listed in the TO
 | Maintainer lifecycle, source and extracted packaged scripts | both passed (install, upgrade, remove, purge, abort, cleanup failure, unresolved role, manual recovery) |
 | Isolated upgrade with fresh `state_check` | 0.0.1 → 0.1.0 kept identity, migrated v2 membership to v3 roles, restarted; failed cleanup aborted removal; remove retained state; purge deleted it |
 
-Workspace 933 = the 928 of `a7abc60` plus the new seam tests (the in-file count rose from 12 to
-19 client unit tests; other suites unchanged); `reconnect_deadline` rose from 10 to 12. Counts are
+Workspace 933 = the 928 of `a7abc60` plus the five new dispatch unit tests: the
+`blueroute-client` library harness rose from 14 to 19 tests (+5), all five in `deadline_tests`
+(8 → 13); the six other library tests and all other suites are unchanged. *Corrected
+2026-11-16 ("rose from 12 to 19" before; see [RCD-REVIEW-01](#rcd-review-01--client-test-count-correction-and-proof-2026-11-16)).* `reconnect_deadline` rose from 10 to 12. Counts are
 per run and not summed across overlapping runs. Change scope `0257bcb..a1702ad`: only
 `crates/blueroute-client/src/lib.rs`, its `reconnect_deadline` test and documentation.
 
@@ -257,6 +260,11 @@ partial-write cancellation limitation documented under RQR-01 is unchanged.
 | EVIDENCE-1 exact candidate | RCD-VALIDATE-01..05 | `ci.yml` (suite already scheduled) | — | RCD-VALIDATE above; CI 43963097981 |
 | EVIDENCE-2 reconcile claims | RCD-CLOSEOUT-01/03/04 | RC backlog and evidence corrections, SPEC.md, P5-005 docs, rustdoc | — | dated corrections in `a1702ad` and `08e50fa` |
 | EVIDENCE-3 reviewed closure | RCD-CLOSEOUT-02/05 | independent review | — | review findings resolved in `4df1339` |
+
+*Correction (2026-11-16, RCD-REVIEW-01):* a review of `3a9a631` marked RCD-VALIDATE-05 and
+RCD-CLOSEOUT-04/05 (and through them the EVIDENCE-1/2/3 rows above) Partial for one shared reason:
+the wrong 12 → 19 client unit-test comparison in RCD-VALIDATE. It is corrected and proved in
+[RCD-REVIEW-01](#rcd-review-01--client-test-count-correction-and-proof-2026-11-16). No code, test or runtime result changed.
 
 **Closure.** RRC-01 is **COMPLETE** as a software correction (software-only acceptance,
 specification §5). With it, RQR-01's DEADLINE-3 and the RC items corrected above are met. The
