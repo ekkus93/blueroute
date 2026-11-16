@@ -1,6 +1,7 @@
 # Code Review Reconnect Evidence Counts TODO
 
-**Status:** IN PROGRESS; RCN-BASE and RCN-CORRECT accepted.  
+**Status:** COMPLETE (2026-11-16); documentation-only correction. Proof and closure:
+[dispatch evidence, RCD-REVIEW-01](CODE_REVIEW_RECONNECT_DISPATCH_EVIDENCE.md#rcd-review-01--client-test-count-correction-and-proof-2026-11-16).  
 **Finding / priority:** RCD-REVIEW-01 / P3.  
 **Reviewed revision:** `3a9a63114d369dd1eec1702f143272ac8d704aa9`.  
 **Companion specification:** [CODE_REVIEW_RECONNECT_COUNTS_SPEC.md](CODE_REVIEW_RECONNECT_COUNTS_SPEC.md).  
@@ -28,7 +29,7 @@
 | --- | --- | --- | --- |
 | RCN-BASE | Confirm exact revisions, suite names and count proof | None | `[x]` |
 | RCN-CORRECT | Correct the evidence and reconcile affected claims | RCN-BASE | `[x]` |
-| RCN-CLOSEOUT | Validate documents, complete traceability and close the correction | RCN-CORRECT | `[ ]` |
+| RCN-CLOSEOUT | Validate documents, complete traceability and close the correction | RCN-CORRECT | `[x]` |
 
 ## RCN-BASE — Establish the count comparison
 
@@ -75,19 +76,19 @@ claims are consistent, and all previously valid behavior/results retain their or
 
 **Requirements:** COUNT-4/5/6.
 
-- [ ] **RCN-CLOSEOUT-01:** Independently compare the corrected prose with the harness outputs
+- [x] **RCN-CLOSEOUT-01:** Independently compare the corrected prose with the harness outputs
   and immutable source revisions. Verify suite names, the 14/19 and 8/13 totals, +5 arithmetic,
   unchanged six-test remainder and separation from workspace/broker counts. Correct conflicting
   local summaries of this same comparison if any are found; preserve valid older comparisons.
-- [ ] **RCN-CLOSEOUT-02:** Check Markdown file/anchor links, task IDs, parent/child states and
+- [x] **RCN-CLOSEOUT-02:** Check Markdown file/anchor links, task IDs, parent/child states and
   requirement mappings. Inspect the final diff for documentation-only scope. Follow applicable
   repository submission checks and accurately record any CI run cited for the correction;
   document why no additional runtime/package/hardware campaign is needed for this text change.
-- [ ] **RCN-CLOSEOUT-03:** Complete the six-row requirement ledger below with exact source
+- [x] **RCN-CLOSEOUT-03:** Complete the six-row requirement ledger below with exact source
   revision, corrected section, commands/results and dated acceptance reference. Preserve the
   distinction between new count verification and historical passing runtime tests. Resolve
   review discrepancies before marking children or parents accepted.
-- [ ] **RCN-CLOSEOUT-04:** Close RCD-REVIEW-01 and this documentation correction only after
+- [x] **RCN-CLOSEOUT-04:** Close RCD-REVIEW-01 and this documentation correction only after
   all criteria pass. Link the accepted correction from the affected RCD evidence/backlog and
   reconcile its documentary completion claims. Report existing installed-system, physical and
   release gates separately; make no new transport-safety or hardware-support claim.
@@ -125,13 +126,13 @@ workspace/frontend/package rerun solely to substantiate a corrected historical c
 
 ## Requirement and evidence ledger
 
-Populate during correction; all rows are pending at plan creation.
+Source revisions: listings at `a7abc60`/`0257bcb` and `a1702ad`/`3a9a631`; corrections in `11f0736` (proof), `dbab6cd` (text and notes) and the closing commit. Section: [RCD-REVIEW-01](CODE_REVIEW_RECONNECT_DISPATCH_EVIDENCE.md#rcd-review-01--client-test-count-correction-and-proof-2026-11-16).
 
 | Requirement | Tasks | Required acceptance evidence | State |
 | --- | --- | --- | --- |
-| COUNT-1 | RCN-BASE-03, RCN-CORRECT-01, RCN-CLOSEOUT-01 | Correct 14 → 19 library and 8 → 13 filtered labels | PENDING |
-| COUNT-2 | RCN-BASE-01/02/03 | Immutable revisions, exact commands, names and listing totals | PENDING |
-| COUNT-3 | RCN-BASE-01, RCN-CORRECT-02, RCN-CLOSEOUT-01 | Dated correction preserving valid historical results and suite boundaries | PENDING |
-| COUNT-4 | RCN-CORRECT-03, RCN-CLOSEOUT-01/04 | Affected RCD leaves, parents and EVIDENCE mappings reconciled | PENDING |
-| COUNT-5 | RCN-CLOSEOUT-01/02 | Accurate arithmetic/labels, valid links, scoped diff and required checks | PENDING |
-| COUNT-6 | RCN-CORRECT-02, RCN-CLOSEOUT-03/04 | Complete versioned proof and reviewed documentation closure | PENDING |
+| COUNT-1 | RCN-BASE-03, RCN-CORRECT-01, RCN-CLOSEOUT-01 | Text now reads 14 → 19 (library) and 8 → 13 (`deadline_tests`); "seam 19/19" qualified as the library — ACCEPTED 2026-11-16 | ACCEPTED |
+| COUNT-2 | RCN-BASE-01/02/03 | Full SHAs, rustc/cargo 1.95.0, both `--list` commands (exit 0), complete names; independently re-run — ACCEPTED 2026-11-16 | ACCEPTED |
+| COUNT-3 | RCN-BASE-01, RCN-CORRECT-02, RCN-CLOSEOUT-01 | Dated correction in place; 928/933, 12 broker cases, hashes, CI, controls and RQR-01 counts kept at their revisions — ACCEPTED 2026-11-16 | ACCEPTED |
+| COUNT-4 | RCN-CORRECT-03, RCN-CLOSEOUT-01/04 | Dated notes on RCD-VALIDATE-05, RCD-CLOSEOUT-04/05, the status line, EVIDENCE-1/2/3 rows and the closure — ACCEPTED 2026-11-16 | ACCEPTED |
+| COUNT-5 | RCN-CLOSEOUT-01/02 | Arithmetic and labels checked independently; links/anchors resolve; diff since `3a9a631` docs-only; CI on the pushed head — ACCEPTED 2026-11-16 | ACCEPTED |
+| COUNT-6 | RCN-CORRECT-02, RCN-CLOSEOUT-03/04 | Proof stored in the versioned dispatch evidence; this ledger complete; RCD-REVIEW-01 closed — ACCEPTED 2026-11-16 | ACCEPTED |

@@ -222,8 +222,8 @@ git-ignored helper `tmp/validate.sh`; the commands are the ones listed in the TO
 
 Workspace 933 = the 928 of `a7abc60` plus the five new dispatch unit tests: the
 `blueroute-client` library harness rose from 14 to 19 tests (+5), all five in `deadline_tests`
-(8 → 13); the six other library tests and all other suites are unchanged. *Corrected
-2026-11-16 ("rose from 12 to 19" before; see [RCD-REVIEW-01](#rcd-review-01--client-test-count-correction-and-proof-2026-11-16)).* `reconnect_deadline` rose from 10 to 12. Counts are
+(8 → 13); the six other library tests and the other workspace unit suites are unchanged. *Corrected
+2026-11-16 ("rose from 12 to 19" before; see [RCD-REVIEW-01](#rcd-review-01--client-test-count-correction-and-proof-2026-11-16)).* the ignored private-broker suite `reconnect_deadline`, run separately, rose from 10 to 12. Counts are
 per run and not summed across overlapping runs. Change scope `0257bcb..a1702ad`: only
 `crates/blueroute-client/src/lib.rs`, its `reconnect_deadline` test and documentation.
 
@@ -335,3 +335,12 @@ library 19 passed at `3fd226a` and `4df1339`, workspace 933 passed at `a1702ad`,
 `a7abc60`. The library count is already inside the workspace count, and `deadline_tests` is
 inside the library count; none of these are summed. The 12 `reconnect_deadline` cases are a
 separate private-broker integration suite and were counted correctly.
+
+**Verification and closure (RCN-CLOSEOUT, 2026-11-16).** An independent check re-ran both listings
+in its own worktrees at `a7abc60` and `a1702ad` (14/8 and 19/13), confirmed both equivalences
+over the client crate, `Cargo.toml`, `Cargo.lock` and `rust-toolchain.toml`, matched every number
+and name in this record, and confirmed the earlier RQR-01 counts are right as recorded (`3e05d98`:
+12 library tests, 6 `deadline_tests`; `af58349`: 14 and 8, so its "seam 8/8" stands). Its one
+wording note (the broker suite versus "all other suites") is applied above. Links and anchors in
+the four affected documents resolve; the change since `3a9a631` is documentation only, so no
+runtime, package, negative-control or hardware rerun is needed. RCD-REVIEW-01 is closed.
