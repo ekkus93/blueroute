@@ -84,3 +84,61 @@ Baseline run at `bd58ce2` plus the new test file, three repeats
 The five failures are the corrected expectations; the five controls preserve the behavior that
 was already right (timely success, immediate incompatibility, restart recovery, no replay,
 cancellation safety).
+
+## RC-DEADLINE — One whole-operation budget (2026-11-16)
+
+**Source.** `3e05d98` (`fix(RC-DEADLINE)`), `crates/blueroute-client/src/lib.rs`:
+`BlueRouteClient::reconnect` now delegates to the private `negotiate_within(timeout, attempt)`,
+where one attempt is `validated_owner` (owner lookup, owner proxy and Version negotiation).
+
+| Requirement | Implementation |
+| --- | --- |
+| DEADLINE-1 one budget | `Instant::now().checked_add(timeout)` once, in the async body, so on the first poll; the same absolute deadline for every attempt and delay. A budget too large to represent never expires (the old `Instant + timeout` panicked on it; negative control X1). |
+| DEADLINE-2 bound every await | Each whole attempt (lookup, proxy setup, Version) races `Timer::at(deadline)` with `futures_lite::future::or`. On expiry the attempt future is dropped: its pending read-only call is abandoned, the connection is not closed. |
+| DEADLINE-3 bounded delays | A bus failure sleeps until `min(now + 100 ms, deadline)`; the loop checks expiry before every attempt, so nothing is sent after it. Retry classification unchanged: only `ClientError::Bus` retries. |
+| DEADLINE-4 outcome decision | After each attempt, expiry is checked **before** its outcome is looked at, so a reply that became ready with the deadline (compatible or incompatible) loses whatever order the branches were polled in. A timely incompatible reply returns at once without retries; every other typed failure also decides at once (unchanged). |
+| DEADLINE-5 typed timeout | The existing `ReconnectTimeout { timeout, last_error }` (Unavailable) with the requested duration. `last_error` is the last bus failure's text when the expiry came during a retry delay; "the owner lookup or Version negotiation did not answer before the deadline" when an attempt was pending; "the daemon answered only after the deadline" when its outcome came too late; each with the previous bus failure appended when there was one. No bus error is fabricated; classification is by type, not text. |
+| DEADLINE-6 zero/short | A zero budget is expired on the first check: no attempt, no state change. A short budget is capped like any other. |
+| COMPAT-1 | Attempts are unchanged `validated_owner` calls: owner-bound, major/minor rules, no `Request`. Commands are never replayed. |
+| COMPAT-2 | `server_version` is assigned only after `negotiate_within` returns `Ok`, which it does only before the deadline. Expiry or drop leaves it unchanged; no task is spawned, nothing outlives the future. |
+| COMPAT-3 | No change to subscriptions, the shared watcher, the daemon, frontends, API 1.7, schema v3, join or sharing. |
+
+The contract is documented on `reconnect`'s rustdoc and `negotiate_within`, in `docs/SPEC.md`
+(client paragraph) and as a dated correction in `docs/P5-005-CLIENT.md`.
+
+## RC-TEST — Timing, outcome and cancellation matrix (2026-11-16)
+
+Private-broker suite `crates/blueroute-client/tests/reconnect_deadline.rs` (10 ignored tests) and
+internal-seam unit tests `deadline_tests` in `crates/blueroute-client/src/lib.rs` (6 ordinary
+tests, which drive `negotiate_within` with scripted attempts; the seam is private and test-only
+use adds no public API).
+
+| Scenario (spec table) | Tests | Result at `3e05d98` |
+| --- | --- | --- |
+| Held Version, short budget (RC-TEST-01) | `rc_a_held_version_reply_times_out_within_the_budget` | `ReconnectTimeout(50 ms)` in 50.058 / 50.065 / 50.069 ms (bound 200 ms) while the reply was still held; late reply released afterwards changed nothing; a fresh reconnect then recorded 1.8 |
+| Delayed owner lookup (RC-TEST-02) | `rc_a_delayed_owner_lookup_is_bounded_by_the_whole_budget` (seam: lookup stage held 10 s, Version stage never reached) | timeout within 50 ms + 150 ms; 1 lookup, 0 Version |
+| Zero budget (RC-TEST-03) | `rc_a_zero_budget_times_out_without_negotiating`; `rc_a_zero_budget_makes_no_attempt` | timeout in ~2 µs; 0 `GetNameOwner` seen by a bus monitor, no extra Version call, version unchanged; seam: 0 attempts |
+| Service absent, budget < retry interval (RC-TEST-03) | `rc_an_absent_service_with_a_short_budget_caps_the_wait`; `rc_retry_delays_are_capped_and_stop_at_the_deadline` (30 ms and 250 ms) | 30.056 / 30.054 / 30.075 ms (bound 90 ms); exactly 1 lookup; `NameHasNoOwner` kept in `last_error`; seam: no attempt after expiry, finish within budget + 60 ms |
+| Reply and timer both ready after expiry (RC-TEST-04) | `rc_expiry_wins_over_a_late_compatible_reply`, `..._incompatible_reply`; seam `rc_an_outcome_decided_after_the_deadline_loses_to_it` | the client is left unpolled past the deadline, the reply (1.8 or 2.0) is released and seen dispatched on the client connection, then one poll returns `ReconnectTimeout`; version stays 1.7 |
+| Timely replies and restart (RC-TEST-05) | `rc_a_timely_compatible_reply_succeeds_and_records_its_version`, `rc_a_timely_incompatible_reply_fails_at_once`, `rc_a_restarted_daemon_is_reached_within_the_budget`, `rc_a_command_whose_reply_was_lost_is_never_replayed`; seam `rc_timely_outcomes_decide_at_once`, `rc_an_unrepresentable_budget_does_not_overflow` | success records 1.8; incompatibility in < 1 ms with 1 Version call and no retry; restart reached; 0 Requests during every reconnect; the swallowed command reached A once and B never |
+| Cancellation, late reply, fresh operation (RC-TEST-06) | `rc_a_cancelled_reconnect_leaves_the_connection_and_subscriptions_working` | version unchanged after drop and late reply; no further lookup or Version for 300 ms; an active `events()` subscription on the same connection still receives the owner's event; a fresh reconnect succeeds |
+
+Three repeats of the broker suite at `3e05d98`: `10 passed` each. Existing client suites at
+`3e05d98`, all passed: `dbus_client` 1, `owner_race` 6, `event_owner_race` 6, `ownership_period`
+12, `queue_saturation` 18, `owner_watch` 3, `watcher` 8; client unit tests 12.
+
+### Negative controls
+
+`tmp/rc-neg-controls.sh 3e05d98` (git-ignored helper; the edits are recorded here) creates a
+detached worktree with its own `CARGO_TARGET_DIR`, applies one old behavior to
+`negotiate_within`, runs `deadline_tests` and the broker suite, and reverts:
+
+| Control | Restored behavior | Caught by (FAILED) |
+| --- | --- | --- |
+| X1 | the `bd58ce2` retry-only loop (`Instant + timeout`, unbounded attempt, full 100 ms sleep, no expiry check on success) | seam: zero budget, unrepresentable budget (panic), late outcome, capped delays, delayed lookup; broker: held Version, zero budget, absent service, both late-reply tests (5 controls still pass) |
+| X2 | expiry checked only when the attempt did not finish | seam: late outcome; broker: both late-reply tests |
+| X3 | retry delay not cut to the time left | seam: capped delays; broker: absent service |
+| X4 | attempt not raced against the deadline | seam: delayed lookup; broker: held Version |
+
+Each restored behavior is detected by both layers, and the late-reply tests fail only under the
+controls that change the outcome decision, so they are not confirming the old bug.

@@ -1,6 +1,6 @@
 # Code Review Reconnect Deadline TODO
 
-**Status:** IN PROGRESS; RC-BASE accepted. Evidence:
+**Status:** IN PROGRESS; RC-BASE, RC-DEADLINE and RC-TEST accepted. Evidence:
 [CODE_REVIEW_RECONNECT_EVIDENCE.md](CODE_REVIEW_RECONNECT_EVIDENCE.md).  
 **Finding / priority:** RQR-01 / P2.  
 **Baseline:** `bd58ce2355816d7c7b956b9ed7dceedb4925044a`.  
@@ -27,8 +27,8 @@ and [queue/recovery evidence](CODE_REVIEW_QUEUE_RECOVERY_EVIDENCE.md).
 | Task | Outcome | Dependencies | State |
 | --- | --- | --- | --- |
 | RC-BASE | Durable reproduction and corrected failing expectations | None | `[x]` |
-| RC-DEADLINE | One deadline across lookup, Version and backoff | RC-BASE | `[ ]` |
-| RC-TEST | Timing boundaries, cancellation and compatibility regressions | RC-DEADLINE design; tests may precede implementation | `[ ]` |
+| RC-DEADLINE | One deadline across lookup, Version and backoff | RC-BASE | `[x]` |
+| RC-TEST | Timing boundaries, cancellation and compatibility regressions | RC-DEADLINE design; tests may precede implementation | `[x]` |
 | RC-VALIDATE | Exact-candidate checks, packages and CI scheduling | RC-DEADLINE, RC-TEST | `[ ]` |
 | RC-CLOSEOUT | Public contract, P5-005 reconciliation and reviewed software closure | RC-DEADLINE, RC-TEST, RC-VALIDATE | `[ ]` |
 
@@ -58,22 +58,22 @@ with controlled setup, requested budget and measured outcome recorded.
 
 **Requirements:** DEADLINE-1..6, COMPAT-1..3.
 
-- [ ] **RC-DEADLINE-01:** Define budget start, monotonic deadline, expiry-versus-ready-reply
+- [x] **RC-DEADLINE-01:** Define budget start, monotonic deadline, expiry-versus-ready-reply
   precedence, zero-duration behavior, typed diagnostics and informational-version update rules.
-- [ ] **RC-DEADLINE-02:** Bound the full current-owner/Version negotiation, including internal
+- [x] **RC-DEADLINE-02:** Bound the full current-owner/Version negotiation, including internal
   setup awaits, by the remaining operation budget. Do not wait for a longer transport timeout
   or close the shared connection to terminate a read-only attempt.
-- [ ] **RC-DEADLINE-03:** Cap retry sleep to remaining time and stop before dispatching another
+- [x] **RC-DEADLINE-03:** Cap retry sleep to remaining time and stop before dispatching another
   lookup/Version after expiry. Preserve existing retryable-error and early incompatibility rules.
-- [ ] **RC-DEADLINE-04:** Return the existing ReconnectTimeout with the requested duration and
+- [x] **RC-DEADLINE-04:** Return the existing ReconnectTimeout with the requested duration and
   useful existing error context or a truthful pending-negotiation timeout description. Preserve
   Unavailable classification; never fabricate a bus failure or classify authorization by text.
-- [ ] **RC-DEADLINE-05:** Make zero/short budgets obey the contract without an initial attempt
+- [x] **RC-DEADLINE-05:** Make zero/short budgets obey the contract without an initial attempt
   for zero, a full 100 ms sleep for a shorter budget, or late success when both results are ready.
-- [ ] **RC-DEADLINE-06:** Update `server_version` only on timely compatible success; expiry,
+- [x] **RC-DEADLINE-06:** Update `server_version` only on timely compatible success; expiry,
   cancellation and late replies must not mutate it. Release operation-owned work and retain
   connection usability for later operations and active subscriptions.
-- [ ] **RC-DEADLINE-07:** Preserve owner-bound compatibility negotiation, zero ordinary Requests
+- [x] **RC-DEADLINE-07:** Preserve owner-bound compatibility negotiation, zero ordinary Requests
   during reconnect, mutation no-replay, QR subscription behavior, watcher backoff, authorization,
   API/schema and closed join/sharing boundaries. Add no new background retry/monitor tasks.
 
@@ -84,21 +84,21 @@ decision, produces the existing typed timeout, and preserves client state/connec
 
 **Requirements:** EVIDENCE-1, DEADLINE-1..6, COMPAT-1/2/3.
 
-- [ ] **RC-TEST-01:** On a private broker, hold and never reply to reconnect's Version request;
+- [x] **RC-TEST-01:** On a private broker, hold and never reply to reconnect's Version request;
   require ReconnectTimeout before releasing it. Record budget, measured latency and justified
   tolerance, with a watchdog long enough to expose the original failure.
-- [ ] **RC-TEST-02:** Cover delayed owner lookup so the timeout cannot accidentally apply only
+- [x] **RC-TEST-02:** Cover delayed owner lookup so the timeout cannot accidentally apply only
   to Version. Use a narrow internal timing seam when necessary, retaining the production-path
   broker regression and keeping test hooks out of the public API.
-- [ ] **RC-TEST-03:** Test zero duration and service absence with a budget shorter than the
+- [x] **RC-TEST-03:** Test zero duration and service absence with a budget shorter than the
   poll interval. Count attempts; require no zero-budget negotiation or post-expiry retry.
-- [ ] **RC-TEST-04:** Make reply and timer both ready after expiry, for compatible and incompatible
+- [x] **RC-TEST-04:** Make reply and timer both ready after expiry, for compatible and incompatible
   replies. Require timeout and unchanged informational version; use a distinct compatible server
   version so a late update would be observable.
-- [ ] **RC-TEST-05:** Verify timely compatible success, immediate timely incompatibility and
+- [x] **RC-TEST-05:** Verify timely compatible success, immediate timely incompatibility and
   normal restart recovery. Preserve unique-owner binding, zero ordinary Requests to incompatible
   successors and no replay after possible command delivery.
-- [ ] **RC-TEST-06:** Cancel an in-flight reconnect, release a late reply, then perform a fresh
+- [x] **RC-TEST-06:** Cancel an in-flight reconnect, release a late reply, then perform a fresh
   reconnect/read-only call and exercise another active subscription on the same connection.
   Verify unchanged cancelled/expired state, resource cleanup and preserved QR queue regressions.
 
@@ -187,7 +187,7 @@ Preserve exact revisions and separate new results from historical acceptance.
 | Task / finding | Fix SHA / source | Regression, control and validation evidence | Remaining acceptance | State |
 | --- | --- | --- | --- | --- |
 | RC-BASE / RQR-01 | `bd58ce2` (baseline) + `tests/reconnect_deadline.rs` | 5 corrected expectations fail at the baseline on 3 repeats; 5 controls pass ([evidence](CODE_REVIEW_RECONNECT_EVIDENCE.md#rc-base--finding-preserved-and-corrected-expectations-established-2026-11-16)) | None | ACCEPTED |
-| RC-DEADLINE / RQR-01 | — | DEADLINE-1..6, COMPAT-1..3 pending | Whole-operation budget and typed/state safety | NOT STARTED |
-| RC-TEST | — | Timing, outcome, cancellation and negative-control matrix pending | All required scenarios | NOT STARTED |
+| RC-DEADLINE / RQR-01 | `3e05d98`, `crates/blueroute-client/src/lib.rs` (`negotiate_within`) | DEADLINE-1..6, COMPAT-1..3 mapped ([evidence](CODE_REVIEW_RECONNECT_EVIDENCE.md#rc-deadline--one-whole-operation-budget-2026-11-16)); existing client suites pass | None | ACCEPTED |
+| RC-TEST | `tests/reconnect_deadline.rs` (10), `deadline_tests` (6) | Full matrix passes 3/3; controls X1–X4 each caught ([evidence](CODE_REVIEW_RECONNECT_EVIDENCE.md#rc-test--timing-outcome-and-cancellation-matrix-2026-11-16)) | None | ACCEPTED |
 | RC-VALIDATE | — | EVIDENCE-2 checks/packages/CI pending | Exact-candidate software evidence | NOT STARTED |
 | RC-CLOSEOUT | — | EVIDENCE-3 and requirement map pending | Reviewed software closure; existing environment gates separate | NOT STARTED |

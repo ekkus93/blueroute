@@ -90,6 +90,10 @@ jobs:
           dbus-run-session -- cargo test -p blueroute-client --test ownership_period --locked -- --ignored
           dbus-run-session -- cargo test -p blueroute-client --test queue_saturation --locked -- --ignored
 
+      - name: Run client reconnect deadline tests (RQR-01)
+        run: |
+          dbus-run-session -- cargo test -p blueroute-client --test reconnect_deadline --locked -- --ignored
+
       - name: Run state publication tests (CR-F1)
         run: |
           dbus-run-session -- cargo test -p blueroute-daemon --test state_events --locked -- --ignored

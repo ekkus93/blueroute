@@ -29,6 +29,8 @@ The subscription rechecks the daemon API version before accepting each event. A 
 
 `reconnect(timeout)` retries only the daemon's read-only `Version()` method until a compatible owner is available or the bounded timeout expires. Once a compatible daemon appears, the client records its version and can resume explicit caller-issued operations.
 
+**Correction (2026-11-16, RQR-01).** Until `bd58ce2` the timeout was checked only after a bus error, before a fixed 100 ms sleep: a held or absent owner-lookup or Version reply kept `reconnect` pending past its budget, a reply arriving after the deadline was still accepted, and a budget under 100 ms slept the full interval. The happy-path restart acceptance below was correct but never held a reply. The timeout now bounds the whole operation: one deadline covers every owner lookup, Version negotiation and capped retry delay, expiry wins over a reply that becomes ready with it, a zero budget contacts nothing, and the recorded version changes only on a timely compatible reply. The non-replay and version-gating behavior below is unchanged. Authority and evidence: [CODE_REVIEW_RECONNECT_TODO.md](CODE_REVIEW_RECONNECT_TODO.md), [CODE_REVIEW_RECONNECT_EVIDENCE.md](CODE_REVIEW_RECONNECT_EVIDENCE.md).
+
 BlueRoute deliberately does **not** auto-replay normal commands during reconnect. If a mutating call reached the old daemon but its reply was lost, automatic replay could duplicate a side effect. Higher-level code must decide whether and how an operation is safe to retry.
 
 An incompatible replacement daemon fails immediately rather than being treated as transient unavailability.
