@@ -77,3 +77,93 @@ reconnect_deadline --locked -- --ignored rcd_`), identical each time: the regres
 `reconnect sent (lookups, Version, Request) = (1, 1, 0) after expiry; expected (1, 0, 0)` (owner
 reply ready at 0.36 / 0.30 / 0.21 ms, resumed at 100.09 / 100.11 / 100.11 ms, result on that
 poll, daemon Version count 1 before resuming); the control passed.
+
+## RCD-GUARD — Expired work cannot advance into a new dispatch (2026-11-16)
+
+**Source.** `3fd226a` (`fix(RCD-GUARD)`), `crates/blueroute-client/src/lib.rs`. All changes are
+private to reconnect's path; no public API, wire, daemon or frontend change.
+
+**Paths reviewed (RCD-GUARD-01).** `reconnect` → `negotiate_within` → one attempt per try.
+Before: the attempt was `validated_owner`, whose awaits are `current_owner` (`GetNameOwner`
+`call_method`, the lookup dispatch), then `negotiate_version_at` → `owner_proxy`
+(`Proxy::new_owned`, lazy property caching: no I/O, no task) → `proxy.call("Version")` (the
+Version dispatch). `validated_owner` is also used by every ordinary request and by subscriptions;
+those callers have no budget and keep it unchanged.
+
+**Decision points.**
+
+| Point | Where | Rule |
+| --- | --- | --- |
+| Budget start | `Budget::starting_now`, first statement of `negotiate_within`'s async body | taken on first poll, never restarted; `checked_add` overflow means "never expires" (DISPATCH-1) |
+| New attempt | loop head of `negotiate_within` | expired: typed timeout, nothing started (zero budget, end of a capped retry delay) |
+| Resumed poll | `poll_fn` in `negotiate_within`: `budget.expired()` before `negotiation.poll` | expired: `Ready(None)`; the attempt is not polled onward, so a stage result that became ready while the caller was away is never consumed (DISPATCH-2). The deadline timer is polled only after a pending attempt, purely to wake the task at the deadline |
+| Stage transition | `in_stages`: `budget.admit()` before the lookup and again before the Version stage (proxy setup + call) | expired: `Halted::Expired`, the next stage is not started, even inside a poll that began in time (DISPATCH-3) |
+| Outcome | `negotiate_within` after each attempt: `budget.expired()` before the outcome is examined | expired: typed timeout whatever the outcome (DISPATCH-4) |
+
+A call admitted before the deadline may still be delivered and answered afterwards; that
+answer loses at the outcome check. Wall-clock time passing while the caller does not poll needs
+no remote cancellation, and no claim is made about OS scheduling or socket delivery after a valid
+admission.
+
+**Diagnostics (DISPATCH-5).** Same `ReconnectTimeout { timeout, last_error }`, Unavailable.
+`last_error` by case: the observed bus failure itself (expiry found at the loop head after a
+retry delay); "the budget ran out before the daemon was contacted" (zero budget); "… was still
+pending at the deadline" (resumed-poll or timer expiry; the pending work is not polled for better
+text); "the deadline passed before the next owner lookup or Version call" (stage admission
+refused); "the daemon answered only after the deadline" (late success); "the last attempt failed
+/ ended only after the deadline: {error}" (late bus failure / other late error, e.g. late
+incompatibility). Each appends "; the previous attempt failed: {failure}" when an earlier bus
+failure was observed.
+
+**Preserved (RCD-GUARD-04..06).** `server_version` assigned only after `Ok`; retry only on
+`ClientError::Bus`; timely incompatibility and other typed errors return at once; capped delays;
+no spawned task, no connection close; zbus mid-write cancellation limitation still documented.
+Public rustdoc on `reconnect` now states both the dispatch and the outcome checks.
+
+## RCD-TEST — Resumption, stage-transition and preserved-behavior matrix (2026-11-16)
+
+New tests: broker `rcd_an_expired_resumption_with_a_ready_owner_reply_sends_no_version`,
+`rcd_a_timely_resumption_with_a_ready_owner_reply_negotiates_once` (RCD-BASE); seam (`deadline_tests`)
+`rcd_an_expired_resumption_does_not_poll_the_attempt_onward` (an attempt with no stage guard, so
+the resumed-poll check is isolated), `rcd_a_timely_resumption_negotiates_once`,
+`rcd_expiry_inside_a_poll_does_not_start_the_next_stage` (through the production `in_stages`),
+`rcd_a_retry_delay_ending_at_expiry_starts_no_lookup`, `rcd_a_stage_started_in_time_that_decides_late_loses`
+(late 1.8, late 2.0, late bus failure). One existing seam assertion changed wording only
+("did not answer" → "still pending").
+
+| Scenario (spec TEST-2) | Tests | Result at `3fd226a` |
+| --- | --- | --- |
+| Ready owner reply, resumed after expiry | broker `rcd_an_expired_resumption…`; seam `rcd_an_expired_resumption_does_not_poll…` | one resumed poll → `ReconnectTimeout(50 ms)`; monitor (1 lookup, 0 Version, 0 Request); daemon Version count 1 (construction); version 1.7; fresh reconnect → 1.8. Owner reply ready at 0.28 / 0.23 / 0.30 ms, resumed at 100.08 / 100.12 / 100.10 ms |
+| Same, resumed in time | broker `rcd_a_timely_resumption…`; seam `rcd_a_timely_resumption_negotiates_once` | success 1.8; monitor (1, 1, 0); daemon count 2; seam 1 negotiation |
+| Expiry inside an active poll | seam `rcd_expiry_inside_a_poll…` | lookup 1, Version stage 0; "before the next owner lookup or Version" |
+| Retry delay ends after expiry | seam `rcd_a_retry_delay…`, `rc_retry_delays…`; broker `rc_an_absent_service…` | 1 lookup; `NameHasNoOwner` kept; 20 ms budget in 20.08–20.10 ms |
+| Version dispatched before expiry, held or late | broker `rc_a_held_version…`, `rc_expiry_wins_over_a_late_{compatible,incompatible}_reply` | timeout in 50.05–50.06 ms; late replies lose; version unchanged |
+| Result produced after a timely-started poll | seam `rcd_a_stage_started_in_time…`, `rc_an_outcome_decided_after…`, `rc_a_failure_after_the_deadline…` | timeout; truthful text per outcome kind |
+| Zero / short / large budgets, delayed first poll | `rc_a_zero_budget…` (both), `rc_an_unrepresentable_budget…`, `rc_the_budget_starts_at_the_first_poll`, broker unpolled-future check | unchanged, all pass |
+| Cancellation, late reply, fresh use | broker `rc_a_cancelled_reconnect…` | unchanged, passes |
+| Restart, incompatible replacement, lost reply | broker `rc_a_restarted…`, `rc_a_timely_incompatible…`, `rc_a_command_whose_reply_was_lost…`, `dbus_client` | unchanged, pass |
+| QR queues, owner binding, watchers | `owner_race` 6, `event_owner_race` 6, `ownership_period` 12, `queue_saturation` 18, `owner_watch` 3, `watcher` 8; desktop/TUI watcher suites in RCD-VALIDATE | pass |
+
+Seam 19/19; broker `reconnect_deadline` 12/12 on three repeats at `3fd226a`.
+
+### Negative controls (RCD-TEST-07)
+
+`tmp/rcd-neg-controls.sh 3fd226a` (git-ignored helper; edits recorded here): a detached worktree
+with its own `CARGO_TARGET_DIR`; each control applies one Python edit to `lib.rs` (asserting its
+anchor, and reporting "CONTROL NOT APPLIED" instead of running unmodified code), runs
+`deadline_tests` and the broker suite, and resets.
+
+| Control | Edit | Seam FAILED | Broker FAILED |
+| --- | --- | --- | --- |
+| Y1 the `0257bcb` dispatch | remove the resumed-poll check and make `admit` always allow | `rcd_an_expired_resumption_does_not_poll…`, `rcd_expiry_inside_a_poll…` | `rcd_an_expired_resumption_with_a_ready_owner_reply_sends_no_version` |
+| Y2 no resumed-poll check | remove only the `poll_fn` check | `rcd_an_expired_resumption_does_not_poll…` | none: stage admission alone still stops the Version |
+| Y3 no stage admission | make only `admit` always allow | `rcd_expiry_inside_a_poll…` | none: the resumed-poll check alone still stops it |
+| Y4 no post-outcome expiry check | check expiry after the attempt only when it did not finish | `rc_an_outcome_decided_after…`, `rc_a_failure_after_the_deadline…`, `rcd_a_stage_started_in_time…`, `rcd_expiry_inside_a_poll…` | none (see below) |
+
+The guards are deliberately redundant on the broker path: each is caught on its own by a seam test
+built to isolate it, and the broker regression fails when both are gone (the reviewed bug). Under
+Y4 the broker late-reply tests now pass because they resume after expiry, where the resumed-poll
+check decides first; an outcome decided inside a poll that began in time needs an executor
+blocked across the deadline, which only the seam tests can arrange. The existing RQR-01
+late-outcome seam test (`rc_an_outcome_decided_after_the_deadline_loses_to_it`) is the one that
+fails for Y4, as TEST-3 requires.

@@ -1,6 +1,6 @@
 # Code Review Reconnect Dispatch TODO
 
-**Status:** IN PROGRESS; RCD-BASE accepted.  
+**Status:** IN PROGRESS; RCD-BASE, RCD-GUARD and RCD-TEST accepted.  
 **Finding / priority:** RRC-01 / P2.  
 **Baseline:** `0257bcbf11f37276771a477e612529fc3e10f155` (reviewed 2026-11-16).  
 **Companion specification:** [CODE_REVIEW_RECONNECT_DISPATCH_SPEC.md](CODE_REVIEW_RECONNECT_DISPATCH_SPEC.md).  
@@ -27,8 +27,8 @@ and [original backlog](TODO.md), P5-005.
 | Task | Outcome | Dependencies | State |
 | --- | --- | --- | --- |
 | RCD-BASE | Durable reproduction, scope and corrected failing expectation | None | `[x]` |
-| RCD-GUARD | Expiry guards before resumed work and new dispatch | RCD-BASE; design may proceed concurrently | `[ ]` |
-| RCD-TEST | Public and internal boundary matrix with sensitive controls | RCD-GUARD design; tests may precede code | `[ ]` |
+| RCD-GUARD | Expiry guards before resumed work and new dispatch | RCD-BASE; design may proceed concurrently | `[x]` |
+| RCD-TEST | Public and internal boundary matrix with sensitive controls | RCD-GUARD design; tests may precede code | `[x]` |
 | RCD-VALIDATE | Exact-candidate software/package checks and CI | RCD-GUARD, RCD-TEST | `[ ]` |
 | RCD-CLOSEOUT | Reviewed evidence, corrected claims and software closure | All preceding acceptance | `[ ]` |
 
@@ -58,24 +58,24 @@ passes. Durable instructions and maintained tests reproduce the issue without ol
 
 **Requirements:** DISPATCH-1..5, PRESERVE-1..3.
 
-- [ ] **RCD-GUARD-01:** Define the dispatch decision point, first-poll budget, resumed-poll
+- [x] **RCD-GUARD-01:** Define the dispatch decision point, first-poll budget, resumed-poll
   expiry priority and stage/outcome checks. Review `reconnect`, `negotiate_within`,
   `validated_owner`, `current_owner`, proxy setup and Version together; identify all relevant
   awaits and which normal request/subscription callers must retain their current behavior.
-- [ ] **RCD-GUARD-02:** Guard each resumed negotiation poll before advancing its inner future.
+- [x] **RCD-GUARD-02:** Guard each resumed negotiation poll before advancing its inner future.
   If the deadline has expired, return the existing typed timeout on that poll without a new
   lookup, Version or retry. Remove dependence on attempt-first polling for timeout progress.
-- [ ] **RCD-GUARD-03:** Apply the same deadline at lookup/Version dispatch decisions, including
+- [x] **RCD-GUARD-03:** Apply the same deadline at lookup/Version dispatch decisions, including
   when a poll starts before expiry but reaches another stage afterwards. Keep the path private
   and scoped; do not add public test hooks, restart budgets or change unrelated validation calls.
-- [ ] **RCD-GUARD-04:** Retain post-outcome expiry checks, so an outcome produced after a
+- [x] **RCD-GUARD-04:** Retain post-outcome expiry checks, so an outcome produced after a
   timely-started poll loses to expiry. Preserve immediate timely incompatibility, compatible
   success, `server_version` update rules and first-poll/zero/short/large-duration behavior.
-- [ ] **RCD-GUARD-05:** Preserve ReconnectTimeout's requested duration and Unavailable kind,
+- [x] **RCD-GUARD-05:** Preserve ReconnectTimeout's requested duration and Unavailable kind,
   retry classification, capped delays and useful already-observed bus diagnostics. Keep a late
   produced error's available context; use truthful pending text when expiry prevents polling.
   Never resume expired work merely to extract an error or classify authorization by text.
-- [ ] **RCD-GUARD-06:** Preserve unique-owner compatibility, zero ordinary Requests, command
+- [x] **RCD-GUARD-06:** Preserve unique-owner compatibility, zero ordinary Requests, command
   no-replay, cancellation/state safety, receiver release, QR queues/watchers and all security/
   feature boundaries. Add no detached retries or shared-connection close. Retain the documented
   zbus mid-write limitation without treating the temporary timer-first control as a proven fix.
@@ -87,27 +87,27 @@ earlier deadline/outcome/state invariants remain correct. Document how each guar
 
 **Requirements:** TEST-1..3, all DISPATCH and PRESERVE requirements.
 
-- [ ] **RCD-TEST-01:** Complete the ready-owner/expired-resumption broker regression. Require
+- [x] **RCD-TEST-01:** Complete the ready-owner/expired-resumption broker regression. Require
   one resumed poll to yield ReconnectTimeout for the original budget, no new lookup/Version/
   Request, unchanged `server_version`, and connection progress. Count construction and
   subscription negotiations separately; establish zero reconnect Version dispatch before pause.
-- [ ] **RCD-TEST-02:** Use the same observable owner stage for a timely-resumption control.
+- [x] **RCD-TEST-02:** Use the same observable owner stage for a timely-resumption control.
   Require exactly one reconnect Version, compatible success with a distinct version and zero
   ordinary Requests. Record phase assumptions and any dependence on pinned zbus ordering.
-- [ ] **RCD-TEST-03:** Add a narrow internal test for expiry inside an active poll before the
+- [x] **RCD-TEST-03:** Add a narrow internal test for expiry inside an active poll before the
   next lookup/Version stage. Prove the next stage is not activated. Also verify a poll begun in
   time that produces a result after expiry still times out; keep seam behavior tied to production
   dispatch guards rather than testing a duplicate algorithm.
-- [ ] **RCD-TEST-04:** Cover expiry after a capped retry delay and preserve previous observed
+- [x] **RCD-TEST-04:** Cover expiry after a capped retry delay and preserve previous observed
   bus-error context. Retain zero-attempt zero budgets, short absent-service budgets, delayed first
   poll, very large durations, late compatible/incompatible outcomes and late-error diagnostics.
-- [ ] **RCD-TEST-05:** Retain held-Version timeout, cancellation, late reply, fresh reconnect/
+- [x] **RCD-TEST-05:** Retain held-Version timeout, cancellation, late reply, fresh reconnect/
   read and another active subscription on the shared connection. Verify no stale version update,
   lingering retry work, receiver interference or ordinary Request during reconnect.
-- [ ] **RCD-TEST-06:** Run restart, incompatible replacement, unique-owner and lost-command
+- [x] **RCD-TEST-06:** Run restart, incompatible replacement, unique-owner and lost-command
   no-replay controls, plus queue saturation/retirement and actual desktop/TUI watcher regressions.
   Preserve the existing watcher path; do not reroute frontends through reconnect for this fix.
-- [ ] **RCD-TEST-07:** Repeat corrected baseline/final cases at least three times with call
+- [x] **RCD-TEST-07:** Repeat corrected baseline/final cases at least three times with call
   counts, requested budget, resume/result timestamps and justified tolerances. In an isolated
   checkout/target, restore the missing resume guard/attempt-first behavior and require the new
   no-Version assertion to fail; separately remove post-outcome expiry checking and require the
