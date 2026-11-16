@@ -70,29 +70,29 @@ impl BlueRouteClient {
 
     /// Wait for a compatible daemon to become available again after a restart.
     ///
-    /// Only the read-only `Version` method is retried. Normal commands are never replayed
-    /// automatically because retrying a mutation after a lost reply could duplicate side effects.
+    /// Only the read-only owner lookup and `Version` negotiation are retried, after a bus failure.
+    /// Normal commands are never replayed automatically because retrying a mutation after a lost
+    /// reply could duplicate side effects. An incompatible daemon fails at once, without retries.
+    ///
+    /// `timeout` bounds the whole operation (RQR-01, DEADLINE-1..6). One deadline, taken when the
+    /// returned future is first polled, covers every owner lookup, Version negotiation and retry
+    /// delay; delays are cut to the time left and nothing new is sent once it has passed. An
+    /// outcome counts only if it is decided before the deadline: when a reply and the deadline
+    /// are both ready, including a reply that arrived while the future was not being polled, the
+    /// deadline wins and the result is [`ClientError::ReconnectTimeout`], whether that reply was
+    /// compatible or not. A zero `timeout` returns that error without contacting the bus.
+    ///
+    /// [`server_version`](Self::server_version) changes only on a timely compatible reply. An
+    /// expired or dropped reconnect leaves it unchanged and abandons its pending read-only call
+    /// without closing the connection, which stays usable for later calls and subscriptions.
     pub async fn reconnect(&mut self, timeout: Duration) -> Result<(), ClientError> {
-        let deadline = Instant::now() + timeout;
-        loop {
-            match validated_owner(&self.connection).await {
-                Ok(owner) => {
-                    self.server_version = owner.version;
-                    return Ok(());
-                }
-                Err(error @ ClientError::IncompatibleVersion { .. }) => return Err(error),
-                Err(ClientError::Bus(_)) if Instant::now() < deadline => {
-                    Timer::after(RECONNECT_POLL_INTERVAL).await;
-                }
-                Err(ClientError::Bus(error)) => {
-                    return Err(ClientError::ReconnectTimeout {
-                        timeout,
-                        last_error: error.to_string(),
-                    });
-                }
-                Err(error) => return Err(error),
-            }
-        }
+        let connection = &self.connection;
+        let version = negotiate_within(timeout, || async {
+            validated_owner(connection).await.map(|owner| owner.version)
+        })
+        .await?;
+        self.server_version = version;
+        Ok(())
     }
 
     /// Send one typed protocol command.
@@ -606,6 +606,78 @@ impl EventSubscription {
     }
 }
 
+/// Runs `attempt` (one owner lookup and Version negotiation) until it decides, retrying only after
+/// a bus failure, all within one `timeout` budget (RQR-01, DEADLINE-1..6).
+///
+/// The deadline is taken on the first poll. Every attempt races it, and every retry delay is cut
+/// to the time left. After each attempt the deadline is checked before the attempt's outcome is
+/// looked at, so an expired budget wins over a reply that became ready with it, compatible or
+/// not; branch polling order never decides the result. A budget too large to represent as an
+/// instant never expires.
+async fn negotiate_within<Attempt, Negotiation>(
+    timeout: Duration,
+    mut attempt: Attempt,
+) -> Result<ApiVersion, ClientError>
+where
+    Attempt: FnMut() -> Negotiation,
+    Negotiation: Future<Output = Result<ApiVersion, ClientError>>,
+{
+    let deadline = Instant::now().checked_add(timeout);
+    let expired = || deadline.is_some_and(|deadline| Instant::now() >= deadline);
+    let timed_out = |last_error: String| ClientError::ReconnectTimeout {
+        timeout,
+        last_error,
+    };
+    // The most recent bus failure, kept as context for a timeout.
+    let mut failure: Option<String> = None;
+    loop {
+        if expired() {
+            // Before the first attempt (a zero budget) or after a capped retry delay.
+            return Err(timed_out(failure.unwrap_or_else(|| {
+                "the budget ran out before the daemon was contacted".to_owned()
+            })));
+        }
+        let outcome = match deadline {
+            Some(deadline) => {
+                futures_lite::future::or(async { Some(attempt().await) }, async {
+                    Timer::at(deadline).await;
+                    None
+                })
+                .await
+            }
+            None => Some(attempt().await),
+        };
+        if expired() {
+            let what = if outcome.is_some() {
+                "the daemon answered only after the deadline"
+            } else {
+                "the owner lookup or Version negotiation did not answer before the deadline"
+            };
+            return Err(timed_out(match failure {
+                Some(failure) => format!("{what}; the previous attempt failed: {failure}"),
+                None => what.to_owned(),
+            }));
+        }
+        match outcome {
+            Some(Ok(version)) => return Ok(version),
+            Some(Err(ClientError::Bus(error))) => {
+                failure = Some(error.to_string());
+                let retry = Instant::now() + RECONNECT_POLL_INTERVAL;
+                Timer::at(deadline.map_or(retry, |deadline| deadline.min(retry))).await;
+            }
+            // Incompatibility and every other typed failure decide at once.
+            Some(Err(error)) => return Err(error),
+            // The deadline's timer fired, so the check above has already returned.
+            None => {
+                return Err(timed_out(
+                    "the owner lookup or Version negotiation did not answer before the deadline"
+                        .to_owned(),
+                ));
+            }
+        }
+    }
+}
+
 /// Resolve the well-known name to its current unique owner and check that owner's version there.
 async fn validated_owner(connection: &Connection) -> Result<ValidatedOwner, ClientError> {
     let (name, since) = current_owner(connection).await?;
@@ -918,5 +990,191 @@ mod error_class_tests {
             .kind(),
             ClientErrorKind::Authorization
         );
+    }
+}
+
+/// RC-TEST-02/03/04: the whole-operation budget through the internal seam that `reconnect` uses,
+/// with scripted attempts. A real broker answers `GetNameOwner` at once, so a delayed owner lookup
+/// is scripted here; the real-broker held-Version regressions are in `tests/reconnect_deadline.rs`.
+#[cfg(test)]
+mod deadline_tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use super::*;
+
+    const NEWER: ApiVersion =
+        ApiVersion::new(ApiVersion::CURRENT.major, ApiVersion::CURRENT.minor + 1);
+    const INCOMPATIBLE: ApiVersion = ApiVersion::new(ApiVersion::CURRENT.major + 1, 0);
+    /// Scheduler tolerance on top of a budget.
+    const TOLERANCE: Duration = Duration::from_millis(150);
+
+    fn absent() -> ClientError {
+        ClientError::Bus(zbus::Error::FDO(Box::new(
+            zbus::fdo::Error::NameHasNoOwner("no owner".into()),
+        )))
+    }
+
+    fn checked(server: ApiVersion) -> Result<ApiVersion, ClientError> {
+        if ApiVersion::CURRENT.is_compatible_with_server(server) {
+            Ok(server)
+        } else {
+            Err(ClientError::IncompatibleVersion {
+                client: ApiVersion::CURRENT,
+                server,
+            })
+        }
+    }
+
+    fn timeout_of(outcome: Result<ApiVersion, ClientError>, budget: Duration) -> String {
+        match outcome {
+            Err(error @ ClientError::ReconnectTimeout { timeout, .. }) if timeout == budget => {
+                assert_eq!(error.kind(), ClientErrorKind::Unavailable);
+                let ClientError::ReconnectTimeout { last_error, .. } = error else {
+                    unreachable!()
+                };
+                last_error
+            }
+            other => panic!("expected ReconnectTimeout({budget:?}): {other:?}"),
+        }
+    }
+
+    /// RC-TEST-02: a lookup that never answers is bounded too, not only the Version stage, and
+    /// the Version stage is never reached.
+    #[test]
+    fn rc_a_delayed_owner_lookup_is_bounded_by_the_whole_budget() {
+        let budget = Duration::from_millis(50);
+        let lookups = Rc::new(Cell::new(0));
+        let versions = Rc::new(Cell::new(0));
+        let started = Instant::now();
+        let outcome = futures_lite::future::block_on(negotiate_within(budget, || {
+            let (lookups, versions) = (lookups.clone(), versions.clone());
+            async move {
+                lookups.set(lookups.get() + 1);
+                // The owner lookup is held well past the budget.
+                Timer::after(Duration::from_secs(10)).await;
+                versions.set(versions.get() + 1);
+                checked(ApiVersion::CURRENT)
+            }
+        }));
+        let elapsed = started.elapsed();
+        let last_error = timeout_of(outcome, budget);
+        assert!(elapsed < budget + TOLERANCE, "took {elapsed:?}");
+        assert!(last_error.contains("did not answer"), "{last_error}");
+        assert!(
+            !last_error.contains("D-Bus operation failed"),
+            "{last_error}"
+        );
+        assert_eq!((lookups.get(), versions.get()), (1, 0));
+    }
+
+    /// RC-TEST-03 / DEADLINE-6: a zero budget makes no attempt.
+    #[test]
+    fn rc_a_zero_budget_makes_no_attempt() {
+        let attempts = Cell::new(0);
+        let outcome = futures_lite::future::block_on(negotiate_within(Duration::ZERO, || {
+            attempts.set(attempts.get() + 1);
+            async { checked(ApiVersion::CURRENT) }
+        }));
+        let last_error = timeout_of(outcome, Duration::ZERO);
+        assert!(
+            last_error.contains("before the daemon was contacted"),
+            "{last_error}"
+        );
+        assert_eq!(attempts.get(), 0);
+    }
+
+    /// RC-TEST-03 / DEADLINE-3: retry delays are cut to the time left and nothing is attempted
+    /// after expiry; the last bus failure is kept as context.
+    #[test]
+    fn rc_retry_delays_are_capped_and_stop_at_the_deadline() {
+        for (budget, most) in [(30, 1), (250, 3)] {
+            let budget = Duration::from_millis(budget);
+            let started = Instant::now();
+            let late = Cell::new(0);
+            let attempts = Cell::new(0);
+            let outcome = futures_lite::future::block_on(negotiate_within(budget, || {
+                attempts.set(attempts.get() + 1);
+                if started.elapsed() >= budget {
+                    late.set(late.get() + 1);
+                }
+                async { Err(absent()) }
+            }));
+            let elapsed = started.elapsed();
+            let last_error = timeout_of(outcome, budget);
+            assert!(last_error.contains("NameHasNoOwner"), "{last_error}");
+            assert!(elapsed >= budget, "gave up early: {elapsed:?}");
+            assert!(
+                elapsed < budget + Duration::from_millis(60),
+                "{budget:?} took {elapsed:?}"
+            );
+            assert_eq!(late.get(), 0, "attempted after the deadline");
+            assert!(
+                (1..=most).contains(&attempts.get()),
+                "{budget:?}: {} attempts",
+                attempts.get()
+            );
+        }
+    }
+
+    /// RC-TEST-04 / DEADLINE-4: an attempt that decides only after the deadline (the executor
+    /// resumed late) loses to it, compatible or not.
+    #[test]
+    fn rc_an_outcome_decided_after_the_deadline_loses_to_it() {
+        let budget = Duration::from_millis(20);
+        for server in [NEWER, INCOMPATIBLE] {
+            let outcome = futures_lite::future::block_on(negotiate_within(budget, || async move {
+                // Blocks the executor past the deadline, so the reply and the timer are both
+                // ready when the operation is next looked at.
+                std::thread::sleep(budget * 3);
+                checked(server)
+            }));
+            let last_error = timeout_of(outcome, budget);
+            assert!(
+                last_error.contains("only after the deadline"),
+                "{server}: {last_error}"
+            );
+        }
+    }
+
+    /// DEADLINE-4: timely outcomes stand; incompatibility is not retried.
+    #[test]
+    fn rc_timely_outcomes_decide_at_once() {
+        let budget = Duration::from_secs(5);
+        let attempts = Cell::new(0);
+        let outcome = futures_lite::future::block_on(negotiate_within(budget, || {
+            attempts.set(attempts.get() + 1);
+            async { checked(INCOMPATIBLE) }
+        }));
+        assert!(
+            matches!(outcome, Err(ClientError::IncompatibleVersion { server, .. })
+            if server == INCOMPATIBLE)
+        );
+        assert_eq!(attempts.get(), 1);
+
+        // A bus failure then a compatible reply: retried once, accepted in time.
+        let attempts = Cell::new(0);
+        let outcome = futures_lite::future::block_on(negotiate_within(budget, || {
+            attempts.set(attempts.get() + 1);
+            let first = attempts.get() == 1;
+            async move { if first { Err(absent()) } else { checked(NEWER) } }
+        }));
+        assert!(matches!(outcome, Ok(version) if version == NEWER));
+        assert_eq!(attempts.get(), 2);
+
+        // Other typed failures are not retried either.
+        let outcome = futures_lite::future::block_on(negotiate_within(budget, || async {
+            Err(ClientError::OwnerLost)
+        }));
+        assert!(matches!(outcome, Err(ClientError::OwnerLost)));
+    }
+
+    /// DEADLINE-1: a budget too large to represent as an instant never expires.
+    #[test]
+    fn rc_an_unrepresentable_budget_does_not_overflow() {
+        let outcome = futures_lite::future::block_on(negotiate_within(Duration::MAX, || async {
+            checked(NEWER)
+        }));
+        assert!(matches!(outcome, Ok(version) if version == NEWER));
     }
 }
