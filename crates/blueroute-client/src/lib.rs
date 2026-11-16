@@ -85,6 +85,8 @@ impl BlueRouteClient {
     /// [`server_version`](Self::server_version) changes only on a timely compatible reply. An
     /// expired or dropped reconnect leaves it unchanged and abandons its pending read-only call
     /// without closing the connection, which stays usable for later calls and subscriptions.
+    /// As with any cancelled zbus call, the one transport-level exception is a call abandoned in
+    /// the middle of writing its message to the socket, which zbus does not guard against.
     pub async fn reconnect(&mut self, timeout: Duration) -> Result<(), ClientError> {
         let connection = &self.connection;
         let version = negotiate_within(timeout, || async {
@@ -648,14 +650,22 @@ where
             None => Some(attempt().await),
         };
         if expired() {
-            let what = if outcome.is_some() {
-                "the daemon answered only after the deadline"
-            } else {
-                "the owner lookup or Version negotiation did not answer before the deadline"
+            let what = match &outcome {
+                None => {
+                    "the owner lookup or Version negotiation did not answer before the deadline"
+                        .to_owned()
+                }
+                Some(Ok(_)) => "the daemon answered only after the deadline".to_owned(),
+                Some(Err(ClientError::Bus(error))) => {
+                    format!("the last attempt failed only after the deadline: {error}")
+                }
+                Some(Err(error)) => {
+                    format!("the last attempt ended only after the deadline: {error}")
+                }
             };
             return Err(timed_out(match failure {
                 Some(failure) => format!("{what}; the previous attempt failed: {failure}"),
-                None => what.to_owned(),
+                None => what,
             }));
         }
         match outcome {
@@ -1088,7 +1098,8 @@ mod deadline_tests {
     /// after expiry; the last bus failure is kept as context.
     #[test]
     fn rc_retry_delays_are_capped_and_stop_at_the_deadline() {
-        for (budget, most) in [(30, 1), (250, 3)] {
+        // (budget, most attempts, slack): the short budget must stay below one 100 ms interval.
+        for (budget, most, slack) in [(20, 1, 75), (250, 3, 150)] {
             let budget = Duration::from_millis(budget);
             let started = Instant::now();
             let late = Cell::new(0);
@@ -1105,7 +1116,7 @@ mod deadline_tests {
             assert!(last_error.contains("NameHasNoOwner"), "{last_error}");
             assert!(elapsed >= budget, "gave up early: {elapsed:?}");
             assert!(
-                elapsed < budget + Duration::from_millis(60),
+                elapsed < budget + Duration::from_millis(slack),
                 "{budget:?} took {elapsed:?}"
             );
             assert_eq!(late.get(), 0, "attempted after the deadline");
@@ -1176,5 +1187,37 @@ mod deadline_tests {
             checked(NEWER)
         }));
         assert!(matches!(outcome, Ok(version) if version == NEWER));
+    }
+
+    /// DEADLINE-5: an attempt that fails only after the deadline keeps its bus diagnostic and
+    /// is not described as an answer.
+    #[test]
+    fn rc_a_failure_after_the_deadline_keeps_its_diagnostic() {
+        let budget = Duration::from_millis(20);
+        let outcome = futures_lite::future::block_on(negotiate_within(budget, || async move {
+            std::thread::sleep(budget * 3);
+            Err(absent())
+        }));
+        let last_error = timeout_of(outcome, budget);
+        assert!(
+            last_error.contains("failed only after the deadline"),
+            "{last_error}"
+        );
+        assert!(last_error.contains("NameHasNoOwner"), "{last_error}");
+        assert!(!last_error.contains("answered"), "{last_error}");
+    }
+
+    /// DEADLINE-1: the budget starts when the operation is first polled, not when its future
+    /// is created. `tests/reconnect_deadline.rs` checks the same through the public `reconnect`.
+    #[test]
+    fn rc_the_budget_starts_at_the_first_poll() {
+        let budget = Duration::from_millis(50);
+        let operation = negotiate_within(budget, || async { checked(NEWER) });
+        std::thread::sleep(budget * 2);
+        let outcome = futures_lite::future::block_on(operation);
+        assert!(
+            matches!(outcome, Ok(version) if version == NEWER),
+            "{outcome:?}"
+        );
     }
 }

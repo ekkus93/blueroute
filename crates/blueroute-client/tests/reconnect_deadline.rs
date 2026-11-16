@@ -44,7 +44,7 @@ const BUDGET: Duration = Duration::from_millis(50);
 /// 250 ms; the bound accepted here (200 ms) stays below that.
 const TOLERANCE: Duration = Duration::from_millis(150);
 /// Shorter than the client's 100 ms retry interval.
-const SHORT: Duration = Duration::from_millis(30);
+const SHORT: Duration = Duration::from_millis(20);
 /// The client's retry interval, which a short budget must not incur in full.
 const RETRY_INTERVAL: Duration = Duration::from_millis(100);
 /// Fixture watchdog: long enough to expose the original failure (pending until released).
@@ -211,10 +211,14 @@ where
                 let client_connection = Connection::session().await?;
                 let client = BlueRouteClient::from_connection(client_connection.clone()).await?;
                 assert_eq!(client.server_version(), INITIAL);
-                let outcome = body(a.clone(), script.clone(), client, client_connection).await;
-                // Leave the name free for the next scenario whatever happened.
+                let outcome = futures_lite::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(
+                    body(a.clone(), script.clone(), client, client_connection),
+                ))
+                .await;
+                // Leave the name free for the next scenario whatever happened, a failed
+                // assertion included, so one failure does not cascade into the next scenario.
                 let _ = a.release_name(DBUS_SERVICE_NAME).await;
-                outcome
+                outcome.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
             },
         )
         .await
@@ -383,6 +387,16 @@ fn rc_a_held_version_reply_times_out_within_the_budget() -> Result<(), Box<dyn E
 fn rc_a_timely_compatible_reply_succeeds_and_records_its_version() -> Result<(), Box<dyn Error>> {
     scenario(|_a, script, mut client, _connection| async move {
         script.reply_with(NEWER);
+        // DEADLINE-1: created, then left unpolled for longer than its budget. The budget starts
+        // on the first poll, so the operation still has all of it.
+        let unpolled = client.reconnect(BUDGET);
+        Timer::after(BUDGET * 2).await;
+        match within(WATCHDOG, unpolled).await {
+            Some(Ok(())) => {}
+            other => {
+                return Err(format!("the budget started before the first poll: {other:?}").into());
+            }
+        }
         let started = Instant::now();
         match within(WATCHDOG, client.reconnect(Duration::from_secs(1))).await {
             Some(Ok(())) => {}
@@ -394,7 +408,7 @@ fn rc_a_timely_compatible_reply_succeeds_and_records_its_version() -> Result<(),
             "timely reconnect",
         )?;
         assert_eq!(client.server_version(), NEWER);
-        assert_eq!(script.version_calls(), 2);
+        assert_eq!(script.version_calls(), 3);
         assert_eq!(
             script.request_calls(),
             0,
@@ -478,8 +492,8 @@ fn rc_an_absent_service_with_a_short_budget_caps_the_wait() -> Result<(), Box<dy
         // Strictly below one full retry interval: the sleep was capped.
         expect_within(
             elapsed,
-            RETRY_INTERVAL - Duration::from_millis(10),
-            "reconnect(30 ms) with the service absent",
+            RETRY_INTERVAL - Duration::from_millis(5),
+            "reconnect(20 ms) with the service absent",
         )?;
         if !last_error.contains("NameHasNoOwner") {
             return Err(format!("the bus diagnostic was lost: {last_error}").into());
@@ -504,6 +518,12 @@ async fn late_reply_loses(
     script.reply_with(NEWER);
     script.hold(2, late);
     // Sees every message the client's reader dispatches, so the test knows the reply is in.
+    // zbus 5.19's reader completes a pending call's reply before it broadcasts the message to
+    // streams (socket_reader.rs), so once this stream has the reply, the reconnect's call is
+    // ready too and the single poll below sees both it and the deadline ready. Were that order
+    // ever reversed the poll would see only the deadline: still a pass, but no longer this
+    // precedence check, which the seam test `rc_an_outcome_decided_after_the_deadline_loses_to_it`
+    // covers independently. `queue_saturation` pins the zbus version this relies on.
     let mut seen = MessageStream::from(&connection);
     let outcome = {
         let mut operation = pin!(client.reconnect(BUDGET));
