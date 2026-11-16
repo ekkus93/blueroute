@@ -1,6 +1,6 @@
 # Code Review Reconnect Dispatch TODO
 
-**Status:** IN PROGRESS; RCD-BASE, RCD-GUARD and RCD-TEST accepted.  
+**Status:** COMPLETE (2026-11-16, candidate `a1702ad`, CI 43963097981); software-only acceptance.  
 **Finding / priority:** RRC-01 / P2.  
 **Baseline:** `0257bcbf11f37276771a477e612529fc3e10f155` (reviewed 2026-11-16).  
 **Companion specification:** [CODE_REVIEW_RECONNECT_DISPATCH_SPEC.md](CODE_REVIEW_RECONNECT_DISPATCH_SPEC.md).  
@@ -29,8 +29,8 @@ and [original backlog](TODO.md), P5-005.
 | RCD-BASE | Durable reproduction, scope and corrected failing expectation | None | `[x]` |
 | RCD-GUARD | Expiry guards before resumed work and new dispatch | RCD-BASE; design may proceed concurrently | `[x]` |
 | RCD-TEST | Public and internal boundary matrix with sensitive controls | RCD-GUARD design; tests may precede code | `[x]` |
-| RCD-VALIDATE | Exact-candidate software/package checks and CI | RCD-GUARD, RCD-TEST | `[ ]` |
-| RCD-CLOSEOUT | Reviewed evidence, corrected claims and software closure | All preceding acceptance | `[ ]` |
+| RCD-VALIDATE | Exact-candidate software/package checks and CI | RCD-GUARD, RCD-TEST | `[x]` |
+| RCD-CLOSEOUT | Reviewed evidence, corrected claims and software closure | All preceding acceptance | `[x]` |
 
 ## RCD-BASE — Preserve the finding and establish sensitive fixtures
 
@@ -122,22 +122,22 @@ all prior regressions remain valid. A passing timeout assertion alone is insuffi
 
 **Requirements:** EVIDENCE-1, PRESERVE-1..3.
 
-- [ ] **RCD-VALIDATE-01:** Run pinned Rust formatting, locked workspace build/check/tests and
+- [x] **RCD-VALIDATE-01:** Run pinned Rust formatting, locked workspace build/check/tests and
   strict all-target Clippy; run experimental-join daemon tests/Clippy separately. Record per-run
   passed/failed/ignored counts and retain evidence that default production join stays closed.
-- [ ] **RCD-VALIDATE-02:** Explicitly run all existing/new private-broker suites and Python
+- [x] **RCD-VALIDATE-02:** Explicitly run all existing/new private-broker suites and Python
   socket tests. If new ignored cases stay in the existing reconnect suite, verify CI executes
   them without excluding filters; explicitly schedule any new suite. Preserve all owner/queue/
   watcher/authorization/typed-error/no-replay jobs.
-- [ ] **RCD-VALIDATE-03:** With pinned Node/npm, run clean frontend install, format, lint,
+- [x] **RCD-VALIDATE-03:** With pinned Node/npm, run clean frontend install, format, lint,
   typecheck, component/StrictMode tests and production build. Confirm narrow Tauri permissions
   and payload-free notifications remain intact.
-- [ ] **RCD-VALIDATE-04:** Build fresh core and desktop Debian packages; inspect manifests,
+- [x] **RCD-VALIDATE-04:** Build fresh core and desktop Debian packages; inspect manifests,
   dependencies and embedded assets. Run source and extracted-control lifecycle checks plus
   isolated upgrade using current `state_check`, covering identity preservation, v2-to-v3 state
   migration, cleanup failure/retry, remove and purge. Keep helper/systemd mocks and scratch under
   workspace `tmp/`; DPKG_ROOT alone does not isolate D-Bus or host services.
-- [ ] **RCD-VALIDATE-05:** Record exact source SHA, environment, commands/results, ignored cases,
+- [x] **RCD-VALIDATE-05:** Record exact source SHA, environment, commands/results, ignored cases,
   broker timings/counts, control edits, fresh package hashes and limitations in versioned evidence.
   Read exact-candidate CI through Ralph Bridge. Attribute earlier CI/results to their own
   revisions; do not reuse historical hashes or sum overlapping test runs as a new total.
@@ -175,21 +175,21 @@ actually execute. Counts and artifacts identify the candidate, mocked layers and
 
 **Requirements:** EVIDENCE-2/3 and every requirement-to-evidence mapping.
 
-- [ ] **RCD-CLOSEOUT-01:** Add dated RRC-01 correction/authority links to the previous reconnect
+- [x] **RCD-CLOSEOUT-01:** Add dated RRC-01 correction/authority links to the previous reconnect
   backlog/evidence. Reconcile RC-DEADLINE-03, RC-TEST-02 and RC-CLOSEOUT-01/03/04, their parent
   states and acceptance assertions with the review. Preserve valid fixes/historical runs; an
   earlier all-green validation matrix must not be treated as proof of no post-expiry dispatch.
-- [ ] **RCD-CLOSEOUT-02:** Review the whole reconnect poll/stage path, dispatch decision points,
+- [x] **RCD-CLOSEOUT-02:** Review the whole reconnect poll/stage path, dispatch decision points,
   ready-owner regression, in-poll expiry, both sensitivity controls, diagnostics, state changes,
   owner/no-replay safety and cancellation limits. Resolve review findings before acceptance.
-- [ ] **RCD-CLOSEOUT-03:** Align public rustdoc, product specification and dated P5-005 client/
+- [x] **RCD-CLOSEOUT-03:** Align public rustdoc, product specification and dated P5-005 client/
   backlog guidance with dispatch and outcome semantics. Preserve prior RC/QR/LC/FU/CR history
   and link this backlog as RRC-01 authority. Do not claim to fix arbitrary zbus mid-write safety.
-- [ ] **RCD-CLOSEOUT-04:** Create versioned implementation evidence mapping all 14 companion
+- [x] **RCD-CLOSEOUT-04:** Create versioned implementation evidence mapping all 14 companion
   requirements to tasks, source, regressions, baseline/control failures, final results and limits.
   Verify document links, exact revision identity, parent/leaf states and consistent acceptance
   rows. Reconcile earlier DEADLINE-3, EVIDENCE-1/3 mappings using the new evidence.
-- [ ] **RCD-CLOSEOUT-05:** Close this scoped software correction only after all acceptance
+- [x] **RCD-CLOSEOUT-05:** Close this scoped software correction only after all acceptance
   criteria pass. Report existing installed-system/physical/product/release gates separately and
   preserve their open status. Record no hardware-support claim or new equipment dependency.
 
@@ -199,21 +199,21 @@ timer-first experiment establishes no implementation acceptance.
 
 ## Requirement coverage and evidence ledger
 
-Populate versioned evidence during implementation; no fix SHA or result is established yet.
+Fix `3fd226a` with review fixes `4df1339`; candidate `a1702ad`. Full map: [evidence](CODE_REVIEW_RECONNECT_DISPATCH_EVIDENCE.md#rcd-closeout--requirement-map-and-closure-2026-11-16).
 
 | Requirements | Tasks | Required evidence | State |
 | --- | --- | --- | --- |
-| DISPATCH-1 | RCD-GUARD-01/04/05, RCD-TEST-04 | Single budget, first-poll/zero/short/large-duration regressions | PENDING |
-| DISPATCH-2 | RCD-GUARD-02, RCD-TEST-01 | Ready-owner expired resumption; no extra dispatch on resumed poll | PENDING |
-| DISPATCH-3 | RCD-GUARD-03, RCD-TEST-03 | Explicit dispatch decision guards; in-poll stage activation test | PENDING |
-| DISPATCH-4 | RCD-GUARD-04, RCD-TEST-03/04/07 | Late outcome precedence and post-outcome negative control | PENDING |
-| DISPATCH-5 | RCD-GUARD-05, RCD-TEST-04 | Typed timeout/requested budget and truthful available diagnostics | PENDING |
-| PRESERVE-1 | RCD-GUARD-06, RCD-TEST-06 | Owner/compatibility/zero Request/no-replay regressions | PENDING |
-| PRESERVE-2 | RCD-GUARD-06, RCD-TEST-05 | State, cancellation, fresh use, active subscription and transport limits | PENDING |
-| PRESERVE-3 | RCD-GUARD-06, RCD-TEST-06, RCD-VALIDATE | QR/feature/security/frontend/package invariants | PENDING |
-| TEST-1 | RCD-BASE-03/04, RCD-TEST-01 | Maintained production-path call-count regression, not temporary-only probe | PENDING |
-| TEST-2 | RCD-BASE-04, RCD-TEST-02..06 | Complete boundary matrix and isolated, bounded fixtures | PENDING |
-| TEST-3 | RCD-BASE-03, RCD-TEST-07 | Baseline/final repeats and sensitive isolated negative controls | PENDING |
-| EVIDENCE-1 | RCD-VALIDATE-01..05 | Exact-candidate validation, package hashes and scheduled CI | PENDING |
-| EVIDENCE-2 | RCD-CLOSEOUT-01/03/04 | Dated corrections, public contract and complete requirement map | PENDING |
-| EVIDENCE-3 | RCD-CLOSEOUT-02/05 | Reviewed software-only closure; other qualification stays separate | PENDING |
+| DISPATCH-1 | RCD-GUARD-01/04/05, RCD-TEST-04 | Single budget, first-poll/zero/short/large-duration regressions | ACCEPTED |
+| DISPATCH-2 | RCD-GUARD-02, RCD-TEST-01 | Ready-owner expired resumption; no extra dispatch on resumed poll | ACCEPTED |
+| DISPATCH-3 | RCD-GUARD-03, RCD-TEST-03 | Explicit dispatch decision guards; in-poll stage activation test | ACCEPTED |
+| DISPATCH-4 | RCD-GUARD-04, RCD-TEST-03/04/07 | Late outcome precedence and post-outcome negative control | ACCEPTED |
+| DISPATCH-5 | RCD-GUARD-05, RCD-TEST-04 | Typed timeout/requested budget and truthful available diagnostics | ACCEPTED |
+| PRESERVE-1 | RCD-GUARD-06, RCD-TEST-06 | Owner/compatibility/zero Request/no-replay regressions | ACCEPTED |
+| PRESERVE-2 | RCD-GUARD-06, RCD-TEST-05 | State, cancellation, fresh use, active subscription and transport limits | ACCEPTED |
+| PRESERVE-3 | RCD-GUARD-06, RCD-TEST-06, RCD-VALIDATE | QR/feature/security/frontend/package invariants | ACCEPTED |
+| TEST-1 | RCD-BASE-03/04, RCD-TEST-01 | Maintained production-path call-count regression, not temporary-only probe | ACCEPTED |
+| TEST-2 | RCD-BASE-04, RCD-TEST-02..06 | Complete boundary matrix and isolated, bounded fixtures | ACCEPTED |
+| TEST-3 | RCD-BASE-03, RCD-TEST-07 | Baseline/final repeats and sensitive isolated negative controls | ACCEPTED |
+| EVIDENCE-1 | RCD-VALIDATE-01..05 | Exact-candidate validation, package hashes and scheduled CI | ACCEPTED |
+| EVIDENCE-2 | RCD-CLOSEOUT-01/03/04 | Dated corrections, public contract and complete requirement map | ACCEPTED |
+| EVIDENCE-3 | RCD-CLOSEOUT-02/05 | Reviewed software-only closure; other qualification stays separate | ACCEPTED |

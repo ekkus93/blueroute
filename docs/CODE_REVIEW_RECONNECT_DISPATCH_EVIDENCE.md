@@ -197,3 +197,69 @@ boundary). Against the `0257bcb` client with the reworked test, three runs: the 
 FAILED each time with `before Counts { sent: (1, 0, 0), daemon_versions: 1 }, after Counts {
 sent: (1, 1, 0), daemon_versions: 2 }`; the timely control passed. Controls Y1–Y4 rerun at
 `4df1339`: identical to the table above.
+
+## RCD-VALIDATE — Exact candidate (2026-11-16)
+
+**Candidate** `a1702ad63ee1325fdfb3a945b0d63075efa8a06a` (code identical to `4df1339`; `a1702ad`
+adds only documentation). Clean tracked tree apart from `.serena/` and `AGENTS.md`. rustc/cargo
+1.95.0, Node 26.13.0, npm 11.20.0, Python 3.13.5, dbus-daemon 1.16.2, Debian 13 kernel
+6.12.115. Steps are the backlog's command reference plus every `ci.yml` broker suite (run by the
+git-ignored helper `tmp/validate.sh`; the commands are the ones listed in the TODO).
+
+| Check | Result |
+| --- | --- |
+| `cargo fmt --all -- --check`; locked build, check; strict all-target Clippy | all rc=0 |
+| `cargo test --workspace --locked` | 933 passed, 0 failed, 97 ignored (the broker cases, run below) |
+| `cargo test -p blueroute-daemon --features experimental-join --locked`; its Clippy | 392 passed, 0 failed, 16 ignored; clean |
+| Default build keeps join closed | 61 join tests pass, including `default_builds_cannot_open_the_join_gate` |
+| Private brokers (`dbus-run-session`) | `dbus_service` 1, `authorization` 1, `dbus_client` 1, `cli_exit_contract` 1, `bridge_end_to_end` 1, `owner_race` 6, `event_owner_race` 6, `ownership_period` 12, `queue_saturation` 18, **`reconnect_deadline` 12**, `owner_watch` 3, `watcher` 8, `state_events` 8, `publisher_progress` 6, `watch_integration` 2, `watch_handover` 6, `tui_watcher` 4; all passed |
+| Python socket tooling | 7 passed |
+| Frontend (`npm ci`, format, lint, typecheck, test, build) | all rc=0; 4 files, 43 tests (component and StrictMode) passed; no frontend or Tauri file changed since `0257bcb`, so permissions and notifications are as before |
+| Debian packages | `blueroute_0.1.0_amd64.deb` `f6ce1200e6f50c4ea95e82305e3abe226f2144da4505e2eca902cba731f9c60c` (19 entries; Depends dbus, bluez, network-manager, polkitd, systemd); `blueroute-desktop_0.1.0_amd64.deb` `abeb7f740bcf370383d8fb6320f0e9f57d4238601d4ecac2e45127fcd32a29ae` (12 entries; Depends blueroute (= 0.1.0) and the GTK/WebKit runtime) |
+| Maintainer lifecycle, source and extracted packaged scripts | both passed (install, upgrade, remove, purge, abort, cleanup failure, unresolved role, manual recovery) |
+| Isolated upgrade with fresh `state_check` | 0.0.1 → 0.1.0 kept identity, migrated v2 membership to v3 roles, restarted; failed cleanup aborted removal; remove retained state; purge deleted it |
+
+Workspace 933 = the 928 of `a7abc60` plus the new seam tests (the in-file count rose from 12 to
+19 client unit tests; other suites unchanged); `reconnect_deadline` rose from 10 to 12. Counts are
+per run and not summed across overlapping runs. Change scope `0257bcb..a1702ad`: only
+`crates/blueroute-client/src/lib.rs`, its `reconnect_deadline` test and documentation.
+
+**Exact-revision CI** (read with `gh run view`; the backlog's "Ralph Bridge" instruction is
+superseded by the maintainer's standing direction to use `git`/`gh` for CI evidence):
+[run 43963097981](https://github.com/ekkus93/blueroute/actions/runs/43963097981) on `a1702ad`:
+success (Rust, Desktop frontend); its "Run client reconnect deadline tests (RQR-01)" step reports
+`12 passed`. Earlier: [43961287907](https://github.com/ekkus93/blueroute/actions/runs/43961287907)
+on `08e50fa`, success, 12 passed. `8ca0ad3`, `7ad46e1`, `3fd226a` and `4df1339` were pushed
+together with a later head and have no run of their own. The historical runs 43942151162 and
+earlier passed while this defect existed and are not acceptance for it.
+
+**Mocked layers and limits.** Broker daemons are scripted fakes on private session buses; package
+tests mock the helper and systemd. Timings come from one development machine and CI's runner. A
+call admitted in time may still be answered after the deadline (its answer loses); the microsecond
+window between admission and the send inside one timely poll is inherent (DISPATCH-3). The zbus
+partial-write cancellation limitation documented under RQR-01 is unchanged.
+
+## RCD-CLOSEOUT — Requirement map and closure (2026-11-16)
+
+| Requirement | Tasks | Source | Baseline / control failure | Final evidence |
+| --- | --- | --- | --- | --- |
+| DISPATCH-1 one budget | RCD-GUARD-01/04/05, RCD-TEST-04 | `Budget::starting_now` | (preserved) | first-poll, zero, short, overflow tests pass |
+| DISPATCH-2 resumed polls | RCD-GUARD-02, RCD-TEST-01 | `poll_fn` expiry check in `negotiate_within` | broker regression (1,0,0)→(1,1,0) at `0257bcb` 3/3; Y1, Y2 | broker and seam resumed-expiry tests pass |
+| DISPATCH-3 stage transitions | RCD-GUARD-03, RCD-TEST-03 | `Budget::admit` in `in_stages` | Y1, Y3 | `rcd_expiry_inside_a_poll…`, `rcd_a_retry_delay…` |
+| DISPATCH-4 outcome precedence | RCD-GUARD-04, RCD-TEST-03/04/07 | post-outcome check | Y4 (4 seam tests incl. RQR-01's) | late compatible/incompatible/error tests pass |
+| DISPATCH-5 typed errors | RCD-GUARD-05, RCD-TEST-04 | `last_error` by case | — | text and Unavailable checks in every timeout test |
+| PRESERVE-1 owner/command safety | RCD-GUARD-06, RCD-TEST-06 | `validated_owner` unchanged for requests | — | restart, incompatible, lost-reply, `dbus_client`, `owner_race`; 0 Requests |
+| PRESERVE-2 state and lifetime | RCD-GUARD-06, RCD-TEST-05 | `server_version` only on `Ok`; nothing spawned | — | cancellation test; version unchanged in every timeout and discarded setup |
+| PRESERVE-3 boundaries | RCD-GUARD-06, RCD-TEST-06, RCD-VALIDATE | no change outside the client | — | all QR/watcher/daemon/desktop/TUI, package and frontend checks |
+| TEST-1 public regression | RCD-BASE-03/04, RCD-TEST-01 | `rcd_an_expired_resumption…` with `Dispatches` | fails at `0257bcb` | passes 25/25 incl. under load |
+| TEST-2 boundary matrix | RCD-BASE-04, RCD-TEST-02..06 | RCD-TEST table | — | all rows pass; raced setups reported and retried, never skipped |
+| TEST-3 sensitivity | RCD-BASE-03, RCD-TEST-07 | `tmp/rcd-neg-controls.sh` (edits recorded) | baseline 3/3; Y1–Y4 | each guard caught by a test isolating it |
+| EVIDENCE-1 exact candidate | RCD-VALIDATE-01..05 | `ci.yml` (suite already scheduled) | — | RCD-VALIDATE above; CI 43963097981 |
+| EVIDENCE-2 reconcile claims | RCD-CLOSEOUT-01/03/04 | RC backlog and evidence corrections, SPEC.md, P5-005 docs, rustdoc | — | dated corrections in `a1702ad` and `08e50fa` |
+| EVIDENCE-3 reviewed closure | RCD-CLOSEOUT-02/05 | independent review | — | review findings resolved in `4df1339` |
+
+**Closure.** RRC-01 is **COMPLETE** as a software correction (software-only acceptance,
+specification §5). With it, RQR-01's DEADLINE-3 and the RC items corrected above are met. The
+existing QR, LC, FU and CR installed-system, physical and product/release gates are unchanged and
+remain open in their own backlogs; this correction needs no equipment and makes no
+hardware-support claim.
