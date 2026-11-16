@@ -263,3 +263,67 @@ specification §5). With it, RQR-01's DEADLINE-3 and the RC items corrected abov
 existing QR, LC, FU and CR installed-system, physical and product/release gates are unchanged and
 remain open in their own backlogs; this correction needs no equipment and makes no
 hardware-support claim.
+
+## RCD-REVIEW-01 — Client test-count correction and proof (2026-11-16)
+
+Authority: [CODE_REVIEW_RECONNECT_COUNTS_TODO.md](CODE_REVIEW_RECONNECT_COUNTS_TODO.md)
+(specification [CODE_REVIEW_RECONNECT_COUNTS_SPEC.md](CODE_REVIEW_RECONNECT_COUNTS_SPEC.md)).
+
+**Finding.** The RCD-VALIDATE note above originally said the client unit-test count "rose from
+12 to 19". The baseline actually had 14. The workspace totals (928 → 933), the 12-case
+`reconnect_deadline` broker suite and every runtime result were right; only that comparison was
+wrong. It is corrected in place above; this section holds the proof.
+
+**Revisions and environment (RCN-BASE-01/02).** Work started at `e9ac106` (the reviewed
+`3a9a631` plus the two counts plan documents; no code difference), clean tracked tree apart from
+`.serena/` and `AGENTS.md`. Toolchain rustc 1.95.0 (59807616e 2026-04-14), cargo 1.95.0
+(f2d3ce0bd 2026-03-21). Listings were taken in a detached worktree under the ignored `tmp/`,
+checked out at each revision in turn (clean, 0 changed files each time), never in the main
+checkout:
+
+| Revision | Full SHA | Equivalence |
+| --- | --- | --- |
+| `a7abc60` (RQR-01 candidate) | `a7abc6004054e4c2bcc922fa3b22c103d532a810` | baseline |
+| `0257bcb` (RQR-01 closeout) | `0257bcbf11f37276771a477e612529fc3e10f155` | `git diff --quiet a7abc60 0257bcb -- Cargo.toml Cargo.lock crates/blueroute-client` succeeds: identical client source and lock |
+| `a1702ad` (RRC-01 candidate) | `a1702ad63ee1325fdfb3a945b0d63075efa8a06a` | candidate |
+| `3a9a631` (RRC-01 closeout, reviewed) | `3a9a63114d369dd1eec1702f143272ac8d704aa9` | `git diff --quiet a1702ad 3a9a631 -- …` succeeds: identical |
+
+**Commands** (in each checkout, exit status 0 every time):
+
+```bash
+cargo test -p blueroute-client --lib --locked -- --list
+cargo test -p blueroute-client --lib --locked deadline_tests -- --list
+```
+
+**Harness totals** (the listings' own summary lines; the listings of each equivalent pair are
+byte-identical):
+
+| Scope | `a7abc60` = `0257bcb` | `a1702ad` = `3a9a631` | Change |
+| --- | ---: | ---: | ---: |
+| Whole `blueroute-client` library harness (`src/lib.rs` and `src/watch.rs`) | 14 tests | 19 tests | +5 |
+| Selected by the `deadline_tests` filter (a subset of the line above) | 8 tests | 13 tests | +5 |
+| Other library tests | 6 | 6 | 0 |
+
+**Names (RCN-BASE-03).**
+
+- Unchanged other six: `error_class_tests::error_names_are_exact_and_never_classify_untrusted_message_text`,
+  `error_class_tests::lc_owner_only_a_missing_owner_retires_on_a_failed_final_check`,
+  `error_class_tests::qr_queue_a_period_end_before_the_decision_withholds_and_one_after_retires_next`,
+  `error_class_tests::qr_queue_an_overflow_is_typed_operational_and_names_its_limit`,
+  `error_class_tests::version_mismatch_is_unavailable_and_unrelated_errors_remain_operational`,
+  `watch::tests::reconnect_backoff_is_exponential_and_bounded`.
+- Baseline eight `deadline_tests` (all still present): `rc_a_delayed_owner_lookup_is_bounded_by_the_whole_budget`,
+  `rc_a_failure_after_the_deadline_keeps_its_diagnostic`, `rc_a_zero_budget_makes_no_attempt`,
+  `rc_an_outcome_decided_after_the_deadline_loses_to_it`, `rc_an_unrepresentable_budget_does_not_overflow`,
+  `rc_retry_delays_are_capped_and_stop_at_the_deadline`, `rc_the_budget_starts_at_the_first_poll`,
+  `rc_timely_outcomes_decide_at_once`.
+- Added five (the RRC-01 dispatch tests), none removed: `rcd_an_expired_resumption_does_not_poll_the_attempt_onward`,
+  `rcd_a_retry_delay_ending_at_expiry_starts_no_lookup`, `rcd_a_stage_started_in_time_that_decides_late_loses`,
+  `rcd_a_timely_resumption_negotiates_once`, `rcd_expiry_inside_a_poll_does_not_start_the_next_stage`.
+
+**What this proves and what it does not.** A listing proves which tests the harness discovers,
+not that they pass. Passing results stay attributed to the runs that recorded them: client
+library 19 passed at `3fd226a` and `4df1339`, workspace 933 passed at `a1702ad`, 928 at
+`a7abc60`. The library count is already inside the workspace count, and `deadline_tests` is
+inside the library count; none of these are summed. The 12 `reconnect_deadline` cases are a
+separate private-broker integration suite and were counted correctly.

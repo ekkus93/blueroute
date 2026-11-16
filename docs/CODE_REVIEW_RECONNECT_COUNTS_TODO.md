@@ -1,6 +1,6 @@
 # Code Review Reconnect Evidence Counts TODO
 
-**Status:** NOT STARTED; planning only.  
+**Status:** IN PROGRESS; RCN-BASE accepted.  
 **Finding / priority:** RCD-REVIEW-01 / P3.  
 **Reviewed revision:** `3a9a63114d369dd1eec1702f143272ac8d704aa9`.  
 **Companion specification:** [CODE_REVIEW_RECONNECT_COUNTS_SPEC.md](CODE_REVIEW_RECONNECT_COUNTS_SPEC.md).  
@@ -26,7 +26,7 @@
 
 | Task | Outcome | Dependencies | State |
 | --- | --- | --- | --- |
-| RCN-BASE | Confirm exact revisions, suite names and count proof | None | `[ ]` |
+| RCN-BASE | Confirm exact revisions, suite names and count proof | None | `[x]` |
 | RCN-CORRECT | Correct the evidence and reconcile affected claims | RCN-BASE | `[ ]` |
 | RCN-CLOSEOUT | Validate documents, complete traceability and close the correction | RCN-CORRECT | `[ ]` |
 
@@ -34,15 +34,15 @@
 
 **Requirements:** COUNT-1/2/3.
 
-- [ ] **RCN-BASE-01:** Record HEAD, dirty state, pinned Rust toolchain and differences from
+- [x] **RCN-BASE-01:** Record HEAD, dirty state, pinned Rust toolchain and differences from
   reviewed `3a9a631`. Read the finding, companion spec and affected evidence/backlog. Identify
   the incorrect parenthetical in “RCD-VALIDATE — Exact candidate”; distinguish it from the
   correctly recorded workspace, broker and current client totals.
-- [ ] **RCN-BASE-02:** Resolve baseline `a7abc60`/`0257bcb` and candidate `a1702ad`/`3a9a631`
+- [x] **RCN-BASE-02:** Resolve baseline `a7abc60`/`0257bcb` and candidate `a1702ad`/`3a9a631`
   to immutable SHAs. Confirm client source equivalence within each pair before using an
   equivalent revision. Obtain full-library and filtered `deadline_tests` harness listings from
   the correct sources, including `watch.rs`, using ignored isolated checkouts if needed.
-- [ ] **RCN-BASE-03:** Record complete names/count proof: library 14 → 19, deadline subset
+- [x] **RCN-BASE-03:** Record complete names/count proof: library 14 → 19, deadline subset
   8 → 13, six other library tests unchanged, five RCD deadline tests added. Explain that library
   and filtered counts overlap and listing does not execute tests. Keep the evidence independent
   of machine-specific temporary paths or prior review scripts.
