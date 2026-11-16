@@ -235,3 +235,20 @@ watcher does not use `reconnect` and is unchanged.
 (specification §4). The existing QR, LC, FU and CR installed-system, physical and
 product/release gates are unchanged and remain open in their own backlogs; this correction neither
 satisfies them nor depends on them, and it makes no hardware-support claim.
+
+## Correction (2026-11-16, RRC-01)
+
+A review of `0257bcb` found that the "nothing new is sent after the deadline" claim did not hold
+for a resumed poll. `negotiate_within` raced the attempt against the timer attempt-first, so when
+the owner lookup's reply arrived while the caller was not polling, the first poll after the
+deadline advanced into Version before the timeout was returned. The result, the recorded version
+and the no-replay rule were correct; one read-only Version call was sent after expiry.
+
+- **Rows affected above:** DEADLINE-3 ("the loop checks expiry before every attempt, so nothing is
+  sent after it" — true for new attempts, not for stages inside a resumed attempt), the
+  RC-CLOSEOUT-01 review statement that attempt-first polling was "harmless", and the EVIDENCE-1
+  and EVIDENCE-3 rows of the requirement map, whose matrix had no resumed-after-expiry case.
+- **Still valid:** every result recorded above for what it tested (held Version, late outcomes,
+  zero and short budgets, capped delays, cancellation, restart, no-replay, X1–X5).
+- **Current authority:** [CODE_REVIEW_RECONNECT_DISPATCH_TODO.md](CODE_REVIEW_RECONNECT_DISPATCH_TODO.md),
+  evidence [CODE_REVIEW_RECONNECT_DISPATCH_EVIDENCE.md](CODE_REVIEW_RECONNECT_DISPATCH_EVIDENCE.md).

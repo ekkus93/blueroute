@@ -167,3 +167,33 @@ check decides first; an outcome decided inside a poll that began in time needs a
 blocked across the deadline, which only the seam tests can arrange. The existing RQR-01
 late-outcome seam test (`rc_an_outcome_decided_after_the_deadline_loses_to_it`) is the one that
 fails for Y4, as TEST-3 requires.
+
+## RCD-CLOSEOUT-02 — Independent review (2026-11-16)
+
+An independent reviewer read the specification and the code at `3fd226a`/`7ad46e1`/`08e50fa`
+(not this record's conclusions), checked zbus 5.19 internals and ran the suites (including 110
+broker runs sequentially, under CPU saturation and with six suites concurrently).
+
+**No dispatch bug found.** Resumed polls check expiry before polling the attempt; `in_stages`
+admits before the lookup and before Version; the loop head checks before every new attempt.
+`Proxy::new_owned` does no I/O (`CacheProperties::Lazily`); `call_method_raw` sends on its first
+poll and a later poll that would finish a delayed send is itself guarded; the post-outcome check is
+kept. The only window is the microseconds between `admit` and the send inside one poll that began
+in time, which DISPATCH-3 accepts and the rustdoc states. `poll_fn` always registers a waker
+(attempt, plus timer when there is a deadline), the Timer is never re-polled after firing and its
+rule agrees with `expired()`; `validated_owner` for requests/subscriptions is byte-identical;
+nothing is spawned; `server_version` is set only on `Ok`.
+
+| # | Finding | Resolution (`4df1339`) |
+| --- | --- | --- |
+| 1 | Test gap: the fixture's "no Version yet" check could not fail (the monitor was read only up to the lookup), and the helper re-polled after 20 ms, which could let a poll find the reply and send Version inside the budget, making the timely control pass without testing the boundary | The helper polls exactly once (fails clearly if no lookup appears); after the matched reply it takes a round trip and a quiet monitor window and asserts (lookup, Version, Request) and daemon counts as deltas before resuming; the regression compares full before/after counts |
+| 2 | Possible load flake (one unexplained failure during a concurrent validation) | Reproduced under 16 busy loops: 2 of 10 runs, "before resuming, reconnect had sent (1, 1, 0)". Cause: the client's reader thread delivered the lookup reply while the single first poll was still running, so that poll legitimately went on to Version. The fixture now reports such a setup as `Raced`, discards the operation and retries with a fresh one (at most 20 times, counted and printed); these two tests use a 200 ms budget so setup finishes well inside it |
+| 3 | Nit: the unreachable `Halted::Expired`/`None` arm dropped the observed bus failure | It now appends the previous failure like the other arms |
+| 4 | `versions_before` only printed | Asserted (finding 1) |
+
+**After the fixes** (`4df1339`): seam 19/19; broker `reconnect_deadline` 12/12 on 10 idle runs and
+15 runs under 16 busy loops (3 of those discarded one raced setup each and then tested the
+boundary). Against the `0257bcb` client with the reworked test, three runs: the regression
+FAILED each time with `before Counts { sent: (1, 0, 0), daemon_versions: 1 }, after Counts {
+sent: (1, 1, 0), daemon_versions: 2 }`; the timely control passed. Controls Y1–Y4 rerun at
+`4df1339`: identical to the table above.

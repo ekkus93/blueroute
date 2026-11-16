@@ -1,6 +1,12 @@
 # Code Review Reconnect Deadline TODO
 
-**Status:** COMPLETE (2026-11-16, candidate `a7abc60`, CI 43940470468); software-only acceptance. Evidence:
+**Status:** COMPLETE (2026-11-16, candidate `a7abc60`, CI 43940470468); software-only acceptance.
+**Correction (2026-11-16, RRC-01):** the review of `0257bcb` found that an expired reconnect could
+still send one read-only Version call when resumed with a ready owner reply. RC-DEADLINE-03,
+RC-TEST-02 and RC-CLOSEOUT-01/03/04 (and their parents) were therefore not fully met at `a7abc60`;
+they are met by the dispatch correction, whose backlog
+[CODE_REVIEW_RECONNECT_DISPATCH_TODO.md](CODE_REVIEW_RECONNECT_DISPATCH_TODO.md) is the current
+authority for that behavior. The results recorded here stay valid for what they tested. Evidence:
 [CODE_REVIEW_RECONNECT_EVIDENCE.md](CODE_REVIEW_RECONNECT_EVIDENCE.md).  
 **Finding / priority:** RQR-01 / P2.  
 **Baseline:** `bd58ce2355816d7c7b956b9ed7dceedb4925044a`.  
@@ -65,6 +71,7 @@ with controlled setup, requested budget and measured outcome recorded.
   or close the shared connection to terminate a read-only attempt.
 - [x] **RC-DEADLINE-03:** Cap retry sleep to remaining time and stop before dispatching another
   lookup/Version after expiry. Preserve existing retryable-error and early incompatibility rules.
+  *Correction (2026-11-16):* not met at `a7abc60` for a resumed poll ([RRC-01](CODE_REVIEW_RECONNECT_DISPATCH_TODO.md)); met by RCD-GUARD.
 - [x] **RC-DEADLINE-04:** Return the existing ReconnectTimeout with the requested duration and
   useful existing error context or a truthful pending-negotiation timeout description. Preserve
   Unavailable classification; never fabricate a bus failure or classify authorization by text.
@@ -90,6 +97,8 @@ decision, produces the existing typed timeout, and preserves client state/connec
 - [x] **RC-TEST-02:** Cover delayed owner lookup so the timeout cannot accidentally apply only
   to Version. Use a narrow internal timing seam when necessary, retaining the production-path
   broker regression and keeping test hooks out of the public API.
+  *Correction (2026-11-16):* partial at `a7abc60`: the seam kept polling a held lookup and never
+  resumed one after expiry ([RRC-01](CODE_REVIEW_RECONNECT_DISPATCH_TODO.md)); completed by RCD-TEST.
 - [x] **RC-TEST-03:** Test zero duration and service absence with a budget shorter than the
   poll interval. Count attempts; require no zero-budget negotiation or post-expiry retry.
 - [x] **RC-TEST-04:** Make reply and timer both ready after expiry, for compatible and incompatible
@@ -165,16 +174,22 @@ actually run and evidence identifies mocked layers, ignored cases and remaining 
 
 - [x] **RC-CLOSEOUT-01:** Review the full deadline path and timing matrix, negative control,
   cancellation/late-reply behavior, typed errors, client-state updates and owner/no-replay safety.
+  *Correction (2026-11-16):* partial: the review accepted attempt-first polling as harmless and
+  missed the post-expiry dispatch ([RRC-01](CODE_REVIEW_RECONNECT_DISPATCH_TODO.md)); completed by RCD-CLOSEOUT-02.
 - [x] **RC-CLOSEOUT-02:** Document public timeout semantics and update relevant specification /
   client guidance. Append a dated P5-005 correction/evidence link for bounded reconnect, preserving
   its working request/event/version-gating behavior and earlier QR/LC/FU/CR history.
 - [x] **RC-CLOSEOUT-03:** Complete versioned evidence mapping all 12 requirements to tasks,
   source, corrected baseline failures, final results and limits; verify links, candidate identity
   and states. Link this backlog as the current RQR-01 authority.
+  *Correction (2026-11-16):* partial: the DEADLINE-3, EVIDENCE-1 and EVIDENCE-3 rows claimed
+  "nothing is sent after it" without a resumed-poll test ([RRC-01](CODE_REVIEW_RECONNECT_DISPATCH_TODO.md)); reconciled in the dispatch evidence.
 - [x] **RC-CLOSEOUT-04:** Close this software deadline remediation only after implementation,
   tests, validation, documentation and review pass. Report existing installed-system/physical /
   product/release gates separately and preserve their open status without adding an unrelated
   equipment dependency to this fix or making a hardware-support claim.
+  *Correction (2026-11-16):* the closure was premature for DEADLINE-3 ([RRC-01](CODE_REVIEW_RECONNECT_DISPATCH_TODO.md)); RQR-01's remaining
+  dispatch boundary closes with the RRC-01 correction.
 
 **Acceptance:** RQR-01's caller-supplied timeout contract is evidenced and documented. This scoped
 software outcome is distinct from earlier queue/recovery acceptance and remaining qualification.
