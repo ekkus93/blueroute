@@ -136,3 +136,21 @@ plain `cargo test --workspace`.
 
 **Checks.** `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets --locked -- -D
 warnings` pass.
+
+## TC-DEDUP — Duplicate route projection harness removed (2026-11-16)
+
+`crates/blueroute-linux/tests/route_projection_contract.rs` contained only a `#[path =
+"../src/route_projection.rs"] mod route_projection;` and an import, under a doc comment that still
+called the module's wiring pending. Its harness listing (9 tests) was identical, name for name, to
+the library's `route_projection::tests::*` listing from `--lib`. Nothing in the repository, CI or
+other docs referenced the file outside this backlog. It was deleted.
+
+| Listing | Before (baseline / TC-PAIR) | After |
+| --- | ---: | ---: |
+| `blueroute-linux --lib` | 170 | 170, identical names |
+| `blueroute-linux --tests` | 172 at the baseline, 189 with TC-PARSE and TC-PAIR | 180 |
+| `route_projection::tests::*` occurrences in `--tests` | 18 | 9 |
+
+Against the baseline `--tests` multiset, the only names removed are one copy each of the nine
+`route_projection::tests::*` names. `cargo test -p blueroute-linux --locked` (170 + 4 + 6) and
+`cargo clippy -p blueroute-linux --all-targets --locked -- -D warnings` pass.

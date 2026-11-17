@@ -26,7 +26,7 @@
 | TC-PAIR | BlueZ pairing error mapping and agent refusal | G4 | TC-BASE | `[x]` |
 | TC-CLI | Checked-in CLI behavior matrix | G5 | TC-BASE | `[x]` |
 | TC-NM | Fake NetworkManager broker suite | G1 | TC-BASE | `[ ]` |
-| TC-DEDUP | Remove the duplicate route projection harness | — | TC-BASE | `[ ]` |
+| TC-DEDUP | Remove the duplicate route projection harness | — | TC-BASE | `[x]` |
 | TC-VALIDATE | Exact-candidate validation and CI | all | all above | `[ ]` |
 | TC-CLOSEOUT | Review, requirement map and closure | all | TC-VALIDATE | `[ ]` |
 
@@ -139,9 +139,9 @@ asserted, controls fail as expected, and CI runs the suite.
 
 **Requirements:** COV-8, VERIFY-3.
 
-- [ ] **TC-DEDUP-01:** Confirm `route_projection_contract.rs` defines no tests of its own and that
+- [x] **TC-DEDUP-01:** Confirm `route_projection_contract.rs` defines no tests of its own and that
   its listed tests are exactly `route_projection::tests::*` from `--lib`.
-- [ ] **TC-DEDUP-02:** Delete the file; record before and after listings (nine duplicate names
+- [x] **TC-DEDUP-02:** Delete the file; record before and after listings (nine duplicate names
   gone, `--lib` unchanged).
 
 **Acceptance:** No route projection test is lost; the duplicate run is gone.
@@ -185,6 +185,6 @@ asserted, controls fail as expected, and CI runs the suite.
 | COV-5 Parser rejection tables | TC-PARSE | [TC-PARSE](TEST_COVERAGE_EVIDENCE.md#tc-parse--parser-rejection-tables-2026-11-16) | MET |
 | COV-6 Pairing mapping and refusal | TC-PAIR | [TC-PAIR](TEST_COVERAGE_EVIDENCE.md#tc-pair--pairing-error-mapping-and-agent-refusal-2026-11-16) | MET |
 | COV-7 CLI behavior matrix | TC-CLI | [TC-CLI](TEST_COVERAGE_EVIDENCE.md#tc-cli--checked-in-cli-behavior-matrix-2026-11-16) | MET |
-| COV-8 Remove duplicate harness | TC-DEDUP | TC-DEDUP-01/02 | Pending |
+| COV-8 Remove duplicate harness | TC-DEDUP | [TC-DEDUP](TEST_COVERAGE_EVIDENCE.md#tc-dedup--duplicate-route-projection-harness-removed-2026-11-16) | MET |
 | COV-9 Scheduling and docs | TC-NM | TC-NM-06 | Pending |
 | VERIFY-1..4 | all | per-task and TC-VALIDATE | Pending |
