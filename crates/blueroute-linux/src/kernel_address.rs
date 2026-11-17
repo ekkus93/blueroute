@@ -550,4 +550,210 @@ mod tests {
         let error = parse_netlink_ack(&(-17_i32).to_ne_bytes()).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidState);
     }
+
+    /// An `ifaddrmsg` header for `family`, `prefix_len` and `index`, without attributes.
+    fn ifaddr(family: u8, prefix_len: u8, index: u32) -> Vec<u8> {
+        let mut payload = vec![family, prefix_len, 0, 0];
+        push_u32(&mut payload, index);
+        payload
+    }
+
+    /// One attribute with an explicit declared length, padded to four bytes.
+    fn raw_attribute(payload: &mut Vec<u8>, declared: u16, attribute_type: u16, value: &[u8]) {
+        push_u16(payload, declared);
+        push_u16(payload, attribute_type);
+        payload.extend_from_slice(value);
+        while !payload.len().is_multiple_of(4) {
+            payload.push(0);
+        }
+    }
+
+    fn inet() -> u8 {
+        AddressFamily::INET.as_raw() as u8
+    }
+
+    fn header(length: u32, message_type: u16, sequence: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        push_u32(&mut bytes, length);
+        push_u16(&mut bytes, message_type);
+        push_u16(&mut bytes, 0);
+        push_u32(&mut bytes, sequence);
+        push_u32(&mut bytes, 0);
+        bytes
+    }
+
+    #[test]
+    fn netlink_message_rejects_truncated_and_inconsistent_headers() {
+        let cases: [(&str, Vec<u8>); 4] = [
+            ("fifteen bytes", header(15, NLMSG_DONE, 9)[..15].to_vec()),
+            (
+                "declared length below the header",
+                header(15, NLMSG_DONE, 9),
+            ),
+            ("declared length past the buffer", header(20, NLMSG_DONE, 9)),
+            ("declared length zero", header(0, NLMSG_DONE, 9)),
+        ];
+        for (name, bytes) in cases {
+            let error = netlink_message(&bytes)
+                .err()
+                .unwrap_or_else(|| panic!("{name}: accepted"));
+            assert_eq!(error.kind(), ErrorKind::ProtocolError, "{name}");
+        }
+    }
+
+    #[test]
+    fn netlink_message_accepts_a_bare_header_and_bounds_the_payload_by_its_length() {
+        let bare = header(16, NLMSG_DONE, 9);
+        let message = netlink_message(&bare).unwrap();
+        assert_eq!(message.length, 16);
+        assert_eq!(message.message_type, NLMSG_DONE);
+        assert_eq!(message.sequence, 9);
+        assert!(message.payload.is_empty());
+
+        let mut followed = header(20, NLMSG_ERROR, 3);
+        followed.extend_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        let message = netlink_message(&followed).unwrap();
+        assert_eq!(message.length, 20);
+        assert_eq!(message.payload, &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn netlink_acknowledgements_classify_errno_and_reject_truncation() {
+        let error = parse_netlink_ack(&[0, 0, 0]).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::ProtocolError);
+        assert!(parse_netlink_ack(&[]).is_err());
+
+        let mut longer = 0_i32.to_ne_bytes().to_vec();
+        longer.extend_from_slice(&[0xff; 16]);
+        assert!(parse_netlink_ack(&longer).is_ok());
+
+        for (raw, kind, errno) in [
+            (-17_i32, ErrorKind::InvalidState, "errno=17"),
+            (-1, ErrorKind::NetworkBackendUnavailable, "errno=1"),
+            (-19, ErrorKind::NetworkBackendUnavailable, "errno=19"),
+            (5, ErrorKind::NetworkBackendUnavailable, "errno=-5"),
+            (
+                i32::MIN,
+                ErrorKind::NetworkBackendUnavailable,
+                "errno=2147483647",
+            ),
+        ] {
+            let error = parse_netlink_ack(&raw.to_ne_bytes()).unwrap_err();
+            assert_eq!(error.kind(), kind, "raw {raw}");
+            assert_eq!(error.diagnostic(), Some(errno), "raw {raw}");
+        }
+    }
+
+    #[test]
+    fn address_parser_rejects_truncated_and_malformed_attributes() {
+        let local = [10, 0, 0, 1];
+        let mut truncated_header = ifaddr(inet(), 24, 7);
+        truncated_header.extend_from_slice(&[8, 0]);
+        let mut short_attribute = ifaddr(inet(), 24, 7);
+        raw_attribute(&mut short_attribute, 3, IFA_LOCAL, &[]);
+        let mut past_end = ifaddr(inet(), 24, 7);
+        raw_attribute(&mut past_end, 12, IFA_LOCAL, &local);
+        let mut zero_length = ifaddr(inet(), 24, 7);
+        raw_attribute(&mut zero_length, 0, IFA_LOCAL, &local);
+        let cases: [(&str, Vec<u8>); 5] = [
+            (
+                "message under eight bytes",
+                ifaddr(inet(), 24, 7)[..7].to_vec(),
+            ),
+            ("truncated attribute header", truncated_header),
+            ("attribute length under four", short_attribute),
+            ("attribute length past the end", past_end),
+            ("attribute length zero", zero_length),
+        ];
+        for (name, payload) in cases {
+            let error = parse_ipv4_address(&payload, 7)
+                .err()
+                .unwrap_or_else(|| panic!("{name}: accepted"));
+            assert_eq!(error.kind(), ErrorKind::ProtocolError, "{name}");
+        }
+    }
+
+    #[test]
+    fn address_parser_skips_other_families_interfaces_and_unusable_attributes() {
+        let local = [10, 0, 0, 1];
+        let mut inet6 = ifaddr(AddressFamily::INET6.as_raw() as u8, 64, 7);
+        raw_attribute(&mut inet6, 8, IFA_LOCAL, &local);
+        assert_eq!(parse_ipv4_address(&inet6, 7).unwrap(), None);
+
+        let mut other_interface = ifaddr(inet(), 24, 8);
+        raw_attribute(&mut other_interface, 8, IFA_LOCAL, &local);
+        assert_eq!(parse_ipv4_address(&other_interface, 7).unwrap(), None);
+
+        assert_eq!(parse_ipv4_address(&ifaddr(inet(), 24, 7), 7).unwrap(), None);
+
+        let mut empty_attribute = ifaddr(inet(), 24, 7);
+        raw_attribute(&mut empty_attribute, 4, IFA_LOCAL, &[]);
+        assert_eq!(parse_ipv4_address(&empty_attribute, 7).unwrap(), None);
+
+        let mut wrong_width = ifaddr(inet(), 24, 7);
+        raw_attribute(&mut wrong_width, 20, IFA_LOCAL, &[0xfe; 16]);
+        raw_attribute(&mut wrong_width, 7, IFA_ADDRESS, &[10, 0, 0]);
+        assert_eq!(parse_ipv4_address(&wrong_width, 7).unwrap(), None);
+    }
+
+    #[test]
+    fn address_parser_follows_aligned_attributes_and_prefers_local() {
+        let expected = |octets: [u8; 4]| {
+            Some(Ipv4InterfacePrefix {
+                address: Ipv4Addr::from(octets),
+                prefix_len: 24,
+            })
+        };
+
+        let mut only_address = ifaddr(inet(), 24, 7);
+        raw_attribute(&mut only_address, 8, IFA_ADDRESS, &[10, 0, 0, 2]);
+        assert_eq!(
+            parse_ipv4_address(&only_address, 7).unwrap(),
+            expected([10, 0, 0, 2])
+        );
+
+        for local_first in [true, false] {
+            let mut both = ifaddr(inet(), 24, 7);
+            if local_first {
+                raw_attribute(&mut both, 8, IFA_LOCAL, &[10, 0, 0, 1]);
+                raw_attribute(&mut both, 8, IFA_ADDRESS, &[10, 0, 0, 2]);
+            } else {
+                raw_attribute(&mut both, 8, IFA_ADDRESS, &[10, 0, 0, 2]);
+                raw_attribute(&mut both, 8, IFA_LOCAL, &[10, 0, 0, 1]);
+            }
+            assert_eq!(
+                parse_ipv4_address(&both, 7).unwrap(),
+                expected([10, 0, 0, 1]),
+                "local first: {local_first}"
+            );
+        }
+
+        // An unknown five-byte attribute is padded to eight; the next attribute still parses.
+        let mut unaligned = ifaddr(inet(), 24, 7);
+        raw_attribute(&mut unaligned, 5, 8, &[0xaa]);
+        raw_attribute(&mut unaligned, 8, IFA_LOCAL, &[10, 0, 0, 3]);
+        assert_eq!(
+            parse_ipv4_address(&unaligned, 7).unwrap(),
+            expected([10, 0, 0, 3])
+        );
+
+        // Flag bits above the type mask do not hide the attribute type.
+        let mut flagged = ifaddr(inet(), 24, 7);
+        raw_attribute(&mut flagged, 8, 0x8000 | IFA_LOCAL, &[10, 0, 0, 4]);
+        assert_eq!(
+            parse_ipv4_address(&flagged, 7).unwrap(),
+            expected([10, 0, 0, 4])
+        );
+
+        // A final attribute whose declared length is not a multiple of four ends the message.
+        let mut unpadded = ifaddr(inet(), 24, 7);
+        raw_attribute(&mut unpadded, 8, IFA_LOCAL, &[10, 0, 0, 5]);
+        push_u16(&mut unpadded, 5);
+        push_u16(&mut unpadded, 9);
+        unpadded.push(0xbb);
+        assert_eq!(
+            parse_ipv4_address(&unpadded, 7).unwrap(),
+            expected([10, 0, 0, 5])
+        );
+    }
 }

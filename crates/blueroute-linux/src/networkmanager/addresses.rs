@@ -326,4 +326,126 @@ mod tests {
         );
         assert_eq!(address_prefixes(&settings).unwrap(), vec![prefix]);
     }
+
+    /// Settings whose `family` group holds `address-data` built from `entries`.
+    fn with_address_data(family: &str, entries: Vec<HashMap<String, OwnedValue>>) -> NmSettings {
+        let value = Value::from(entries).try_into_owned().unwrap();
+        let mut group = HashMap::new();
+        group.insert("address-data".to_owned(), value);
+        let mut settings = NmSettings::new();
+        settings.insert(family.to_owned(), group);
+        settings
+    }
+
+    fn address_entry(
+        address: Option<OwnedValue>,
+        prefix: Option<OwnedValue>,
+    ) -> HashMap<String, OwnedValue> {
+        let mut entry = HashMap::new();
+        if let Some(address) = address {
+            entry.insert("address".to_owned(), address);
+        }
+        if let Some(prefix) = prefix {
+            entry.insert("prefix".to_owned(), prefix);
+        }
+        entry
+    }
+
+    #[test]
+    fn address_data_rejection_table_fails_closed_with_typed_errors() {
+        let text = |value: &str| Some(owned_string(value));
+        let number = |value: u32| Some(OwnedValue::from(value));
+        let protocol = ErrorKind::ProtocolError;
+        let cases = [
+            (
+                "missing address",
+                IPV4_SETTING,
+                address_entry(None, number(24)),
+                protocol,
+            ),
+            (
+                "non-string address",
+                IPV4_SETTING,
+                address_entry(number(7), number(24)),
+                protocol,
+            ),
+            (
+                "missing prefix",
+                IPV4_SETTING,
+                address_entry(text("10.42.0.2"), None),
+                protocol,
+            ),
+            (
+                "string prefix",
+                IPV4_SETTING,
+                address_entry(text("10.42.0.2"), text("24")),
+                protocol,
+            ),
+            (
+                "invalid address",
+                IPV4_SETTING,
+                address_entry(text("10.42.0"), number(24)),
+                protocol,
+            ),
+            (
+                "prefix 256",
+                IPV4_SETTING,
+                address_entry(text("10.42.0.2"), number(256)),
+                protocol,
+            ),
+            (
+                "IPv4 prefix 33",
+                IPV4_SETTING,
+                address_entry(text("10.42.0.2"), number(33)),
+                ErrorKind::InvalidInput,
+            ),
+            (
+                "IPv6 prefix 129",
+                IPV6_SETTING,
+                address_entry(text("fd00:42::2"), number(129)),
+                ErrorKind::InvalidInput,
+            ),
+        ];
+        for (name, family, entry, kind) in cases {
+            let settings = with_address_data(family, vec![entry]);
+            let error = address_prefixes(&settings)
+                .err()
+                .unwrap_or_else(|| panic!("{name}: accepted"));
+            assert_eq!(error.kind(), kind, "{name}: {error:?}");
+        }
+
+        let mut malformed = NmSettings::new();
+        let mut group = HashMap::new();
+        group.insert("address-data".to_owned(), OwnedValue::from(true));
+        malformed.insert(IPV4_SETTING.to_owned(), group);
+        assert_eq!(address_prefixes(&malformed).unwrap_err().kind(), protocol);
+    }
+
+    #[test]
+    fn address_data_is_optional_and_accepts_boundary_prefixes() {
+        let mut settings = NmSettings::new();
+        assert!(address_prefixes(&settings).unwrap().is_empty());
+        settings.insert(IPV4_SETTING.to_owned(), HashMap::new());
+        assert!(address_prefixes(&settings).unwrap().is_empty());
+
+        let host = address_entry(
+            Some(owned_string("10.42.0.2")),
+            Some(OwnedValue::from(32_u32)),
+        );
+        let duplicate = address_entry(
+            Some(owned_string("10.42.0.2")),
+            Some(OwnedValue::from(32_u32)),
+        );
+        let settings = with_address_data(IPV4_SETTING, vec![host, duplicate]);
+        let expected = IpPrefix::new(IpAddr::V4(Ipv4Addr::new(10, 42, 0, 2)), 32).unwrap();
+        assert_eq!(address_prefixes(&settings).unwrap(), vec![expected]);
+
+        let v6 = address_entry(
+            Some(owned_string("fd00:42::2")),
+            Some(OwnedValue::from(128_u32)),
+        );
+        let settings = with_address_data(IPV6_SETTING, vec![v6]);
+        let expected = IpPrefix::new(IpAddr::from_str("fd00:42::2").unwrap(), 128).unwrap();
+        assert_eq!(address_prefixes(&settings).unwrap(), vec![expected]);
+    }
 }

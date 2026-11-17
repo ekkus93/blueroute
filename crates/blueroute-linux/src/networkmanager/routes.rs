@@ -496,4 +496,168 @@ mod tests {
             ErrorKind::InvalidState
         );
     }
+
+    /// A valid entry for `dest`/`prefix` with metric 77 and no next hop.
+    fn entry(dest: &str, prefix: u32) -> HashMap<String, OwnedValue> {
+        let mut entry = HashMap::new();
+        entry.insert("dest".to_owned(), owned_string(dest));
+        entry.insert("prefix".to_owned(), OwnedValue::from(prefix));
+        entry.insert("metric".to_owned(), OwnedValue::from(77_u32));
+        entry
+    }
+
+    fn with(
+        mut entry: HashMap<String, OwnedValue>,
+        key: &str,
+        value: Option<OwnedValue>,
+    ) -> HashMap<String, OwnedValue> {
+        match value {
+            Some(value) => entry.insert(key.to_owned(), value),
+            None => entry.remove(key),
+        };
+        entry
+    }
+
+    #[test]
+    fn route_data_rejection_table_fails_closed_with_typed_errors() {
+        let v4 = || entry("10.43.0.0", 24);
+        let v6 = || entry("fd00:43::", 64);
+        let protocol = ErrorKind::ProtocolError;
+        let cases: Vec<(&str, HashMap<String, OwnedValue>, bool, ErrorKind)> = vec![
+            (
+                "unsupported key",
+                with(v4(), "gateway", Some(owned_string("x"))),
+                true,
+                ErrorKind::InvalidState,
+            ),
+            ("missing dest", with(v4(), "dest", None), true, protocol),
+            (
+                "non-string dest",
+                with(v4(), "dest", Some(OwnedValue::from(7_u32))),
+                true,
+                protocol,
+            ),
+            (
+                "invalid dest",
+                with(v4(), "dest", Some(owned_string("10.43.0"))),
+                true,
+                protocol,
+            ),
+            ("IPv6 dest under IPv4", v6(), true, protocol),
+            ("IPv4 dest under IPv6", v4(), false, protocol),
+            ("missing prefix", with(v4(), "prefix", None), true, protocol),
+            (
+                "string prefix",
+                with(v4(), "prefix", Some(owned_string("24"))),
+                true,
+                protocol,
+            ),
+            ("prefix 256", entry("10.43.0.0", 256), true, protocol),
+            (
+                "IPv4 prefix 33",
+                entry("10.43.0.0", 33),
+                true,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                "IPv6 prefix 129",
+                entry("fd00:43::", 129),
+                false,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                "invalid next hop",
+                with(v4(), "next-hop", Some(owned_string("gw"))),
+                true,
+                protocol,
+            ),
+            (
+                "IPv6 next hop under IPv4",
+                with(v4(), "next-hop", Some(owned_string("fd00::1"))),
+                true,
+                protocol,
+            ),
+            (
+                "IPv4 next hop under IPv6",
+                with(v6(), "next-hop", Some(owned_string("10.0.0.1"))),
+                false,
+                protocol,
+            ),
+            (
+                "non-string next hop",
+                with(v4(), "next-hop", Some(OwnedValue::from(1_u32))),
+                true,
+                protocol,
+            ),
+            (
+                "missing metric",
+                with(v4(), "metric", None),
+                true,
+                ErrorKind::InvalidState,
+            ),
+            (
+                "string metric",
+                with(v4(), "metric", Some(owned_string("77"))),
+                true,
+                protocol,
+            ),
+        ];
+        for (name, entry, ipv4, kind) in cases {
+            let error = route_key_from_entry(&entry, ipv4)
+                .err()
+                .unwrap_or_else(|| panic!("{name}: accepted"));
+            assert_eq!(error.kind(), kind, "{name}: {error:?}");
+        }
+    }
+
+    #[test]
+    fn route_data_accepts_boundary_prefixes_and_an_empty_next_hop() {
+        let v4 = |text: &str| IpAddr::from_str(text).unwrap();
+        let (destination, via, metric) =
+            route_key_from_entry(&entry("10.43.0.1", 32), true).unwrap();
+        assert_eq!(destination, IpPrefix::new(v4("10.43.0.1"), 32).unwrap());
+        assert_eq!((via, metric), (None, 77));
+
+        let (destination, _, _) = route_key_from_entry(&entry("fd00:43::1", 128), false).unwrap();
+        assert_eq!(destination, IpPrefix::new(v4("fd00:43::1"), 128).unwrap());
+
+        let empty = with(entry("10.43.0.0", 24), "next-hop", Some(owned_string("")));
+        assert_eq!(route_key_from_entry(&empty, true).unwrap().1, None);
+
+        let gateway = with(
+            entry("fd00:43::", 64),
+            "next-hop",
+            Some(owned_string("fd00::1")),
+        );
+        assert_eq!(
+            route_key_from_entry(&gateway, false).unwrap().1,
+            Some(v4("fd00::1"))
+        );
+    }
+
+    #[test]
+    fn route_data_container_is_optional_but_never_malformed() {
+        let mut settings = NmSettings::new();
+        assert!(
+            route_data_entries(&settings, IPV4_SETTING)
+                .unwrap()
+                .is_empty()
+        );
+        settings.insert(IPV4_SETTING.to_owned(), HashMap::new());
+        assert!(
+            route_data_entries(&settings, IPV4_SETTING)
+                .unwrap()
+                .is_empty()
+        );
+        settings
+            .get_mut(IPV4_SETTING)
+            .unwrap()
+            .insert("route-data".to_owned(), OwnedValue::from(true));
+        assert_eq!(
+            route_data_entries(&settings, IPV4_SETTING)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::ProtocolError
+        );
+    }
 }

@@ -22,7 +22,7 @@
 | Task | Outcome | Gap | Dependencies | State |
 | --- | --- | --- | --- | --- |
 | TC-BASE | Baseline listings and evidence file | — | None | `[x]` |
-| TC-PARSE | Route/address and netlink parser rejection tables | G2, G3 | TC-BASE | `[ ]` |
+| TC-PARSE | Route/address and netlink parser rejection tables | G2, G3 | TC-BASE | `[x]` |
 | TC-PAIR | BlueZ pairing error mapping and agent refusal | G4 | TC-BASE | `[ ]` |
 | TC-CLI | Checked-in CLI behavior matrix | G5 | TC-BASE | `[ ]` |
 | TC-NM | Fake NetworkManager broker suite | G1 | TC-BASE | `[ ]` |
@@ -51,21 +51,21 @@ largest task, TC-NM. TC-DEDUP is independent and can go anywhere after TC-BASE.
 
 **Requirements:** COV-1, COV-2, COV-5, VERIFY-1/2/3.
 
-- [ ] **TC-PARSE-01:** In `networkmanager/routes.rs` tests, add a table for
+- [x] **TC-PARSE-01:** In `networkmanager/routes.rs` tests, add a table for
   `route_key_from_entry`: unsupported key; missing, non-string or invalid `dest`; IPv4 entry under
   IPv6 and vice versa; missing, non-integer, 256 and family-invalid `prefix`; invalid and
   wrong-family `next-hop`; empty `next-hop` accepted as no gateway; missing and non-integer
   `metric`. Assert `ErrorKind` for each rejection.
-- [ ] **TC-PARSE-02:** In `networkmanager/addresses.rs` tests, add the equivalent table for
+- [x] **TC-PARSE-02:** In `networkmanager/addresses.rs` tests, add the equivalent table for
   `address_prefixes`, covering every `CoreError` branch in the function.
-- [ ] **TC-PARSE-03:** In `kernel_address.rs` tests, add tables for `netlink_message` (under 16
+- [x] **TC-PARSE-03:** In `kernel_address.rs` tests, add tables for `netlink_message` (under 16
   bytes, declared length under 16, declared length over the buffer, exactly 16),
   `parse_netlink_ack` (under 4 bytes, 0, `-EEXIST` → `InvalidState`, another errno →
   `NetworkBackendUnavailable`, `i32::MIN`) and `parse_ipv4_address` (truncated message, non-INET
   family skipped, other interface skipped, truncated attribute header, attribute length under 4
   or past the end, unaligned lengths, non-4-byte address ignored, `IFA_ADDRESS` used when
   `IFA_LOCAL` is absent, no address → `None`).
-- [ ] **TC-PARSE-04:** Negative controls (VERIFY-2): for example, accept a missing metric, and
+- [x] **TC-PARSE-04:** Negative controls (VERIFY-2): for example, accept a missing metric, and
   drop the `length > bytes.len()` check; record the failing tests.
 
 **Acceptance:** Every rejection branch named in COV-5 is asserted with its kind; controls fail
@@ -182,7 +182,7 @@ asserted, controls fail as expected, and CI runs the suite.
 | COV-2 Findings handled separately | all | evidence findings section | Pending |
 | COV-3 Fake NetworkManager over a real bus | TC-NM | TC-NM-01/02 | Pending |
 | COV-4 Ownership at the D-Bus boundary | TC-NM | TC-NM-03..05, 07 | Pending |
-| COV-5 Parser rejection tables | TC-PARSE | TC-PARSE-01..04 | Pending |
+| COV-5 Parser rejection tables | TC-PARSE | [TC-PARSE](TEST_COVERAGE_EVIDENCE.md#tc-parse--parser-rejection-tables-2026-11-16) | MET |
 | COV-6 Pairing mapping and refusal | TC-PAIR | TC-PAIR-01..04 | Pending |
 | COV-7 CLI behavior matrix | TC-CLI | TC-CLI-01..04 | Pending |
 | COV-8 Remove duplicate harness | TC-DEDUP | TC-DEDUP-01/02 | Pending |
