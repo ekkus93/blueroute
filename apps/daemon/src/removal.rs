@@ -339,6 +339,26 @@ pub fn cleanup_outcome(outcome: &Result<RemovalReport, CoreError>) -> (i32, serd
     }
 }
 
+/// What the maintenance helper prints after its log line, for the person running the removal:
+/// nothing on success; otherwise what to do next and, when cleanup could not run at all, why
+/// (QA-A-02: a running daemon's "stop blueroute.service first" was lost). Only the error's fixed
+/// message is shown, never its diagnostic.
+pub fn cleanup_failure_text(outcome: &Result<RemovalReport, CoreError>) -> Option<String> {
+    match outcome {
+        Ok(report) if report.succeeded() => None,
+        Ok(_) => Some(
+            "BlueRoute could not remove all of its networking state; the package stays \
+             installed. Fix the cause (see the line above) and run the removal again."
+                .to_owned(),
+        ),
+        Err(error) => Some(format!(
+            "BlueRoute could not remove its networking state: {}. The package stays installed; \
+             fix the cause and run the removal again.",
+            error.message()
+        )),
+    }
+}
+
 fn io_error(message: &'static str, error: &std::io::Error) -> CoreError {
     CoreError::with_diagnostic(ErrorKind::Internal, message, error.to_string())
 }
@@ -783,6 +803,9 @@ mod tests {
         let daemon = acquire_instance_lock(&paths.state_directory).unwrap();
         let fake = Fake::with(|world| world.profiles = vec![(net(1), iface("br-a"))]);
         let (outcome, fake) = run(&paths, fake, true);
+        // QA-A-02: the operator is told why, not only the failure class.
+        let text = cleanup_failure_text(&outcome).expect("a refusal is explained");
+        assert!(text.contains("stop blueroute.service first"), "{text}");
         assert_eq!(outcome.unwrap_err().kind(), ErrorKind::InvalidState);
         assert!(!removal_pending(&paths.state_directory));
         assert_eq!(fake.world(|world| world.profiles.len()), 1);
@@ -962,6 +985,12 @@ mod tests {
         assert_eq!(line["unresolved_client_links"], 1);
         let (code, line) = cleanup_outcome(&Ok(RemovalReport::default()));
         assert_eq!((code, line["outcome"].as_str()), (0, Some("succeeded")));
+        assert!(
+            cleanup_failure_text(&Ok(unresolved))
+                .unwrap()
+                .contains("run the removal again")
+        );
+        assert_eq!(cleanup_failure_text(&Ok(RemovalReport::default())), None);
     }
 
     #[test]

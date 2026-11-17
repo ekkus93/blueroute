@@ -9,9 +9,10 @@ use blueroute_daemon::{
     EXPERIMENTAL_JOIN, JoinControlConfig, NetworkOperations, PeerPinStore,
     PendingHostCommitAuthorization, PendingJoinOperations, PendingJoinStore, ReconnectPolicy,
     RemovalPaths, SingleStarNetworkOperations, SystemClientLeave,
-    TransactionalJoinNetworkOperations, acquire_instance_lock, cleanup_outcome, current_network,
-    removal_pending, run_removal_cleanup, spawn_daemon_control_worker_with_peers,
-    spawn_daemon_runtime_worker, spawn_state_publisher, system_diagnostics_from_report,
+    TransactionalJoinNetworkOperations, acquire_instance_lock, cleanup_failure_text,
+    cleanup_outcome, current_network, removal_pending, run_removal_cleanup,
+    spawn_daemon_control_worker_with_peers, spawn_daemon_runtime_worker, spawn_state_publisher,
+    system_diagnostics_from_report,
 };
 use blueroute_linux::{
     NetworkMembershipStore, NodeIdentityStore, SystemCapabilityProbe, SystemSupportLevel,
@@ -101,11 +102,8 @@ fn remove_owned_networking() -> i32 {
     ));
     let (code, line) = cleanup_outcome(&outcome);
     eprintln!("{line}");
-    if code != 0 {
-        eprintln!(
-            "BlueRoute could not remove all of its networking state; the package stays installed. \
-             Fix the cause (see the line above) and run the removal again."
-        );
+    if let Some(text) = cleanup_failure_text(&outcome) {
+        eprintln!("{text}");
     }
     code
 }
