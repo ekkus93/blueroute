@@ -281,8 +281,9 @@ coverage and limitations without claiming installed-system/physical qualificatio
 
 **Requirements:** QUAL-2/4, ACCEPT-4. **Authoritative existing criteria:** CR-QUALIFY-01..08.
 
-- [ ] **FU-QUALIFY-01:** On designated disposable equipment, execute revised Part A and record
+- [x] **FU-QUALIFY-01:** On designated disposable equipment, execute revised Part A and record
   actual NetworkManager/kernel/systemd/dpkg results for CR-QUALIFY-01..05.
+  *(2026-11-17, `fc93e98`: [Part A passed](CR-QUALIFY-A-EVIDENCE-2026-11-17-RERUN.md).)*
 - [ ] **FU-QUALIFY-02:** On a designated Bluetooth rig, execute Part B for CR-QUALIFY-06..07,
   including unavailable/restored Bluetooth, owned-client retry, and foreign-state preservation.
 - [ ] **FU-QUALIFY-03:** Store reproducible versioned evidence with exact candidate/package

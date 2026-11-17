@@ -6,6 +6,9 @@ exactly as the procedure says, foreign state was never touched, and every failur
 Seven further deviations are recorded below: two minor product findings, four procedure or
 runbook defects and one environment limit. Part A must be rerun on a candidate that fixes QA-A-01.
 
+**Superseded (2026-11-17):** fixed in `8dcf85a`, `d31a7b5` and `fc93e98`; the rerun
+passed: [CR-QUALIFY-A-EVIDENCE-2026-11-17-RERUN.md](CR-QUALIFY-A-EVIDENCE-2026-11-17-RERUN.md).
+
 Procedure: [CR-QUALIFY-PROCEDURE.md](CR-QUALIFY-PROCEDURE.md), Part A (A0–A5). Task: CR-QUALIFY in
 [CODE_REVIEW_REMEDIATION_TODO.md](CODE_REVIEW_REMEDIATION_TODO.md). Part B was not run.
 

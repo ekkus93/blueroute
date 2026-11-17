@@ -53,7 +53,7 @@ cargo build --release --locked -p blueroute-daemon --features experimental-join
 
 Check `blueroute diagnostics show` reports a daemon version ending in `+experimental-join`, and that the service log contains the `experimental_join_enabled` warning. Then confirm keys out of band: on the host, `blueroute network create NAME` and `blueroute peer enroll JOINER_NODE JOINER_KEY`; on the joiner, `blueroute peer set-join-host NETWORK HOST_NODE HOST_KEY` and `blueroute network join NETWORK` (values from each machine's `blueroute peer local-key`). Never install a feature build on a machine that is not part of the test rig, and record the exact commit and build command with the evidence.
 
-## Package removal cleanup (CR-QUALIFY: Part A FAILED 2026-11-17, Part B NOT STARTED)
+## Package removal cleanup (CR-QUALIFY: Part A PASSED 2026-11-17, Part B NOT STARTED)
 
 Removing the package now removes the networking BlueRoute owns, or fails visibly (CR-F5). This is
 tested only with fakes and an isolated dpkg database. The installed-system procedure (a disposable
@@ -67,8 +67,9 @@ Its manual recovery deletes both the membership and the matching client record (
 Part A ran on 2026-11-17 in a disposable Debian 13 VM (`3cc06a7`) and failed on one packaging
 defect, QA-A-01: reinstalling after a remove leaves the service disabled and stopped. The cleanup
 itself behaved as specified. See
-[CR-QUALIFY-A-EVIDENCE-2026-11-17.md](CR-QUALIFY-A-EVIDENCE-2026-11-17.md). Part A must be rerun on
-a fixed candidate; that record will also cover FU-QUALIFY-01 and LC-QUALIFY-02.
+[CR-QUALIFY-A-EVIDENCE-2026-11-17.md](CR-QUALIFY-A-EVIDENCE-2026-11-17.md). The rerun on the fixed
+candidate `fc93e98` passed: [CR-QUALIFY-A-EVIDENCE-2026-11-17-RERUN.md](CR-QUALIFY-A-EVIDENCE-2026-11-17-RERUN.md). It also covers
+FU-QUALIFY-01, LC-QUALIFY-02 and QR-QUALIFY-02. Part B, on a Bluetooth rig, is still required.
 
 ## P6-009 joined-client restart checklist (S6, NOT STARTED)
 

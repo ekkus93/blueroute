@@ -1,6 +1,6 @@
 # CR-QUALIFY: Installed-System and Physical Cleanup Qualification
 
-Status: **procedure ready; Part A run once (2026-11-17, FAILED on QA-A-01), Part B NOT EXECUTED**
+Status: **procedure ready; Part A PASSED (2026-11-17 rerun, `fc93e98`), Part B NOT EXECUTED**
 (revised 2026-11-13 by FU-06: Part A no longer needs an adapter, and a seeded joined client must
 fail honestly; revised 2026-11-14 by
 LC-QUALIFY-01: an active membership with an unknown role must fail too, and recover only once

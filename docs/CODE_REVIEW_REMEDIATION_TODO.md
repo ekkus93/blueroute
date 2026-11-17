@@ -327,13 +327,13 @@ explicitly recorded; software success alone does not complete CR-F5 or CR-CLOSEO
 
 - [x] **CR-QUALIFY-01:** Prepare a disposable VM/test machine with actual NetworkManager,
   systemd, and candidate packages; capture versions, source SHA, and package hashes.
-- [ ] **CR-QUALIFY-02:** Create a supported owned bridge/address/profile and foreign comparison
+- [x] **CR-QUALIFY-02:** Create a supported owned bridge/address/profile and foreign comparison
   fixtures. Remove while active; inspect actual backend and kernel state independently.
-- [ ] **CR-QUALIFY-03:** Repeat with daemon already stopped, Bluetooth unavailable, partial
+- [x] **CR-QUALIFY-03:** Repeat with daemon already stopped, Bluetooth unavailable, partial
   backend failure/recovery, repeated cleanup, remove-then-purge, and direct purge.
-- [ ] **CR-QUALIFY-04:** Prove identity/membership survive ordinary remove, purge occurs only
+- [x] **CR-QUALIFY-04:** Prove identity/membership survive ordinary remove, purge occurs only
   after cleanup, and upgrade/restart do not accidentally execute removal policy.
-- [ ] **CR-QUALIFY-05:** Verify no owned active profiles/addresses/routes/interfaces remain,
+- [x] **CR-QUALIFY-05:** Verify no owned active profiles/addresses/routes/interfaces remain,
   foreign/default state is preserved, and the forwarding baseline is respected with its lease.
 - [ ] **CR-QUALIFY-06:** On an explicitly designated Bluetooth test rig, qualify owned PAN
   attachment/registration teardown and compare foreign Bluetooth/network state before/after.
@@ -356,6 +356,12 @@ but reinstalling after a remove leaves `blueroute.service` disabled and stopped 
 maintainer-script defect), so 02–05 stay open until a fixed candidate passes a rerun. The record
 also lists two minor product findings (QA-A-02, QA-A-03), procedure and runbook defects to fix
 before the rerun (QA-A-04..06, 09), an environment limit (QA-A-07) and an open question (QA-A-10). Part B (06–07) is not started; 08 stays open with it.
+
+**Part A rerun (2026-11-17, `fc93e98`, CI 44188257738): PASSED.** Record:
+[CR-QUALIFY-A-EVIDENCE-2026-11-17-RERUN.md](CR-QUALIFY-A-EVIDENCE-2026-11-17-RERUN.md). The fixes (`8dcf85a`,
+`d31a7b5`, `fc93e98`) held on the installed system, so CR-QUALIFY-02..05 are met. The "with
+`bluetoothd` running" variants need an adapter and stay with Part B. CR-QUALIFY stays open for
+Part B (06–07) and 08.
 
 ## CR-CLOSEOUT — Review all findings and reconcile original gates
 
@@ -393,5 +399,5 @@ Fill entries as work is qualified. Link concrete records; do not replace evidenc
 | CR-F7 / F7 | `73537c1` (docs) | Facts rechecked against source and packages; 0 broken links | Preserve existing records (preserved) | Final comparison at CR-CLOSEOUT | COMPLETE |
 | CR-INTEGRATION | `d1d86a5` | Real watchers, producers and consumers on private buses; every restored defect fails | Isolated-system results where relevant (CR-QUALIFY) | Boundary regressions included in CI (done) | COMPLETE |
 | CR-VALIDATE | `42ae7ab` | All checks, bus suites, packages, packaging tests; CI 43520783589 | No physical claim from CI | None | COMPLETE |
-| CR-QUALIFY | `3cc06a7` (Part A) | — | Part A run 2026-11-17: FAILED on QA-A-01 ([record](CR-QUALIFY-A-EVIDENCE-2026-11-17.md)); Part B not run (no rig) | QA-A-01 fix and Part A rerun; Part B | OPEN (Part A failed) |
+| CR-QUALIFY | `fc93e98` (Part A) | Part A failed on `3cc06a7` ([record](CR-QUALIFY-A-EVIDENCE-2026-11-17.md)), fixed in `8dcf85a`/`d31a7b5`/`fc93e98` | Part A rerun 2026-11-17: PASSED ([record](CR-QUALIFY-A-EVIDENCE-2026-11-17-RERUN.md)); Part B not run (no rig) | Part B (06–07), 08 | OPEN (Part A passed; Part B pending) |
 | CR-CLOSEOUT | `42ae7ab` | Independent review, one defect fixed; original states unchanged | Pending CR-QUALIFY | CR-CLOSEOUT-04 after CR-QUALIFY | SOFTWARE MILESTONE |

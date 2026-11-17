@@ -194,7 +194,7 @@ review's earlier 911 Rust, 63 broker and 43 frontend passes are historical basel
 - [x] **QR-QUALIFY-01:** Reconcile the installed-system recovery procedure with the corrected
   administrator sequence, matching-record/foreign comparisons and candidate identity. Preserve
   its complete two-record deletion case and distinguish procedure readiness from execution.
-- [!] **QR-QUALIFY-02:** *(blocked: needs a disposable Debian 13 VM with sudo for Part A and the designated Bluetooth rig for Part B; the kit is built at `b700577`)* On designated disposable equipment, execute the applicable recovery /
+- [x] **QR-QUALIFY-02:** *(2026-11-17, `fc93e98`: [Part A passed](CR-QUALIFY-A-EVIDENCE-2026-11-17-RERUN.md), including the two-record recovery; Part B stays a separate gate)* On designated disposable equipment, execute the applicable recovery /
   remove/retry/purge acceptance and record real backend/kernel/systemd/dpkg observations. Retain
   the separate Part B physical PAN gate and link results through existing qualification trackers.
 - [x] **QR-QUALIFY-03:** If equipment remains unavailable, record deferral and keep this parent

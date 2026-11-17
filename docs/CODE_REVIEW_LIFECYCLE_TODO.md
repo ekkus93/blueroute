@@ -221,8 +221,10 @@ scope and limitations are recorded without installed-system/physical claims.
 - [x] **LC-QUALIFY-01:** Extend adapter-free Part A fixtures/procedure with active unknown role
   plus client record, retained proof and failed removal/purge; retain confirmed completed-leave
   and recovery cases. State clearly that procedure readiness is separate from execution.
-- [!] **LC-QUALIFY-02:** On designated disposable equipment, execute the revised installed-system
+- [x] **LC-QUALIFY-02:** On designated disposable equipment, execute the revised installed-system
   procedure and record actual NetworkManager/kernel/systemd/dpkg outcomes and foreign comparisons.
+  *(2026-11-17, `fc93e98`: [Part A passed](CR-QUALIFY-A-EVIDENCE-2026-11-17-RERUN.md);
+  unknown-role and completed-leave cases included.)*
 - [!] **LC-QUALIFY-03:** For physical PAN claims, execute existing Part B on the designated rig;
   record machines/controllers/software, candidate/package identity and independent observations.
   Link evidence to existing FU/CR qualification and hardware gates rather than duplicating closure.
