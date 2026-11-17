@@ -757,4 +757,360 @@ mod tests {
             ErrorKind::InvalidState
         );
     }
+
+    const DEVICE: &str = "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF";
+    const OTHER_DEVICE: &str = "/org/bluez/hci0/dev_11_22_33_44_55_66";
+    const OTHER_ADAPTER_DEVICE: &str = "/org/bluez/hci1/dev_AA_BB_CC_DD_EE_FF";
+    const NESTED_PATH: &str = "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF/sep1";
+    const UNAUTHORIZED: &str = "BlueRoute did not authorize this pairing request";
+
+    fn method_error(name: &str) -> zbus::Error {
+        let message = zbus::message::Message::method_call(DEVICE, "Pair")
+            .unwrap()
+            .build(&())
+            .unwrap();
+        zbus::Error::MethodError(
+            zbus::names::OwnedErrorName::try_from(name).unwrap(),
+            Some("detail".to_owned()),
+            message,
+        )
+    }
+
+    fn fdo(error: zbus::fdo::Error) -> zbus::Error {
+        zbus::Error::FDO(Box::new(error))
+    }
+
+    fn assert_error(error: CoreError, kind: ErrorKind, message: &str, case: &str) {
+        assert_eq!(error.kind(), kind, "{case}");
+        assert_eq!(error.message(), message, "{case}");
+        assert!(error.diagnostic().is_some(), "{case}: diagnostic missing");
+    }
+
+    #[test]
+    fn every_pairing_method_error_name_maps_to_its_kind_and_message() {
+        use ErrorKind::*;
+        let cases = [
+            (
+                "org.bluez.Error.AuthenticationRejected",
+                AuthenticationFailed,
+                "Bluetooth pairing was rejected",
+            ),
+            (
+                "org.bluez.Error.AuthenticationCanceled",
+                AuthenticationFailed,
+                "Bluetooth pairing was canceled",
+            ),
+            (
+                "org.bluez.Error.AuthenticationFailed",
+                AuthenticationFailed,
+                "Bluetooth authentication failed",
+            ),
+            (
+                "org.bluez.Error.AuthenticationTimeout",
+                PairingFailed,
+                "Bluetooth pairing timed out",
+            ),
+            (
+                "org.bluez.Error.ConnectionAttemptFailed",
+                PairingFailed,
+                "Bluetooth connection attempt failed",
+            ),
+            (
+                "org.bluez.Error.InvalidArguments",
+                InvalidInput,
+                "Bluetooth pairing request is invalid",
+            ),
+            (
+                "org.bluez.Error.InProgress",
+                InvalidState,
+                "Bluetooth pairing is already in progress",
+            ),
+            (
+                "org.bluez.Error.DoesNotExist",
+                InvalidState,
+                "Bluetooth peer is no longer available",
+            ),
+            (
+                "org.freedesktop.DBus.Error.UnknownObject",
+                InvalidState,
+                "Bluetooth peer is no longer available",
+            ),
+            (
+                "org.bluez.Error.AlreadyExists",
+                PairingFailed,
+                "Bluetooth pairing failed",
+            ),
+            (
+                "org.bluez.Error.Failed",
+                PairingFailed,
+                "Bluetooth pairing failed",
+            ),
+        ];
+        for (name, kind, message) in cases {
+            assert_eq!(pairing_method_error(name), (kind, message), "{name}");
+            assert_error(pairing_error(method_error(name)), kind, message, name);
+        }
+    }
+
+    #[test]
+    fn pairing_transport_errors_map_timeouts_apart_from_other_failures() {
+        let timed_out = "Bluetooth pairing timed out";
+        let failed = "Bluetooth pairing failed";
+        let cases = [
+            (
+                "no reply",
+                fdo(zbus::fdo::Error::NoReply("x".to_owned())),
+                timed_out,
+            ),
+            (
+                "timed out",
+                fdo(zbus::fdo::Error::TimedOut("x".to_owned())),
+                timed_out,
+            ),
+            (
+                "timeout",
+                fdo(zbus::fdo::Error::Timeout("x".to_owned())),
+                timed_out,
+            ),
+            (
+                "fdo failed",
+                fdo(zbus::fdo::Error::Failed("x".to_owned())),
+                failed,
+            ),
+            (
+                "transport failure",
+                zbus::Error::Failure("x".to_owned()),
+                failed,
+            ),
+        ];
+        for (case, error, message) in cases {
+            assert_error(
+                pairing_error(error),
+                ErrorKind::PairingFailed,
+                message,
+                case,
+            );
+        }
+    }
+
+    #[test]
+    fn trust_errors_map_missing_peers_apart_from_refusals() {
+        use ErrorKind::*;
+        let message = "failed to change Bluetooth trust state";
+        let cases = [
+            ("org.bluez.Error.DoesNotExist", InvalidState),
+            ("org.freedesktop.DBus.Error.UnknownObject", InvalidState),
+            ("org.bluez.Error.NotAuthorized", AuthenticationFailed),
+            (
+                "org.freedesktop.DBus.Error.AccessDenied",
+                AuthenticationFailed,
+            ),
+            ("org.bluez.Error.Failed", AuthenticationFailed),
+        ];
+        for (name, kind) in cases {
+            assert_error(trust_error(method_error(name)), kind, message, name);
+        }
+        assert_error(
+            trust_error(zbus::Error::Failure("x".to_owned())),
+            AuthenticationFailed,
+            message,
+            "transport failure",
+        );
+
+        let property_cases = [
+            (
+                "unknown object",
+                zbus::fdo::Error::UnknownObject("x".to_owned()),
+                InvalidState,
+            ),
+            (
+                "access denied",
+                zbus::fdo::Error::AccessDenied("x".to_owned()),
+                AuthenticationFailed,
+            ),
+            (
+                "auth failed",
+                zbus::fdo::Error::AuthFailed("x".to_owned()),
+                AuthenticationFailed,
+            ),
+            (
+                "failed",
+                zbus::fdo::Error::Failed("x".to_owned()),
+                AuthenticationFailed,
+            ),
+        ];
+        for (case, error, kind) in property_cases {
+            assert_error(trust_property_error(error), kind, message, case);
+        }
+    }
+
+    #[test]
+    fn incoming_pairing_and_agent_registration_errors_map_to_typed_kinds() {
+        use ErrorKind::*;
+        let message = "failed to open the pairing window";
+        let cases = [
+            ("org.bluez.Error.DoesNotExist", MissingAdapter),
+            ("org.freedesktop.DBus.Error.UnknownObject", MissingAdapter),
+            ("org.bluez.Error.NotAuthorized", AuthenticationFailed),
+            (
+                "org.freedesktop.DBus.Error.AccessDenied",
+                AuthenticationFailed,
+            ),
+            ("org.bluez.Error.Failed", CapabilityUnavailable),
+        ];
+        for (name, kind) in cases {
+            let error = incoming_pairing_error("open the pairing window", method_error(name));
+            assert_error(error, kind, message, name);
+        }
+        let error = incoming_pairing_error(
+            "open the pairing window",
+            zbus::Error::Failure("x".to_owned()),
+        );
+        assert_error(error, CapabilityUnavailable, message, "transport failure");
+
+        let property_cases = [
+            (
+                "unknown object",
+                zbus::fdo::Error::UnknownObject("x".to_owned()),
+                MissingAdapter,
+            ),
+            (
+                "access denied",
+                zbus::fdo::Error::AccessDenied("x".to_owned()),
+                AuthenticationFailed,
+            ),
+            (
+                "auth failed",
+                zbus::fdo::Error::AuthFailed("x".to_owned()),
+                AuthenticationFailed,
+            ),
+            (
+                "failed",
+                zbus::fdo::Error::Failed("x".to_owned()),
+                CapabilityUnavailable,
+            ),
+        ];
+        for (case, error, kind) in property_cases {
+            let error = incoming_pairing_property_error("open the pairing window", error);
+            assert_error(error, kind, message, case);
+        }
+
+        let error = pairing_agent_registration_error("register the agent", "bus refused");
+        assert_error(
+            error.clone(),
+            CapabilityUnavailable,
+            "failed to register the agent",
+            "registration",
+        );
+        assert_eq!(error.diagnostic(), Some("bus refused"));
+    }
+
+    /// The outcome of every device-taking agent callback, as `Ok(())` or the rejection text.
+    fn callback_outcomes(
+        agent: &PairingAgent,
+        device: &str,
+    ) -> [(&'static str, Result<(), String>); 5] {
+        let path = || OwnedObjectPath::try_from(device).unwrap();
+        let text = |error: PairingAgentError| {
+            let PairingAgentError::Rejected(message) = error;
+            message
+        };
+        [
+            (
+                "request_pin_code",
+                agent.request_pin_code(path()).map(drop).map_err(text),
+            ),
+            (
+                "request_passkey",
+                agent.request_passkey(path()).map(drop).map_err(text),
+            ),
+            (
+                "request_confirmation",
+                agent.request_confirmation(path(), 123_456).map_err(text),
+            ),
+            (
+                "request_authorization",
+                agent.request_authorization(path()).map_err(text),
+            ),
+            (
+                "authorize_service",
+                agent
+                    .authorize_service(path(), "0000110a-0000-1000-8000-00805f9b34fb".to_owned())
+                    .map_err(text),
+            ),
+        ]
+    }
+
+    fn assert_all_refused(agent: &PairingAgent, device: &str, case: &str) {
+        for (callback, outcome) in callback_outcomes(agent, device) {
+            assert_eq!(outcome, Err(UNAUTHORIZED.to_owned()), "{case}: {callback}");
+        }
+    }
+
+    fn assert_authorized(agent: &PairingAgent, device: &str, case: &str) {
+        let expected = [
+            Err("BlueRoute NoInputNoOutput pairing cannot provide a PIN code".to_owned()),
+            Err("BlueRoute NoInputNoOutput pairing cannot provide a passkey".to_owned()),
+            Err("BlueRoute NoInputNoOutput pairing cannot confirm a displayed passkey".to_owned()),
+            Ok(()),
+            Ok(()),
+        ];
+        for ((callback, outcome), expected) in
+            callback_outcomes(agent, device).into_iter().zip(expected)
+        {
+            assert_eq!(outcome, expected, "{case}: {callback}");
+        }
+    }
+
+    #[test]
+    fn every_agent_callback_refuses_devices_outside_an_active_permit() {
+        let control = Arc::new(PairingControl::default());
+        let agent = PairingAgent {
+            control: Arc::clone(&control),
+        };
+        assert_all_refused(&agent, DEVICE, "no pairing operation");
+
+        let permit = control.begin(&PeerHandle::new(DEVICE).unwrap()).unwrap();
+        assert_authorized(&agent, DEVICE, "permitted peer");
+        assert_all_refused(&agent, OTHER_DEVICE, "other peer during a permit");
+        assert_all_refused(
+            &agent,
+            OTHER_ADAPTER_DEVICE,
+            "other adapter during a permit",
+        );
+        assert_all_refused(&agent, NESTED_PATH, "child object of the permitted peer");
+        drop(permit);
+        assert_all_refused(&agent, DEVICE, "after the permit is dropped");
+    }
+
+    #[test]
+    fn every_agent_callback_refuses_devices_outside_the_incoming_window() {
+        let control = Arc::new(PairingControl::default());
+        let agent = PairingAgent {
+            control: Arc::clone(&control),
+        };
+        let adapter = AdapterHandle::new("/org/bluez/hci0").unwrap();
+        control.begin_incoming(&adapter).unwrap();
+        assert_authorized(&agent, DEVICE, "device on the window's adapter");
+        assert_authorized(
+            &agent,
+            OTHER_DEVICE,
+            "second device on the window's adapter",
+        );
+        assert_all_refused(&agent, OTHER_ADAPTER_DEVICE, "device on another adapter");
+        assert_all_refused(&agent, NESTED_PATH, "child object below a device");
+        assert_all_refused(&agent, "/org/bluez/hci0", "the adapter itself");
+        assert_all_refused(
+            &agent,
+            "/org/bluez/hci0/other_AA",
+            "non-device child of the adapter",
+        );
+        assert_all_refused(
+            &agent,
+            "/org/bluez/hci00/dev_AA_BB_CC_DD_EE_FF",
+            "adapter name prefix",
+        );
+        control.end_incoming(&adapter).unwrap();
+        assert_all_refused(&agent, DEVICE, "after the window ends");
+    }
 }

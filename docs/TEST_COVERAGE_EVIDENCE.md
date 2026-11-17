@@ -68,3 +68,32 @@ decide whether it warrants a separate task.
 warnings` and `cargo test -p blueroute-linux --locked` (164 + 4 + 9 + 6) pass. The over-width
 lines reported in `routes.rs` and `addresses.rs` are pre-existing production error strings that
 rustfmt leaves alone; none are in the new tests.
+
+## TC-PAIR — Pairing error mapping and agent refusal (2026-11-16)
+
+Six unit tests added to `crates/blueroute-linux/src/bluez/pairing.rs`; no production line
+changed.
+
+| Test | Covers |
+| --- | --- |
+| `every_pairing_method_error_name_maps_to_its_kind_and_message` | all nine named arms of `pairing_method_error` plus two unknown names (default arm), asserted both directly and through `pairing_error`, with kind, message and diagnostic |
+| `pairing_transport_errors_map_timeouts_apart_from_other_failures` | `pairing_error`: `NoReply`, `TimedOut` and `Timeout` → timed out; `fdo::Failed` and a transport failure → failed |
+| `trust_errors_map_missing_peers_apart_from_refusals` | `trust_error` (every guarded name, an unknown name, a transport failure) and `trust_property_error` (`UnknownObject`, `AccessDenied`, `AuthFailed`, `Failed`) |
+| `incoming_pairing_and_agent_registration_errors_map_to_typed_kinds` | `incoming_pairing_error` (every guarded name → `MissingAdapter` or `AuthenticationFailed`, others → `CapabilityUnavailable`), `incoming_pairing_property_error` (all four arms) and `pairing_agent_registration_error` (kind, message and diagnostic) |
+| `every_agent_callback_refuses_devices_outside_an_active_permit` | all five device-taking callbacks refuse with the authorization message when no operation is active, for another peer, a device on another adapter and a child object of the permitted peer, and after the permit is dropped; for the permitted peer, the three input callbacks still refuse with their own NoInputNoOutput messages and `request_authorization`/`authorize_service` accept |
+| `every_agent_callback_refuses_devices_outside_the_incoming_window` | in an incoming window, devices on the window's adapter are accepted as above; a device on another adapter, a child object, the adapter path itself, a non-device child and an adapter-name prefix (`hci00`) are refused; everything is refused after the window ends |
+
+**Listing.** `blueroute-linux --lib` grew from 164 to 170: exactly the six new names, none
+removed.
+
+**Negative controls** (same scratch worktree and helper as TC-PARSE):
+
+| Control | Mutation | Failing tests |
+| --- | --- | --- |
+| E | `AuthenticationRejected` maps to `PairingFailed` | `every_pairing_method_error_name_maps_to_its_kind_and_message`, and the pre-existing `pairing_rejection_and_timeout_have_distinct_typed_errors` |
+| F | `authorize_service` returns `Ok` without `require_authorized` | both agent-callback refusal tests; before this task no test called `authorize_service` |
+
+**Findings (COV-2).** None.
+
+**Checks.** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D
+warnings` and `cargo test -p blueroute-linux --lib --locked` (170) pass.

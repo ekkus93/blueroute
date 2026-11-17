@@ -23,7 +23,7 @@
 | --- | --- | --- | --- | --- |
 | TC-BASE | Baseline listings and evidence file | — | None | `[x]` |
 | TC-PARSE | Route/address and netlink parser rejection tables | G2, G3 | TC-BASE | `[x]` |
-| TC-PAIR | BlueZ pairing error mapping and agent refusal | G4 | TC-BASE | `[ ]` |
+| TC-PAIR | BlueZ pairing error mapping and agent refusal | G4 | TC-BASE | `[x]` |
 | TC-CLI | Checked-in CLI behavior matrix | G5 | TC-BASE | `[ ]` |
 | TC-NM | Fake NetworkManager broker suite | G1 | TC-BASE | `[ ]` |
 | TC-DEDUP | Remove the duplicate route projection harness | — | TC-BASE | `[ ]` |
@@ -75,16 +75,16 @@ as expected; listings grow only by the new names.
 
 **Requirements:** COV-1, COV-2, COV-6, VERIFY-1/2/3.
 
-- [ ] **TC-PAIR-01:** Table test over all nine named arms of `pairing_method_error` plus an
+- [x] **TC-PAIR-01:** Table test over all nine named arms of `pairing_method_error` plus an
   unknown name, asserting `ErrorKind` and message.
-- [ ] **TC-PAIR-02:** Cases for `pairing_error`, `trust_error`, `trust_property_error`,
+- [x] **TC-PAIR-02:** Cases for `pairing_error`, `trust_error`, `trust_property_error`,
   `incoming_pairing_error`, `incoming_pairing_property_error` and
   `pairing_agent_registration_error`: at least one per distinct `ErrorKind` each can return.
-- [ ] **TC-PAIR-03:** For every agent callback that takes a device (`request_pin_code`,
+- [x] **TC-PAIR-03:** For every agent callback that takes a device (`request_pin_code`,
   `request_passkey`, `request_confirmation`, `request_authorization`, `authorize_service`), assert
   refusal for a device outside the active permit and outside the incoming window, and the
   expected result for the authorized device.
-- [ ] **TC-PAIR-04:** Negative controls: remap `AuthenticationRejected`, and let
+- [x] **TC-PAIR-04:** Negative controls: remap `AuthenticationRejected`, and let
   `authorize_service` skip `require_authorized`; record the failures.
 
 **Acceptance:** Every mapping arm and agent callback is asserted; controls fail as expected.
@@ -183,7 +183,7 @@ asserted, controls fail as expected, and CI runs the suite.
 | COV-3 Fake NetworkManager over a real bus | TC-NM | TC-NM-01/02 | Pending |
 | COV-4 Ownership at the D-Bus boundary | TC-NM | TC-NM-03..05, 07 | Pending |
 | COV-5 Parser rejection tables | TC-PARSE | [TC-PARSE](TEST_COVERAGE_EVIDENCE.md#tc-parse--parser-rejection-tables-2026-11-16) | MET |
-| COV-6 Pairing mapping and refusal | TC-PAIR | TC-PAIR-01..04 | Pending |
+| COV-6 Pairing mapping and refusal | TC-PAIR | [TC-PAIR](TEST_COVERAGE_EVIDENCE.md#tc-pair--pairing-error-mapping-and-agent-refusal-2026-11-16) | MET |
 | COV-7 CLI behavior matrix | TC-CLI | TC-CLI-01..04 | Pending |
 | COV-8 Remove duplicate harness | TC-DEDUP | TC-DEDUP-01/02 | Pending |
 | COV-9 Scheduling and docs | TC-NM | TC-NM-06 | Pending |
