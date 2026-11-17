@@ -1,4 +1,6 @@
-//! BlueRoute ownership metadata on NetworkManager profiles: which profiles are BlueRoute's, fail-closed parsing, foreign-claim rejection and deterministic profile identity. Only profiles proven owned here may be changed or deleted.
+//! BlueRoute ownership metadata on NetworkManager profiles: which profiles are BlueRoute's, fail-
+//! closed parsing, foreign-claim rejection and deterministic profile identity. Only profiles proven
+//! owned here may be changed or deleted.
 
 use super::dbus::{network_error, owned_string, settings_proxy};
 use super::inventory::{connection_from_settings, get_settings, list_connections};

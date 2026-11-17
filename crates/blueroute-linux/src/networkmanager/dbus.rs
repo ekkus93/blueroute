@@ -1,4 +1,5 @@
-//! NetworkManager D-Bus access: availability, typed proxies, settings-map accessors and error mapping.
+//! NetworkManager D-Bus access: availability, typed proxies, settings-map accessors and error
+//! mapping.
 
 use super::{
     ACTIVE_CONNECTION_INTERFACE, DEVICE_INTERFACE, NM_INTERFACE, NM_PATH, NM_SERVICE,

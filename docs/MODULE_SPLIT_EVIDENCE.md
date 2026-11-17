@@ -271,8 +271,8 @@ review benefit, so they stay as they are.
 **Move-only check (SPLIT-1).** The line-multiset comparison leaves only the new test module
 header and its closing brace: no signature needed rewrapping.
 
-**Visibility (SPLIT-3).** `pub(super)`: `PairingControl` and `PairingAgent` (field types of
-`BluezBackend`) and the four operations `BluezBackend` calls (`begin_incoming_pairing`,
+**Visibility (SPLIT-3).** `pub(super)`: `PairingControl` (the type of `BluezBackend`'s
+`pairing` field) and the four operations `BluezBackend` calls (`begin_incoming_pairing`,
 `end_incoming_pairing`, `pair_peer`, `set_peer_trusted`). Constants stay private in `mod.rs`.
 `BluezBackend`'s `pub(crate)` fields and the `crate::bluez::BluezBackend` path that `pan.rs` uses
 are unchanged; no field needed widening.
@@ -283,3 +283,28 @@ discovery tests and their three helpers stay in `mod.rs`.
 **Verification (VERIFY-1/2).** `capture.sh bluez`: leaf test names identical (`blueroute-linux`
 153, 15 under `bluez::`); public doc items and CLI matrix identical. fmt clean; workspace Clippy
 clean; workspace tests 933 passed, 97 ignored. Private-broker suites are run in MS-VALIDATE.
+
+## MS-CLOSEOUT-01 — Independent review (2026-11-16)
+
+An independent reviewer read every split commit against its rename commit (line multisets plus
+an order-aware block match) without relying on this record. Results: **SPLIT-1** pass (no logic,
+ordering, error text, constant, log message or assertion changed; line order inside every function
+preserved); **SPLIT-4** pass (identical test-name multisets, no `#[ignore]` added or removed);
+**SPLIT-5** pass (the ownership functions match the old blocks exactly; `Drop` still zeroizes the
+private key and `load_or_create` keeps its record zeroizes; `verify_control_tls_peer_identity`
+unchanged; `control_tls/mod.rs` re-exports exactly the 17 previously `pub` items, plus
+`ControlTlsError` in place); **SPLIT-7** pass (`git log --follow` reaches each file's creation
+commit: `ec33801`, `84f05a6`, `1970a5a`). `private_key`, `fingerprint` and the identity record
+encode/decode stay private.
+
+| Finding | Resolution |
+| --- | --- |
+| `bluez/pairing.rs`: `PairingAgent` was `pub(super)` with no user outside `pairing.rs`, and this record wrongly called it a `BluezBackend` field type | Made private again; the visibility note above corrected |
+| `control_tls/mod.rs`: test counter `NEXT_TEMP` was `pub(super)` but used only inside `test_support` | Made private again |
+| `control_tls/session.rs` doc claimed the exporter-bound Hello, which lives in `transport.rs` (in `ControlTlsStream`'s impl) | Both module docs rewritten to match their contents |
+| New `//!` first lines exceeded 100 columns (rustfmt does not wrap comments) | All wrapped to 100 columns |
+| Reviewer listed `ensure_address`/`remove_address` among rewrapped NetworkManager signatures | Not changed: both were already multi-line in the original; the list above (including `set_address_prefixes`) is what the line comparison shows |
+
+After the fixes: fmt clean; workspace and `experimental-join` Clippy clean; `capture.sh final`
+identical to the baseline (22 / 153 / 343 tests, 62 CLI cases, 81 / 155 public doc items); the
+BlueZ move check still shows only test-module scaffolding.

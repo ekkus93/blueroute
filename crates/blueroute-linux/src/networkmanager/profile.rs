@@ -1,4 +1,5 @@
-//! Lifecycle of BlueRoute-owned profiles: bridge ensure and removal, add, update, activate, reapply, deactivate, and waits for the resulting state.
+//! Lifecycle of BlueRoute-owned profiles: bridge ensure and removal, add, update, activate,
+//! reapply, deactivate, and waits for the resulting state.
 
 use super::dbus::{
     device_proxy, network_error, network_manager_proxy, object_path, settings_connection_proxy,

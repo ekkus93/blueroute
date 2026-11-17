@@ -1,4 +1,5 @@
-//! Pinned mutual TLS 1.3: connecting and accepting, verifying the peer against its approved pin, and the deadline-bounded TLS stream.
+//! Pinned mutual TLS 1.3: connecting and accepting, verifying the peer against its approved pin,
+//! the deadline-bounded TLS stream, and the exporter-bound Hello exchange and activation on it.
 
 use super::certificate::{
     PinnedControlTlsCertificate, PinnedControlTlsPeer, certificate_fingerprint,

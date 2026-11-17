@@ -1,4 +1,5 @@
-//! Routes on BlueRoute-owned profiles: reading, ensuring and removing them, validation, and the profile route encoding.
+//! Routes on BlueRoute-owned profiles: reading, ensuring and removing them, validation, and the
+//! profile route encoding.
 
 use super::dbus::{
     network_error, optional_setting_string, owned_string, setting_string, settings_proxy,

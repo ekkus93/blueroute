@@ -1,4 +1,5 @@
-//! Addresses on BlueRoute-owned profiles: reading, ensuring and removing them, and the profile address encoding.
+//! Addresses on BlueRoute-owned profiles: reading, ensuring and removing them, and the profile
+//! address encoding.
 
 use super::dbus::{network_error, owned_string, setting_string, settings_proxy};
 use super::inventory::{connection_from_settings, get_settings};

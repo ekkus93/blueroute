@@ -156,7 +156,7 @@ lifecycle check with `BLUEROUTE_MAINTAINER_SCRIPT_DIR` pointing at the extracted
 
 **Requirements:** VERIFY-4, all SPLIT requirements.
 
-- [ ] **MS-CLOSEOUT-01:** Independent review of each split diff for non-move edits, visibility
+- [x] **MS-CLOSEOUT-01:** Independent review of each split diff for non-move edits, visibility
   widening and lost tests, with a specific re-read of the moved ownership and identity/verifier
   code. Resolve findings before acceptance.
 - [ ] **MS-CLOSEOUT-02:** Record per-module production line counts and doc comments; justify any

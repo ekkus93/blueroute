@@ -1,4 +1,6 @@
-//! The authenticated control session over a verified TLS stream: the exporter-bound Hello, framed reads and writes, and session errors.
+//! The active control session after authentication: heartbeats and goodbye, framed reads under
+//! deadlines, approval revalidation before outbound frames, the session ID export, and session
+//! errors.
 
 use super::identity::LocalControlTlsIdentity;
 use super::transport::{

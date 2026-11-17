@@ -1,4 +1,5 @@
-//! Certificates and pins: pinned certificates and peers, enrollment candidates, and strict parsing of a certificate's SPKI fingerprint and node name.
+//! Certificates and pins: pinned certificates and peers, enrollment candidates, and strict parsing
+//! of a certificate's SPKI fingerprint and node name.
 
 use super::{
     ControlTlsError, MAX_CERTIFICATE_BYTES, MAX_ENROLLMENT_CANDIDATE_AGE, is_zero_network,

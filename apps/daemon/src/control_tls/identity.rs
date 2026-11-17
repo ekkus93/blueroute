@@ -1,4 +1,5 @@
-//! The local control-TLS identity: key generation, its persisted record format and `SecretFileStore` storage, and wiping key material on drop.
+//! The local control-TLS identity: key generation, its persisted record format and
+//! `SecretFileStore` storage, and wiping key material on drop.
 
 use super::certificate::{
     PinnedControlTlsCertificate, certificate_fingerprint, certificate_names_node, node_dns_name,

@@ -1,4 +1,5 @@
-//! Read-only inventory of NetworkManager connections and devices, and the change events derived from successive snapshots.
+//! Read-only inventory of NetworkManager connections and devices, and the change events derived
+//! from successive snapshots.
 
 use super::dbus::{
     active_connection_proxy, device_proxy, ensure_networkmanager_available, network_error,

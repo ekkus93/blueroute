@@ -126,7 +126,7 @@ mod test_support {
     use blueroute_protocol::control::HelloFacts;
     use blueroute_protocol::session::ConnectionDeadline;
 
-    pub(super) static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
+    static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
 
     pub(super) struct TempDirectory(pub(super) PathBuf);
 

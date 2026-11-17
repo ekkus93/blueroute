@@ -1,4 +1,5 @@
-//! The bounded certificate-preface exchange used before enrollment. It yields unauthenticated candidates only; it never enrolls a peer.
+//! The bounded certificate-preface exchange used before enrollment. It yields unauthenticated
+//! candidates only; it never enrolls a peer.
 
 use super::certificate::{
     ControlTlsCertificateCandidate, PinnedControlTlsCertificate, PinnedControlTlsPeer,

@@ -1,4 +1,5 @@
-//! Pairing through BlueZ: the single-operation pairing control, the no-input/no-output pairing agent, incoming pairing windows, outgoing pairing and trust.
+//! Pairing through BlueZ: the single-operation pairing control, the no-input/no-output pairing
+//! agent, incoming pairing windows, outgoing pairing and trust.
 
 use super::{
     ADAPTER_INTERFACE, AGENT_MANAGER_INTERFACE, BLUEZ_AGENT_MANAGER_PATH, BLUEZ_SERVICE,
@@ -114,7 +115,7 @@ impl Drop for PairingPermit {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct PairingAgent {
+struct PairingAgent {
     control: Arc<PairingControl>,
 }
 
