@@ -308,3 +308,62 @@ encode/decode stay private.
 After the fixes: fmt clean; workspace and `experimental-join` Clippy clean; `capture.sh final`
 identical to the baseline (22 / 153 / 343 tests, 62 CLI cases, 81 / 155 public doc items); the
 BlueZ move check still shows only test-module scaffolding.
+
+## MS-VALIDATE — Exact candidate (2026-11-16)
+
+**Candidate** `a8f3fad188da95be8b92e887d54f0954d61283da` (all four splits plus the review fixes).
+Clean tracked tree apart from `.serena/` and `AGENTS.md`. rustc/cargo 1.95.0, Node 26.13.0, npm
+11.20.0, Python 3.13.5, dbus-daemon 1.16.2, Debian 13 kernel 6.12.115.
+
+| Check | Result |
+| --- | --- |
+| fmt; locked build and check; strict all-target Clippy | all rc=0 |
+| `cargo test --workspace --locked` | 933 passed, 0 failed, 97 ignored (unchanged from the baseline) |
+| `experimental-join` tests; its Clippy | 392 passed, 0 failed, 16 ignored; clean |
+| Removal tests; default build keeps join closed | 33 passed; 61 join tests pass incl. `default_builds_cannot_open_the_join_gate` |
+| All 17 private-broker suites | 96 passed, 0 failed |
+| Python socket tooling | 7 passed |
+| Frontend (`npm ci`, format, lint, typecheck, test, build) | all rc=0; 43 tests passed |
+| Debian packages | `blueroute_0.1.0_amd64.deb` `7f86e5467ea5a30cf3ebc537e9bdfd40ba97569193d4ec4c43013f4e23588924` (19 entries); `blueroute-desktop_0.1.0_amd64.deb` `31224dc8714a87c6bb61b1ac9531f9b1e085879acc0ca424f1971879c9e8b12b` (12 entries) |
+| Maintainer lifecycle (source and extracted scripts); isolated upgrade | both passed; upgrade rc=0 |
+| Baseline comparison (`capture.sh final`) | identical: 22 / 153 / 343 test names, 62 CLI cases, 81 / 155 public doc items |
+
+**Exact-revision CI** (read with `gh run view`):
+[run 43990104349](https://github.com/ekkus93/blueroute/actions/runs/43990104349) on `a8f3fad`:
+success. Earlier split heads, each success: `5620d11` (CLI) 43984384409, `020aac2` (NM)
+43986099437, `93986be` (TLS) 43987479604, `7435d4e` (BlueZ, also fully validated locally)
+43988805226. The rename commits were pushed together with their split and have no run of their own.
+
+## MS-CLOSEOUT — Sizes, follow-up decision and requirement map (2026-11-16)
+
+**Sizes (MS-CLOSEOUT-02).** Largest production module per split: CLI `args.rs` 364, NetworkManager
+`routes.rs` 373, control TLS `transport.rs` 453, BlueZ `mod.rs` 725 and `pairing.rs` 669 (the
+two over ~600 are justified in MS-BLUEZ). Every new module opens with a one-responsibility doc.
+
+**Borderline files (MS-CLOSEOUT-03).** Not split in this backlog:
+
+- `apps/daemon/src/lib.rs` (1,149 production lines) is the single D-Bus interface: one
+  `DaemonService` whose methods are the API. Its only separable part is the error mapping and
+  logging helpers (`RequestError` and friends, about 150 lines). Worth a small follow-up only if
+  that part grows; splitting the interface itself would scatter one API across files.
+- `crates/blueroute-client/src/lib.rs` (996) holds the client, the event subscription and the
+  reconnect deadline logic, all reviewed closely in RQR-01/RRC-01. Moving `EventSubscription`
+  into its own module would be a reasonable later refactor, but there is no review problem today.
+
+| Requirement | Tasks | Evidence | State |
+| --- | --- | --- | --- |
+| SPLIT-1 move only | each split, MS-CLOSEOUT-01 | per-split move checks; independent review pass | MET |
+| SPLIT-2 public surface | MS-BASE-03, each split, MS-VALIDATE | identical doc items and CLI matrix; dependents unedited; TLS re-exports exact | MET |
+| SPLIT-3 minimal visibility | each split, MS-CLOSEOUT-01 | per-split visibility notes; review fixes (`PairingAgent`, `NEXT_TEMP`) | MET |
+| SPLIT-4 tests travel | MS-BASE-02, each split | identical test-name multisets and totals | MET |
+| SPLIT-5 invariants | MS-NM-02, MS-TLS-02, MS-VALIDATE | ownership and identity code re-read by review; private key still private; full validation | MET |
+| SPLIT-6 one responsibility | each split, MS-CLOSEOUT-02 | module docs; sizes; BlueZ justification | MET |
+| SPLIT-7 history | each split | rename commits `4f8df40`, `13e4469`, `ecf9c7f`; `--follow` checked by review | MET |
+| VERIFY-1 per split | each split | fmt, Clippy, tests, captures, broker suites | MET |
+| VERIFY-2 public items | MS-BASE-03 and each split | `all.html` comparisons | MET |
+| VERIFY-3 exact candidate | MS-VALIDATE | full validation and CI on `a8f3fad` | MET |
+| VERIFY-4 review | MS-CLOSEOUT-01 | findings resolved in `a8f3fad` | MET |
+
+**Closure.** The module split is **COMPLETE**: a software-only, behavior-preserving refactor with
+no product, API, wire or security change. Existing installed-system, physical and release
+qualification gates are unaffected and stay open in their own backlogs.

@@ -1,6 +1,6 @@
 # Module Split TODO
 
-**Status:** IN PROGRESS; MS-BASE, MS-CLI, MS-NM, MS-TLS and MS-BLUEZ accepted.  
+**Status:** COMPLETE (2026-11-16, candidate `a8f3fad`, CI 43990104349); software-only refactor.  
 **Baseline:** `1870e406836174c0e0433f42d026f71e497b73f5`.  
 **Companion specification:** [MODULE_SPLIT_SPEC.md](MODULE_SPLIT_SPEC.md).  
 **Implementation evidence:** [MODULE_SPLIT_EVIDENCE.md](MODULE_SPLIT_EVIDENCE.md).
@@ -25,8 +25,8 @@
 | MS-NM | `networkmanager.rs` split into dbus, inventory, ownership, profile, addresses, routes | MS-BASE | `[x]` |
 | MS-TLS | `control_tls.rs` split into identity, certificate, enrollment, transport, session | MS-BASE | `[x]` |
 | MS-BLUEZ | Pairing agent moved out of `bluez.rs` | MS-BASE | `[x]` |
-| MS-VALIDATE | Exact-candidate validation, packages and CI | all splits | `[ ]` |
-| MS-CLOSEOUT | Review, requirement map and closure | MS-VALIDATE | `[ ]` |
+| MS-VALIDATE | Exact-candidate validation, packages and CI | all splits | `[x]` |
+| MS-CLOSEOUT | Review, requirement map and closure | MS-VALIDATE | `[x]` |
 
 Order by risk: CLI (no shared API), NetworkManager (crate-private, ownership-critical), control
 TLS (security-critical, re-exported), BlueZ (smallest gain). Splits are independent of each other,
@@ -122,11 +122,11 @@ change.
 
 **Requirements:** VERIFY-3, SPLIT-2/4/5.
 
-- [ ] **MS-VALIDATE-01:** Run the full command reference below on the final candidate; record
+- [x] **MS-VALIDATE-01:** Run the full command reference below on the final candidate; record
   counts, ignored cases and any change from the baseline totals (there should be none).
-- [ ] **MS-VALIDATE-02:** Build both Debian packages, record hashes, and run the source and
+- [x] **MS-VALIDATE-02:** Build both Debian packages, record hashes, and run the source and
   extracted-script lifecycle checks and the isolated upgrade.
-- [ ] **MS-VALIDATE-03:** Confirm with `gh` that CI passed on the exact pushed candidate and ran
+- [x] **MS-VALIDATE-03:** Confirm with `gh` that CI passed on the exact pushed candidate and ran
   every broker suite.
 
 **Command reference** (repository root, Rust 1.95.0):
@@ -159,11 +159,11 @@ lifecycle check with `BLUEROUTE_MAINTAINER_SCRIPT_DIR` pointing at the extracted
 - [x] **MS-CLOSEOUT-01:** Independent review of each split diff for non-move edits, visibility
   widening and lost tests, with a specific re-read of the moved ownership and identity/verifier
   code. Resolve findings before acceptance.
-- [ ] **MS-CLOSEOUT-02:** Record per-module production line counts and doc comments; justify any
+- [x] **MS-CLOSEOUT-02:** Record per-module production line counts and doc comments; justify any
   module over about 600 lines.
-- [ ] **MS-CLOSEOUT-03:** Decide, with a short written reason, whether `apps/daemon/src/lib.rs` and
+- [x] **MS-CLOSEOUT-03:** Decide, with a short written reason, whether `apps/daemon/src/lib.rs` and
   `crates/blueroute-client/src/lib.rs` need a follow-up split; do not split them in this backlog.
-- [ ] **MS-CLOSEOUT-04:** Map every SPLIT and VERIFY requirement to tasks and evidence, then mark
+- [x] **MS-CLOSEOUT-04:** Map every SPLIT and VERIFY requirement to tasks and evidence, then mark
   the backlog COMPLETE. Report existing qualification gates as still open and separate.
 
 **Acceptance:** Reviewed, behavior-preserving splits with identical public surface and tests;
@@ -173,14 +173,14 @@ evidence complete.
 
 | Requirement | Tasks | Required evidence | State |
 | --- | --- | --- | --- |
-| SPLIT-1 move only | MS-CLI/NM/TLS/BLUEZ, MS-CLOSEOUT-01 | moved-block checks; review | PENDING |
-| SPLIT-2 public surface | MS-BASE-03, each split, MS-VALIDATE | identical `all.html` items and CLI behavior matrix; dependents unedited | PENDING |
-| SPLIT-3 minimal visibility | each split, MS-CLOSEOUT-01 | review of every visibility change | PENDING |
-| SPLIT-4 tests travel | MS-BASE-02, each split | identical test-name multisets and totals | PENDING |
-| SPLIT-5 invariants | MS-NM-02, MS-TLS-02, MS-VALIDATE | review; full validation | PENDING |
-| SPLIT-6 one responsibility | each split, MS-CLOSEOUT-02 | module doc comments and line counts | PENDING |
-| SPLIT-7 history | each split | `git mv` renames; `git log --follow` works | PENDING |
-| VERIFY-1 per split | each split | fmt, Clippy, tests, broker suites | PENDING |
-| VERIFY-2 public items | MS-BASE-03, MS-NM-04, MS-TLS-04, MS-BLUEZ-03 | `all.html` comparisons | PENDING |
-| VERIFY-3 exact candidate | MS-VALIDATE | full validation and CI | PENDING |
-| VERIFY-4 review | MS-CLOSEOUT-01 | resolved review findings | PENDING |
+| SPLIT-1 move only | MS-CLI/NM/TLS/BLUEZ, MS-CLOSEOUT-01 | moved-block checks; review | MET ([evidence](MODULE_SPLIT_EVIDENCE.md#ms-closeout--sizes-follow-up-decision-and-requirement-map-2026-11-16)) |
+| SPLIT-2 public surface | MS-BASE-03, each split, MS-VALIDATE | identical `all.html` items and CLI behavior matrix; dependents unedited | MET ([evidence](MODULE_SPLIT_EVIDENCE.md#ms-closeout--sizes-follow-up-decision-and-requirement-map-2026-11-16)) |
+| SPLIT-3 minimal visibility | each split, MS-CLOSEOUT-01 | review of every visibility change | MET ([evidence](MODULE_SPLIT_EVIDENCE.md#ms-closeout--sizes-follow-up-decision-and-requirement-map-2026-11-16)) |
+| SPLIT-4 tests travel | MS-BASE-02, each split | identical test-name multisets and totals | MET ([evidence](MODULE_SPLIT_EVIDENCE.md#ms-closeout--sizes-follow-up-decision-and-requirement-map-2026-11-16)) |
+| SPLIT-5 invariants | MS-NM-02, MS-TLS-02, MS-VALIDATE | review; full validation | MET ([evidence](MODULE_SPLIT_EVIDENCE.md#ms-closeout--sizes-follow-up-decision-and-requirement-map-2026-11-16)) |
+| SPLIT-6 one responsibility | each split, MS-CLOSEOUT-02 | module doc comments and line counts | MET ([evidence](MODULE_SPLIT_EVIDENCE.md#ms-closeout--sizes-follow-up-decision-and-requirement-map-2026-11-16)) |
+| SPLIT-7 history | each split | `git mv` renames; `git log --follow` works | MET ([evidence](MODULE_SPLIT_EVIDENCE.md#ms-closeout--sizes-follow-up-decision-and-requirement-map-2026-11-16)) |
+| VERIFY-1 per split | each split | fmt, Clippy, tests, broker suites | MET ([evidence](MODULE_SPLIT_EVIDENCE.md#ms-closeout--sizes-follow-up-decision-and-requirement-map-2026-11-16)) |
+| VERIFY-2 public items | MS-BASE-03, MS-NM-04, MS-TLS-04, MS-BLUEZ-03 | `all.html` comparisons | MET ([evidence](MODULE_SPLIT_EVIDENCE.md#ms-closeout--sizes-follow-up-decision-and-requirement-map-2026-11-16)) |
+| VERIFY-3 exact candidate | MS-VALIDATE | full validation and CI | MET ([evidence](MODULE_SPLIT_EVIDENCE.md#ms-closeout--sizes-follow-up-decision-and-requirement-map-2026-11-16)) |
+| VERIFY-4 review | MS-CLOSEOUT-01 | resolved review findings | MET ([evidence](MODULE_SPLIT_EVIDENCE.md#ms-closeout--sizes-follow-up-decision-and-requirement-map-2026-11-16)) |
