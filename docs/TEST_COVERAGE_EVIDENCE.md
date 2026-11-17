@@ -218,3 +218,87 @@ makes every operation and listing fail closed, not just operations on its interf
 
 **Checks.** `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets --locked -- -D
 warnings` pass.
+
+## TC-VALIDATE — Exact-candidate validation (2026-11-16)
+
+Validation ran twice: on the pre-review candidate `d7640c0` and, after the review fixes below, on
+the final code candidate `36de5c85abb9f60bd80980536db0aa07298e19fa`. Both runs used the same
+script, the TODO's checks with the new suite added: `cargo fmt --check`, `cargo build`, `cargo
+check`, workspace clippy with `-D warnings`, workspace tests, experimental-join tests and
+clippy, the removal tests, every private-bus suite in `ci.yml`, the Python tests, the desktop
+frontend checks, and the closed-join gate tests. Toolchain: Rust 1.95.0, Node 26.13.0,
+npm 11.20.0, Python 3.13.5, dbus-daemon 1.16.2.
+
+| Check | `d7640c0` | `36de5c8` (final) |
+| --- | --- | --- |
+| fmt, build, check, clippy (workspace and experimental-join) | pass | pass |
+| `cargo test --workspace --locked` | 942 passed, 107 ignored | 943 passed, 108 ignored |
+| experimental-join | 392 passed | 392 passed |
+| removal | 33 passed | 33 passed |
+| private-bus suites | 18 of 18 pass; `networkmanager_backend` 10 | 18 of 18 pass; `networkmanager_backend` 11 |
+| Python | 7 OK | 7 OK |
+| frontend (`ci`, format, lint, typecheck, test, build) | all rc 0, 43 tests | all rc 0, 43 tests |
+| closed join gate | pass | pass |
+
+The workspace delta from the module-split result (933 passed, 97 ignored) is exact: +18
+library tests (11 TC-PARSE, 6 TC-PAIR, 1 review fix), +1 CLI matrix, −9 duplicate
+route-projection tests, and +11 ignored suite tests (one outer test, ten scenarios).
+
+**No production change (TC-VALIDATE-02).** `git diff e00aa28..36de5c8` touches `.github/workflows/ci.yml`,
+`CLAUDE.md`, docs, new files under `tests/`, and four `src` files only below their existing
+`#[cfg(test)]` line (first changed lines 552, 498, 328 and 759; the test modules start at 511,
+375, 281 and 671). The only removed code lines anywhere are the seven lines of the deleted
+duplicate harness. No `Cargo.toml` or `Cargo.lock` change.
+
+**CI (TC-VALIDATE-03).** Exact-revision runs, each read with `gh`, all success:
+
+| Head | Content | Run |
+| --- | --- | --- |
+| `3b71fb3` | TC-PARSE | 44036478997 |
+| `5e604b4` | TC-PAIR, TC-CLI, TC-DEDUP | 44037732550 |
+| `d7640c0` | TC-NM | 44038994230 |
+| `36de5c8` | review fixes (final code) | 44040584052 |
+
+The `36de5c8` log shows the new CI step running the suite (`test result: ok. 11 passed`) and the
+behavior matrix in the workspace tests.
+
+## TC-CLOSEOUT — Review and close (2026-11-16)
+
+**Independent review (TC-CLOSEOUT-01).** A separate reviewer read `e00aa28..d7640c0` against the
+specification without the evidence, ran the linux, CLI and NetworkManager suites, and ran its
+own mutations. It found no production change, no change in visibility or dependencies, a fake
+surface identical to what the backend calls, no lost or weakened test, and every pairing arm
+covered. Its findings and their resolution (TC-CLOSEOUT-02, one commit each):
+
+| Finding | Severity | Resolution |
+| --- | --- | --- |
+| `activate_profile`'s refusal to replace a foreign active connection, and the active-device branch of `reject_foreign_interface_claim`, were never reached: disabling both left all 10 tests green | gap | `5b61f3a` adds `scenario_owned_profiles_never_replace_a_foreign_active_connection`: a foreign profile **without** `interface-name` active on a device, so only the active-device branch can refuse; and an owned bridge profile on a device where such a foreign connection is active. New controls: M (activation refusal disabled) fails with "bridge activation touched NetworkManager: `ActivateConnection`"; N (active-device branch disabled) fails with "bridge on eth5 touched NetworkManager: `AddConnection2`" |
+| `ensure_address`/`ensure_route` write `Update2` to the owned profile before activation is refused there | gap (untested behavior) | the same scenario asserts the call log is exactly one `Update2` on the **owned** profile, with no `ActivateConnection` or `Reapply` and the foreign profile byte-identical and still active. This is existing behavior on BlueRoute's own profile only, so it is asserted as is, not changed |
+| removal was scoped by network but not shown scoped by interface | gap | `5b61f3a`: the removal scenario now has one network owning profiles on two interfaces; removing `br-two` deactivates and deletes only that profile |
+| `ensure_bridge`'s refusal of an owned non-bridge profile was not covered | gap | `5b61f3a`: same new scenario, `InvalidState` with no call |
+| no bound on the child run or on `next_event()`, so a regression could hang CI | nit | `5b61f3a`: the outer test logs the child to a file and kills it after 180 s; each subscription wait fails after 10 s |
+| the CLI matrix depended on the checkout path: zbus percent-encodes some characters, so a target directory with `+` failed 37 cases | nit | `01edad6`: fixed address `unix:path=/nonexistent/blueroute-behavior-no-such-bus`; the matrix passes with `CARGO_TARGET_DIR` containing `+` and a space; expected files unchanged |
+| prefix 255 (named in COV-5) and the `read_u16`/`read_u32` error paths were not asserted; a helper named `v4` also parsed IPv6 | nit | `36de5c8`: 255 cases for both parsers (IPv4 and IPv6 → `InvalidInput`), a direct test of both readers at every wrong width, helper renamed `ip` |
+
+With these changes the suite has ten scenarios and the outer test requires exactly ten to pass;
+the TC-NM section above describes the original nine.
+
+**Accepted limitations (recorded, not changed).** The fake stores `AddConnection2`/`Update2`
+settings without NetworkManager's validation, ignores `Reapply` settings, never returns the
+legacy `addresses`/`routes` keys real NetworkManager adds (their removal is covered by the
+pre-existing unit tests `address_mutation_removes_legacy_addresses_property` and
+`route_mutation_removes_legacy_routes_shadow`), keeps devices managed, and completes activation
+immediately, so the `APPLY_TIMEOUT` paths of the four waits are not exercised (each would take
+8 s). Run without `dbus-run-session` on a desktop, the child would claim the NetworkManager name
+on the user's session bus, never the system bus; the documented command and CI always use a
+private bus. Real NetworkManager behavior remains with the Part A qualification.
+
+**Findings (COV-2), whole backlog.** No production defect was found. One observation from
+TC-PARSE (an address under the wrong family group is read as valid) remains an observation: the
+review raised no concern, BlueRoute writes each prefix under its own family, and no task is
+opened.
+
+**Requirement map.** Every COV and VERIFY requirement is met; see the ledger in
+[TEST_COVERAGE_TODO.md](TEST_COVERAGE_TODO.md#requirement-ledger). Acceptance is software-only and
+changes no product claim; installed-system and hardware qualification stay open in their own
+backlogs.

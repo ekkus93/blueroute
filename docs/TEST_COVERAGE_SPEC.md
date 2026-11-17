@@ -1,6 +1,7 @@
 # Test Coverage Specification
 
-**Status:** Proposed; no test in this document is implemented or accepted yet.  
+**Status:** Implemented and accepted (2026-11-16, final code candidate `36de5c8`); see the
+[backlog](TEST_COVERAGE_TODO.md) and [evidence](TEST_COVERAGE_EVIDENCE.md).  
 **Baseline:** `e00aa28` (2026-11-16).  
 **Execution backlog:** [TEST_COVERAGE_TODO.md](TEST_COVERAGE_TODO.md).  
 **Related:** [product specification](SPEC.md), [module split](MODULE_SPLIT_SPEC.md),

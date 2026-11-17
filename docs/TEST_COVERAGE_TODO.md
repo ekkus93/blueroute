@@ -1,6 +1,6 @@
 # Test Coverage TODO
 
-**Status:** In progress.  
+**Status:** COMPLETE (2026-11-16, final code candidate `36de5c8`, CI 44040584052); software-only, tests only.  
 **Baseline:** `e00aa28`.  
 **Companion specification:** [TEST_COVERAGE_SPEC.md](TEST_COVERAGE_SPEC.md).  
 **Implementation evidence:** [TEST_COVERAGE_EVIDENCE.md](TEST_COVERAGE_EVIDENCE.md).
@@ -27,8 +27,8 @@
 | TC-CLI | Checked-in CLI behavior matrix | G5 | TC-BASE | `[x]` |
 | TC-NM | Fake NetworkManager broker suite | G1 | TC-BASE | `[x]` |
 | TC-DEDUP | Remove the duplicate route projection harness | — | TC-BASE | `[x]` |
-| TC-VALIDATE | Exact-candidate validation and CI | all | all above | `[ ]` |
-| TC-CLOSEOUT | Review, requirement map and closure | all | TC-VALIDATE | `[ ]` |
+| TC-VALIDATE | Exact-candidate validation and CI | all | all above | `[x]` |
+| TC-CLOSEOUT | Review, requirement map and closure | all | TC-VALIDATE | `[x]` |
 
 Order: the cheap, self-contained unit tests first (TC-PARSE, TC-PAIR), then TC-CLI, then the
 largest task, TC-NM. TC-DEDUP is independent and can go anywhere after TC-BASE.
@@ -150,13 +150,13 @@ asserted, controls fail as expected, and CI runs the suite.
 
 **Requirements:** VERIFY-4, COV-1.
 
-- [ ] **TC-VALIDATE-01:** On the exact candidate, run `cargo fmt --all -- --check`, `cargo check
+- [x] **TC-VALIDATE-01:** On the exact candidate, run `cargo fmt --all -- --check`, `cargo check
   --workspace --locked`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo
   test --workspace --locked`, the experimental-join tests, every broker suite in `ci.yml`
   (including the new one), the Python tests and the desktop frontend checks.
-- [ ] **TC-VALIDATE-02:** Confirm `git diff e00aa28..HEAD` touches no production code: only
+- [x] **TC-VALIDATE-02:** Confirm `git diff e00aa28..HEAD` touches no production code: only
   `#[cfg(test)]` modules, files under `tests/`, CI, `CLAUDE.md` and docs.
-- [ ] **TC-VALIDATE-03:** Push and read exact-revision CI with `gh`; record the run ID.
+- [x] **TC-VALIDATE-03:** Push and read exact-revision CI with `gh`; record the run ID.
 
 **Acceptance:** Every check passes on the exact candidate; CI passes.
 
@@ -164,13 +164,13 @@ asserted, controls fail as expected, and CI runs the suite.
 
 **Requirements:** VERIFY-4, all COV requirements.
 
-- [ ] **TC-CLOSEOUT-01:** Independent review of the test diff: no production change, the fake
+- [x] **TC-CLOSEOUT-01:** Independent review of the test diff: no production change, the fake
   implements only the COV-3 surface, the COV-4 foreign-path assertions are reached, no test is
   weakened or flaky.
-- [ ] **TC-CLOSEOUT-02:** Resolve review findings, each in its own commit.
-- [ ] **TC-CLOSEOUT-03:** Complete the requirement ledger below and the evidence file; record any
+- [x] **TC-CLOSEOUT-02:** Resolve review findings, each in its own commit.
+- [x] **TC-CLOSEOUT-03:** Complete the requirement ledger below and the evidence file; record any
   COV-2 findings and their fixes.
-- [ ] **TC-CLOSEOUT-04:** Mark this backlog COMPLETE with the candidate SHA and CI run.
+- [x] **TC-CLOSEOUT-04:** Mark this backlog COMPLETE with the candidate SHA and CI run.
 
 **Acceptance:** Reviewed, test-only change set with all requirements met and evidenced.
 
@@ -178,8 +178,8 @@ asserted, controls fail as expected, and CI runs the suite.
 
 | Requirement | Tasks | Evidence | State |
 | --- | --- | --- | --- |
-| COV-1 Tests only | all | TC-VALIDATE-02 | Pending |
-| COV-2 Findings handled separately | all | evidence findings section | Pending |
+| COV-1 Tests only | all | [TC-VALIDATE](TEST_COVERAGE_EVIDENCE.md#tc-validate--exact-candidate-validation-2026-11-16) | MET |
+| COV-2 Findings handled separately | all | [TC-CLOSEOUT](TEST_COVERAGE_EVIDENCE.md#tc-closeout--review-and-close-2026-11-16) | MET |
 | COV-3 Fake NetworkManager over a real bus | TC-NM | [TC-NM](TEST_COVERAGE_EVIDENCE.md#tc-nm--fake-networkmanager-broker-suite-2026-11-16) | MET |
 | COV-4 Ownership at the D-Bus boundary | TC-NM | [TC-NM](TEST_COVERAGE_EVIDENCE.md#tc-nm--fake-networkmanager-broker-suite-2026-11-16) | MET |
 | COV-5 Parser rejection tables | TC-PARSE | [TC-PARSE](TEST_COVERAGE_EVIDENCE.md#tc-parse--parser-rejection-tables-2026-11-16) | MET |
@@ -187,4 +187,4 @@ asserted, controls fail as expected, and CI runs the suite.
 | COV-7 CLI behavior matrix | TC-CLI | [TC-CLI](TEST_COVERAGE_EVIDENCE.md#tc-cli--checked-in-cli-behavior-matrix-2026-11-16) | MET |
 | COV-8 Remove duplicate harness | TC-DEDUP | [TC-DEDUP](TEST_COVERAGE_EVIDENCE.md#tc-dedup--duplicate-route-projection-harness-removed-2026-11-16) | MET |
 | COV-9 Scheduling and docs | TC-NM | [TC-NM](TEST_COVERAGE_EVIDENCE.md#tc-nm--fake-networkmanager-broker-suite-2026-11-16) | MET |
-| VERIFY-1..4 | all | per-task and TC-VALIDATE | Pending |
+| VERIFY-1..4 | all | per-task sections, [TC-VALIDATE](TEST_COVERAGE_EVIDENCE.md#tc-validate--exact-candidate-validation-2026-11-16), [TC-CLOSEOUT](TEST_COVERAGE_EVIDENCE.md#tc-closeout--review-and-close-2026-11-16) | MET |
