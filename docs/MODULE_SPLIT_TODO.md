@@ -1,6 +1,6 @@
 # Module Split TODO
 
-**Status:** IN PROGRESS; MS-BASE and MS-CLI accepted.  
+**Status:** IN PROGRESS; MS-BASE, MS-CLI and MS-NM accepted.  
 **Baseline:** `1870e406836174c0e0433f42d026f71e497b73f5`.  
 **Companion specification:** [MODULE_SPLIT_SPEC.md](MODULE_SPLIT_SPEC.md).  
 **Implementation evidence:** [MODULE_SPLIT_EVIDENCE.md](MODULE_SPLIT_EVIDENCE.md).
@@ -22,7 +22,7 @@
 | --- | --- | --- | --- |
 | MS-BASE | Baseline listings, CLI behavior and public-surface snapshots | None | `[x]` |
 | MS-CLI | `apps/cli/src/main.rs` split into args, format, local_key, failure, run | MS-BASE | `[x]` |
-| MS-NM | `networkmanager.rs` split into dbus, inventory, ownership, profile, addresses, routes | MS-BASE | `[ ]` |
+| MS-NM | `networkmanager.rs` split into dbus, inventory, ownership, profile, addresses, routes | MS-BASE | `[x]` |
 | MS-TLS | `control_tls.rs` split into identity, certificate, enrollment, transport, session | MS-BASE | `[ ]` |
 | MS-BLUEZ | Pairing agent moved out of `bluez.rs` | MS-BASE | `[ ]` |
 | MS-VALIDATE | Exact-candidate validation, packages and CI | all splits | `[ ]` |
@@ -71,15 +71,15 @@ module has a one-responsibility doc comment.
 
 **Requirements:** SPLIT-1..7, VERIFY-1/2.
 
-- [ ] **MS-NM-01:** `git mv` the file to `networkmanager/mod.rs`, then move items into `dbus.rs`,
+- [x] **MS-NM-01:** `git mv` the file to `networkmanager/mod.rs`, then move items into `dbus.rs`,
   `inventory.rs`, `ownership.rs`, `profile.rs`, `addresses.rs` and `routes.rs` per the
   specification. `NetworkManagerBackend`'s trait impls stay in `mod.rs` as thin delegations.
-- [ ] **MS-NM-02:** Keep the fail-closed ownership rules together in `ownership.rs`: owner
+- [x] **MS-NM-02:** Keep the fail-closed ownership rules together in `ownership.rs`: owner
   parsing, exactly-one-owned-profile, foreign interface/active-connection rejection and profile
   UUID derivation. Nothing outside `networkmanager` gains access to them.
-- [ ] **MS-NM-03:** Move the 14 tests to their submodules (ownership, address, route and event
+- [x] **MS-NM-03:** Move the 14 tests to their submodules (ownership, address, route and event
   tests separately).
-- [ ] **MS-NM-04:** Verify: fmt, Clippy, workspace tests, the 153 `blueroute-linux` test names,
+- [x] **MS-NM-04:** Verify: fmt, Clippy, workspace tests, the 153 `blueroute-linux` test names,
   the `blueroute_linux` public items, the daemon's broker suites, and the moved-block check.
 
 **Acceptance:** Same public surface and tests; ownership logic is reviewable in one module; no
