@@ -2948,7 +2948,7 @@ Cover:
 
 - Uninstall leaves no active BlueRoute networking configuration.
 
-**POLICY IMPLEMENTED / ACCEPTANCE OPEN:** `prerm` stops the service and `postrm` disables it on removal. Dpkg removes installed service, D-Bus and PolicyKit files. Ordinary removal retains durable identity/membership; explicit purge deletes `/var/lib/blueroute`. An installed-system check for active owned routes and runtime networking remains.
+**POLICY IMPLEMENTED / ACCEPTANCE OPEN:** `prerm` stops the service and `postrm` masks it on removal (unmasked again by a reinstall; QA-A-01, 2026-11-17). Dpkg removes installed service, D-Bus and PolicyKit files. Ordinary removal retains durable identity/membership; explicit purge deletes `/var/lib/blueroute`. An installed-system check for active owned routes and runtime networking remains.
 
 ## P15-006 — Define future distribution packaging boundary
 

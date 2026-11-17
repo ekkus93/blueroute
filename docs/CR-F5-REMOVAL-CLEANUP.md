@@ -125,9 +125,9 @@ never cleared to hide a failure.
 | `prerm remove`, `prerm deconfigure` | Stop the service, then run the cleanup. A cleanup failure fails `prerm`, so dpkg keeps the package installed and runs `postinst abort-remove` (or `abort-deconfigure`). |
 | `postinst abort-remove`, `abort-deconfigure` | Delete the marker, start the service again. |
 | `prerm upgrade`, `failed-upgrade` | Nothing: the service keeps running and `postinst configure` restarts it on the new binary. Networking is not torn down for an upgrade. |
-| `postinst configure` | Delete the marker, enable, start (fresh) or restart (upgrade). |
-| `postrm remove` | Disable the unit. Durable state stays. |
-| `postrm purge` | Delete `/var/lib/blueroute`. Purge of an installed package runs `prerm remove` first, and purge of a removed package follows a successful remove, so the state is deleted only after cleanup succeeded. |
+| `postinst configure` | Delete the marker; unmask; enable on a first install or if the unit was enabled before, otherwise keep the administrator's disable (as debhelper does); reload systemd; start (fresh) or restart (upgrade). |
+| `postrm remove` | Mask the unit, keeping its enablement for a reinstall (QA-A-01: disabling here left a reinstalled service disabled and stopped); reload systemd. Durable state stays. |
+| `postrm purge` | Delete `/var/lib/blueroute`, then forget and unmask the unit (`deb-systemd-helper purge`, `unmask`). Purge of an installed package runs `prerm remove` first, and purge of a removed package follows a successful remove, so the state is deleted only after cleanup succeeded. |
 
 Forced removal or manual administrator intervention after a failed cleanup is outside the success
 guarantee. Physical qualification (no active networking after uninstall on real hardware) is

@@ -14,6 +14,8 @@ mkdir -p "$tmp/bin" "$tmp/root/usr/libexec/blueroute"
 cat > "$tmp/bin/deb-systemd-helper" <<'MOCK'
 #!/bin/sh
 printf 'helper %s\n' "$*" >> "$BLUEROUTE_MAINTAINER_LOG"
+# `was-enabled` answers $WAS_ENABLED_EXIT (default: enabled); every other action succeeds.
+case "$*" in *was-enabled*) exit "${WAS_ENABLED_EXIT:-0}" ;; esac
 MOCK
 cat > "$tmp/bin/deb-systemd-invoke" <<'MOCK'
 #!/bin/sh
@@ -75,22 +77,29 @@ fresh_state() {
     printf 'identity\n' > "$state/node-id"
 }
 
+# What `postinst configure` asks deb-systemd-helper on install and upgrade (QA-A-01).
+enable_calls=$'helper unmask blueroute.service\nhelper --quiet was-enabled blueroute.service'
+enable_calls+=$'\nhelper enable blueroute.service'
 # Fresh install and upgrade: no cleanup, and a stale removal marker is cleared.
 fresh_state
 printf 'pending\n' > "$state/removal-pending"
-check postinst configure $'helper enable blueroute.service\ninvoke start blueroute.service'
+check postinst configure "$enable_calls"$'\ninvoke start blueroute.service'
 [[ ! -e "$state/removal-pending" ]] || fail 'configure must clear the removal marker'
 check prerm upgrade ''
 check prerm failed-upgrade ''
 check postrm upgrade ''
-check postinst configure $'helper enable blueroute.service\ninvoke restart blueroute.service' '0.1.0'
+check postinst configure "$enable_calls"$'\ninvoke restart blueroute.service' '0.1.0'
 check postinst triggered ''
+# A unit the administrator disabled stays disabled: only its recorded state is updated.
+keep_disabled=$'helper unmask blueroute.service\nhelper --quiet was-enabled blueroute.service'
+keep_disabled+=$'\nhelper update-state blueroute.service\ninvoke restart blueroute.service'
+WAS_ENABLED_EXIT=1 check postinst configure "$keep_disabled" '0.1.0'
 
 # Remove: stop, then clean up, in that order; state is retained.
 cleanup=$'invoke stop blueroute.service\ndaemon --remove-owned-networking'
 check prerm remove "$cleanup"
 check prerm deconfigure "$cleanup"
-check postrm remove 'helper disable blueroute.service'
+check postrm remove 'helper mask blueroute.service'
 [[ -e "$state/node-id" ]] || fail 'remove must retain durable state'
 check postrm disappear ''
 
@@ -173,7 +182,7 @@ fresh_state
 step prerm remove
 step postrm remove
 [[ -e "$state/node-id" ]] || fail 'remove must keep state for a later purge'
-check postrm purge ''
+check postrm purge $'helper purge blueroute.service\nhelper unmask blueroute.service'
 [[ ! -e "$state" ]] || fail 'purge of a removed package must delete the state directory'
 
 printf 'Maintainer lifecycle contract passed (install, upgrade, remove, purge, abort, cleanup failure, unresolved role, manual recovery).\n'

@@ -1,11 +1,29 @@
 #!/bin/sh
 set -e
 
+# systemd sees a new or changed unit only after a reload; without one an upgrade would restart the
+# daemon under the old unit definition (QA-A-03). Skipped for chrootless installs (DPKG_ROOT set),
+# where the running systemd is not the target system's.
+reload_systemd() {
+    if [ -z "${DPKG_ROOT:-}" ] && [ -d "${DPKG_ROOT:-}/run/systemd/system" ]; then
+        systemctl --system daemon-reload >/dev/null || true
+    fi
+}
+
 case "$1" in
     configure)
         # A reinstall after a remove: the daemon may start again (CR-F5).
         rm -f "${DPKG_ROOT:-}/var/lib/blueroute/removal-pending"
-        deb-systemd-helper enable blueroute.service >/dev/null || true
+        # As debhelper does (QA-A-01): undo the mask from `postrm remove`, then enable on a first
+        # install or when the unit was enabled before, and otherwise keep the administrator's
+        # choice to disable it. `was-enabled` is true when no enablement was ever recorded.
+        deb-systemd-helper unmask blueroute.service >/dev/null || true
+        if deb-systemd-helper --quiet was-enabled blueroute.service; then
+            deb-systemd-helper enable blueroute.service >/dev/null || true
+        else
+            deb-systemd-helper update-state blueroute.service >/dev/null || true
+        fi
+        reload_systemd
         # dpkg passes the previously configured version as $2 on upgrade.
         # Restart so the active daemon runs the newly installed binary rather
         # than continuing to serve requests from the old executable.

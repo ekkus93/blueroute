@@ -1,8 +1,13 @@
 #!/bin/sh
 set -e
 
+# As debhelper does (QA-A-01). Remove masks the unit instead of disabling it: `disable` deletes
+# the enablement links but keeps deb-systemd-helper's record of the installation, so a reinstall's
+# `enable` would take the missing links for an administrator's choice and leave the service
+# disabled and stopped. The mask keeps the links for a reinstall, which unmasks them, and keeps
+# anything from starting the unit while its files are gone. Purge forgets the unit entirely.
 if [ "$1" = remove ]; then
-    deb-systemd-helper disable blueroute.service >/dev/null || true
+    deb-systemd-helper mask blueroute.service >/dev/null || true
 fi
 
 # Durable identity and membership under /var/lib/blueroute are deliberately
@@ -12,6 +17,15 @@ fi
 # evidence is deleted (CR-F5).
 if [ "$1" = purge ]; then
     rm -rf "${DPKG_ROOT:-}/var/lib/blueroute"
+    deb-systemd-helper purge blueroute.service >/dev/null || true
+    deb-systemd-helper unmask blueroute.service >/dev/null || true
+fi
+
+# Let systemd forget the removed unit file (skipped for chrootless installs, see postinst).
+if [ "$1" = remove ] || [ "$1" = purge ]; then
+    if [ -z "${DPKG_ROOT:-}" ] && [ -d "${DPKG_ROOT:-}/run/systemd/system" ]; then
+        systemctl --system daemon-reload >/dev/null || true
+    fi
 fi
 
 #DEBHELPER#

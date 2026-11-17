@@ -139,7 +139,7 @@ dpkg-query --admindir="$tmp/root/var/lib/dpkg" -W -f='${Status}' blueroute | gre
 test -x "$tmp/root/usr/libexec/blueroute/blueroute-daemon"
 test ! -e "$state/removal-pending"
 test "$("$state_check" "$state")" = "$expected"
-# Retried after the cause is fixed, the removal goes through: stop, cleanup, disable.
+# Retried after the cause is fixed, the removal goes through: stop, cleanup, mask (QA-A-01).
 echo 0 > "$tmp/root/cleanup-exit"
 : > "$tmp/service.log"
 remove_pkg || {
@@ -148,7 +148,7 @@ remove_pkg || {
 }
 test "$(cat "$tmp/service.log")" = "invoke stop blueroute.service
 $cleanup_line
-helper disable blueroute.service"
+helper mask blueroute.service"
 if test -e "$tmp/root/usr/bin/blueroute" ||
    test -e "$tmp/root/usr/libexec/blueroute/blueroute-daemon" ||
    test -e "$tmp/root/usr/lib/systemd/system/blueroute.service" ||

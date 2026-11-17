@@ -140,6 +140,9 @@ jobs:
       - name: Validate Debian maintainer upgrade and removal lifecycle
         run: bash packaging/debian/test-maintainer-lifecycle.sh
 
+      - name: Validate service enablement with the real deb-systemd-helper (QA-A-01)
+        run: bash packaging/debian/test-systemd-enablement.sh
+
       - name: Install pinned Node.js for the desktop package
         uses: actions/setup-node@v4
         with:
@@ -164,6 +167,7 @@ jobs:
           bash -n "$tmp/control/postinst" "$tmp/control/prerm" "$tmp/control/postrm"
           # Exercise the scripts embedded in the actual .deb, not only source files.
           BLUEROUTE_MAINTAINER_SCRIPT_DIR="$tmp/control" bash packaging/debian/test-maintainer-lifecycle.sh
+          BLUEROUTE_MAINTAINER_SCRIPT_DIR="$tmp/control" bash packaging/debian/test-systemd-enablement.sh
           echo "Release Debian artifact built and inspected successfully."
           # Load the upgraded state with this revision's code, as the daemon would at startup.
           cargo build --release --locked -p blueroute-linux --example state_check
