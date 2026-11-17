@@ -554,6 +554,18 @@ mod tests {
             ),
             ("prefix 256", entry("10.43.0.0", 256), true, protocol),
             (
+                "IPv4 prefix 255",
+                entry("10.43.0.0", 255),
+                true,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                "IPv6 prefix 255",
+                entry("fd00:43::", 255),
+                false,
+                ErrorKind::InvalidInput,
+            ),
+            (
                 "IPv4 prefix 33",
                 entry("10.43.0.0", 33),
                 true,
@@ -612,14 +624,14 @@ mod tests {
 
     #[test]
     fn route_data_accepts_boundary_prefixes_and_an_empty_next_hop() {
-        let v4 = |text: &str| IpAddr::from_str(text).unwrap();
+        let ip = |text: &str| IpAddr::from_str(text).unwrap();
         let (destination, via, metric) =
             route_key_from_entry(&entry("10.43.0.1", 32), true).unwrap();
-        assert_eq!(destination, IpPrefix::new(v4("10.43.0.1"), 32).unwrap());
+        assert_eq!(destination, IpPrefix::new(ip("10.43.0.1"), 32).unwrap());
         assert_eq!((via, metric), (None, 77));
 
         let (destination, _, _) = route_key_from_entry(&entry("fd00:43::1", 128), false).unwrap();
-        assert_eq!(destination, IpPrefix::new(v4("fd00:43::1"), 128).unwrap());
+        assert_eq!(destination, IpPrefix::new(ip("fd00:43::1"), 128).unwrap());
 
         let empty = with(entry("10.43.0.0", 24), "next-hop", Some(owned_string("")));
         assert_eq!(route_key_from_entry(&empty, true).unwrap().1, None);
@@ -631,7 +643,7 @@ mod tests {
         );
         assert_eq!(
             route_key_from_entry(&gateway, false).unwrap().1,
-            Some(v4("fd00::1"))
+            Some(ip("fd00::1"))
         );
     }
 

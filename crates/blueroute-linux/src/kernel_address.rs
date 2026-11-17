@@ -618,6 +618,24 @@ mod tests {
     }
 
     #[test]
+    fn fixed_width_readers_reject_any_other_width() {
+        for bytes in [&[][..], &[1][..], &[1, 2, 3][..]] {
+            assert_eq!(
+                read_u16(bytes).unwrap_err().kind(),
+                ErrorKind::ProtocolError
+            );
+        }
+        for bytes in [&[][..], &[1, 2, 3][..], &[1, 2, 3, 4, 5][..]] {
+            assert_eq!(
+                read_u32(bytes).unwrap_err().kind(),
+                ErrorKind::ProtocolError
+            );
+        }
+        assert_eq!(read_u16(&7_u16.to_ne_bytes()).unwrap(), 7);
+        assert_eq!(read_u32(&9_u32.to_ne_bytes()).unwrap(), 9);
+    }
+
+    #[test]
     fn netlink_acknowledgements_classify_errno_and_reject_truncation() {
         let error = parse_netlink_ack(&[0, 0, 0]).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::ProtocolError);

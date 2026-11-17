@@ -394,6 +394,18 @@ mod tests {
                 protocol,
             ),
             (
+                "IPv4 prefix 255",
+                IPV4_SETTING,
+                address_entry(text("10.42.0.2"), number(255)),
+                ErrorKind::InvalidInput,
+            ),
+            (
+                "IPv6 prefix 255",
+                IPV6_SETTING,
+                address_entry(text("fd00:42::2"), number(255)),
+                ErrorKind::InvalidInput,
+            ),
+            (
                 "IPv4 prefix 33",
                 IPV4_SETTING,
                 address_entry(text("10.42.0.2"), number(33)),
