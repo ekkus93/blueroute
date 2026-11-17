@@ -325,7 +325,7 @@ explicitly recorded; software success alone does not complete CR-F5 or CR-CLOSEO
 
 ## CR-QUALIFY — Validate active-network cleanup in an isolated system
 
-- [ ] **CR-QUALIFY-01:** Prepare a disposable VM/test machine with actual NetworkManager,
+- [x] **CR-QUALIFY-01:** Prepare a disposable VM/test machine with actual NetworkManager,
   systemd, and candidate packages; capture versions, source SHA, and package hashes.
 - [ ] **CR-QUALIFY-02:** Create a supported owned bridge/address/profile and foreign comparison
   fixtures. Remove while active; inspect actual backend and kernel state independently.
@@ -348,6 +348,14 @@ claims have identified hardware evidence. Synthetic dpkg roots are not sufficien
 **Blocked (2026-11-13):** needs a disposable VM or test machine with real NetworkManager and
 systemd, and a designated Bluetooth test rig; none is available to this work. Kept open. The
 procedure and evidence checklist are in [CR-QUALIFY-PROCEDURE.md](CR-QUALIFY-PROCEDURE.md).
+
+**Part A run (2026-11-17, `3cc06a7`): FAILED.** Record:
+[CR-QUALIFY-A-EVIDENCE-2026-11-17.md](CR-QUALIFY-A-EVIDENCE-2026-11-17.md). A disposable Debian 13
+VM (NetworkManager 1.52.1, no adapter) met CR-QUALIFY-01. Every removal-cleanup expectation held,
+but reinstalling after a remove leaves `blueroute.service` disabled and stopped (QA-A-01, a
+maintainer-script defect), so 02–05 stay open until a fixed candidate passes a rerun. The record
+also lists two minor product findings (QA-A-02, QA-A-03), procedure and runbook defects to fix
+before the rerun (QA-A-04..06, 09), an environment limit (QA-A-07) and an open question (QA-A-10). Part B (06–07) is not started; 08 stays open with it.
 
 ## CR-CLOSEOUT — Review all findings and reconcile original gates
 
@@ -385,5 +393,5 @@ Fill entries as work is qualified. Link concrete records; do not replace evidenc
 | CR-F7 / F7 | `73537c1` (docs) | Facts rechecked against source and packages; 0 broken links | Preserve existing records (preserved) | Final comparison at CR-CLOSEOUT | COMPLETE |
 | CR-INTEGRATION | `d1d86a5` | Real watchers, producers and consumers on private buses; every restored defect fails | Isolated-system results where relevant (CR-QUALIFY) | Boundary regressions included in CI (done) | COMPLETE |
 | CR-VALIDATE | `42ae7ab` | All checks, bus suites, packages, packaging tests; CI 43520783589 | No physical claim from CI | None | COMPLETE |
-| CR-QUALIFY | — | — | Not run: no VM or Bluetooth rig available | All required installed-system and physical checks | BLOCKED (equipment) |
+| CR-QUALIFY | `3cc06a7` (Part A) | — | Part A run 2026-11-17: FAILED on QA-A-01 ([record](CR-QUALIFY-A-EVIDENCE-2026-11-17.md)); Part B not run (no rig) | QA-A-01 fix and Part A rerun; Part B | OPEN (Part A failed) |
 | CR-CLOSEOUT | `42ae7ab` | Independent review, one defect fixed; original states unchanged | Pending CR-QUALIFY | CR-CLOSEOUT-04 after CR-QUALIFY | SOFTWARE MILESTONE |
