@@ -1,0 +1,7 @@
+argv: peer verify-local-key 00112233445566778899aabbccddeeff short
+status: 2
+--- stdout
+--- stderr
+blueroute: invalid canonical SPKI SHA-256 fingerprint
+Run `blueroute --help` to see supported commands and options.
+Guide: https://github.com/ekkus93/blueroute/blob/master/docs/ADMINISTRATOR.md

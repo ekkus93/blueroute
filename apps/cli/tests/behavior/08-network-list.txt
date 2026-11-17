@@ -1,0 +1,7 @@
+argv: network list
+status: 3
+--- stdout
+--- stderr
+blueroute: daemon unavailable/incompatible: D-Bus operation failed: Failed to connect to address `{bus}`: No such file or directory (os error 2)
+Check `systemctl status blueroute.service` and the daemon journal.
+Guide: https://github.com/ekkus93/blueroute/blob/master/docs/TROUBLESHOOTING.md#the-daemon-is-unavailable-or-reports-unsupported-capability

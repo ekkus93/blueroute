@@ -1,0 +1,7 @@
+argv: node show not-a-node
+status: 2
+--- stdout
+--- stderr
+blueroute: invalid full node NodeId
+Run `blueroute --help` to see supported commands and options.
+Guide: https://github.com/ekkus93/blueroute/blob/master/docs/ADMINISTRATOR.md

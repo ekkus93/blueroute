@@ -1,0 +1,13 @@
+argv: network create
+status: 2
+--- stdout
+--- stderr
+blueroute: error: the following required arguments were not provided:
+  <NAME>
+
+Usage: blueroute network create <NAME>
+
+For more information, try '--help'.
+
+Run `blueroute --help` to see supported commands and options.
+Guide: https://github.com/ekkus93/blueroute/blob/master/docs/ADMINISTRATOR.md

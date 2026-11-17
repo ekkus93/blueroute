@@ -1,0 +1,21 @@
+argv: network
+status: 2
+--- stdout
+--- stderr
+blueroute: Usage: blueroute network [OPTIONS] <COMMAND>
+
+Commands:
+  list       
+  create     
+  join       
+  leave      
+  link       Show the joined client's link to its host (read-only)
+  reconnect  Try again to reconnect a joined client to its host after it gave up or needed attention
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+      --json  
+  -h, --help  Print help
+
+Run `blueroute --help` to see supported commands and options.
+Guide: https://github.com/ekkus93/blueroute/blob/master/docs/ADMINISTRATOR.md

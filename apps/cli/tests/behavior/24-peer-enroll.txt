@@ -1,0 +1,7 @@
+argv: peer enroll 00112233445566778899aabbccddeeff 0000000000000000000000000000000000000000000000000000000000000000
+status: 2
+--- stdout
+--- stderr
+blueroute: invalid canonical SPKI SHA-256 fingerprint
+Run `blueroute --help` to see supported commands and options.
+Guide: https://github.com/ekkus93/blueroute/blob/master/docs/ADMINISTRATOR.md

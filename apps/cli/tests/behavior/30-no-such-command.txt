@@ -1,0 +1,12 @@
+argv: no-such-command
+status: 2
+--- stdout
+--- stderr
+blueroute: error: unrecognized subcommand 'no-such-command'
+
+Usage: blueroute [OPTIONS] [COMMAND]
+
+For more information, try '--help'.
+
+Run `blueroute --help` to see supported commands and options.
+Guide: https://github.com/ekkus93/blueroute/blob/master/docs/ADMINISTRATOR.md

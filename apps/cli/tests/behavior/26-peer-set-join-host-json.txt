@@ -1,0 +1,5 @@
+argv: peer set-join-host 00112233445566778899aabbccddeeff 00112233445566778899aabbccddeeff 0000000000000000000000000000000000000000000000000000000000000000 --json
+status: 2
+--- stdout
+--- stderr
+{"error":{"code":2,"help":"https://github.com/ekkus93/blueroute/blob/master/docs/ADMINISTRATOR.md","kind":"usage","message":"invalid canonical SPKI SHA-256 fingerprint"},"ok":false}

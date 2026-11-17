@@ -24,7 +24,7 @@
 | TC-BASE | Baseline listings and evidence file | — | None | `[x]` |
 | TC-PARSE | Route/address and netlink parser rejection tables | G2, G3 | TC-BASE | `[x]` |
 | TC-PAIR | BlueZ pairing error mapping and agent refusal | G4 | TC-BASE | `[x]` |
-| TC-CLI | Checked-in CLI behavior matrix | G5 | TC-BASE | `[ ]` |
+| TC-CLI | Checked-in CLI behavior matrix | G5 | TC-BASE | `[x]` |
 | TC-NM | Fake NetworkManager broker suite | G1 | TC-BASE | `[ ]` |
 | TC-DEDUP | Remove the duplicate route projection harness | — | TC-BASE | `[ ]` |
 | TC-VALIDATE | Exact-candidate validation and CI | all | all above | `[ ]` |
@@ -93,16 +93,16 @@ as expected; listings grow only by the new names.
 
 **Requirements:** COV-1, COV-7, VERIFY-1/2/3.
 
-- [ ] **TC-CLI-01:** Port the 62 cases from `tmp/ms/capture.sh` (its text is preserved in
+- [x] **TC-CLI-01:** Port the 62 cases from `tmp/ms/capture.sh` (its text is preserved in
   `docs/MODULE_SPLIT_EVIDENCE.md`) into `apps/cli/tests/behavior_matrix.rs`, one named case per
   invocation, running the built binary via `CARGO_BIN_EXE_blueroute` with
   `DBUS_SYSTEM_BUS_ADDRESS` pointing at a nonexistent socket under the test's temp directory.
-- [ ] **TC-CLI-02:** Check in expected stdout, stderr and status under
+- [x] **TC-CLI-02:** Check in expected stdout, stderr and status under
   `apps/cli/tests/behavior/`, generated once from the baseline binary. Confirm they equal the
   module-split capture. Regeneration happens only when an opt-in environment variable is set.
-- [ ] **TC-CLI-03:** Mismatches report the case name and a line diff. Run the test twice to
+- [x] **TC-CLI-03:** Mismatches report the case name and a line diff. Run the test twice to
   confirm it is deterministic.
-- [ ] **TC-CLI-04:** Negative control: change one help word and one JSON field name; record the
+- [x] **TC-CLI-04:** Negative control: change one help word and one JSON field name; record the
   failing cases.
 
 **Acceptance:** The matrix runs in plain `cargo test`, passes on the baseline and fails on a
@@ -184,7 +184,7 @@ asserted, controls fail as expected, and CI runs the suite.
 | COV-4 Ownership at the D-Bus boundary | TC-NM | TC-NM-03..05, 07 | Pending |
 | COV-5 Parser rejection tables | TC-PARSE | [TC-PARSE](TEST_COVERAGE_EVIDENCE.md#tc-parse--parser-rejection-tables-2026-11-16) | MET |
 | COV-6 Pairing mapping and refusal | TC-PAIR | [TC-PAIR](TEST_COVERAGE_EVIDENCE.md#tc-pair--pairing-error-mapping-and-agent-refusal-2026-11-16) | MET |
-| COV-7 CLI behavior matrix | TC-CLI | TC-CLI-01..04 | Pending |
+| COV-7 CLI behavior matrix | TC-CLI | [TC-CLI](TEST_COVERAGE_EVIDENCE.md#tc-cli--checked-in-cli-behavior-matrix-2026-11-16) | MET |
 | COV-8 Remove duplicate harness | TC-DEDUP | TC-DEDUP-01/02 | Pending |
 | COV-9 Scheduling and docs | TC-NM | TC-NM-06 | Pending |
 | VERIFY-1..4 | all | per-task and TC-VALIDATE | Pending |

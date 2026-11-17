@@ -1,0 +1,5 @@
+argv: --version --json
+status: 0
+--- stdout
+blueroute 0.1.0
+--- stderr

@@ -1,0 +1,5 @@
+argv: peer forget 00112233445566778899aabbccddeeff --json
+status: 3
+--- stdout
+--- stderr
+{"error":{"code":3,"help":"https://github.com/ekkus93/blueroute/blob/master/docs/TROUBLESHOOTING.md#the-daemon-is-unavailable-or-reports-unsupported-capability","kind":"daemon_unavailable","message":"daemon unavailable/incompatible: D-Bus operation failed: Failed to connect to address `{bus}`: No such file or directory (os error 2)"},"ok":false}

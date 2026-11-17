@@ -97,3 +97,42 @@ removed.
 
 **Checks.** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D
 warnings` and `cargo test -p blueroute-linux --lib --locked` (170) pass.
+
+## TC-CLI — Checked-in CLI behavior matrix (2026-11-16)
+
+`apps/cli/tests/behavior_matrix.rs` adds one test,
+`every_cli_command_matches_its_recorded_behavior_without_a_daemon`. It runs the built binary
+(`CARGO_BIN_EXE_blueroute`) for the 31 command lines of the module-split capture, each with and
+without `--json`, with `DBUS_SYSTEM_BUS_ADDRESS` naming a socket under `CARGO_TARGET_TMPDIR`
+that never exists (the test asserts it is absent). Each case's argv, exit status, stdout and
+stderr are compared byte for byte with `apps/cli/tests/behavior/NN-words[-json].txt`. The bus
+address appears in connection diagnostics, so it is replaced with `{bus}` in the recorded and
+compared text. All mismatches are reported together with the case file and the differing lines;
+a recorded file that no case produces is also a failure. Files are rewritten only with
+`BLUEROUTE_BEHAVIOR_BLESS=1`.
+
+**Expected files.** Generated once from the current binary (CLI sources unchanged since
+`a8f3fad`): 62 files, outcome mix 5 × exit 0, 20 × exit 2, 37 × exit 3. Each file was rebuilt
+independently from the module-split capture `tmp/ms/final/cli/NNN[-json].{meta,out,err}` (the
+capture's own bus path replaced with `{bus}`): **0 of 62 differ**.
+
+The help screens end several lines with spaces (clap's column padding), so the recorded help
+files intentionally contain trailing whitespace and `git diff --check` reports them; do not strip
+it, or the matrix fails.
+
+**Determinism.** Two consecutive non-blessing runs pass; the test needs no private bus and runs in
+plain `cargo test --workspace`.
+
+**Listing.** `cargo test -p blueroute --locked -- --list` grew from 29 to 30: the one new name.
+
+**Negative controls** (same scratch worktree and helper):
+
+| Control | Mutation | Result |
+| --- | --- | --- |
+| G | top-level `about` text "Manage BlueRoute networks" → "…meshes" | 3 of 62 cases differ (`01-help`, `01-help-json`, `03-help-network`), each showing the one changed line |
+| H | JSON error key `"ok"` → `"success"` in `error_guidance.rs` | 29 of 62 cases differ: every `--json` case that fails (all except help and version) |
+
+**Findings (COV-2).** None.
+
+**Checks.** `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets --locked -- -D
+warnings` pass.
