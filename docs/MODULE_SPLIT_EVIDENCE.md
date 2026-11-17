@@ -251,3 +251,35 @@ test modules that need them (`Duration`, `Instant`, `Arc`, `SpkiSha256`, `HelloF
 daemon Clippy clean with `experimental-join`; workspace tests 933 passed, 97 ignored;
 `experimental-join` 392 passed, 16 ignored; all 17 private-broker suites passed (96 tests).
 Production lines per module are at most 453.
+
+## MS-BLUEZ — Pairing agent moved out of the BlueZ backend (2026-11-16)
+
+Two commits: `ecf9c7f` moves `bluez.rs` to `bluez/mod.rs` unchanged (recorded as a rename); the
+next commit moves the pairing subsystem to `bluez/pairing.rs`.
+
+| Module | Responsibility | Production | Total |
+| --- | --- | ---: | ---: |
+| `mod.rs` | constants, `BluezBackend` and its `BluetoothBackend` impl, managed objects, adapter/peer discovery and their signal subscriptions | 725 | 935 |
+| `pairing.rs` | pairing control (one operation at a time), the no-input/no-output agent, incoming pairing windows, outgoing pairing and trust | 669 | 759 |
+
+**Size (SPLIT-6).** Both modules exceed the ~600-line guide. The plan for this file was only to
+separate pairing; what remains in `mod.rs` is one subsystem (BlueZ object enumeration, discovery
+and the signals that keep those snapshots current), and `pairing.rs` is the single pairing agent
+and its control. Splitting either further would cut through tightly coupled code for little
+review benefit, so they stay as they are.
+
+**Move-only check (SPLIT-1).** The line-multiset comparison leaves only the new test module
+header and its closing brace: no signature needed rewrapping.
+
+**Visibility (SPLIT-3).** `pub(super)`: `PairingControl` and `PairingAgent` (field types of
+`BluezBackend`) and the four operations `BluezBackend` calls (`begin_incoming_pairing`,
+`end_incoming_pairing`, `pair_peer`, `set_peer_trusted`). Constants stay private in `mod.rs`.
+`BluezBackend`'s `pub(crate)` fields and the `crate::bluez::BluezBackend` path that `pan.rs` uses
+are unchanged; no field needed widening.
+
+**Tests (SPLIT-4).** 15 tests, same leaf names: the six pairing tests moved to `pairing`; the nine
+discovery tests and their three helpers stay in `mod.rs`.
+
+**Verification (VERIFY-1/2).** `capture.sh bluez`: leaf test names identical (`blueroute-linux`
+153, 15 under `bluez::`); public doc items and CLI matrix identical. fmt clean; workspace Clippy
+clean; workspace tests 933 passed, 97 ignored. Private-broker suites are run in MS-VALIDATE.

@@ -1,6 +1,6 @@
 # Module Split TODO
 
-**Status:** IN PROGRESS; MS-BASE, MS-CLI, MS-NM and MS-TLS accepted.  
+**Status:** IN PROGRESS; MS-BASE, MS-CLI, MS-NM, MS-TLS and MS-BLUEZ accepted.  
 **Baseline:** `1870e406836174c0e0433f42d026f71e497b73f5`.  
 **Companion specification:** [MODULE_SPLIT_SPEC.md](MODULE_SPLIT_SPEC.md).  
 **Implementation evidence:** [MODULE_SPLIT_EVIDENCE.md](MODULE_SPLIT_EVIDENCE.md).
@@ -24,7 +24,7 @@
 | MS-CLI | `apps/cli/src/main.rs` split into args, format, local_key, failure, run | MS-BASE | `[x]` |
 | MS-NM | `networkmanager.rs` split into dbus, inventory, ownership, profile, addresses, routes | MS-BASE | `[x]` |
 | MS-TLS | `control_tls.rs` split into identity, certificate, enrollment, transport, session | MS-BASE | `[x]` |
-| MS-BLUEZ | Pairing agent moved out of `bluez.rs` | MS-BASE | `[ ]` |
+| MS-BLUEZ | Pairing agent moved out of `bluez.rs` | MS-BASE | `[x]` |
 | MS-VALIDATE | Exact-candidate validation, packages and CI | all splits | `[ ]` |
 | MS-CLOSEOUT | Review, requirement map and closure | MS-VALIDATE | `[ ]` |
 
@@ -108,11 +108,11 @@ code each live in one module; no behavior change.
 
 **Requirements:** SPLIT-1..7, VERIFY-1/2.
 
-- [ ] **MS-BLUEZ-01:** `git mv` the file to `bluez/mod.rs` and move the pairing control, permit,
+- [x] **MS-BLUEZ-01:** `git mv` the file to `bluez/mod.rs` and move the pairing control, permit,
   agent, incoming-pairing, pair and trust items to `bluez/pairing.rs`. Keep `BluezBackend`'s
   `pub(crate)` fields and the `crate::bluez::BluezBackend` path that `pan.rs` uses.
-- [ ] **MS-BLUEZ-02:** Move the pairing-related tests with the code; keep the rest in `mod.rs`.
-- [ ] **MS-BLUEZ-03:** Verify: fmt, Clippy, workspace tests, the 153 `blueroute-linux` test names
+- [x] **MS-BLUEZ-02:** Move the pairing-related tests with the code; keep the rest in `mod.rs`.
+- [x] **MS-BLUEZ-03:** Verify: fmt, Clippy, workspace tests, the 153 `blueroute-linux` test names
   (15 under `bluez::`), the public items, and the moved-block check.
 
 **Acceptance:** Pairing is its own module; discovery and signals stay in `mod.rs`; no behavior
