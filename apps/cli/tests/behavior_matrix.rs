@@ -4,7 +4,7 @@
 //!
 //! The system bus address names a socket that never exists, so every daemon command fails before
 //! anything is sent. That address appears in connection diagnostics; it is replaced with `{bus}`
-//! so expected files do not depend on the checkout path.
+//! so expected files do not depend on the address.
 //!
 //! Expected files are rewritten only when `BLUEROUTE_BEHAVIOR_BLESS=1` is set. Review the diff of
 //! `tests/behavior/` before committing a blessed change.
@@ -16,6 +16,8 @@ use std::process::Command;
 const NODE: &str = "00112233445566778899aabbccddeeff";
 const FINGERPRINT: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 const BLESS: &str = "BLUEROUTE_BEHAVIOR_BLESS";
+/// A socket address under a directory that does not exist, so nothing can ever listen there.
+const BUS: &str = "unix:path=/nonexistent/blueroute-behavior-no-such-bus";
 
 /// Command lines in the order of the module-split capture; `{node}` and `{fp}` are substituted.
 const COMMANDS: [&str; 31] = [
@@ -115,10 +117,10 @@ fn line_diff(expected: &str, actual: &str) -> String {
 
 #[test]
 fn every_cli_command_matches_its_recorded_behavior_without_a_daemon() {
-    let bus = format!(
-        "unix:path={}/blueroute-behavior-no-such-bus",
-        env!("CARGO_TARGET_TMPDIR")
-    );
+    // A fixed, short path of plain characters: the diagnostics print the address with some
+    // characters percent-encoded, so a path taken from the checkout (with `+`, spaces or `~`)
+    // would not match the `{bus}` replacement, and a long one could exceed the socket path limit.
+    let bus = BUS.to_owned();
     assert!(
         !Path::new(bus.trim_start_matches("unix:path=")).exists(),
         "the no-daemon bus path must not exist: {bus}"
