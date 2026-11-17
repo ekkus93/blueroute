@@ -192,3 +192,62 @@ and route modules and constructed in `mod.rs`). Nothing is `pub` that was not.
 (`blueroute-linux` 153, 14 under `networkmanager::`); `blueroute_linux` and `blueroute_daemon`
 public doc items identical; CLI matrix identical. fmt clean; workspace Clippy clean; workspace
 tests 933 passed, 0 failed, 97 ignored; all 17 private-broker suites passed (96 tests).
+
+## MS-TLS — Control TLS split (2026-11-16)
+
+Two commits: `13e4469` moves `control_tls.rs` to `control_tls/mod.rs` unchanged (recorded as a
+rename); the next commit splits it with the same move-only splitter.
+
+| Module | Responsibility | Production | Total |
+| --- | --- | ---: | ---: |
+| `mod.rs` | module doc, constants, `ControlTlsError`, zero-ID checks, re-exports; test-only `test_support` | 111 | 210 |
+| `identity.rs` | local identity, its persisted record format and storage, key wiping on drop | 313 | 600 |
+| `certificate.rs` | pinned certificates and peers, enrollment candidates, strict SPKI/node-name parsing | 232 | 262 |
+| `enrollment.rs` | the bounded certificate-preface exchange (unauthenticated candidates only) | 240 | 354 |
+| `transport.rs` | pinned mutual TLS 1.3 connect/accept, peer verification, the TLS stream | 453 | 751 |
+| `session.rs` | the authenticated control session: exporter-bound Hello, framed I/O, session errors | 348 | 913 |
+
+**Public surface (SPLIT-2).** `mod.rs` re-exports every item that was `pub` in the original file
+(`pub use self::<module>::{…}`), so `crate::control_tls::X` paths and the daemon's own
+`pub use control_tls::{…}` list are unchanged; those items keep their original `pub`. The
+`blueroute_daemon` public doc items are identical to the baseline.
+
+**Visibility (SPLIT-3).** `pub(super)` only where a sibling needs it:
+
+- functions: `certificate_fingerprint`, `certificate_names_node`, `certificate_node_id`,
+  `node_dns_name`, `verify_control_tls_peer_identity`, and the method
+  `ControlTlsStream::send_close_notify_until`;
+- fields read across modules: `node`/`network`/`fingerprint` of the pinned and verified peer
+  types, `PinnedControlTlsCertificate.certificate`, all fields of
+  `ControlTlsCertificateCandidate` (built in `enrollment`) and of `ActiveControlSession` (built
+  in `transport`), `AuthenticatedControlPeer`'s `peer`/`session_id`/`facts`,
+  `LocalControlTlsIdentity`'s `node` and `certificate`, and `ControlTlsStream`'s `socket` and
+  `connection`.
+
+**Key material stays private.** `LocalControlTlsIdentity.private_key` is still private to
+`identity.rs`. Three tests read it directly (as the single-module file allowed), so they live in
+`identity`'s test module rather than with the certificate/enrollment code they exercise:
+`certificate_parsers_reject_valid_der_with_trailing_untrusted_bytes`,
+`certificate_preface_is_bounded_and_matches_only_the_approved_pin` and
+`enrollment_candidate_requires_independent_fingerprint_confirmation`. The last one also reads
+`ControlTlsStream.connection`; with no existing accessor, that field is `pub(super)` (visible only
+inside `control_tls`) instead of widening `private_key`. The rustls connection holds session state,
+not the identity's private key. `preface_factories_establish_only_pinned_tls13_connections` reads
+only `connection` and sits in `transport`.
+
+**Tests (SPLIT-4).** 22 tests, same leaf names: `identity` 6, `transport` 6, `session` 6,
+`enrollment` 3, `certificate` 1. The shared helpers (`TempDirectory`, `NEXT_TEMP`, `node`,
+`network`, `make_tls_pair`, `stream_pair`, `hello_facts`, `trust_for_peer`, `active_deadline`)
+moved once to `test_support`.
+
+**Move-only check (SPLIT-1).** Only scaffolding (five test modules / `test_support` with their
+braces) and `certificate_node_id`'s signature rewrapped by rustfmt, plus `TempDirectory`'s field
+visibility. Some imports that only tests had used through `use super::*` were added back into the
+test modules that need them (`Duration`, `Instant`, `Arc`, `SpkiSha256`, `HelloFacts`,
+`ConnectionDeadline`, `CertificateParams`, `KeyPair`, `Digest`, `FromDer`, `Write`).
+
+**Verification (VERIFY-1/2).** `capture.sh tls`: leaf test names identical (daemon 343, 22 under
+`control_tls::`); public doc items and CLI matrix identical. fmt clean; workspace Clippy clean,
+daemon Clippy clean with `experimental-join`; workspace tests 933 passed, 97 ignored;
+`experimental-join` 392 passed, 16 ignored; all 17 private-broker suites passed (96 tests).
+Production lines per module are at most 453.

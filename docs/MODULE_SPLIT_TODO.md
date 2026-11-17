@@ -1,6 +1,6 @@
 # Module Split TODO
 
-**Status:** IN PROGRESS; MS-BASE, MS-CLI and MS-NM accepted.  
+**Status:** IN PROGRESS; MS-BASE, MS-CLI, MS-NM and MS-TLS accepted.  
 **Baseline:** `1870e406836174c0e0433f42d026f71e497b73f5`.  
 **Companion specification:** [MODULE_SPLIT_SPEC.md](MODULE_SPLIT_SPEC.md).  
 **Implementation evidence:** [MODULE_SPLIT_EVIDENCE.md](MODULE_SPLIT_EVIDENCE.md).
@@ -23,7 +23,7 @@
 | MS-BASE | Baseline listings, CLI behavior and public-surface snapshots | None | `[x]` |
 | MS-CLI | `apps/cli/src/main.rs` split into args, format, local_key, failure, run | MS-BASE | `[x]` |
 | MS-NM | `networkmanager.rs` split into dbus, inventory, ownership, profile, addresses, routes | MS-BASE | `[x]` |
-| MS-TLS | `control_tls.rs` split into identity, certificate, enrollment, transport, session | MS-BASE | `[ ]` |
+| MS-TLS | `control_tls.rs` split into identity, certificate, enrollment, transport, session | MS-BASE | `[x]` |
 | MS-BLUEZ | Pairing agent moved out of `bluez.rs` | MS-BASE | `[ ]` |
 | MS-VALIDATE | Exact-candidate validation, packages and CI | all splits | `[ ]` |
 | MS-CLOSEOUT | Review, requirement map and closure | MS-VALIDATE | `[ ]` |
@@ -89,15 +89,15 @@ behavior change.
 
 **Requirements:** SPLIT-1..7, VERIFY-1/2.
 
-- [ ] **MS-TLS-01:** `git mv` the file to `control_tls/mod.rs`, then move items into
+- [x] **MS-TLS-01:** `git mv` the file to `control_tls/mod.rs`, then move items into
   `identity.rs`, `certificate.rs`, `enrollment.rs`, `transport.rs` and `session.rs` per the
   specification. `mod.rs` re-exports exactly the items the daemon's `lib.rs` re-exports today.
-- [ ] **MS-TLS-02:** Keep private key material, the identity record format and the verifier
+- [x] **MS-TLS-02:** Keep private key material, the identity record format and the verifier
   internals private to their submodules; confirm the key-wiping `Drop` and the bounded enrollment
   I/O move unchanged.
-- [ ] **MS-TLS-03:** Move the 22 tests, including the real localhost TLS handshakes, to the
+- [x] **MS-TLS-03:** Move the 22 tests, including the real localhost TLS handshakes, to the
   submodules they exercise.
-- [ ] **MS-TLS-04:** Verify: fmt, Clippy, workspace and experimental-join tests, the 343 daemon
+- [x] **MS-TLS-04:** Verify: fmt, Clippy, workspace and experimental-join tests, the 343 daemon
   test names, the `blueroute_daemon` public items, every daemon broker suite, and the moved-block
   check.
 
