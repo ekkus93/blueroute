@@ -25,7 +25,7 @@
 | TC-PARSE | Route/address and netlink parser rejection tables | G2, G3 | TC-BASE | `[x]` |
 | TC-PAIR | BlueZ pairing error mapping and agent refusal | G4 | TC-BASE | `[x]` |
 | TC-CLI | Checked-in CLI behavior matrix | G5 | TC-BASE | `[x]` |
-| TC-NM | Fake NetworkManager broker suite | G1 | TC-BASE | `[ ]` |
+| TC-NM | Fake NetworkManager broker suite | G1 | TC-BASE | `[x]` |
 | TC-DEDUP | Remove the duplicate route projection harness | — | TC-BASE | `[x]` |
 | TC-VALIDATE | Exact-candidate validation and CI | all | all above | `[ ]` |
 | TC-CLOSEOUT | Review, requirement map and closure | all | TC-VALIDATE | `[ ]` |
@@ -112,24 +112,24 @@ one-word output change.
 
 **Requirements:** COV-1, COV-2, COV-3, COV-4, COV-9, VERIFY-1/2/3.
 
-- [ ] **TC-NM-01:** Write the test-only fake service in
+- [x] **TC-NM-01:** Write the test-only fake service in
   `crates/blueroute-linux/tests/networkmanager_backend/` (zbus `#[interface]` objects for exactly
   the COV-3 surface), with seedable connections, devices and active connections, scripted
   failures, and a log of mutating calls by object path. Record any dev-dependency added and why.
-- [ ] **TC-NM-02:** Add `crates/blueroute-linux/tests/networkmanager_backend.rs`: an `#[ignore]`
+- [x] **TC-NM-02:** Add `crates/blueroute-linux/tests/networkmanager_backend.rs`: an `#[ignore]`
   outer test that re-runs the binary with `DBUS_SYSTEM_BUS_ADDRESS` set to the private bus, and
   inner tests that use the unmodified `NetworkManagerBackend::connect_system()`.
-- [ ] **TC-NM-03:** Owned-path tests (COV-4 items 1, 2, 5): ensure bridge, address and route
+- [x] **TC-NM-03:** Owned-path tests (COV-4 items 1, 2, 5): ensure bridge, address and route
   create then update idempotently; remove deletes only the requested owned profile; inventory
   matches the fake; foreign profiles stay byte-identical throughout.
-- [ ] **TC-NM-04:** Fail-closed tests (COV-4 item 3): foreign, other-NetworkId, malformed and
+- [x] **TC-NM-04:** Fail-closed tests (COV-4 item 3): foreign, other-NetworkId, malformed and
   duplicate-claim profiles each fail the operation, and the call log shows no mutating call on
   any of their paths.
-- [ ] **TC-NM-05:** Failure tests (COV-4 item 4): NetworkManager absent from the bus, and a D-Bus
+- [x] **TC-NM-05:** Failure tests (COV-4 item 4): NetworkManager absent from the bus, and a D-Bus
   error from each mutating method, map to the documented kinds with no mutation of other profiles.
-- [ ] **TC-NM-06:** Schedule the suite in `ci.yml` and list it in `CLAUDE.md` (COV-9). Run it
+- [x] **TC-NM-06:** Schedule the suite in `ci.yml` and list it in `CLAUDE.md` (COV-9). Run it
   three times in a row locally.
-- [ ] **TC-NM-07:** Negative controls: skip the ownership check before `Delete`, and before
+- [x] **TC-NM-07:** Negative controls: skip the ownership check before `Delete`, and before
   `Update2`; record the failing tests. Confirm the foreign-path assertions are actually reached.
 
 **Acceptance:** The suite passes repeatedly against the unmodified backend, every COV-4 item is
@@ -180,11 +180,11 @@ asserted, controls fail as expected, and CI runs the suite.
 | --- | --- | --- | --- |
 | COV-1 Tests only | all | TC-VALIDATE-02 | Pending |
 | COV-2 Findings handled separately | all | evidence findings section | Pending |
-| COV-3 Fake NetworkManager over a real bus | TC-NM | TC-NM-01/02 | Pending |
-| COV-4 Ownership at the D-Bus boundary | TC-NM | TC-NM-03..05, 07 | Pending |
+| COV-3 Fake NetworkManager over a real bus | TC-NM | [TC-NM](TEST_COVERAGE_EVIDENCE.md#tc-nm--fake-networkmanager-broker-suite-2026-11-16) | MET |
+| COV-4 Ownership at the D-Bus boundary | TC-NM | [TC-NM](TEST_COVERAGE_EVIDENCE.md#tc-nm--fake-networkmanager-broker-suite-2026-11-16) | MET |
 | COV-5 Parser rejection tables | TC-PARSE | [TC-PARSE](TEST_COVERAGE_EVIDENCE.md#tc-parse--parser-rejection-tables-2026-11-16) | MET |
 | COV-6 Pairing mapping and refusal | TC-PAIR | [TC-PAIR](TEST_COVERAGE_EVIDENCE.md#tc-pair--pairing-error-mapping-and-agent-refusal-2026-11-16) | MET |
 | COV-7 CLI behavior matrix | TC-CLI | [TC-CLI](TEST_COVERAGE_EVIDENCE.md#tc-cli--checked-in-cli-behavior-matrix-2026-11-16) | MET |
 | COV-8 Remove duplicate harness | TC-DEDUP | [TC-DEDUP](TEST_COVERAGE_EVIDENCE.md#tc-dedup--duplicate-route-projection-harness-removed-2026-11-16) | MET |
-| COV-9 Scheduling and docs | TC-NM | TC-NM-06 | Pending |
+| COV-9 Scheduling and docs | TC-NM | [TC-NM](TEST_COVERAGE_EVIDENCE.md#tc-nm--fake-networkmanager-broker-suite-2026-11-16) | MET |
 | VERIFY-1..4 | all | per-task and TC-VALIDATE | Pending |

@@ -27,6 +27,7 @@ dbus-run-session -- cargo test -p <pkg> --test <file> --locked -- --ignored --ex
 - `-p blueroute-client --test owner_race`, `--test event_owner_race`, `--test ownership_period`, `--test queue_saturation`, `--test reconnect_deadline`, `--test owner_watch` and `--test watcher` (all their tests: run with `-- --ignored`, no `--exact`)
 - `-p blueroute-daemon --test state_events` and `--test publisher_progress` (all their tests: run with `-- --ignored`, no `--exact`)
 - `-p blueroute-desktop --test watch_integration` and `--test watch_handover` (all their tests: `-- --ignored`; each re-runs its own test binary with `DBUS_SYSTEM_BUS_ADDRESS` set to the private bus) and `-p blueroute-tui` with `-- --ignored tui_watcher`
+- `-p blueroute-linux --test networkmanager_backend` (all its tests: `-- --ignored`; re-runs its own binary with `DBUS_SYSTEM_BUS_ADDRESS` set to the private bus and drives the real `NetworkManagerBackend` against a fake NetworkManager)
 
 Desktop frontend checks (run in `apps/desktop`, also in CI): `npm run format:check`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`.
 

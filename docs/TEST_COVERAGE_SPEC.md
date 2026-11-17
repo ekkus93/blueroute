@@ -53,8 +53,14 @@ baseline:
   `DeactivateConnection`;
 - `…Settings`: `ListConnections`, `AddConnection2`;
 - `…Settings.Connection`: `GetSettings`, `Update2`, `Delete`;
-- `…Device`: `Interface`, `DeviceType`, `Managed`, `ActiveConnection`, `Reapply`;
-- `…Connection.Active`: `Connection`, `State`.
+- `…Device`: `Interface`, `DeviceType`, `Managed`, `State`, `ActiveConnection`, `Reapply`;
+- `…Connection.Active`: `Connection`.
+
+*Correction (2026-11-16, TC-NM):* the list originally placed `State` on
+`…Connection.Active` and omitted it from `…Device`. The backend reads the device's `State`
+(`inventory.rs` `read_device`) and only `Connection` from the active connection; the list above is
+the corrected surface. Name ownership is checked through the bus's own `NameHasOwner` and
+`GetNameOwner`, which the private `dbus-daemon` provides.
 
 The production `NetworkManagerBackend::connect_system()` is used unchanged. Because the workspace
 forbids `unsafe` (and so `std::env::set_var`), the outer test re-runs its own binary with

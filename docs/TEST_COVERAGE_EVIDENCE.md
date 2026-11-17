@@ -154,3 +154,67 @@ other docs referenced the file outside this backlog. It was deleted.
 Against the baseline `--tests` multiset, the only names removed are one copy each of the nine
 `route_projection::tests::*` names. `cargo test -p blueroute-linux --locked` (170 + 4 + 6) and
 `cargo clippy -p blueroute-linux --all-targets --locked -- -D warnings` pass.
+
+## TC-NM — Fake NetworkManager broker suite (2026-11-16)
+
+**Files.** `crates/blueroute-linux/tests/networkmanager_backend/fake.rs` (the fake) and
+`crates/blueroute-linux/tests/networkmanager_backend.rs` (one outer test and nine scenarios). No
+production line changed and no dependency was added: the fake uses `zbus`, which the crate
+already depends on, and integration tests may use the crate's normal dependencies.
+
+**Fake (COV-3).** zbus `#[interface]` objects implement exactly the corrected COV-3 surface (see
+the dated correction in the specification: the device's `State` property was missing from the
+original list and `State` was wrongly listed on the active connection). Profiles, devices and
+active connections live in fixed pools of object paths registered at start (32, 16 and 64); an
+empty slot answers `UnknownObject`. Changes apply immediately, so every backend wait succeeds on
+its first check (the waits poll before sleeping). Every mutating call is logged with its target
+profile, device and flags, failed calls included, and any method can be scripted to fail with
+`org.freedesktop.DBus.Error.Failed`. Activating a bridge profile without a device creates the
+bridge device, as NetworkManager does for virtual interfaces.
+
+**Execution.** The outer `#[ignore]` test re-runs its own binary with `DBUS_SYSTEM_BUS_ADDRESS`
+set to the `dbus-run-session` bus and runs the `scenario_*` tests with `--test-threads=1`
+(each owns `org.freedesktop.NetworkManager`); it requires the child to report exactly 9 passed.
+The scenarios use the unmodified `NetworkManagerBackend::connect_system()`. Run directly with the
+child variable set, the nine scenarios take 1.49 s; without it they return immediately (0.00 s),
+as in the existing `watch_integration` pattern.
+
+| Scenario | COV-4 item | Asserts |
+| --- | --- | --- |
+| `owned_bridge_lifecycle_is_idempotent_and_leaves_others_untouched` | 1, 2, 5 | `Version` and `service_owner`; `ensure_bridge` → exactly `AddConnection2` (flags `0x21`) and a device-less `ActivateConnection`, with the `user.data` ownership triple and `autoconnect=false` stored; repeat → no call; address and route ensure → `Update2` (flag `0x1`) + `Reapply`, repeat → `Reapply` only; removals → `Update2` + `Reapply`, repeats → no call; `addresses`, `routes`, `network_connections` and `network_devices` match the fake exactly; `remove_owned_interface` → `DeactivateConnection` + `Delete`, repeat → no call; foreign and other-network profiles byte-identical and the foreign device still active |
+| `owned_interface_profile_is_created_only_on_a_known_free_device` | 1, 2 | unknown interface → `InvalidInput`, no call; known free device → `AddConnection2`, `Update2`, `ActivateConnection` on that device, `Reapply`, `generic` type and `interface` kind stored; removal deactivates and deletes only that profile |
+| `removal_is_scoped_to_the_requested_network` | 2 | with A's active and B's inactive profile on one interface, removing B's deletes exactly B's profile; A's stays byte-identical and active |
+| `foreign_and_other_network_claims_fail_closed` | 3 | six refusals (foreign claim, foreign active interface for bridge and address, other-network claim, other-network active interface, route without an owned profile), each checked for no mutating call **before** its `InvalidState` kind; removals of this network on every interface are no-ops with no call |
+| `malformed_ownership_metadata_fails_every_operation_closed` | 3 | six variants (schema `2`, schema missing, kind missing, kind `tunnel`, invalid owner → `InvalidState`; `user.data` not a string map → `ProtocolError`) on an unrelated interface: all six mutations on both the owned and the malformed interface, and `addresses`, `routes`, `network_connections`, fail with that kind and no call; the owned profile stays active |
+| `duplicate_owned_profiles_fail_closed` | 3 | two profiles of one network on one interface: all six mutations `InvalidState` with no call; read-only listings still succeed |
+| `absent_networkmanager_is_backend_unavailable` | 4 | `connect_system` before the fake owns the name; after it releases the name, `service_owner` is `None` and `version`, the four listings and all six mutations are `NetworkBackendUnavailable` |
+| `scripted_method_failures_are_backend_unavailable_and_stop_the_operation` | 4 | each of `AddConnection2`, `ActivateConnection`, `Update2`, `Reapply`, `DeactivateConnection`, `Delete`, `ListConnections`, `GetSettings` and `GetDevices` failing → `NetworkBackendUnavailable`; a failed mutating call is the last call made; no call targets the foreign or other-network profile, which stay byte-identical |
+| `state_subscription_reports_inventory_then_changes` | 5 | subscription yields the seeded connection and device, then the profile added afterwards |
+
+**Scheduling (COV-9).** A CI step "Run the NetworkManager backend against a fake NetworkManager
+(TC-NM)" runs `dbus-run-session -- cargo test -p blueroute-linux --test networkmanager_backend
+--locked -- --ignored`, and `CLAUDE.md` lists the suite with the other private-bus suites.
+
+**Repetition.** Three consecutive local runs: `10 passed` each (about 1 s).
+
+**Negative controls** (scratch worktree with the new suite; each control rebuilt and the child
+run directly):
+
+| Control | Mutation | Reported failure |
+| --- | --- | --- |
+| I | `remove_owned_interface` takes any profile on the interface and skips its owner re-check (no ownership check before `Delete`) | "removals on eth0 touched NetworkManager": `DeactivateConnection` and `Delete` on the foreign `Wired` profile; the duplicate scenario also fails (`remove_owned_interface` succeeded) |
+| J | `matching_profiles` keeps every profile and `ensure_address` skips its owner re-check (no ownership check before `Update2`) | "address on a foreign active interface: touched NetworkManager": `Update2` and `Reapply` on `Wired`; the scoped-removal scenario also fails |
+| K | `ensure_bridge` skips `reject_foreign_interface_claim` | "bridge on an interface a foreign profile claims: touched NetworkManager": `AddConnection2` and `ActivateConnection` |
+| L | `ensure_address` skips `reject_foreign_active_connection` | "address on a foreign active interface: touched NetworkManager": `AddConnection2` and `Update2` |
+
+A first run of I and J removed both the shared owner filter and the re-check; the suite failed
+then too, but at an earlier assertion (an adopted other-network bridge, an ambiguity error), so
+the refusal checks were changed to inspect the call log per case before the error kind, and the
+removal loop to use a removal-only helper. The controls above are from the final suite and show
+the foreign-path call-log assertions are reached.
+
+**Findings (COV-2).** None. Asserted as designed: a single malformed BlueRoute profile anywhere
+makes every operation and listing fail closed, not just operations on its interface.
+
+**Checks.** `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets --locked -- -D
+warnings` pass.

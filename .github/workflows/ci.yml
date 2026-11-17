@@ -110,6 +110,10 @@ jobs:
           dbus-run-session -- cargo test -p blueroute-desktop --test watch_handover --locked -- --ignored
           dbus-run-session -- cargo test -p blueroute-tui --locked -- --ignored tui_watcher
 
+      - name: Run the NetworkManager backend against a fake NetworkManager (TC-NM)
+        run: |
+          dbus-run-session -- cargo test -p blueroute-linux --test networkmanager_backend --locked -- --ignored
+
       - name: Validate CLI typed broker error exits
         run: dbus-run-session -- cargo test -p blueroute --test cli_exit_contract --locked cli_exit_statuses_propagate_typed_broker_failures -- --ignored --exact
 
