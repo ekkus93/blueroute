@@ -5,6 +5,11 @@
 **Companion specification:** [MODULE_SPLIT_SPEC.md](MODULE_SPLIT_SPEC.md).  
 **Implementation evidence:** [MODULE_SPLIT_EVIDENCE.md](MODULE_SPLIT_EVIDENCE.md).
 
+**Documentation correction (2026-11-16, MS-REVIEW-01):** the final size summary retained
+pre-review comment-wrapping counts. The [corrected final snapshot](MODULE_SPLIT_EVIDENCE.md#ms-review-01--final-size-correction-2026-11-16)
+resolves the MS-CLOSEOUT-02/04 evidence gap; earlier split-stage sizes remain attributed to
+their original commits. Runtime acceptance and separate qualification gates are unchanged.
+
 ## Tracking
 
 - Stable `MS-*` IDs. `[ ]` pending, `[-]` in progress, `[x]` accepted, `[!]` blocked with a reason.

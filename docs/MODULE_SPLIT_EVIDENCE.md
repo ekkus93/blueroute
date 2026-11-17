@@ -157,6 +157,9 @@ name, so history needs no rename; `git blame -C` follows the moved lines.
 Two commits. `4f8df40` moves `networkmanager.rs` to `networkmanager/mod.rs` with identical content
 (git records the rename, so `git log --follow` keeps the history); the next commit splits it:
 
+The sizes in this section are the `020aac2` split snapshot, before the review's doc wrapping.
+Final candidate sizes are recorded under [MS-REVIEW-01](#ms-review-01--final-size-correction-2026-11-16).
+
 | Module | Responsibility | Production | Total |
 | --- | --- | ---: | ---: |
 | `mod.rs` | constants, `NmSettings`, `NetworkManagerBackend` and its two trait impls; test-only `test_support` | 236 | 249 |
@@ -197,6 +200,9 @@ tests 933 passed, 0 failed, 97 ignored; all 17 private-broker suites passed (96 
 
 Two commits: `13e4469` moves `control_tls.rs` to `control_tls/mod.rs` unchanged (recorded as a
 rename); the next commit splits it with the same move-only splitter.
+
+The sizes in this section are the `93986be` split snapshot, before the review's doc wrapping.
+Final candidate sizes are recorded under [MS-REVIEW-01](#ms-review-01--final-size-correction-2026-11-16).
 
 | Module | Responsibility | Production | Total |
 | --- | --- | ---: | ---: |
@@ -256,6 +262,9 @@ Production lines per module are at most 453.
 
 Two commits: `ecf9c7f` moves `bluez.rs` to `bluez/mod.rs` unchanged (recorded as a rename); the
 next commit moves the pairing subsystem to `bluez/pairing.rs`.
+
+The sizes in this section are the `7435d4e` split snapshot, before the review's doc wrapping.
+Final candidate sizes are recorded under [MS-REVIEW-01](#ms-review-01--final-size-correction-2026-11-16).
 
 | Module | Responsibility | Production | Total |
 | --- | --- | ---: | ---: |
@@ -337,8 +346,50 @@ success. Earlier split heads, each success: `5620d11` (CLI) 43984384409, `020aac
 ## MS-CLOSEOUT — Sizes, follow-up decision and requirement map (2026-11-16)
 
 **Sizes (MS-CLOSEOUT-02).** Largest production module per split: CLI `args.rs` 364, NetworkManager
-`routes.rs` 373, control TLS `transport.rs` 453, BlueZ `mod.rs` 725 and `pairing.rs` 669 (the
+`routes.rs` 374, control TLS `transport.rs` 454, BlueZ `mod.rs` 725 and `pairing.rs` 670 (the
 two over ~600 are justified in MS-BLUEZ). Every new module opens with a one-responsibility doc.
+
+### MS-REVIEW-01 — Final size correction (2026-11-16)
+
+The closing summary previously retained the pre-review counts 373, 453 and 669. The review
+commit `a8f3fad188da95be8b92e887d54f0954d61283da` wrapped module doc comments, changing line counts
+without changing executable code. The summary above now uses the final source counts; the
+earlier per-split tables remain labeled historical snapshots.
+
+The final candidate and reviewed `e00aa2895a95ea73e3b854fefe055c8032e82889` have identical
+implementation files. The following complete snapshot was checked against both. Production
+lines include everything before the first standalone `#[cfg(test)]` line, including comments
+and blank lines; a file without that marker is counted in full. Totals count all file lines.
+
+| Source file | Production | Total |
+| --- | ---: | ---: |
+| `apps/cli/src/main.rs` | 13 | 13 |
+| `apps/cli/src/args.rs` | 364 | 702 |
+| `apps/cli/src/format.rs` | 357 | 724 |
+| `apps/cli/src/local_key.rs` | 127 | 333 |
+| `apps/cli/src/failure.rs` | 62 | 87 |
+| `apps/cli/src/run.rs` | 286 | 286 |
+| `apps/cli/src/error_guidance.rs` | 72 | 131 |
+| `crates/blueroute-linux/src/networkmanager/mod.rs` | 236 | 249 |
+| `crates/blueroute-linux/src/networkmanager/dbus.rs` | 168 | 168 |
+| `crates/blueroute-linux/src/networkmanager/inventory.rs` | 292 | 335 |
+| `crates/blueroute-linux/src/networkmanager/ownership.rs` | 300 | 427 |
+| `crates/blueroute-linux/src/networkmanager/profile.rs` | 310 | 310 |
+| `crates/blueroute-linux/src/networkmanager/addresses.rs` | 280 | 329 |
+| `crates/blueroute-linux/src/networkmanager/routes.rs` | 374 | 499 |
+| `apps/daemon/src/control_tls/mod.rs` | 111 | 210 |
+| `apps/daemon/src/control_tls/identity.rs` | 314 | 601 |
+| `apps/daemon/src/control_tls/certificate.rs` | 233 | 263 |
+| `apps/daemon/src/control_tls/enrollment.rs` | 241 | 355 |
+| `apps/daemon/src/control_tls/transport.rs` | 454 | 752 |
+| `apps/daemon/src/control_tls/session.rs` | 350 | 915 |
+| `crates/blueroute-linux/src/bluez/mod.rs` | 725 | 935 |
+| `crates/blueroute-linux/src/bluez/pairing.rs` | 670 | 760 |
+
+This resolves the P3 documentation finding and the related MS-CLOSEOUT-02/04 evidence gap.
+The ~600-line guidance and BlueZ exception are unchanged. Historical test results, package
+hashes, CI identities and software-only acceptance retain their original attribution; this
+documentation correction does not claim a new runtime validation or hardware result.
 
 **Borderline files (MS-CLOSEOUT-03).** Not split in this backlog:
 
@@ -357,7 +408,7 @@ two over ~600 are justified in MS-BLUEZ). Every new module opens with a one-resp
 | SPLIT-3 minimal visibility | each split, MS-CLOSEOUT-01 | per-split visibility notes; review fixes (`PairingAgent`, `NEXT_TEMP`) | MET |
 | SPLIT-4 tests travel | MS-BASE-02, each split | identical test-name multisets and totals | MET |
 | SPLIT-5 invariants | MS-NM-02, MS-TLS-02, MS-VALIDATE | ownership and identity code re-read by review; private key still private; full validation | MET |
-| SPLIT-6 one responsibility | each split, MS-CLOSEOUT-02 | module docs; sizes; BlueZ justification | MET |
+| SPLIT-6 one responsibility | each split, MS-CLOSEOUT-02 | module docs; final candidate sizes in MS-REVIEW-01; BlueZ justification | MET |
 | SPLIT-7 history | each split | rename commits `4f8df40`, `13e4469`, `ecf9c7f`; `--follow` checked by review | MET |
 | VERIFY-1 per split | each split | fmt, Clippy, tests, captures, broker suites | MET |
 | VERIFY-2 public items | MS-BASE-03 and each split | `all.html` comparisons | MET |
