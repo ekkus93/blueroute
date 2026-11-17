@@ -115,3 +115,39 @@ done
   echo "cli-cases $(ls "$out/cli"/*.meta | wc -l)"
   for c in blueroute_linux blueroute_daemon; do echo "doc-$c $(wc -l < "$out/doc-$c")"; done; } | tee "$out/summary"
 ```
+
+## MS-CLI — CLI entry point split (2026-11-16)
+
+`apps/cli/src/main.rs` (2,090 lines) is now `main.rs` (module declarations and `main`, 13 lines)
+plus, with production / total lines:
+
+| Module | Responsibility | Production | Total |
+| --- | --- | ---: | ---: |
+| `args.rs` | command tree and parsing into an `Operation` | 364 | 702 |
+| `format.rs` | human and JSON rendering, escaping untrusted daemon text | 357 | 724 |
+| `local_key.rs` | reading and independently verifying the local control-TLS key | 127 | 333 |
+| `failure.rs` | `CliFailure`: stable exit codes and error text | 62 | 87 |
+| `run.rs` | running one parsed command and printing its result | 286 | 286 |
+| `error_guidance.rs` | unchanged | 72 | 131 |
+
+**Move-only check (SPLIT-1).** A line-multiset comparison of the original file with the new files
+(ignoring module docs, `use` and `mod` declarations, blank lines and `pub(super)` prefixes) leaves
+only: the three test-module headers and their closing braces; `run(&args)` becoming
+`run::run(&args)` in `main`; and three formatter signatures (`format_status`,
+`format_capabilities`, `format_networks`) that rustfmt rewrapped because `pub(super)` pushed them
+past 100 columns. No logic line differs.
+
+**Visibility (SPLIT-3).** Only items used by a sibling became `pub(super)`: `Cli`, `Operation`,
+`parse`, the nine formatters `run` calls, `mutation_ack`, the three local-key functions,
+`CliFailure` and its three fields (read by `run`), and `run`. Nothing is `pub`.
+
+**Tests (SPLIT-4).** 22 tests, the same leaf names as the baseline: `args` 4 (with the `args`
+test helper), `format` 12, `local_key` 2, `failure` 1, `error_guidance` 3. The two tests that
+check both parsing and output (`diagnostic_summary_is_opt_in…`, `explicit_mutation_commands…`)
+sit in `args` and import the formatter they check.
+
+**Verification (VERIFY-1).** `capture.sh cli` against the baseline: leaf test names identical for
+all three crates; all 62 CLI behavior cases (stdout, stderr, exit status) byte-identical; both
+crates' public doc items identical. fmt clean; workspace Clippy clean; workspace tests 933 passed,
+0 failed, 97 ignored (unchanged); `cli_exit_contract` broker test passed. The CLI keeps its file
+name, so history needs no rename; `git blame -C` follows the moved lines.

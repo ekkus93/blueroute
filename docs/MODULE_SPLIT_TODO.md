@@ -1,6 +1,6 @@
 # Module Split TODO
 
-**Status:** IN PROGRESS; MS-BASE accepted.  
+**Status:** IN PROGRESS; MS-BASE and MS-CLI accepted.  
 **Baseline:** `1870e406836174c0e0433f42d026f71e497b73f5`.  
 **Companion specification:** [MODULE_SPLIT_SPEC.md](MODULE_SPLIT_SPEC.md).  
 **Implementation evidence:** [MODULE_SPLIT_EVIDENCE.md](MODULE_SPLIT_EVIDENCE.md).
@@ -21,7 +21,7 @@
 | Task | Outcome | Dependencies | State |
 | --- | --- | --- | --- |
 | MS-BASE | Baseline listings, CLI behavior and public-surface snapshots | None | `[x]` |
-| MS-CLI | `apps/cli/src/main.rs` split into args, format, local_key, failure, run | MS-BASE | `[ ]` |
+| MS-CLI | `apps/cli/src/main.rs` split into args, format, local_key, failure, run | MS-BASE | `[x]` |
 | MS-NM | `networkmanager.rs` split into dbus, inventory, ownership, profile, addresses, routes | MS-BASE | `[ ]` |
 | MS-TLS | `control_tls.rs` split into identity, certificate, enrollment, transport, session | MS-BASE | `[ ]` |
 | MS-BLUEZ | Pairing agent moved out of `bluez.rs` | MS-BASE | `[ ]` |
@@ -55,12 +55,12 @@ but do them one at a time so each diff stays reviewable.
 
 **Requirements:** SPLIT-1..7, VERIFY-1.
 
-- [ ] **MS-CLI-01:** Move the command tree and parsing to `args.rs`, the formatters to
+- [x] **MS-CLI-01:** Move the command tree and parsing to `args.rs`, the formatters to
   `format.rs`, local-key verification to `local_key.rs`, `CliFailure` to `failure.rs` and `run` to
   `run.rs`, leaving `main.rs` with module declarations and `main`. Keep `error_guidance.rs`.
-- [ ] **MS-CLI-02:** Move each of the 22 tests next to the code it exercises; no test changes
+- [x] **MS-CLI-02:** Move each of the 22 tests next to the code it exercises; no test changes
   beyond its module path.
-- [ ] **MS-CLI-03:** Verify: fmt, Clippy, workspace tests, `cli_exit_contract` broker test, the 22
+- [x] **MS-CLI-03:** Verify: fmt, Clippy, workspace tests, `cli_exit_contract` broker test, the 22
   test names, and the CLI behavior matrix byte-identical to MS-BASE. Check moved blocks with
   `--color-moved` and account for every non-moved line.
 
