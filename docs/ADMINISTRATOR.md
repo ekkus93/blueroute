@@ -116,7 +116,21 @@ writes the state directory:
    An interface name or a device hint alone proves nothing; if you cannot establish whether a link
    is BlueRoute's, stop here and leave everything as it is.
 3. Delete the NetworkManager profiles (and with them their addresses) whose `org.blueroute.owner`
-   is that NetworkId. Never delete a profile without that ownership.
+   is that NetworkId. Never delete a profile without that ownership. `nmcli` cannot display
+   `user.data` (NetworkManager 1.52 rejects the field), so ask NetworkManager over D-Bus. With
+   `id` set to the full NetworkId, this prints the D-Bus path of every such profile:
+
+   ```bash
+   for path in $(busctl --json=short call org.freedesktop.NetworkManager \
+           /org/freedesktop/NetworkManager/Settings org.freedesktop.NetworkManager.Settings \
+           ListConnections | grep -o '/org/freedesktop/NetworkManager/Settings/[0-9]*'); do
+       busctl call org.freedesktop.NetworkManager "$path" \
+           org.freedesktop.NetworkManager.Settings.Connection GetSettings \
+           | grep -Fq "\"org.blueroute.owner\" \"$id\"" && echo "$path"
+   done
+   ```
+
+   Delete each one with `nmcli connection delete path <path>`.
    Do this before step 4. Afterwards, the network's owned state is no longer this
    computer's to clean, and anything left would only be reported, not removed.
 4. Remove the records that leave this network's role unresolved, and only those:
@@ -133,8 +147,7 @@ writes the state directory:
    as before recovery; if it went up, step 3 left owned state behind: delete it the same way. If
    the recovered network was the last one it knew, the retry has nothing to clean and does not
    look at NetworkManager at all, so every count is 0 whatever is left: check step 3 yourself by
-   listing every profile's `user.data` (`nmcli -g user.data connection show <uuid>` for each
-   profile) and confirming none still names the NetworkId. A further run must succeed too.
+   running its lookup again and confirming it prints nothing. A further run must succeed too.
 
 | What step 1 found for the network | What step 4 deletes |
 | --- | --- |

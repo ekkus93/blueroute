@@ -1,10 +1,15 @@
 # CR-QUALIFY: Installed-System and Physical Cleanup Qualification
 
-Status: **procedure ready, NOT EXECUTED** (needs equipment; revised 2026-11-13 by FU-06: Part A
-no longer needs an adapter, and a seeded joined client must fail honestly; revised 2026-11-14 by
+Status: **procedure ready; Part A run once (2026-11-17, FAILED on QA-A-01), Part B NOT EXECUTED**
+(revised 2026-11-13 by FU-06: Part A no longer needs an adapter, and a seeded joined client must
+fail honestly; revised 2026-11-14 by
 LC-QUALIFY-01: an active membership with an unknown role must fail too, and recover only once
 resolved; revised again 2026-11-14 by QR-RECOVERY/QR-QUALIFY-01: the recovery case states that
-both records go and checks the foreign count). Procedure readiness is not execution: no box below has been run. Task: CR-QUALIFY in
+both records go and checks the foreign count; revised 2026-11-17 by the first Part A run,
+[CR-QUALIFY-A-EVIDENCE-2026-11-17.md](CR-QUALIFY-A-EVIDENCE-2026-11-17.md), QA-A-04..09: ownership
+is read over D-Bus, the client interface is an `ifb`, and the expectations below match what that
+run observed). The boxes below are the checklist, never ticked here: results live in the dated
+evidence records. Task: CR-QUALIFY in
 [CODE_REVIEW_REMEDIATION_TODO.md](CODE_REVIEW_REMEDIATION_TODO.md). The design under test is
 [CR-F5-REMOVAL-CLEANUP.md](CR-F5-REMOVAL-CLEANUP.md). Software and isolated-dpkg results are in
 [CODE_REVIEW_REMEDIATION_EVIDENCE.md](CODE_REVIEW_REMEDIATION_EVIDENCE.md); this procedure is what
@@ -59,9 +64,17 @@ snapshot helper on the test machine (not in the package):
 set -euo pipefail
 out="qa/$1"; mkdir -p "$out"
 nmcli -t -f NAME,UUID,TYPE,DEVICE,ACTIVE connection show > "$out/nm-connections.txt"
-for uuid in $(nmcli -t -f UUID connection show); do
-    printf '%s %s\n' "$uuid" "$(nmcli -g user.data connection show "$uuid" 2>/dev/null)"
-done > "$out/nm-user-data.txt"
+# nmcli cannot display user.data (NetworkManager 1.52 rejects the field): read it over D-Bus.
+for path in $(busctl --json=short call org.freedesktop.NetworkManager \
+        /org/freedesktop/NetworkManager/Settings org.freedesktop.NetworkManager.Settings \
+        ListConnections | grep -o '/org/freedesktop/NetworkManager/Settings/[0-9]*'); do
+    settings="$(busctl call org.freedesktop.NetworkManager "$path" \
+        org.freedesktop.NetworkManager.Settings.Connection GetSettings)"
+    owner_data="$({ grep -o '"org\.blueroute\.[a-z]*" "[^"]*"' <<< "$settings" || true; } \
+        | tr -d '"' | tr ' ' '=' | sort | paste -sd, -)"
+    printf '%s %s\n' "$(nmcli -g connection.uuid,connection.id connection show path "$path" \
+        | paste -sd' ' -)" "${owner_data:--}"
+done | sort > "$out/nm-user-data.txt"
 ip -br link > "$out/links.txt"
 ip -br -4 addr > "$out/addresses.txt"
 ip -4 route show table all > "$out/routes.txt"
@@ -93,8 +106,12 @@ in `10.201.0.0/16`, and its `user.data` carries `org.blueroute.owner=<NetworkId>
 3. Record: source SHA, `sha256sum` of the package and fixture binary, `uname -a`,
    `/etc/os-release`, `NetworkManager --version`, `systemctl --version`, `dpkg --version`,
    `bluetoothd --version`, and that no adapter exists (`busctl tree org.bluez` shows no `hci`).
+   Without an adapter `bluetooth.service` never runs
+   (`ConditionPathIsDirectory=/sys/class/bluetooth`), so the "with `bluetoothd` running"
+   variants below cannot run here; they belong to Part B (QA-A-07).
 4. `sudo apt install ./blueroute_*.deb`; confirm `systemctl is-active blueroute.service`. With no
-   adapter the daemon reports degraded health; that is expected.
+   adapter `blueroute status` reports `Health: Error` and the journal shows a failed startup
+   reconciliation (`CapabilityUnavailable`); that is expected (QA-A-08).
 
 ### A1. Fixtures (CR-QUALIFY-02)
 
@@ -132,22 +149,28 @@ Expected:
   route and every other profile are unchanged; `ip_forward` is unchanged.
 - [ ] `/var/lib/blueroute` still holds `node-id`, `memberships-v1` and keys, plus `removal-pending`;
   dpkg shows `rc`.
-- [ ] Reinstall: the marker is gone, the service starts, the same NodeId and network `H` are
-  reported (identity and membership survived).
+- [ ] Reinstall: the marker is gone, the service is enabled and starts (`systemctl is-enabled` and
+  `is-active`; QA-A-01), the same NodeId and network `H` are reported (identity and membership
+  survived).
 
 ### A3. Further removal cases (CR-QUALIFY-03)
 
 Revert to the A1 snapshot before each case.
 
 - [ ] **Service already stopped:** stop it, then remove. Expected as A2.
-- [ ] **Seeded joined client, no Bluetooth (QUAL-2):** create a dummy interface
-  (`ip link add qa-bnep0 type dummy && ip link set qa-bnep0 up`), then
+- [ ] **Seeded joined client, no Bluetooth (QUAL-2):** create a stand-in interface
+  (`ip link add qa-bnep0 type ifb && ip link set qa-bnep0 up`; NetworkManager treats an `ifb` as a
+  generic device, which accepts the client's generic profile, while it refuses that profile on a
+  `dummy`: QA-A-05), then
   `sudo ./qualify_fixture client /var/lib/blueroute qa-bnep0` → NetworkId `C`. Remove. Expected:
   **removal fails** (package stays `ii`), log line `"unresolved_client_links":1`, whether or not
   `bluetoothd` is running (with it running, BlueZ has no object for the fixture's host device,
   which is inconclusive, not absence); `C`'s owned
   address and profile on `qa-bnep0` remain (proof for a retry); `H` is still removed;
-  `abort-remove` restarted the service. This proves the honest failure on a real system. It is
+  `abort-remove` asked systemd to start the service (journal). The daemon then refuses to run,
+  because the fixture leaves two active networks (`H` and `C`) and a node has at most one
+  (`durable state contains more than one active BlueRoute network`); that refusal is expected
+  here and is not a failure (QA-A-06). This proves the honest failure on a real system. It is
   **not** client PAN teardown, which only Part B can show. Teardown: revert the snapshot.
 - [ ] **NetworkManager down, then recovery:** `systemctl stop NetworkManager`, remove: fails,
   package `ii`, `"outcome":"failed"`, marker absent, service restarted. Start NetworkManager,
@@ -156,31 +179,34 @@ Revert to the A1 snapshot before each case.
   `sudo /usr/libexec/blueroute/blueroute-daemon --remove-owned-networking` twice: both exit 0 and
   log `"remaining_owned_resources":0`. The daemon then refuses to start; delete
   `/var/lib/blueroute/removal-pending` and it starts again.
-- [ ] **Running daemon:** run the same command with the service running: exit 1 ("stop
-  blueroute.service first"), nothing changed, no marker written.
+- [ ] **Running daemon:** run the same command with the service running: exit 1, stderr says
+  "stop blueroute.service first" (QA-A-02), nothing changed, no marker written.
 - [ ] **Remove, then purge:** as A2, then `sudo apt purge blueroute`: state directory gone.
 - [ ] **Direct purge:** from installed, `sudo apt purge blueroute`: cleanup line first (succeeded),
   then the state directory is deleted.
 - [ ] **Purge after an unresolved removal:** with the client fixture, `apt purge` fails at `prerm`
   exactly like remove; the state directory (the retry proof) is kept.
-- [ ] **Unknown active role (LC-QUALIFY-01, RFU-02):** with the dummy `qa-bnep0` as above,
+- [ ] **Unknown active role (LC-QUALIFY-01, RFU-02):** with the `ifb` `qa-bnep0` as above,
   `sudo ./qualify_fixture unknown /var/lib/blueroute qa-bnep0` → NetworkId `U` (membership
   `member` with role `none`, plus a client record). Remove, once with `bluetoothd` stopped and
   once with it running. Expected each time: **removal fails** (package `ii`), log line
   `"unresolved_roles":1`; `U`'s owned address and profile on `qa-bnep0` remain, and so do its
   `network` line in `memberships-v1` (still `member`/`none`) and the client record; `H` is still
-  removed; `F` is untouched; `abort-remove` restarted the service. `apt purge` fails at `prerm`
-  the same way and keeps the state directory.
+  removed; `F` is untouched; `abort-remove` asked systemd to start the service, which refuses
+  two active networks as in the client case. `apt purge` fails at `prerm` the same way and keeps
+  the state directory.
 - [ ] **Unknown active role, recovery:** continuing from the previous case, follow
   [ADMINISTRATOR.md](ADMINISTRATOR.md#removal-with-an-unresolved-role): confirm there is no PAN link
-  (there is none: `qa-bnep0` is a dummy), delete the NetworkManager profiles whose
+  (there is none: `qa-bnep0` is an `ifb`), delete the NetworkManager profiles whose
   `org.blueroute.owner` is `U`, and delete `U`'s `network` line (and `peer` lines) and the client
   record, which names `U` (check its NetworkId first). Both must go: deleting the membership
-  alone leaves an orphan record and removal keeps failing (RLC-02). Remove again: succeeds
-  (`"unresolved_roles":0`), and `unresolved_foreign_resources` equals its value before recovery
-  (`H` is still known, so the retry inventories NetworkManager; `F` is untouched). Repeat the
-  removal command (service stopped): still exit 0. Record every manual step.
-- [ ] **Completed leave with a stale client record (SCOPE-1):** with the dummy `qa-bnep0`,
+  alone leaves an orphan record and removal keeps failing (RLC-02). With the service stopped,
+  run `sudo /usr/libexec/blueroute/blueroute-daemon --remove-owned-networking`: exit 0,
+  `"unresolved_roles":0`, and `unresolved_foreign_resources` equals its value before recovery
+  (`H` is still known, so the retry inventories NetworkManager; `F` is untouched). Run it again:
+  still exit 0. Then remove the package: succeeds. (Run the helper before `apt remove`, which
+  deletes it: QA-A-09.) Record every manual step.
+- [ ] **Completed leave with a stale client record (SCOPE-1):** with the `ifb` `qa-bnep0`,
   `sudo ./qualify_fixture left /var/lib/blueroute qa-bnep0` → NetworkId `L` (`not-member`, a
   client record left behind, an owned address on `qa-bnep0`). Remove with `bluetoothd` stopped.
   Expected: **removal succeeds**, `"unresolved_roles":0`, `L`'s owned address and profile are
@@ -189,9 +215,13 @@ Revert to the A1 snapshot before each case.
 ### A4. Upgrade and restart do not run removal (CR-QUALIFY-04)
 
 - [ ] Install a second build with a higher version (local version bump, not committed): no
-  `removal_cleanup` line, service restarted, `H`'s owned state untouched throughout, identity and
+  `removal_cleanup` line, service restarted, no systemd warning that the unit changed on disk
+  (`postinst` reloads systemd: QA-A-03), `H`'s owned state untouched throughout, identity and
   membership unchanged.
-- [ ] `systemctl restart blueroute.service` and a reboot: no cleanup, owned state untouched.
+- [ ] `systemctl restart blueroute.service` and a reboot: no cleanup, owned state untouched. The
+  owned profiles are `autoconnect=false` and without an adapter the daemon cannot restore `H`, so
+  after the reboot they exist unchanged but inactive; the `ip`/`sysctl` foreign fixtures are
+  transient and also gone after any reboot.
 
 ### A5. Final state check (CR-QUALIFY-05)
 
