@@ -19,9 +19,11 @@
 #[path = "networkmanager_backend/fake.rs"]
 mod fake;
 
+use std::fs::File;
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr};
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use blueroute_core::{CoreError, ErrorKind, IpPrefix, NetworkId};
 use blueroute_linux::{
@@ -32,7 +34,11 @@ use fake::{Call, FakeNetworkManager, Settings, VERSION, clone_settings};
 use zbus::zvariant::{OwnedValue, Str};
 
 const CHILD: &str = "BLUEROUTE_NM_BACKEND_CHILD";
-const SCENARIOS: usize = 9;
+const SCENARIOS: usize = 10;
+/// Bound for the whole child run, so a hang fails the test instead of the CI job.
+const CHILD_BOUND: Duration = Duration::from_secs(180);
+/// Bound for one subscription event; the backend polls every 250 ms.
+const EVENT_BOUND: Duration = Duration::from_secs(10);
 const DEVICE_TYPE_ETHERNET: u32 = 1;
 const DEVICE_TYPE_BRIDGE: u32 = 13;
 const ADD_FLAGS: u32 = 0x1 | 0x20;
@@ -45,19 +51,50 @@ fn networkmanager_backend_scenarios_over_a_private_bus() {
         return; // the child runs only the scenarios
     }
     let address = std::env::var("DBUS_SESSION_BUS_ADDRESS").expect("run under dbus-run-session");
-    let output = Command::new(std::env::current_exe().unwrap())
+    let log_path = format!(
+        "{}/networkmanager_backend_child.log",
+        env!("CARGO_TARGET_TMPDIR")
+    );
+    let log = File::create(&log_path).unwrap();
+    let mut child = Command::new(std::env::current_exe().unwrap())
         .args(["--ignored", "--test-threads=1", "scenario_"])
         .env(CHILD, "1")
         .env("DBUS_SYSTEM_BUS_ADDRESS", address)
-        .output()
+        .stdout(log.try_clone().unwrap())
+        .stderr(log)
+        .spawn()
         .unwrap();
-    let report = String::from_utf8_lossy(&output.stdout).into_owned()
-        + &String::from_utf8_lossy(&output.stderr);
-    assert!(output.status.success(), "{report}");
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if started.elapsed() > CHILD_BOUND {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            let report = std::fs::read_to_string(&log_path).unwrap_or_default();
+            panic!("scenarios did not finish within {CHILD_BOUND:?}:\n{report}");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let report = std::fs::read_to_string(&log_path).unwrap();
+    assert!(status.success(), "{report}");
     assert!(
         report.contains(&format!("test result: ok. {SCENARIOS} passed")),
         "expected {SCENARIOS} scenarios to run:\n{report}"
     );
+}
+
+/// `future`'s output, or a panic naming `what` if it takes longer than `EVENT_BOUND`.
+async fn within<T>(what: &str, future: impl Future<Output = T>) -> T {
+    let timeout = async {
+        async_io::Timer::after(EVENT_BOUND).await;
+        None
+    };
+    match futures_lite::future::or(async { Some(future.await) }, timeout).await {
+        Some(value) => value,
+        None => panic!("{what}: no result within {EVENT_BOUND:?}"),
+    }
 }
 
 /// Run `body` only in the child, where the "system" bus is the private one.
@@ -471,14 +508,26 @@ fn scenario_owned_interface_profile_is_created_only_on_a_known_free_device() {
 
 #[test]
 #[ignore = "run by networkmanager_backend_scenarios_over_a_private_bus"]
-fn scenario_removal_is_scoped_to_the_requested_network() {
+fn scenario_removal_is_scoped_to_the_requested_network_and_interface() {
     scenario(|| async {
         let fake = FakeNetworkManager::start().await.unwrap();
         let ours = fake.add_profile(owned(net_a(), "br-blue0", "bridge"));
         fake.add_device("br-blue0", DEVICE_TYPE_BRIDGE, Some(&ours));
         let theirs = fake.add_profile(owned(net_b(), "br-blue0", "bridge"));
+        let second = fake.add_profile(owned(net_a(), "br-two", "bridge"));
+        fake.add_device("br-two", DEVICE_TYPE_BRIDGE, Some(&second));
         let untouched = snapshot(&fake, &[&ours]);
         let backend = NetworkManagerBackend::connect_system().await.unwrap();
+
+        // Removing this network's br-two deactivates and deletes only that profile.
+        backend
+            .remove_owned_interface(net_a(), iface("br-two"))
+            .await
+            .unwrap();
+        assert_eq!(
+            calls_then_clear(&fake),
+            [("DeactivateConnection", second.clone()), ("Delete", second)]
+        );
 
         // B's profile is inactive, so removing B's interface deletes only B's profile.
         backend
@@ -487,8 +536,86 @@ fn scenario_removal_is_scoped_to_the_requested_network() {
             .unwrap();
         assert_eq!(calls_then_clear(&fake), [("Delete", theirs)]);
         assert_eq!(fake.profiles(), std::slice::from_ref(&ours));
+        assert_eq!(fake.active_profile("br-two"), None);
         assert_eq!(fake.active_profile("br-blue0"), Some(ours));
         assert_unchanged(&fake, &untouched);
+        fake.stop().await.unwrap();
+    });
+}
+
+/// A foreign profile without `interface-name`: it claims no interface by name, so only the
+/// device's active connection shows that the interface is in foreign use.
+fn unnamed_foreign(id: &str) -> Settings {
+    let mut settings = foreign(id, "unused");
+    settings
+        .get_mut("connection")
+        .unwrap()
+        .remove("interface-name");
+    settings
+}
+
+#[test]
+#[ignore = "run by networkmanager_backend_scenarios_over_a_private_bus"]
+fn scenario_owned_profiles_never_replace_a_foreign_active_connection() {
+    scenario(|| async {
+        let fake = FakeNetworkManager::start().await.unwrap();
+        let a = net_a();
+        let on_eth5 = fake.add_profile(unnamed_foreign("Unnamed on eth5"));
+        fake.add_device("eth5", DEVICE_TYPE_ETHERNET, Some(&on_eth5));
+        let on_bridge = fake.add_profile(unnamed_foreign("Unnamed on br-blue0"));
+        fake.add_device("br-blue0", DEVICE_TYPE_BRIDGE, Some(&on_bridge));
+        let ours = fake.add_profile(owned(a, "br-blue0", "bridge"));
+        let generic = fake.add_profile(owned(a, "bnep0", "interface"));
+        fake.add_device("bnep0", DEVICE_TYPE_ETHERNET, None);
+        let untouched = snapshot(&fake, &[&on_eth5, &on_bridge, &generic]);
+        let backend = NetworkManagerBackend::connect_system().await.unwrap();
+
+        // No profile names eth5, but its device is active with a foreign connection.
+        let result = backend.ensure_bridge(a, iface("eth5")).await.map(drop);
+        assert_eq!(
+            calls_then_clear(&fake),
+            [],
+            "bridge on eth5 touched NetworkManager"
+        );
+        assert_eq!(kind_of(result, "bridge on eth5"), ErrorKind::InvalidState);
+
+        // This network owns br-blue0's profile, but a foreign connection is active there:
+        // activation is refused instead of replacing it.
+        let result = backend.ensure_bridge(a, iface("br-blue0")).await.map(drop);
+        assert_eq!(
+            calls_then_clear(&fake),
+            [],
+            "bridge activation touched NetworkManager"
+        );
+        assert_eq!(
+            kind_of(result, "bridge activation"),
+            ErrorKind::InvalidState
+        );
+
+        // Address and route are written to the owned profile first, then activation is
+        // refused: the only call is `Update2` on the owned profile, never on the foreign one.
+        let result = backend.ensure_address(address(a, "br-blue0")).await;
+        assert_eq!(calls_then_clear(&fake), [("Update2", ours.clone())]);
+        assert_eq!(
+            kind_of(result, "address activation"),
+            ErrorKind::InvalidState
+        );
+        let result = backend.ensure_route(route(a, "br-blue0")).await;
+        assert_eq!(calls_then_clear(&fake), [("Update2", ours.clone())]);
+        assert_eq!(kind_of(result, "route activation"), ErrorKind::InvalidState);
+
+        // An owned non-bridge profile is not turned into a bridge.
+        let result = backend.ensure_bridge(a, iface("bnep0")).await.map(drop);
+        assert_eq!(calls_then_clear(&fake), [], "bridge over a generic profile");
+        assert_eq!(
+            kind_of(result, "bridge over a generic profile"),
+            ErrorKind::InvalidState
+        );
+
+        assert_unchanged(&fake, &untouched);
+        assert_eq!(fake.active_profile("eth5"), Some(on_eth5));
+        assert_eq!(fake.active_profile("br-blue0"), Some(on_bridge));
+        assert_eq!(fake.active_profile("bnep0"), None);
         fake.stop().await.unwrap();
     });
 }
@@ -805,13 +932,19 @@ fn scenario_state_subscription_reports_inventory_then_changes() {
         let backend = NetworkManagerBackend::connect_system().await.unwrap();
 
         let mut subscription = backend.subscribe_network_state().await.unwrap();
-        match subscription.next_event().await.unwrap() {
+        match within("seeded connection event", subscription.next_event())
+            .await
+            .unwrap()
+        {
             Some(NetworkStateEvent::ConnectionAdded(value)) => {
                 assert_eq!((value.handle.as_str(), value.owner), (wired.as_str(), None));
             }
             other => panic!("expected the seeded connection, got {other:?}"),
         }
-        match subscription.next_event().await.unwrap() {
+        match within("seeded device event", subscription.next_event())
+            .await
+            .unwrap()
+        {
             Some(NetworkStateEvent::DeviceAdded(value)) => {
                 assert_eq!(value.handle.as_str(), eth0);
                 assert_eq!(
@@ -823,7 +956,10 @@ fn scenario_state_subscription_reports_inventory_then_changes() {
         }
 
         let late = fake.add_profile(owned(net_a(), "br-late", "bridge"));
-        match subscription.next_event().await.unwrap() {
+        match within("new connection event", subscription.next_event())
+            .await
+            .unwrap()
+        {
             Some(NetworkStateEvent::ConnectionAdded(value)) => {
                 assert_eq!(
                     (value.handle.as_str(), value.owner),
