@@ -1,9 +1,9 @@
 # Test Coverage TODO
 
-**Status:** Not started.  
+**Status:** In progress.  
 **Baseline:** `e00aa28`.  
 **Companion specification:** [TEST_COVERAGE_SPEC.md](TEST_COVERAGE_SPEC.md).  
-**Implementation evidence:** `docs/TEST_COVERAGE_EVIDENCE.md` (created by TC-BASE).
+**Implementation evidence:** [TEST_COVERAGE_EVIDENCE.md](TEST_COVERAGE_EVIDENCE.md).
 
 ## Tracking
 
@@ -21,7 +21,7 @@
 
 | Task | Outcome | Gap | Dependencies | State |
 | --- | --- | --- | --- | --- |
-| TC-BASE | Baseline listings and evidence file | — | None | `[ ]` |
+| TC-BASE | Baseline listings and evidence file | — | None | `[x]` |
 | TC-PARSE | Route/address and netlink parser rejection tables | G2, G3 | TC-BASE | `[ ]` |
 | TC-PAIR | BlueZ pairing error mapping and agent refusal | G4 | TC-BASE | `[ ]` |
 | TC-CLI | Checked-in CLI behavior matrix | G5 | TC-BASE | `[ ]` |
@@ -37,12 +37,12 @@ largest task, TC-NM. TC-DEDUP is independent and can go anywhere after TC-BASE.
 
 **Requirements:** VERIFY-3.
 
-- [ ] **TC-BASE-01:** Record HEAD, dirty state and toolchain. Confirm the gap table in the
+- [x] **TC-BASE-01:** Record HEAD, dirty state and toolchain. Confirm the gap table in the
   specification still matches the code (function names, test counts per file).
-- [ ] **TC-BASE-02:** Capture sorted harness listings: `cargo test -p blueroute-linux --lib
+- [x] **TC-BASE-02:** Capture sorted harness listings: `cargo test -p blueroute-linux --lib
   --locked -- --list`, `cargo test -p blueroute-linux --tests --locked -- --list`, `cargo test -p
   blueroute --locked -- --list`.
-- [ ] **TC-BASE-03:** Create `docs/TEST_COVERAGE_EVIDENCE.md` with the baseline counts and how
+- [x] **TC-BASE-03:** Create `docs/TEST_COVERAGE_EVIDENCE.md` with the baseline counts and how
   each later comparison is made.
 
 **Acceptance:** Baseline listings recorded; gap table confirmed or corrected with a dated note.
